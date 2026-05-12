@@ -11,7 +11,8 @@ let package = Package(
     products: [
         .library(name: "KnowTypeCore", targets: ["KnowTypeCore"]),
         .library(name: "KnowTypeProviders", targets: ["KnowTypeProviders"]),
-        .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"])
+        .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"]),
+        .executable(name: "knowtype-demo", targets: ["KnowTypeDemo"])
     ],
     targets: [
         .target(
@@ -30,6 +31,11 @@ let package = Package(
             name: "KnowTypeInputMethod",
             dependencies: ["KnowTypeCore", "KnowTypeProviders"],
             path: "Sources/KnowTypeInputMethod"
+        ),
+        .executableTarget(
+            name: "KnowTypeDemo",
+            dependencies: ["KnowTypeCore", "KnowTypeInputMethod"],
+            path: "Sources/KnowTypeDemo"
         ),
         .testTarget(
             name: "KnowTypeCoreTests",
