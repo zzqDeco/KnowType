@@ -82,7 +82,17 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 appBundleID: nil,
                 locale: self.locale
             )
+            guard !Task.isCancelled else {
+                return
+            }
             await MainActor.run {
+                guard SuggestionPublicationGuard.shouldPublish(
+                    requestedRawInput: rawInput,
+                    currentRawInput: self.rawBuffer,
+                    isCancelled: Task.isCancelled
+                ) else {
+                    return
+                }
                 self.lastSuggestion = suggestion
                 self.updateComposition()
             }
