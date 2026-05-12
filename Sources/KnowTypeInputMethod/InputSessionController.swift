@@ -75,13 +75,15 @@ public actor InputSessionController {
             : suggestionLoader
         updateGeneration &+= 1
         let generation = updateGeneration
-        var suggestion = await loader(context)
-        if isLevelZero {
-            suggestion.continuationCandidates = []
+        let loadedSuggestion = await loader(context)
+        // The actor is reentrant while awaiting provider-backed suggestions; older completions must not publish stale state.
+        guard generation == updateGeneration else {
+            return state.latestSuggestion ?? loadedSuggestion
         }
 
-        guard generation == updateGeneration else {
-            return state.latestSuggestion ?? suggestion
+        var suggestion = loadedSuggestion
+        if isLevelZero {
+            suggestion.continuationCandidates = []
         }
 
         state.rawInput = rawInput
