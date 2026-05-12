@@ -21,7 +21,10 @@ let package = Package(
         .target(
             name: "KnowTypeProviders",
             dependencies: ["KnowTypeCore"],
-            path: "Sources/KnowTypeProviders"
+            path: "Sources/KnowTypeProviders",
+            linkerSettings: [
+                .linkedFramework("Security", .when(platforms: [.macOS]))
+            ]
         ),
         .target(
             name: "KnowTypeInputMethod",

@@ -36,6 +36,28 @@ LLMResponse {
 - `ollama_native`
 - `custom_http`
 
+## Provider Profiles
+
+Provider profiles are stored separately from API keys:
+
+```text
+ProviderProfile {
+  id
+  displayName
+  kind
+  baseURL
+  model
+  timeoutSeconds
+  headers
+  secretName?
+  customBodyTemplate?
+  customResponsePath?
+  isDefault
+}
+```
+
+`secretName` resolves through `SecretStore`. The macOS implementation uses Keychain; tests and non-UI code can use read-only dictionary-backed stores.
+
 ## Candidate Types
 
 - `CorrectionCandidate`: prefix candidate with correction level and protected ranges.

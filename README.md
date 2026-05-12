@@ -54,6 +54,8 @@ swift build
 swift test
 ```
 
+Provider profiles are persisted as JSON without API keys. Secrets are resolved through `SecretStore`; the macOS implementation uses Keychain.
+
 ## Interaction Contract
 
 - `Space`: commit the best prefix candidate.

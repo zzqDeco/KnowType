@@ -50,6 +50,8 @@ swift build
 swift test
 ```
 
+Provider profile 会以 JSON 保存，但不保存 API key。密钥通过 `SecretStore` 解析；macOS 实现使用 Keychain。
+
 ## 交互规则
 
 - `Space`：提交当前最佳前缀。
