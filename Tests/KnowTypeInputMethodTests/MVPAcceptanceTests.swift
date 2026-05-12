@@ -37,6 +37,13 @@ final class MVPAcceptanceTests: XCTestCase {
         XCTAssertEqual(result, .commit("这个 API latency 有点高需要进一步排查接口链路耗时"))
     }
 
+    func testLatencyFallbackRequiresTechnicalTokenBoundary() {
+        XCTAssertTrue(PrefixContinuationEngine.hasTechnicalLatencySignal("这个 API latency 有点高"))
+        XCTAssertTrue(PrefixContinuationEngine.hasTechnicalLatencySignal("接口延迟有点高"))
+        XCTAssertFalse(PrefixContinuationEngine.hasTechnicalLatencySignal("这个 rapid prototype"))
+        XCTAssertFalse(PrefixContinuationEngine.hasTechnicalLatencySignal("这个 capital 开销"))
+    }
+
     func testEnglishCorrectionAndFallbackContinuationFlow() async {
         let pipeline = InputMethodPipeline()
         let response = await pipeline.suggestions(
