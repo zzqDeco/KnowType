@@ -26,6 +26,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .append(let text):
             rawBuffer.append(text)
             invalidateSuggestion()
+            updateComposition()
             refreshSuggestion(client: sender)
             return true
         case .deleteBackward:
@@ -48,6 +49,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
         rawBuffer.append(string ?? "")
         invalidateSuggestion()
+        updateComposition()
         refreshSuggestion(client: sender)
         return true
     }
