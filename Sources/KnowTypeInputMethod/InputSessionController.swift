@@ -31,6 +31,7 @@ public actor InputSessionController {
     private let suggestionLoader: SuggestionLoader
     private let protectedSuggestionLoader: SuggestionLoader
     private let compositionController: InputCompositionController
+    private var updateGeneration: UInt64 = 0
 
     public init(provider: (any LLMProvider)? = nil) {
         let pipeline = InputMethodPipeline(provider: provider)
@@ -72,9 +73,15 @@ public actor InputSessionController {
         let loader = isLevelZero
             ? protectedSuggestionLoader
             : suggestionLoader
+        updateGeneration &+= 1
+        let generation = updateGeneration
         var suggestion = await loader(context)
         if isLevelZero {
             suggestion.continuationCandidates = []
+        }
+
+        guard generation == updateGeneration else {
+            return state.latestSuggestion ?? suggestion
         }
 
         state.rawInput = rawInput

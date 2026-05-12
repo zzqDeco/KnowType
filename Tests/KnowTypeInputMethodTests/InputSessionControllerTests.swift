@@ -18,6 +18,24 @@ private actor RecordingProvider: LLMProvider {
     }
 }
 
+private actor ManualSuggestionLoader {
+    private var continuations: [String: CheckedContinuation<SuggestionResponse, Never>] = [:]
+
+    func load(_ context: InputContext) async -> SuggestionResponse {
+        await withCheckedContinuation { continuation in
+            continuations[context.rawInput] = continuation
+        }
+    }
+
+    func resume(rawInput: String, with suggestion: SuggestionResponse) {
+        continuations.removeValue(forKey: rawInput)?.resume(returning: suggestion)
+    }
+
+    func hasPending(rawInput: String) -> Bool {
+        continuations[rawInput] != nil
+    }
+}
+
 final class InputSessionControllerTests: XCTestCase {
     func testRawInputUpdateStoresSuggestionsAndResetsSelection() async {
         let expected = Self.makeSuggestion()
@@ -145,6 +163,49 @@ final class InputSessionControllerTests: XCTestCase {
 
         let tabResult = await controller.handle(action: .tab)
         XCTAssertEqual(tabResult, .commit("/Users/zq/project/KnowType"))
+    }
+
+    func testStaleUpdateCannotOverwriteNewerInputState() async throws {
+        let loader = ManualSuggestionLoader()
+        let controller = InputSessionController { context in
+            await loader.load(context)
+        }
+
+        async let first = controller.update(rawInput: "first")
+        while await !loader.hasPending(rawInput: "first") {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        async let second = controller.update(rawInput: "second")
+        while await !loader.hasPending(rawInput: "second") {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        let secondSuggestion = Self.makeSuggestion(prefixes: [
+            CorrectionCandidate(
+                text: "second prefix",
+                source: "test",
+                confidence: 1.0,
+                correctionLevel: .light
+            )
+        ])
+        let firstSuggestion = Self.makeSuggestion(prefixes: [
+            CorrectionCandidate(
+                text: "first prefix",
+                source: "test",
+                confidence: 1.0,
+                correctionLevel: .light
+            )
+        ])
+
+        await loader.resume(rawInput: "second", with: secondSuggestion)
+        _ = await second
+        await loader.resume(rawInput: "first", with: firstSuggestion)
+        _ = await first
+
+        let state = await controller.state
+        XCTAssertEqual(state.rawInput, "second")
+        XCTAssertEqual(state.latestSuggestion?.prefixCandidates.first?.text, "second prefix")
     }
 
     private static func makeSuggestion(
