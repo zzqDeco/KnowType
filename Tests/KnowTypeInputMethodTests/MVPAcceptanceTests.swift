@@ -27,7 +27,7 @@ final class MVPAcceptanceTests: XCTestCase {
         )
         let controller = InputCompositionController()
         let result = controller.handle(
-            action: .optionNumber(1),
+            action: .tab,
             prefixCandidates: response.prefixCandidates,
             continuationCandidates: response.continuationCandidates,
             originalText: "zhege api latnecy youdian gao"
