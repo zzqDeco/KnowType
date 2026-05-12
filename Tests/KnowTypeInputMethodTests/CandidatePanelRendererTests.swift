@@ -138,4 +138,35 @@ final class CandidatePanelRendererTests: XCTestCase {
 
         XCTAssertEqual(rendered.previewText, "我觉得这个方案 | 还有进一步优化空间")
     }
+
+    func testOptionShortcutLabelsMatchCommitActions() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "wo jue de zhege fangan",
+            prefixCandidates: prefixCandidates,
+            continuationCandidates: continuationCandidates
+        )
+        let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
+        let controller = InputCompositionController()
+
+        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab")
+        XCTAssertEqual(rendered.rows[7].shortcutLabel, "Option+1")
+        XCTAssertEqual(
+            controller.handle(
+                action: .tab,
+                prefixCandidates: prefixCandidates,
+                continuationCandidates: continuationCandidates,
+                originalText: viewModel.rawInput
+            ),
+            .commit("我觉得这个方案还有进一步优化空间")
+        )
+        XCTAssertEqual(
+            controller.handle(
+                action: .optionNumber(1),
+                prefixCandidates: prefixCandidates,
+                continuationCandidates: continuationCandidates,
+                originalText: viewModel.rawInput
+            ),
+            .commit("我觉得这个方案在落地成本上可能偏高")
+        )
+    }
 }
