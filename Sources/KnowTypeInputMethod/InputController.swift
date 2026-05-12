@@ -158,7 +158,17 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func modifierSet(from flags: Int) -> Set<InputModifier> {
         let eventFlags = NSEvent.ModifierFlags(rawValue: UInt(flags))
-        return eventFlags.contains(.option) ? [.option] : []
+        var modifiers: Set<InputModifier> = []
+        if eventFlags.contains(.option) {
+            modifiers.insert(.option)
+        }
+        if eventFlags.contains(.command) {
+            modifiers.insert(.command)
+        }
+        if eventFlags.contains(.control) {
+            modifiers.insert(.control)
+        }
+        return modifiers
     }
 }
 #endif

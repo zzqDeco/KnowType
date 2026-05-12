@@ -32,4 +32,22 @@ final class InputKeyCommandMapperTests: XCTestCase {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "w", keyCode: 13)), .append("w"))
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "", keyCode: 123)), .ignored)
     }
+
+    func testCommandAndControlModifiedInputIsIgnored() {
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: "c", keyCode: 8, modifiers: [.command])),
+            .ignored
+        )
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: "v", keyCode: 9, modifiers: [.control])),
+            .ignored
+        )
+    }
+
+    func testUnrecognizedOptionInputIsIgnored() {
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: "r", keyCode: 14, modifiers: [.option])),
+            .ignored
+        )
+    }
 }

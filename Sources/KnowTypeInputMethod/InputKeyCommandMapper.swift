@@ -2,6 +2,8 @@ import Foundation
 
 public enum InputModifier: Sendable, Equatable, Hashable {
     case option
+    case command
+    case control
 }
 
 public struct InputKeyStroke: Sendable, Equatable {
@@ -27,6 +29,10 @@ public struct InputKeyCommandMapper: Sendable {
     public init() {}
 
     public func intent(for stroke: InputKeyStroke) -> InputKeyIntent {
+        if stroke.modifiers.contains(.command) || stroke.modifiers.contains(.control) {
+            return .ignored
+        }
+
         if stroke.modifiers.contains(.option) {
             if let digit = optionDigit(for: stroke.keyCode) {
                 return .action(.optionNumber(digit))
@@ -34,6 +40,7 @@ public struct InputKeyCommandMapper: Sendable {
             if stroke.keyCode == Self.rKeyCode {
                 return .action(.optionR)
             }
+            return .ignored
         }
 
         if stroke.keyCode == Self.deleteKeyCode {
