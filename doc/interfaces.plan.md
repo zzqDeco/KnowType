@@ -69,5 +69,5 @@ ProviderProfile {
 
 - `Space` -> commit prefix.
 - `Tab` -> commit prefix plus first continuation.
-- `Option + number` -> commit prefix plus selected continuation.
+- `Option + number` -> commit prefix plus the continuation shown with that shortcut. `Tab` owns the first continuation; `Option + 1` starts at the second continuation.
 - `Option + R` -> request polish for original text.

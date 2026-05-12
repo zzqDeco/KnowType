@@ -53,13 +53,25 @@ final class InputCompositionControllerTests: XCTestCase {
     func testOptionNumberCommitsSelectedContinuation() {
         let controller = InputCompositionController()
         let result = controller.handle(
-            action: .optionNumber(2),
+            action: .optionNumber(1),
             prefixCandidates: prefix,
             continuationCandidates: continuations,
             originalText: "wo jue de zhege fagnan"
         )
 
         XCTAssertEqual(result, .commit("我觉得这个方案在落地成本上可能偏高"))
+    }
+
+    func testOptionNumberZeroDoesNotReplaceTabShortcut() {
+        let controller = InputCompositionController()
+        let result = controller.handle(
+            action: .optionNumber(0),
+            prefixCandidates: prefix,
+            continuationCandidates: continuations,
+            originalText: "wo jue de zhege fagnan"
+        )
+
+        XCTAssertEqual(result, .noAction)
     }
 
     func testOptionRRequestsPolish() {
