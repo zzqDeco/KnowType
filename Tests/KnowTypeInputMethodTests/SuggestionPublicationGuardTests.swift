@@ -25,4 +25,25 @@ final class SuggestionPublicationGuardTests: XCTestCase {
             )
         )
     }
+
+    func testCommitsOnlySuggestionForCurrentRawInput() {
+        XCTAssertTrue(
+            SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: "wojuede",
+                currentRawInput: "wojuede"
+            )
+        )
+        XCTAssertFalse(
+            SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: "wo",
+                currentRawInput: "wojuede"
+            )
+        )
+        XCTAssertFalse(
+            SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: nil,
+                currentRawInput: "wojuede"
+            )
+        )
+    }
 }

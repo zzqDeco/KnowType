@@ -11,6 +11,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private let keyMapper = InputKeyCommandMapper()
     private var rawBuffer = ""
     private var lastSuggestion: SuggestionResponse?
+    private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
     private var suggestionTask: Task<Void, Never>?
 
@@ -24,6 +25,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         switch keyMapper.intent(for: stroke) {
         case .append(let text):
             rawBuffer.append(text)
+            invalidateSuggestion()
             refreshSuggestion(client: sender)
             return true
         case .deleteBackward:
@@ -31,6 +33,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 return false
             }
             rawBuffer.removeLast()
+            invalidateSuggestion()
             refreshSuggestion(client: sender)
             updateComposition()
             return true
@@ -44,6 +47,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
         rawBuffer.append(string ?? "")
+        invalidateSuggestion()
         refreshSuggestion(client: sender)
         return true
     }
@@ -94,6 +98,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                     return
                 }
                 self.lastSuggestion = suggestion
+                self.lastSuggestionRawInput = rawInput
                 self.updateComposition()
             }
         }
@@ -114,7 +119,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private func commitResult(for action: InputAction) -> InputCommitResult {
-        guard let suggestion = lastSuggestion else {
+        guard let suggestion = lastSuggestion,
+              SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: lastSuggestionRawInput,
+                currentRawInput: rawBuffer
+              ) else {
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         }
         return InputCompositionController().handle(
@@ -134,10 +143,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func resetComposition() {
         rawBuffer = ""
+        invalidateSuggestion()
+        updateComposition()
+    }
+
+    private func invalidateSuggestion() {
         lastSuggestion = nil
+        lastSuggestionRawInput = nil
         suggestionTask?.cancel()
         suggestionTask = nil
-        updateComposition()
     }
 
     private func modifierSet(from flags: Int) -> Set<InputModifier> {

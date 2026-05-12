@@ -8,4 +8,11 @@ public enum SuggestionPublicationGuard {
     ) -> Bool {
         !isCancelled && requestedRawInput == currentRawInput
     }
+
+    public static func hasCurrentSuggestion(
+        suggestionRawInput: String?,
+        currentRawInput: String
+    ) -> Bool {
+        suggestionRawInput == currentRawInput
+    }
 }
