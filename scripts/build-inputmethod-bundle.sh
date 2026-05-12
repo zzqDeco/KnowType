@@ -8,7 +8,7 @@ BUNDLE_DIR="$DIST_DIR/KnowType.app"
 CONTENTS_DIR="$BUNDLE_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 
-swift build --configuration "$CONFIGURATION" --product KnowTypeInputMethodApp
+swift build --configuration "$CONFIGURATION" --product KnowTypeInputMethodApp >&2
 
 rm -rf "$BUNDLE_DIR"
 mkdir -p "$MACOS_DIR" "$CONTENTS_DIR/Resources"
