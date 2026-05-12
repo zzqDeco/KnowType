@@ -65,7 +65,10 @@ public struct InputCompositionController: Sendable {
             }
             return .commit(join(prefix: prefix, continuation: continuation))
         case .optionNumber(let number):
-            let index = number - 1
+            guard number > 0 else {
+                return .noAction
+            }
+            let index = number
             guard continuationCandidates.indices.contains(index) else {
                 return .noAction
             }
