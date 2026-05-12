@@ -52,6 +52,14 @@ swift test
 
 Provider profile 会以 JSON 保存，但不保存 API key。密钥通过 `SecretStore` 解析；macOS 实现使用 Keychain。
 
+在完整安装输入法之前，可以先用命令行体验包级 MVP 流程：
+
+```bash
+swift run knowtype-demo --locale zh-CN --action tab wo jue de zhege fagnan
+swift run knowtype-demo --locale mixed --action tab zhege api latnecy youdian gao
+swift run knowtype-demo --locale en-US --action tab I thikn this approch
+```
+
 ## 交互规则
 
 - `Space`：提交当前最佳前缀。

@@ -56,6 +56,14 @@ swift test
 
 Provider profiles are persisted as JSON without API keys. Secrets are resolved through `SecretStore`; the macOS implementation uses Keychain.
 
+Try the package-level MVP flow without installing an input method:
+
+```bash
+swift run knowtype-demo --locale zh-CN --action tab wo jue de zhege fagnan
+swift run knowtype-demo --locale mixed --action tab zhege api latnecy youdian gao
+swift run knowtype-demo --locale en-US --action tab I thikn this approch
+```
+
 ## Interaction Contract
 
 - `Space`: commit the best prefix candidate.
