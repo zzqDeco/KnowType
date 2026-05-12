@@ -108,15 +108,14 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func commit(action: InputAction, client sender: Any!) {
         let result = commitResult(for: action)
-        switch result {
-        case .commit(let text), .polishRequested(let text):
+        switch InputCommitResultPolicy.directive(for: result) {
+        case .insertAndReset(let text):
             insert(text, client: sender)
             resetComposition()
+        case .keepComposition:
+            updateComposition()
         case .noAction:
-            if !rawBuffer.isEmpty {
-                insert(rawBuffer, client: sender)
-                resetComposition()
-            }
+            break
         }
     }
 
@@ -126,7 +125,17 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 suggestionRawInput: lastSuggestionRawInput,
                 currentRawInput: rawBuffer
               ) else {
-            return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
+            guard !rawBuffer.isEmpty else {
+                return .noAction
+            }
+            switch action {
+            case .space, .tab:
+                return .commit(rawBuffer)
+            case .optionR:
+                return .polishRequested(rawBuffer)
+            case .optionNumber:
+                return .noAction
+            }
         }
         return InputCompositionController().handle(
             action: action,
