@@ -48,9 +48,18 @@ Resources/                     词典、码表、保护词和未来资源
 ```bash
 swift build
 swift test
+./scripts/build-inputmethod-bundle.sh
 ```
 
 Provider profile 会以 JSON 保存，但不保存 API key。密钥通过 `SecretStore` 解析；macOS 实现使用 Keychain。
+
+安装本地 macOS 输入法 bundle：
+
+```bash
+./scripts/install-inputmethod.sh
+```
+
+安装后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。需要移除时运行 `./scripts/uninstall-inputmethod.sh`。
 
 在完整安装输入法之前，可以先用命令行体验包级 MVP 流程：
 

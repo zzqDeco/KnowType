@@ -56,3 +56,5 @@ The current package includes:
 - `InputCompositionController` for shortcut behavior
 - `CandidatePanelViewModel` for separated prefix and continuation sections
 - `KnowTypeIMKServerBootstrap` behind `canImport(InputMethodKit)` for future app-bundle integration
+- `KnowTypeInputController` as the InputMethodKit session controller
+- `KnowTypeInputMethodApp` as the background app entry point assembled by `scripts/build-inputmethod-bundle.sh`
