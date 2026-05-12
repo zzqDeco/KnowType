@@ -69,6 +69,20 @@ public final class PrefixContinuationEngine: Sendable {
         return candidate
     }
 
+    public static func hasTechnicalLatencySignal(_ text: String) -> Bool {
+        if text.contains("延迟") {
+            return true
+        }
+
+        let patterns = [
+            #"(?i)(^|[^A-Za-z0-9_])API([^A-Za-z0-9_]|$)"#,
+            #"(?i)(^|[^A-Za-z0-9_])latency([^A-Za-z0-9_]|$)"#
+        ]
+        return patterns.contains { pattern in
+            text.range(of: pattern, options: .regularExpression) != nil
+        }
+    }
+
     private func fallbackContinuations(
         for prefix: String,
         lengthLevel: ContinuationLengthLevel,
@@ -78,6 +92,25 @@ public final class PrefixContinuationEngine: Sendable {
         let texts: [String]
 
         if zh {
+            if Self.hasTechnicalLatencySignal(prefix) {
+                let technicalTexts: [String]
+                switch lengthLevel {
+                case .short:
+                    technicalTexts = ["需要排查", "可能偏慢", "先看链路"]
+                case .medium:
+                    technicalTexts = ["需要进一步排查接口链路耗时", "可能和数据库查询耗时有关", "建议先看一下 P95 和 P99 延迟"]
+                case .long:
+                    technicalTexts = ["需要进一步排查接口链路耗时，并结合 P95 和 P99 延迟确认瓶颈。"]
+                }
+                return technicalTexts.prefix(maxCandidates).map {
+                    ContinuationCandidate(
+                        text: $0,
+                        lengthLevel: lengthLevel,
+                        confidence: 0.5,
+                        provider: "local-fallback"
+                    )
+                }
+            }
             switch lengthLevel {
             case .short:
                 texts = ["可行", "需要优化", "还有问题"]
