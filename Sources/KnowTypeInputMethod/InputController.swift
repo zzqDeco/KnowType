@@ -27,7 +27,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: flags)
         )
 
-        return handle(intent: keyMapper.intent(for: stroke), client: sender)
+        return handle(stroke: stroke, client: sender)
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
@@ -81,7 +81,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             keyCode: Int(event.keyCode),
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue))
         )
-        return handle(intent: keyMapper.intent(for: stroke), client: sender)
+        return handle(stroke: stroke, client: sender)
     }
 
     public override func commitComposition(_ sender: Any!) {
@@ -98,6 +98,13 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         hideNativeCandidates()
         hideCandidatePanel()
         super.inputControllerWillClose()
+    }
+
+    private func handle(stroke: InputKeyStroke, client sender: Any!) -> Bool {
+        if handleCustomCandidateSelection(stroke: stroke, client: sender) {
+            return true
+        }
+        return handle(intent: keyMapper.intent(for: stroke), client: sender)
     }
 
     private func handle(intent: InputKeyIntent, client sender: Any!) -> Bool {
@@ -298,10 +305,41 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         guard let client = sender as? IMKTextInput else {
             return .zero
         }
+        let selectedRange = client.selectedRange()
+        let location = selectedRange.location == NSNotFound ? 0 : selectedRange.location
         return client.firstRect(
-            forCharacterRange: NSRange(location: rawBuffer.utf16.count, length: 0),
+            forCharacterRange: NSRange(location: location, length: 0),
             actualRange: nil
         )
+    }
+
+    private func handleCustomCandidateSelection(stroke: InputKeyStroke, client sender: Any!) -> Bool {
+        guard stroke.modifiers.isEmpty,
+              let number = Self.candidateSelectionNumberByKeyCode[stroke.keyCode],
+              let suggestion = lastSuggestion,
+              SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: lastSuggestionRawInput,
+                currentRawInput: rawBuffer
+              ) else {
+            return false
+        }
+
+        if number == 0 {
+            guard !rawBuffer.isEmpty else {
+                return true
+            }
+            insert(rawBuffer, client: sender)
+            resetComposition()
+            return true
+        }
+
+        let prefixIndex = number - 1
+        guard suggestion.prefixCandidates.indices.contains(prefixIndex) else {
+            return true
+        }
+        insert(suggestion.prefixCandidates[prefixIndex].text, client: sender)
+        resetComposition()
+        return true
     }
 
     private func updateNativeCandidates() {
@@ -342,5 +380,17 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private static let textOnlyKeyCode = -1
+    private static let candidateSelectionNumberByKeyCode: [Int: Int] = [
+        29: 0,
+        18: 1,
+        19: 2,
+        20: 3,
+        21: 4,
+        23: 5,
+        22: 6,
+        26: 7,
+        28: 8,
+        25: 9
+    ]
 }
 #endif

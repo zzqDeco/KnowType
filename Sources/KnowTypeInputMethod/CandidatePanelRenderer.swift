@@ -73,7 +73,7 @@ public struct CandidatePanelRenderer: Sendable {
             rows.append(
                 CandidatePanelRenderRow(
                     kind: .rawInput,
-                    shortcutLabel: nil,
+                    shortcutLabel: viewModel.prefixCandidates.isEmpty ? nil : "0",
                     text: viewModel.rawInput,
                     isSelected: selection == .rawInput,
                     visualRole: .rawInput
