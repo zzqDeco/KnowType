@@ -40,7 +40,7 @@ LLMResponse {
 ```text
 Sources/KnowTypeCore/          Core models, correction, prefix-locked continuation
 Sources/KnowTypeProviders/     Provider profiles, runtime loading, adapters, HTTP normalization
-Sources/KnowTypeInputMethod/   Input-method interaction, custom candidate panel, IMK bootstrap
+Sources/KnowTypeInputMethod/   Input-method interaction, candidate panel, IMK bootstrap
 Sources/KnowTypeInputMethodApp Local macOS IMK background app entry point
 Sources/KnowTypeSettingsApp/   SwiftUI settings and provider profile editing
 Tests/                         Unit and adapter tests
@@ -78,6 +78,8 @@ To install the local macOS input method bundle:
 ```
 
 The script copies the bundle to `~/Library/Input Methods/KnowType.app`. Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. If the input source list does not refresh, log out and back in, or restart the affected app.
+
+During local input, KnowType marks the composing text in the client app first, then shows a compact macOS-style candidate panel anchored to the caret when the client exposes a usable text rect, or near the pointer as a fallback. `Space` replaces the marked text with the best corrected prefix, while `Tab` replaces it with prefix plus the first continuation.
 
 To remove the local bundle:
 
@@ -131,8 +133,10 @@ All provider responses must normalize into `LLMResponse` before reaching core or
 
 - `Space`: commit the selected prefix candidate only.
 - `Tab`: commit the selected prefix plus the first or selected continuation.
-- `Option + number`: commit the selected prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation and is also shown as `Tab / Option+1`.
+- `Option + number`: commit the selected prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation, which is displayed with the `⇥` shortcut because `Tab` commits it directly.
 - `Option + R`: request polish; this is the only default path that may rewrite the prefix.
+
+The candidate panel is intentionally flat: prefix candidates appear first, continuation candidates appear after them, and raw input is shown only when there are no correction candidates yet. When a provider is configured, the immediate local pass shows prefix candidates only; continuation rows are published when the provider result arrives. Local fallback continuations are used when no provider is configured or the provider path fails.
 
 ## Privacy Baseline
 
@@ -153,7 +157,7 @@ Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, `InputMethodK
 
 Before tagging an MVP build, run `swift build`, `swift test`, build/install the local input method bundle, and manually verify:
 
-- TextEdit: candidate window appears; `Space` commits prefix only.
+- TextEdit: candidate window appears near the caret; `Space` commits prefix only.
 - Safari and Chrome: text fields accept `Tab` for prefix plus first continuation.
 - Xcode: technical tokens and code-like identifiers are preserved.
 - Terminal: paths and commands stay Level 0 and do not call cloud providers.

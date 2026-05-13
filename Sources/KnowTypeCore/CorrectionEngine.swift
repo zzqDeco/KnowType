@@ -36,7 +36,7 @@ public final class CorrectionEngine: Sendable {
                 rawInput: raw,
                 locale: context.locale,
                 appContext: context.appBundleID,
-                maxCandidates: 3
+                maxCandidates: 6
             )
             if let cloud = try? await cloudProvider.complete(request) {
                 let cloudCandidates = cloud.candidates.map {
@@ -83,23 +83,8 @@ public final class CorrectionEngine: Sendable {
                 )
             )
 
-            if decoded.hasSuffix("方案") {
-                candidates.append(
-                    CorrectionCandidate(
-                        text: String(decoded.dropLast(2)) + "方法",
-                        source: "local-decoder",
-                        confidence: 0.72,
-                        correctionLevel: .contextual
-                    )
-                )
-                candidates.append(
-                    CorrectionCandidate(
-                        text: String(decoded.dropLast(2)) + "方向",
-                        source: "local-decoder",
-                        confidence: 0.69,
-                        correctionLevel: .contextual
-                    )
-                )
+            for alternative in prefixAlternatives(for: decoded) {
+                candidates.append(alternative)
             }
         }
 
@@ -153,6 +138,30 @@ public final class CorrectionEngine: Sendable {
                 }
                 return $0.confidence > $1.confidence
             }
+    }
+}
+
+private func prefixAlternatives(for decoded: String) -> [CorrectionCandidate] {
+    let suffixAlternatives: [(suffix: String, replacements: [(String, Double)])] = [
+        ("方案", [("方法", 0.72), ("方向", 0.69), ("计划", 0.64), ("思路", 0.61)]),
+        ("功能", [("工具", 0.66), ("模块", 0.63)]),
+        ("问题", [("需求", 0.64), ("bug", 0.6)]),
+        ("接口", [("API", 0.66), ("服务", 0.62)])
+    ]
+
+    guard let match = suffixAlternatives.first(where: { decoded.hasSuffix($0.suffix) }) else {
+        return []
+    }
+
+    let stem = String(decoded.dropLast(match.suffix.count))
+    return match.replacements.map { replacement, confidence in
+        CorrectionCandidate(
+            text: stem + replacement,
+            source: "local-decoder",
+            confidence: confidence,
+            correctionLevel: .contextual,
+            protectedRanges: TextProtection.detectProtectedRanges(in: stem + replacement)
+        )
     }
 }
 

@@ -39,7 +39,7 @@ final class CandidatePanelWindowController {
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 340, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 64),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -94,8 +94,9 @@ final class CandidatePanelWindowController {
     }
 
     private func fallbackAnchorRect() -> CGRect {
-        if let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) {
-            return CGRect(x: mouseScreen.frame.minX + 24, y: mouseScreen.frame.maxY - 80, width: 1, height: 1)
+        let mouseLocation = NSEvent.mouseLocation
+        if NSScreen.screens.contains(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
+            return CGRect(x: mouseLocation.x, y: mouseLocation.y, width: 1, height: 18)
         }
         if let screen = NSScreen.main {
             return CGRect(x: screen.visibleFrame.minX + 24, y: screen.visibleFrame.maxY - 80, width: 1, height: 1)
@@ -129,10 +130,6 @@ private final class CandidatePanelContentView: NSView {
             $0.removeFromSuperview()
         }
 
-        if let previewText = model.previewText {
-            stackView.addArrangedSubview(makePreviewLabel(previewText))
-        }
-
         for row in model.rows {
             stackView.addArrangedSubview(makeRowView(row))
         }
@@ -149,10 +146,10 @@ private final class CandidatePanelContentView: NSView {
         effectView.blendingMode = .behindWindow
         effectView.state = .active
         effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = 8
+        effectView.layer?.cornerRadius = 6
         effectView.layer?.cornerCurve = .continuous
         effectView.layer?.masksToBounds = true
-        effectView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+        effectView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.18).cgColor
         effectView.layer?.borderWidth = 0.5
         effectView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(effectView)
@@ -166,8 +163,8 @@ private final class CandidatePanelContentView: NSView {
 
         stackView.orientation = .vertical
         stackView.alignment = .width
-        stackView.spacing = 1
-        stackView.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        stackView.spacing = 0
+        stackView.edgeInsets = NSEdgeInsets(top: 3, left: 3, bottom: 3, right: 3)
         stackView.translatesAutoresizingMaskIntoConstraints = false
         effectView.addSubview(stackView)
 
@@ -176,8 +173,8 @@ private final class CandidatePanelContentView: NSView {
             stackView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
             stackView.topAnchor.constraint(equalTo: effectView.topAnchor),
             stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-            widthAnchor.constraint(lessThanOrEqualToConstant: 520)
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 420)
         ])
     }
 
@@ -224,12 +221,12 @@ private final class CandidatePanelContentView: NSView {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = 8
-        container.edgeInsets = NSEdgeInsets(top: 5, left: 8, bottom: 2, right: 8)
-        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 19).isActive = true
+        container.spacing = 6
+        container.edgeInsets = NSEdgeInsets(top: 4, left: 7, bottom: 1, right: 7)
+        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 16).isActive = true
 
         let label = baseLabel(text)
-        label.font = .systemFont(ofSize: 10, weight: .medium)
+        label.font = .systemFont(ofSize: 9, weight: .medium)
         label.textColor = .tertiaryLabelColor
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -251,13 +248,13 @@ private final class CandidatePanelContentView: NSView {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = 10
-        container.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 10)
+        container.spacing = 7
+        container.edgeInsets = NSEdgeInsets(top: 1, left: 7, bottom: 1, right: 9)
         container.wantsLayer = true
-        container.layer?.cornerRadius = 5
+        container.layer?.cornerRadius = 3
         container.layer?.cornerCurve = .continuous
         container.layer?.backgroundColor = rowBackgroundColor(row).cgColor
-        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 26).isActive = true
+        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
 
         if let shortcutLabel = row.shortcutLabel {
             container.addArrangedSubview(makeShortcutLabel(shortcutLabel, isSelected: row.isSelected))
@@ -281,12 +278,12 @@ private final class CandidatePanelContentView: NSView {
 
     private func makeShortcutLabel(_ text: String, isSelected: Bool) -> NSTextField {
         let label = baseLabel(text)
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         label.textColor = isSelected ? .alternateSelectedControlTextColor : .secondaryLabelColor
         label.alignment = .right
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
-        label.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 28).isActive = true
         return label
     }
 
@@ -300,13 +297,13 @@ private final class CandidatePanelContentView: NSView {
     private func font(for role: CandidatePanelVisualRole) -> NSFont {
         switch role {
         case .lockedPrefix:
-            return .systemFont(ofSize: 13, weight: .medium)
+            return .systemFont(ofSize: 15, weight: .regular)
         case .continuation:
-            return .systemFont(ofSize: 13, weight: .regular)
+            return .systemFont(ofSize: 15, weight: .regular)
         case .rawInput:
-            return .monospacedSystemFont(ofSize: 12, weight: .regular)
+            return .monospacedSystemFont(ofSize: 13, weight: .regular)
         case .sectionHeader:
-            return .systemFont(ofSize: 10, weight: .medium)
+            return .systemFont(ofSize: 9, weight: .medium)
         }
     }
 

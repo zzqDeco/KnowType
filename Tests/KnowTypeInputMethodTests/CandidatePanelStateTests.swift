@@ -30,20 +30,16 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(
             rendered.rows.map(\.kind),
             [
-                .sectionHeader,
-                .rawInput,
-                .sectionHeader,
                 .prefixCandidate,
                 .prefixCandidate,
-                .sectionHeader,
                 .continuationCandidate,
                 .continuationCandidate
             ]
         )
-        XCTAssertEqual(rendered.rows[3].visualRole, .lockedPrefix)
-        XCTAssertEqual(rendered.rows[6].visualRole, .continuation)
-        XCTAssertTrue(rendered.rows[3].isSelected)
-        XCTAssertFalse(rendered.rows[6].isSelected)
+        XCTAssertEqual(rendered.rows[0].visualRole, .lockedPrefix)
+        XCTAssertEqual(rendered.rows[2].visualRole, .continuation)
+        XCTAssertTrue(rendered.rows[0].isSelected)
+        XCTAssertFalse(rendered.rows[2].isSelected)
     }
 
     func testDefaultSelectionPrefersFirstPrefixOverRawAndContinuation() {

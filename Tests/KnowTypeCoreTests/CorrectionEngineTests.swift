@@ -27,6 +27,7 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
         XCTAssertTrue(candidates.map(\.text).contains("我觉得这个方法"))
         XCTAssertTrue(candidates.map(\.text).contains("我觉得这个方向"))
+        XCTAssertGreaterThanOrEqual(candidates.count, 5)
     }
 
     func testCompactPinyinCorrectionHandlesTypingWithoutSpaces() async {

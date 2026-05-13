@@ -52,6 +52,18 @@ final class PrefixContinuationEngineTests: XCTestCase {
         XCTAssertEqual(continuations.first?.text, "still needs more validation")
     }
 
+    func testFallbackProvidesSixMediumCandidatesForInputMethodPanel() {
+        let engine = PrefixContinuationEngine()
+        let continuations = engine.fallbackContinuations(
+            for: "我觉得这个方案",
+            lengthLevel: .medium,
+            maxCandidates: 6
+        )
+
+        XCTAssertEqual(continuations.count, 6)
+        XCTAssertEqual(continuations.first?.text, "还有进一步优化空间")
+    }
+
     func testLevelZeroContinuationReturnsEmptyAndDoesNotCallProvider() async {
         let provider = RecordingContinuationProvider()
         let engine = PrefixContinuationEngine(provider: provider)

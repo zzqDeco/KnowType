@@ -19,8 +19,8 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - English correction: `I thikn this approch -> I think this approach`
 - Level 0 path input: `/Users/zq/project/KnowType` is not rewritten
 - Explicit polish only: `Option + R` is the only default path that requests rewriting
-- Candidate panel rendering separates raw input, locked prefix, and continuation rows.
-- Candidate panel shortcuts match commit behavior: `Tab / Option+1` for the first continuation and `Option+2` for the second continuation.
+- Candidate panel rendering keeps raw input, locked prefix, and continuation as separate semantic rows while presenting a flat native-style list.
+- Candidate panel shortcuts match commit behavior: `⇥` for the first continuation and `⌥2` for the second continuation.
 - Provider profiles round-trip without API key values.
 - Provider resolution pulls secrets through `SecretStore`.
 
@@ -28,7 +28,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 
 - TextEdit:
   - Type `wo jue de zhege fagnan`.
-  - Candidate window appears with raw input, locked prefix, and continuation sections.
+  - Candidate window appears near the caret as a compact flat list, without preview text or section headers.
   - `Space` commits `我觉得这个方案` only.
   - `Tab` commits the locked prefix plus first continuation.
 - Safari:

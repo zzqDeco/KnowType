@@ -67,13 +67,13 @@ public struct CandidatePanelRenderer: Sendable {
         selected selection: CandidatePanelSelection? = nil
     ) -> CandidatePanelRenderModel {
         var rows: [CandidatePanelRenderRow] = []
+        let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
 
-        if !viewModel.rawInput.isEmpty {
-            appendSectionHeader(localizedRawInputLabel, to: &rows)
+        if !viewModel.rawInput.isEmpty && !hasSuggestions {
             rows.append(
                 CandidatePanelRenderRow(
                     kind: .rawInput,
-                    shortcutLabel: viewModel.prefixCandidates.isEmpty ? nil : "0",
+                    shortcutLabel: nil,
                     text: viewModel.rawInput,
                     isSelected: selection == .rawInput,
                     visualRole: .rawInput
@@ -82,7 +82,6 @@ public struct CandidatePanelRenderer: Sendable {
         }
 
         if !viewModel.prefixCandidates.isEmpty {
-            appendSectionHeader(localizedPrefixLabel, to: &rows)
             for (index, candidate) in viewModel.prefixCandidates.enumerated() {
                 rows.append(
                     CandidatePanelRenderRow(
@@ -97,7 +96,6 @@ public struct CandidatePanelRenderer: Sendable {
         }
 
         if !viewModel.continuationCandidates.isEmpty {
-            appendSectionHeader(localizedContinuationLabel, to: &rows)
             for (index, candidate) in viewModel.continuationCandidates.enumerated() {
                 rows.append(
                     CandidatePanelRenderRow(
@@ -113,53 +111,14 @@ public struct CandidatePanelRenderer: Sendable {
 
         return CandidatePanelRenderModel(
             title: viewModel.title,
-            previewText: viewModel.lockedPreview,
+            previewText: nil,
             rows: rows
-        )
-    }
-
-    private var localizedPrefixLabel: String {
-        switch locale {
-        case .zhCN:
-            return "锁定前缀"
-        case .enUS, .mixed:
-            return "Locked Prefix"
-        }
-    }
-
-    private var localizedContinuationLabel: String {
-        switch locale {
-        case .zhCN:
-            return "续写"
-        case .enUS, .mixed:
-            return "Continuation"
-        }
-    }
-
-    private var localizedRawInputLabel: String {
-        switch locale {
-        case .zhCN:
-            return "原始输入"
-        case .enUS, .mixed:
-            return "Raw Input"
-        }
-    }
-
-    private func appendSectionHeader(_ text: String, to rows: inout [CandidatePanelRenderRow]) {
-        rows.append(
-            CandidatePanelRenderRow(
-                kind: .sectionHeader,
-                shortcutLabel: nil,
-                text: text,
-                isSelected: false,
-                visualRole: .sectionHeader
-            )
         )
     }
 
     private func continuationShortcutLabel(at index: Int) -> String {
         guard index > 0 else {
-            return "Tab  ⌥1"
+            return "⇥"
         }
         return "⌥\(index + 1)"
     }

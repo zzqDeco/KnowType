@@ -67,11 +67,19 @@ Provider profiles are edited by the settings app and stored as JSON metadata plu
 The current package includes:
 
 - `InputCompositionController` for shortcut behavior
-- `CandidatePanelViewModel` for separated prefix and continuation sections
+- `CandidatePanelViewModel` for separated prefix and continuation data
 - `CandidatePanelRenderer` for raw input, locked prefix, and continuation render rows
 - `KnowTypeIMKServerBootstrap` behind `canImport(InputMethodKit)` for IMK server integration
 - `KnowTypeInputController` as the InputMethodKit session controller
 - `KnowTypeInputMethodApp` as the background app entry point assembled by `scripts/build-inputmethod-bundle.sh`
+
+The IMK controller uses `IMKTextInput.setMarkedText` for active composition so local pinyin can become marked Chinese text before commit. Commit calls replace the active marked range with either the locked prefix or the prefix plus selected continuation.
+
+The primary candidate surface is a controlled AppKit `NSPanel` styled as a compact macOS candidate list. We do not rely on `IMKCandidates` for active display because it can silently fail to appear in some host apps. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available.
+
+Candidate positioning recalculates after local and async suggestion publication. Anchor lookup prefers the marked range end, falls back to selected range, then falls back to the client line-height rectangle before using pointer location as the screen fallback.
+
+When a provider is configured, the immediate local pass publishes correction/prefix rows only. Continuation rows are published after the provider-backed suggestion returns; local fallback continuations are reserved for no-provider and provider-failure paths.
 
 ## Privacy and App Rules
 

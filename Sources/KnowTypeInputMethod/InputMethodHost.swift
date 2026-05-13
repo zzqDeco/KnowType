@@ -3,6 +3,9 @@ import KnowTypeCore
 import KnowTypeProviders
 
 public struct InputMethodPipeline: Sendable {
+    public static let defaultMaxPrefixCandidates = 6
+    public static let defaultMaxContinuationCandidates = 6
+
     private let correctionEngine: CorrectionEngine
     private let continuationEngine: PrefixContinuationEngine
 
@@ -28,7 +31,7 @@ public struct InputMethodPipeline: Sendable {
                 for: locked,
                 context: context,
                 lengthLevel: .medium,
-                maxCandidates: 3
+                maxCandidates: Self.defaultMaxContinuationCandidates
             )
         } else {
             continuations = []
@@ -43,7 +46,10 @@ public struct InputMethodPipeline: Sendable {
         )
     }
 
-    public static func localSuggestions(for context: InputContext) -> SuggestionResponse {
+    public static func localSuggestions(
+        for context: InputContext,
+        includeFallbackContinuations: Bool = true
+    ) -> SuggestionResponse {
         let correctionEngine = CorrectionEngine()
         let continuationEngine = PrefixContinuationEngine()
         let prefixes = correctionEngine.localCorrect(context)
@@ -56,13 +62,14 @@ public struct InputMethodPipeline: Sendable {
             )
         }
         let continuations: [ContinuationCandidate]
-        if let locked,
+        if includeFallbackContinuations,
+           let locked,
            !TextProtection.requiresNoCorrection(locked.text, appBundleID: context.appBundleID),
            !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             continuations = continuationEngine.fallbackContinuations(
                 for: locked.text,
                 lengthLevel: .medium,
-                maxCandidates: 3
+                maxCandidates: Self.defaultMaxContinuationCandidates
             )
         } else {
             continuations = []

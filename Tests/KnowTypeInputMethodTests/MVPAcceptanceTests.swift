@@ -37,6 +37,17 @@ final class MVPAcceptanceTests: XCTestCase {
         XCTAssertEqual(result, .commit("我觉得这个方案"))
     }
 
+    func testLocalImmediateSuggestionsCanDeferContinuationsWhenProviderIsConfigured() {
+        let response = InputMethodPipeline.localSuggestions(
+            for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN),
+            includeFallbackContinuations: false
+        )
+
+        XCTAssertEqual(response.lockedPrefix?.text, "我觉得这个方案")
+        XCTAssertFalse(response.prefixCandidates.isEmpty)
+        XCTAssertTrue(response.continuationCandidates.isEmpty)
+    }
+
     func testMixedInputKeepsTechnicalTokensAndCommitsContinuation() async {
         let pipeline = InputMethodPipeline()
         let response = await pipeline.suggestions(

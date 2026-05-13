@@ -13,4 +13,37 @@ final class CandidateAnchorPolicyTests: XCTestCase {
     func testCharacterRangeReturnsNilWhenSelectionLocationIsUnknown() {
         XCTAssertNil(CandidateAnchorPolicy.characterRange(for: NSRange(location: NSNotFound, length: 0)))
     }
+
+    func testCharacterRangeFallsBackToMarkedRangeEnd() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.characterRange(
+                selectedRange: NSRange(location: NSNotFound, length: NSNotFound),
+                markedRange: NSRange(location: 10, length: 4)
+            ),
+            NSRange(location: 14, length: 0)
+        )
+    }
+
+    func testCharacterRangesPreferMarkedRangeEndThenSelectedRange() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.characterRanges(
+                selectedRange: NSRange(location: 42, length: 0),
+                markedRange: NSRange(location: 10, length: 4)
+            ),
+            [
+                NSRange(location: 14, length: 0),
+                NSRange(location: 42, length: 0)
+            ]
+        )
+    }
+
+    func testCharacterRangeUsesDocumentStartWhenClientRangeIsUnknown() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.characterRange(
+                selectedRange: NSRange(location: NSNotFound, length: NSNotFound),
+                markedRange: NSRange(location: NSNotFound, length: NSNotFound)
+            ),
+            NSRange(location: 0, length: 0)
+        )
+    }
 }
