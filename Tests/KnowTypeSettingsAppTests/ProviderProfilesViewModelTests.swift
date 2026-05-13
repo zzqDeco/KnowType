@@ -412,6 +412,62 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.profiles, existing)
     }
 
+    func testSetSecretFailureFromSeededDefaultsRollsBackToLoadedEmptyStore() throws {
+        let loaded = ProviderProfilesFile()
+        let store = CapturingProfileStore(file: loaded)
+        let secrets = RecordingSecretStore(setError: TestProfileStoreError(message: "set failed"))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.draft.apiKey = "sk-new"
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(viewModel.lastErrorMessage, "set failed")
+        XCTAssertEqual(store.savedFiles.count, 2)
+        XCTAssertEqual(store.savedFiles.first?.profiles.count, ProviderKind.allCases.count)
+        XCTAssertEqual(store.savedFiles.last, loaded)
+        XCTAssertEqual(viewModel.profiles.map(\.kind), ProviderKind.allCases)
+    }
+
+    func testFailedLegacySecretDeleteRemovesJustCreatedProfileScopedSecret() throws {
+        let oldSecretName = "knowtype.openai_chat.apiKey"
+        let newSecretName = "knowtype.provider.work.apiKey"
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: oldSecretName,
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore(
+            values: [oldSecretName: "sk-old"],
+            deleteErrors: [oldSecretName: TestProfileStoreError(message: "delete failed")]
+        )
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.draft.apiKey = "sk-new"
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(viewModel.lastErrorMessage, "delete failed")
+        XCTAssertEqual(store.savedFiles.count, 2)
+        XCTAssertEqual(store.savedFiles.first?.profiles.first?.secretName, newSecretName)
+        XCTAssertEqual(store.savedFiles.last?.profiles, existing)
+        XCTAssertEqual(secrets.setSecretCalls.map(\.name), [newSecretName])
+        XCTAssertEqual(secrets.deleteSecretCalls, [oldSecretName, newSecretName])
+        XCTAssertNil(try secrets.secret(named: newSecretName))
+        XCTAssertEqual(viewModel.profiles, existing)
+    }
+
     func testRollbackFailureReportsMetadataMayBeStaged() throws {
         let existing = [
             ProviderProfile(
@@ -712,6 +768,40 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(secrets.setSecretCalls.first?.name, saved.secretName)
     }
 
+    func testCustomHTTPBlankAPIKeyKeepsExistingSecret() throws {
+        let secretName = "knowtype.provider.proxy.apiKey"
+        let existing = [
+            ProviderProfile(
+                id: "proxy",
+                displayName: "Proxy",
+                kind: .customHTTP,
+                baseURL: URL(string: "https://proxy.example.com/complete")!,
+                model: "",
+                secretName: secretName,
+                customBodyTemplate: #"{"request":{{request_json}}}"#,
+                customResponsePath: "candidates",
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore(values: [secretName: "proxy-secret"])
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.draft.displayName = "Updated Proxy"
+        viewModel.draft.apiKey = " \n "
+
+        XCTAssertTrue(viewModel.saveDraft())
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertEqual(saved.displayName, "Updated Proxy")
+        XCTAssertEqual(saved.secretName, secretName)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+        XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
+        XCTAssertEqual(try secrets.secret(named: secretName), "proxy-secret")
+    }
+
     func testSetDefaultPersistsDefaultProviderChoice() throws {
         let profiles = ProviderProfileTemplates.defaultProfiles()
         let targetID = try XCTUnwrap(profiles.first(where: { $0.kind == .ollamaNative })?.id)
@@ -834,13 +924,20 @@ private final class RecordingSecretStore: SecretStore, @unchecked Sendable {
     private var values: [String: String]
     private let setError: Error?
     private let deleteError: Error?
+    private let deleteErrors: [String: Error]
     private(set) var setSecretCalls: [(value: String, name: String)] = []
     private(set) var deleteSecretCalls: [String] = []
 
-    init(values: [String: String] = [:], setError: Error? = nil, deleteError: Error? = nil) {
+    init(
+        values: [String: String] = [:],
+        setError: Error? = nil,
+        deleteError: Error? = nil,
+        deleteErrors: [String: Error] = [:]
+    ) {
         self.values = values
         self.setError = setError
         self.deleteError = deleteError
+        self.deleteErrors = deleteErrors
     }
 
     func secret(named name: String) throws -> String? {
@@ -857,6 +954,9 @@ private final class RecordingSecretStore: SecretStore, @unchecked Sendable {
 
     func deleteSecret(named name: String) throws {
         deleteSecretCalls.append(name)
+        if let error = deleteErrors[name] {
+            throw error
+        }
         if let deleteError {
             throw deleteError
         }

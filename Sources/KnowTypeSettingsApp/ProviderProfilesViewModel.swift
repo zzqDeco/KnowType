@@ -33,7 +33,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
             let loaded = try profileStore.loadProfiles()
             if loaded.profiles.isEmpty && loadDefaultsWhenEmpty {
                 let defaults = Self.profileScopedSecrets(ProviderProfileTemplates.defaultProfiles())
-                resolvedFile = ProviderProfilesFile(schemaVersion: loaded.schemaVersion, profiles: defaults)
+                resolvedFile = loaded
                 resolvedProfiles = defaults
             } else {
                 resolvedFile = loaded
@@ -135,6 +135,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 profile.secretName = secretName
             } else if Self.requiresSecret(kind: profile.kind) {
                 profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
+            } else if Self.acceptsOptionalSecret(kind: profile.kind) {
+                profile.secretName = existingProfile?.secretName ?? profile.secretName
             } else {
                 profile.secretName = nil
             }
@@ -294,9 +296,6 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 if requiresSecret(kind: profile.kind) {
                     return .none
                 }
-                if let oldSecretName = existingProfile?.secretName {
-                    return .delete(secretName: oldSecretName)
-                }
                 return .none
             }
             let secretName = secretName(for: profile.id)
@@ -318,7 +317,12 @@ public final class ProviderProfilesViewModel: ObservableObject {
             if let oldSecretName,
                oldSecretName != secretName,
                !Self.isSecretReferenced(oldSecretName, in: updatedProfiles) {
-                try secretStore.deleteSecret(named: oldSecretName)
+                do {
+                    try secretStore.deleteSecret(named: oldSecretName)
+                } catch {
+                    try? secretStore.deleteSecret(named: secretName)
+                    throw error
+                }
             }
         case .delete(let secretName):
             if !Self.isSecretReferenced(secretName, in: updatedProfiles) {
