@@ -77,6 +77,7 @@ The factory maps `ProviderKind` to one adapter and keeps provider-specific reque
 ## Candidate Types
 
 - `CorrectionCandidate`: prefix candidate with correction level and protected ranges.
+- `TraditionalInputCandidate`: local traditional-input prefix candidate emitted by the clean-room pinyin engine.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
 - `SuggestionResponse`: complete UI-facing suggestion state.

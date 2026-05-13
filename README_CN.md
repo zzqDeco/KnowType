@@ -77,6 +77,8 @@ bundle 会输出到 `dist/KnowType.app`。
 
 本地输入时，KnowType 会先把输入中的文本作为 marked text 标记在当前 app 里，然后在客户端提供可用文本位置时把紧凑的 macOS 风格候选窗锚定到光标附近；拿不到可靠位置时回退到鼠标指针附近。按 `Space` 会用最佳纠错前缀替换 marked text，按 `Tab` 会用前缀 + 第一条延续替换 marked text。
 
+本地纠错路径包含一个 clean-room 的 MVP 拼音引擎。它支持文档中的全拼例子、`wojuedezhegefagnan` 这类连续拼音、`fangan` 常见错拼、`方案/方法/方向` 这类多前缀候选，以及中英混输里的技术 token 保护。在 `en-US` 模式下，本地纠错会保留英文拼写纠错路径，不会先把拼音解码成中文。
+
 移除本地 bundle：
 
 ```bash
