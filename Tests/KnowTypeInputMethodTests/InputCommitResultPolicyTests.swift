@@ -22,4 +22,9 @@ final class InputCommitResultPolicyTests: XCTestCase {
             .noAction
         )
     }
+
+    func testNoActionConsumesOnlyWhenCompositionIsActive() {
+        XCTAssertFalse(InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: false))
+        XCTAssertTrue(InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: true))
+    }
 }

@@ -40,8 +40,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             updateComposition()
             return true
         case .action(let action):
-            commit(action: action, client: sender)
-            return true
+            return commit(action: action, client: sender)
         case .ignored:
             return false
         }
@@ -104,21 +103,25 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         }
     }
 
-    private func commit(action: InputAction, client sender: Any!) {
+    @discardableResult
+    private func commit(action: InputAction, client sender: Any!) -> Bool {
         let result = commitResult(for: action)
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
             insert(text, client: sender)
             resetComposition()
+            return true
         case .requestPolishAndKeepComposition(let text):
             Task { [sessionController] in
                 await sessionController.requestPolish(rawInput: text)
             }
             updateComposition()
+            return true
         case .keepComposition:
             updateComposition()
+            return true
         case .noAction:
-            break
+            return InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: !rawBuffer.isEmpty)
         }
     }
 

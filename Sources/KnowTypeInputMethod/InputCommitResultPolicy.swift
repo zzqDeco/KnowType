@@ -18,4 +18,8 @@ public enum InputCommitResultPolicy {
             return .noAction
         }
     }
+
+    public static func shouldConsumeNoAction(hasComposition: Bool) -> Bool {
+        hasComposition
+    }
 }
