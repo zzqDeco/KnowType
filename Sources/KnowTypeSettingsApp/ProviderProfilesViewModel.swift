@@ -356,7 +356,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
         if requiresSecret(profile) || acceptsOptionalSecret(profile) {
             guard !trimmedAPIKey.isEmpty else {
-                if shouldClearBlankOptionalSecret(for: profile),
+                if shouldClearBlankOptionalSecret(for: profile, existingProfile: existingProfile),
                    let oldSecretName = existingProfile?.secretName {
                     return .delete(secretName: oldSecretName)
                 }
@@ -372,10 +372,17 @@ public final class ProviderProfilesViewModel: ObservableObject {
         return .delete(secretName: oldSecretName)
     }
 
-    private static func shouldClearBlankOptionalSecret(for profile: ProviderProfile) -> Bool {
+    private static func shouldClearBlankOptionalSecret(
+        for profile: ProviderProfile,
+        existingProfile: ProviderProfile?
+    ) -> Bool {
+        guard let existingProfile else {
+            return false
+        }
         switch profile.kind {
         case .openAIChat, .openAIResponses:
             return isLocalBaseURL(profile.baseURL)
+                && (profile.kind != existingProfile.kind || !isLocalBaseURL(existingProfile.baseURL))
         case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
             return false
         }

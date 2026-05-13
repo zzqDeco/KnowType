@@ -161,6 +161,30 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(bodyObject["model"] as? String, "local-model-a")
     }
 
+    func testOpenAIChatDiscoveryNormalizesTrailingV1BaseURL() async throws {
+        let content = #"{"candidates":[{"text":"local continuation"}]}"#
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"object":"list","data":[{"id":"local-model"}]}"#, statusCode: 200),
+            (json: #"{"choices":[{"message":{"content":"\#(content.replacingOccurrences(of: "\"", with: "\\\""))"}}]}"#, statusCode: 200)
+        ])
+        let provider = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://localhost:8000/v1/")!,
+                model: ""
+            ),
+            httpClient: client
+        )
+
+        _ = try await provider.complete(llmRequest)
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(requests.compactMap { $0.url?.absoluteString }, [
+            "http://localhost:8000/v1/models",
+            "http://localhost:8000/v1/chat/completions"
+        ])
+    }
+
     func testOpenAIResponsesDiscoversPlaceholderModelBeforeCompletion() async throws {
         let client = SequencedMockHTTPClient(responses: [
             (json: #"{"data":[{"id":"responses-local-model"}]}"#, statusCode: 200),

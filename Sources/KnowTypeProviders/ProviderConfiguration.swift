@@ -43,7 +43,9 @@ public struct ProviderConfiguration: Codable, Sendable, Equatable {
     func endpoint(path: String) -> URL {
         let base = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         var suffix = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if baseURL.path.hasSuffix("/v1"), suffix.hasPrefix("v1/") {
+        let normalizedBasePath = baseURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if (normalizedBasePath == "v1" || normalizedBasePath.hasSuffix("/v1")),
+           suffix.hasPrefix("v1/") {
             suffix.removeFirst("v1/".count)
         }
         return URL(string: "\(base)/\(suffix)")!

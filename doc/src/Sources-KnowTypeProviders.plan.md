@@ -17,6 +17,7 @@ Runtime provider loading is profile-based:
 - `ProviderProfileResolver` resolves `secretName` through `SecretStore`.
 - `KeychainSecretStore` is the macOS secret-store implementation.
 - `ProviderFactory` maps `ProviderKind` to the concrete adapter.
+- `ProviderConfiguration.endpoint(path:)` normalizes OpenAI-compatible `/v1` base URLs with or without a trailing slash before appending adapter paths.
 - `OpenAICompatibleModelDiscovery` may resolve blank or placeholder model IDs only for local OpenAI-compatible runtimes.
 
 Profile JSON must not store API key values represented by `secretName`. Custom headers are written to JSON as configured and should not contain secrets in the MVP.
