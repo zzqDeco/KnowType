@@ -238,7 +238,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 return
             }
             nativeCandidates.setCandidateData(selections.map(\.text))
-            nativeCandidates.update()
+            refreshNativeCandidateWindow(nativeCandidates)
             nativeCandidates.show(kIMKLocateCandidatesBelowHint)
         }
     }
@@ -264,8 +264,19 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             panelType: kIMKSingleColumnScrollingCandidatePanel
         )
         candidates?.setDismissesAutomatically(false)
+        candidates?.setSelectionKeys([])
         nativeCandidates = candidates
         return candidates
+    }
+
+    @MainActor
+    private func refreshNativeCandidateWindow(_ nativeCandidates: IMKCandidates) {
+        let updateCandidatesSelector = NSSelectorFromString("updateCandidates")
+        if nativeCandidates.responds(to: updateCandidatesSelector) {
+            nativeCandidates.perform(updateCandidatesSelector)
+        } else {
+            nativeCandidates.update()
+        }
     }
 
     private func selectNativeCandidate(matching text: String?) {
