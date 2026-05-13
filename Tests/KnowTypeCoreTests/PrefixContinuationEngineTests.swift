@@ -10,6 +10,22 @@ private struct StubProvider: LLMProvider {
     }
 }
 
+private actor RecordingContinuationProvider: LLMProvider {
+    nonisolated let providerName = "recording-continuation"
+    private var recordedRequests: [LLMRequest] = []
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "should not be used", confidence: 1.0)
+        ])
+    }
+
+    var requests: [LLMRequest] {
+        recordedRequests
+    }
+}
+
 final class PrefixContinuationEngineTests: XCTestCase {
     func testContinuationCropsRepeatedLockedPrefix() async {
         let provider = StubProvider(
@@ -34,5 +50,19 @@ final class PrefixContinuationEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(continuations.first?.text, "still needs more validation")
+    }
+
+    func testLevelZeroContinuationReturnsEmptyAndDoesNotCallProvider() async {
+        let provider = RecordingContinuationProvider()
+        let engine = PrefixContinuationEngine(provider: provider)
+        let continuations = await engine.continuations(
+            for: LockedPrefix(text: "support@example.com", rawInput: "support@example.com", candidateID: "test"),
+            context: InputContext(rawInput: "support@example.com", locale: .mixed),
+            lengthLevel: .medium
+        )
+        let requests = await provider.requests
+
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(continuations.isEmpty)
     }
 }

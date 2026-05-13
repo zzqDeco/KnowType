@@ -22,6 +22,8 @@ raw input
 
 Local correction always runs before cloud correction. Level 0 inputs return immediately and must not call cloud providers.
 
+Level 0 contexts include URLs, emails, file paths, command-like input, code-like tokens, and protected app bundle IDs for Terminal, iTerm2, and Xcode.
+
 Current local coverage:
 
 - pinyin typo examples such as `fagnan -> fangan -> 方案`
@@ -38,6 +40,8 @@ Continuation requests include `locked_prefix`. Provider output is sanitized loca
 - if output repeats the locked prefix, strip the prefix and keep only the continuation
 - if the remaining continuation is empty, reject it
 - fallback local continuations are available when the provider fails
+
+Level 0 contexts return no continuation candidates.
 
 ## Provider Architecture
 

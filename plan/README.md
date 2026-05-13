@@ -7,6 +7,7 @@ This directory stores current, directly implementable plans. Completed historica
 | Document | Description | Status |
 |---|---|---|
 | `multi-api-v1.plan.md` | v1 core, provider adapters, correction, prefix-locked continuation, and project workflow | In Progress |
+| `privacy-app-rules-mvp.plan.md` | Level 0 privacy and protected app bundle rules | In Progress |
 
 ## Maintenance Rules
 
