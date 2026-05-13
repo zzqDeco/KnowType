@@ -31,11 +31,34 @@ final class TraditionalInputEngineTests: XCTestCase {
         }
     }
 
+    func testGongnengKeepsSeededPrefixAlternatives() {
+        let engine = TraditionalInputEngine()
+        let candidateTexts = engine.candidates(for: "zhege gongneng").map(\.text)
+
+        XCTAssertEqual(candidateTexts.first, "这个功能")
+        XCTAssertTrue(candidateTexts.contains("这个工具"))
+        XCTAssertTrue(candidateTexts.contains("这个模块"))
+    }
+
     func testMixedInputPreservesTechnicalTokens() {
         let engine = TraditionalInputEngine()
         let candidates = engine.candidates(for: "zhege API latency youdian gao")
 
         XCTAssertEqual(candidates.first?.text, "这个 API latency 有点高")
+    }
+
+    func testPassthroughPreservesASCIICasing() {
+        let engine = TraditionalInputEngine()
+        let candidates = engine.candidates(for: "I xiang zhege")
+
+        XCTAssertEqual(candidates.first?.text, "I 想这个")
+    }
+
+    func testCapitalizedEnglishNameIsNotTranslatedAsStandalonePinyin() {
+        let engine = TraditionalInputEngine()
+        let candidateTexts = engine.candidates(for: "I thikn Xiang").map(\.text)
+
+        XCTAssertFalse(candidateTexts.contains("I thikn 想"))
     }
 
     func testXiaoheHookCanMapKnownDoublePinyinSyllables() {

@@ -112,12 +112,19 @@ public struct TraditionalInputEngine: Sendable {
         var states: [ParseState] = []
 
         for length in stride(from: min(maxEntryLength, tokens.count - index), through: 1, by: -1) {
-            let normalized = tokens[index..<(index + length)].map(\.normalized)
+            let tokenSlice = tokens[index..<(index + length)]
+            guard !tokenSlice.contains(where: { token in
+                isCapitalizedASCIIWord(token.surface) && knownPinyinTokens.contains(token.normalized)
+            }) else {
+                continue
+            }
+
+            let normalized = tokenSlice.map(\.normalized)
             guard let entry = lexicon.first(where: { $0.pinyin == normalized }) else {
                 continue
             }
 
-            let typoPenalty = tokens[index..<(index + length)].contains { $0.isTypoNormalized } ? 0.03 : 0
+            let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
             for output in entry.outputs {
                 for tail in parse(tokens: tokens, from: index + length) {
                     states.append(
@@ -181,8 +188,11 @@ public struct TraditionalInputEngine: Sendable {
         if isCodeLikeToken(token.surface) {
             return token.surface
         }
+        if isCapitalizedASCIIWord(token.surface), knownPinyinTokens.contains(token.normalized) {
+            return token.surface
+        }
         if isASCIIWord(token.normalized), !knownPinyinTokens.contains(token.normalized) {
-            return token.normalized
+            return token.surface
         }
         return nil
     }
@@ -268,7 +278,11 @@ private let lexicon: [LexiconEntry] = [
     ]),
     entry(["fangfa"], [("方法", 0.98)]),
     entry(["fangxiang"], [("方向", 0.98)]),
-    entry(["gongneng"], [("功能", 0.99)]),
+    entry(["gongneng"], [
+        ("功能", 0.99),
+        ("工具", 0.74),
+        ("模块", 0.70)
+    ]),
     entry(["bushi"], [("不是", 0.99)]),
     entry(["hen"], [("很", 0.99)]),
     entry(["wending"], [("稳定", 0.99)]),
@@ -356,4 +370,14 @@ private func isASCIIWord(_ text: String) -> Bool {
 private func isCodeLikeToken(_ token: String) -> Bool {
     token.range(of: #"^[a-z]+_[A-Za-z0-9_]+$"#, options: .regularExpression) != nil
         || token.range(of: #"^[a-z]+[A-Z][A-Za-z0-9]*$"#, options: .regularExpression) != nil
+}
+
+private func isCapitalizedASCIIWord(_ token: String) -> Bool {
+    guard let first = token.unicodeScalars.first,
+          CharacterSet.uppercaseLetters.contains(first) else {
+        return false
+    }
+    return token.unicodeScalars.allSatisfy { scalar in
+        scalar.value < 128 && CharacterSet.letters.contains(scalar)
+    }
 }

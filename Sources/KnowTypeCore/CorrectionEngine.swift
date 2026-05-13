@@ -64,8 +64,20 @@ public final class CorrectionEngine: Sendable {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
         }
-        let tokenCount = tokenizeWords(context.rawInput).count
+        let tokenCount = correctionTokenCount(context.rawInput)
         return tokenCount >= 4 || context.locale == .mixed
+    }
+
+    private func correctionTokenCount(_ rawInput: String) -> Int {
+        let words = tokenizeWords(rawInput)
+        if words.count != 1 {
+            return words.count
+        }
+
+        return traditionalInputEngine
+            .candidates(for: rawInput)
+            .map(\.inputTokens.count)
+            .max() ?? words.count
     }
 
     private func localCandidates(for raw: String, protectedRanges: [ProtectedRange]) -> [CorrectionCandidate] {
@@ -176,6 +188,9 @@ private func normalizeToken(_ token: String) -> String {
     if preservesCodeLikeToken(token) {
         return token
     }
+    if preservesCapitalizedWord(token) {
+        return token
+    }
     let lower = token.lowercased()
     return spellingCorrections[lower] ?? lower
 }
@@ -183,6 +198,17 @@ private func normalizeToken(_ token: String) -> String {
 private func preservesCodeLikeToken(_ token: String) -> Bool {
     token.range(of: #"^[a-z]+_[A-Za-z0-9_]+$"#, options: .regularExpression) != nil
         || token.range(of: #"^[a-z]+[A-Z][A-Za-z0-9]*$"#, options: .regularExpression) != nil
+}
+
+private func preservesCapitalizedWord(_ token: String) -> Bool {
+    guard token.count > 1,
+          let first = token.unicodeScalars.first,
+          CharacterSet.uppercaseLetters.contains(first) else {
+        return false
+    }
+    return token.unicodeScalars.allSatisfy { scalar in
+        scalar.value < 128 && CharacterSet.letters.contains(scalar)
+    }
 }
 
 private func isLikelyEnglish(_ raw: String) -> Bool {

@@ -39,6 +39,19 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
     }
 
+    func testCompactPinyinCorrectionStillAsksConfiguredProvider() async {
+        let provider = RecordingProvider()
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        _ = await engine.correct(
+            InputContext(rawInput: "wojuedezhegefagnan", locale: .zhCN)
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.first?.task, .correction)
+        XCTAssertEqual(requests.first?.rawInput, "wojuedezhegefagnan")
+    }
+
     func testEnglishCorrectionPreservesSentenceShape() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
@@ -46,6 +59,15 @@ final class CorrectionEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(candidates.first?.text, "I think this approach")
+    }
+
+    func testEnglishNameLikePinyinIsNotTranslatedBeforeSpellcheck() async {
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "I thikn Xiang", locale: .enUS)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "I think Xiang")
     }
 
     func testMixedInputProtectsTechnicalTokens() async {
