@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "KnowTypeCore", targets: ["KnowTypeCore"]),
         .library(name: "KnowTypeProviders", targets: ["KnowTypeProviders"]),
         .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"]),
+        .executable(name: "KnowTypeInputMethodApp", targets: ["KnowTypeInputMethodApp"]),
         .executable(name: "knowtype-demo", targets: ["KnowTypeDemo"])
     ],
     targets: [
@@ -30,7 +31,20 @@ let package = Package(
         .target(
             name: "KnowTypeInputMethod",
             dependencies: ["KnowTypeCore", "KnowTypeProviders"],
-            path: "Sources/KnowTypeInputMethod"
+            path: "Sources/KnowTypeInputMethod",
+            linkerSettings: [
+                .linkedFramework("AppKit", .when(platforms: [.macOS])),
+                .linkedFramework("InputMethodKit", .when(platforms: [.macOS]))
+            ]
+        ),
+        .executableTarget(
+            name: "KnowTypeInputMethodApp",
+            dependencies: ["KnowTypeInputMethod"],
+            path: "Sources/KnowTypeInputMethodApp",
+            linkerSettings: [
+                .linkedFramework("AppKit", .when(platforms: [.macOS])),
+                .linkedFramework("InputMethodKit", .when(platforms: [.macOS]))
+            ]
         ),
         .executableTarget(
             name: "KnowTypeDemo",

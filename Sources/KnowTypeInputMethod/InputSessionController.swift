@@ -137,7 +137,10 @@ public actor InputSessionController {
             guard number > 0 else {
                 return .noAction
             }
-            let index = number
+            if state.selectedPrefixIndex != 0 {
+                return .commit(prefix.text)
+            }
+            let index = number - 1
             guard suggestion.continuationCandidates.indices.contains(index) else {
                 return .noAction
             }
@@ -155,6 +158,16 @@ public actor InputSessionController {
         }
 
         return result
+    }
+
+    @discardableResult
+    public func requestPolish(rawInput: String) -> InputCommitResult {
+        guard !rawInput.isEmpty else {
+            return .noAction
+        }
+        state.rawInput = rawInput
+        state.polishRequested = true
+        return .polishRequested(rawInput)
     }
 
     public var candidatePanelViewModel: CandidatePanelViewModel {
@@ -181,6 +194,9 @@ public actor InputSessionController {
     }
 
     private func selectedContinuationCandidates(in suggestion: SuggestionResponse) -> [ContinuationCandidate] {
+        guard state.selectedPrefixIndex == 0 else {
+            return []
+        }
         if let index = state.selectedContinuationIndex,
            suggestion.continuationCandidates.indices.contains(index) {
             return [suggestion.continuationCandidates[index]]

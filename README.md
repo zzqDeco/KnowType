@@ -52,9 +52,18 @@ Resources/                     Dictionaries, schema notes, and future bundled as
 ```bash
 swift build
 swift test
+./scripts/build-inputmethod-bundle.sh
 ```
 
 Provider profiles are persisted as JSON without API keys. Secrets are resolved through `SecretStore`; the macOS implementation uses Keychain.
+
+To install the local macOS input method bundle:
+
+```bash
+./scripts/install-inputmethod.sh
+```
+
+Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. Use `./scripts/uninstall-inputmethod.sh` to remove the local bundle.
 
 Try the package-level MVP flow without installing an input method:
 
