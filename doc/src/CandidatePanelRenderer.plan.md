@@ -7,6 +7,4 @@ The renderer does not draw UI and does not assign colors. It emits semantic role
 - `lockedPrefix` for correction/prefix candidates
 - `continuation` for continuation candidates
 - `rawInput` for the original input row
-- `sectionHeader` remains available for future grouped presentations but is not emitted by the native-style input panel renderer
-
-Prefix rows and continuation rows remain separate semantic rows, but the visible fallback panel is a flat native-style list without section headers or preview text. Raw input is only exposed while no suggestion is available. Labels keep `1...n` for prefix shortcuts and compact macOS-style continuation labels such as `⇥`, `⌥2`, etc.
+Prefix rows and continuation rows remain separate semantic rows, but the visible fallback panel is a flat native-style strip without section headers or preview text. Raw input is only exposed while no suggestion is available. Labels keep `1...n` for prefix shortcuts and compact macOS-style continuation labels such as `⇥`, `⌥2`, etc. Continuation rows are visually secondary and capped to one row when at least two prefix candidates are available; sparse prefix states may show up to three continuation rows.

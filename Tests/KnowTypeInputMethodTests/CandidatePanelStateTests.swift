@@ -32,7 +32,6 @@ final class CandidatePanelStateTests: XCTestCase {
             [
                 .prefixCandidate,
                 .prefixCandidate,
-                .continuationCandidate,
                 .continuationCandidate
             ]
         )

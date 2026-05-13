@@ -2,7 +2,6 @@ import Foundation
 import KnowTypeCore
 
 public enum CandidatePanelRowKind: Sendable, Equatable {
-    case sectionHeader
     case rawInput
     case prefixCandidate
     case continuationCandidate
@@ -12,7 +11,6 @@ public enum CandidatePanelVisualRole: Sendable, Equatable {
     case lockedPrefix
     case continuation
     case rawInput
-    case sectionHeader
 }
 
 public enum CandidatePanelSelection: Sendable, Equatable {
@@ -56,6 +54,10 @@ public struct CandidatePanelRenderModel: Sendable, Equatable {
 }
 
 public struct CandidatePanelRenderer: Sendable {
+    private static let maxPrefixRows = 5
+    private static let compactContinuationRows = 1
+    private static let expandedContinuationRows = 3
+
     private let locale: KnowTypeLocale
 
     public init(locale: KnowTypeLocale = .mixed) {
@@ -82,7 +84,7 @@ public struct CandidatePanelRenderer: Sendable {
         }
 
         if !viewModel.prefixCandidates.isEmpty {
-            for (index, candidate) in viewModel.prefixCandidates.enumerated() {
+            for (index, candidate) in viewModel.prefixCandidates.prefix(Self.maxPrefixRows).enumerated() {
                 rows.append(
                     CandidatePanelRenderRow(
                         kind: .prefixCandidate,
@@ -95,8 +97,9 @@ public struct CandidatePanelRenderer: Sendable {
             }
         }
 
-        if !viewModel.continuationCandidates.isEmpty {
-            for (index, candidate) in viewModel.continuationCandidates.enumerated() {
+        let visibleContinuationCount = continuationLimit(prefixCount: viewModel.prefixCandidates.count)
+        if visibleContinuationCount > 0 {
+            for (index, candidate) in viewModel.continuationCandidates.prefix(visibleContinuationCount).enumerated() {
                 rows.append(
                     CandidatePanelRenderRow(
                         kind: .continuationCandidate,
@@ -114,6 +117,10 @@ public struct CandidatePanelRenderer: Sendable {
             previewText: nil,
             rows: rows
         )
+    }
+
+    private func continuationLimit(prefixCount: Int) -> Int {
+        prefixCount < 2 ? Self.expandedContinuationRows : Self.compactContinuationRows
     }
 
     private func continuationShortcutLabel(at index: Int) -> String {
