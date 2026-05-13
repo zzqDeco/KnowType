@@ -52,7 +52,7 @@ swift test
 ./scripts/build-inputmethod-bundle.sh
 ```
 
-Provider profile 会以 JSON 保存，但不保存 API key。密钥通过 `SecretStore` 解析；macOS 实现使用 Keychain。设置 App 可编辑 OpenAI、Anthropic、Gemini、Ollama 和自定义 HTTP profile。云端 profile 需要填写新 key，或复用已有 Keychain 密钥。把 profile 切换到本地或不需要密钥的 provider 时，会清空草稿 API key；只有没有其他已保存 profile 继续引用旧密钥时，才会删除旧的 profile 级密钥。
+Provider profile 会以 JSON 保存，但不保存 API key。密钥通过 `SecretStore` 解析；macOS 实现使用 Keychain。设置 App 可编辑 OpenAI、Anthropic、Gemini、Ollama 和自定义 HTTP profile。云端 profile 需要填写新 key，或复用已有 Keychain 密钥。自定义 HTTP profile 可不填写 API key，以支持本地代理 endpoint；如果填写 key，则会保存为 profile 级密钥。把 profile 切换到本地或不需要密钥的 provider 时，会清空草稿 API key；只有没有其他已保存 profile 继续引用旧密钥时，才会删除旧的 profile 级密钥。
 
 安装本地 macOS 输入法 bundle：
 

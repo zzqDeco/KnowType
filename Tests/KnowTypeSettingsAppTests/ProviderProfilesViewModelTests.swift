@@ -91,6 +91,29 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertFalse(savedJSON?.contains("sk-secret") ?? true)
     }
 
+    func testSaveStoresTrimmedAPIKey() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModel.createProfile(kind: .openAIResponses)
+        viewModel.draft.displayName = "Work OpenAI"
+        viewModel.draft.baseURL = "https://api.openai.com"
+        viewModel.draft.model = "gpt-4.1"
+        viewModel.draft.apiKey = " \n sk-trimmed \t "
+        viewModel.draft.isDefault = true
+
+        XCTAssertTrue(viewModel.saveDraft())
+
+        XCTAssertEqual(secrets.setSecretCalls.count, 1)
+        XCTAssertEqual(secrets.setSecretCalls.first?.value, "sk-trimmed")
+        XCTAssertEqual(try secrets.secret(named: secrets.setSecretCalls.first?.name ?? ""), "sk-trimmed")
+    }
+
     func testNewProfilesUseProfileScopedSecretNames() throws {
         let store = CapturingProfileStore(file: ProviderProfilesFile())
         let secrets = InMemorySecretStore()
@@ -388,6 +411,42 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.profiles, existing)
     }
 
+    func testRollbackFailureReportsMetadataMayBeStaged() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.work.apiKey",
+                isDefault: true
+            )
+        ]
+        let store = RollbackFailingProfileStore(
+            file: ProviderProfilesFile(profiles: existing),
+            rollbackError: TestProfileStoreError(message: "rollback failed")
+        )
+        let secrets = RecordingSecretStore(setError: TestProfileStoreError(message: "set failed"))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.draft.displayName = "Updated Work"
+        viewModel.draft.apiKey = "sk-new"
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(
+            viewModel.lastErrorMessage,
+            "Failed to update provider secret: set failed. Also failed to restore providers.json: rollback failed. Provider metadata may be staged on disk."
+        )
+        XCTAssertEqual(store.saveAttempts.count, 2)
+        XCTAssertEqual(store.saveAttempts.first?.profiles.first?.displayName, "Updated Work")
+        XCTAssertEqual(store.saveAttempts.last?.profiles, existing)
+        XCTAssertEqual(viewModel.profiles, existing)
+    }
+
     func testBlankAPIKeyIsRejectedWhenNoExistingSecretIsAvailable() throws {
         let existing = [
             ProviderProfile(
@@ -407,6 +466,35 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         )
 
         viewModel.changeDraftKind(.openAIChat)
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+        XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
+        XCTAssertEqual(viewModel.profiles, existing)
+    }
+
+    func testBlankExistingSecretIsRejectedForCloudProvider() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.work.apiKey",
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore(values: ["knowtype.provider.work.apiKey": " \n\t "])
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.draft.displayName = "Updated Work"
 
         XCTAssertFalse(viewModel.saveDraft())
         XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
@@ -575,6 +663,54 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(errors.contains("Custom HTTP response path is required."))
     }
 
+    func testCustomHTTPSavesWithoutAPIKey() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModel.createProfile(kind: .customHTTP)
+        viewModel.draft.displayName = "Local Proxy"
+        viewModel.draft.baseURL = "http://localhost:8787/complete"
+        viewModel.draft.apiKey = " \n "
+        viewModel.draft.isDefault = true
+
+        XCTAssertTrue(viewModel.saveDraft())
+
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertEqual(saved.kind, .customHTTP)
+        XCTAssertNil(saved.secretName)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+        XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
+    }
+
+    func testCustomHTTPSavesOptionalAPIKey() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModel.createProfile(kind: .customHTTP)
+        viewModel.draft.displayName = "Authenticated Proxy"
+        viewModel.draft.baseURL = "https://proxy.example.com/complete"
+        viewModel.draft.apiKey = " proxy-secret\n"
+        viewModel.draft.isDefault = true
+
+        XCTAssertTrue(viewModel.saveDraft())
+
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertEqual(saved.secretName, "knowtype.provider.\(saved.id).apiKey")
+        XCTAssertEqual(secrets.setSecretCalls.count, 1)
+        XCTAssertEqual(secrets.setSecretCalls.first?.value, "proxy-secret")
+        XCTAssertEqual(secrets.setSecretCalls.first?.name, saved.secretName)
+    }
+
     func testSetDefaultPersistsDefaultProviderChoice() throws {
         let profiles = ProviderProfileTemplates.defaultProfiles()
         let targetID = try XCTUnwrap(profiles.first(where: { $0.kind == .ollamaNative })?.id)
@@ -668,6 +804,28 @@ private final class SavingThrowingProfileStore: ProviderProfileStore, @unchecked
     func saveProfiles(_ profiles: ProviderProfilesFile) throws {
         saveAttempts.append(profiles)
         throw error
+    }
+}
+
+private final class RollbackFailingProfileStore: ProviderProfileStore, @unchecked Sendable {
+    private let file: ProviderProfilesFile
+    private let rollbackError: Error
+    private(set) var saveAttempts: [ProviderProfilesFile] = []
+
+    init(file: ProviderProfilesFile, rollbackError: Error) {
+        self.file = file
+        self.rollbackError = rollbackError
+    }
+
+    func loadProfiles() throws -> ProviderProfilesFile {
+        file
+    }
+
+    func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+        saveAttempts.append(profiles)
+        if saveAttempts.count > 1 {
+            throw rollbackError
+        }
     }
 }
 

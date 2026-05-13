@@ -160,8 +160,16 @@ public final class ProviderProfilesViewModel: ObservableObject {
             do {
                 try apply(secretMutation, updatedProfiles: updatedProfiles)
             } catch {
-                try? profileStore.saveProfiles(file)
-                throw error
+                let secretMutationError = error
+                do {
+                    try profileStore.saveProfiles(file)
+                } catch {
+                    throw ProviderProfilesViewModelError.rollbackFailed(
+                        secretMutation: secretMutationError.localizedDescription,
+                        rollback: error.localizedDescription
+                    )
+                }
+                throw secretMutationError
             }
             profiles = updatedProfiles
             file = updatedFile
@@ -245,14 +253,25 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 
     private static func requiresSecret(kind: ProviderKind) -> Bool {
-        ProviderProfileTemplates.defaultProfile(kind: kind).secretName != nil
+        switch kind {
+        case .openAIChat, .openAIResponses, .anthropicMessages, .geminiNative:
+            return true
+        case .ollamaNative, .customHTTP:
+            return false
+        }
+    }
+
+    private static func acceptsOptionalSecret(kind: ProviderKind) -> Bool {
+        kind == .customHTTP
     }
 
     private func validateSecretAvailability(for profile: ProviderProfile, mutation: SecretMutation) throws {
         guard Self.requiresSecret(kind: profile.kind), case .none = mutation else {
             return
         }
-        guard let secretName = profile.secretName, try secretStore.secret(named: secretName) != nil else {
+        guard let secretName = profile.secretName,
+              let existingSecret = try secretStore.secret(named: secretName),
+              !existingSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ProviderProfilesViewModelError.missingAPIKey
         }
     }
@@ -270,12 +289,18 @@ public final class ProviderProfilesViewModel: ObservableObject {
     ) -> SecretMutation {
         let trimmedAPIKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if requiresSecret(kind: profile.kind) {
+        if requiresSecret(kind: profile.kind) || acceptsOptionalSecret(kind: profile.kind) {
             guard !trimmedAPIKey.isEmpty else {
+                if requiresSecret(kind: profile.kind) {
+                    return .none
+                }
+                if let oldSecretName = existingProfile?.secretName {
+                    return .delete(secretName: oldSecretName)
+                }
                 return .none
             }
             let secretName = secretName(for: profile.id)
-            return .set(value: draftAPIKey, secretName: secretName, oldSecretName: existingProfile?.secretName)
+            return .set(value: trimmedAPIKey, secretName: secretName, oldSecretName: existingProfile?.secretName)
         }
 
         guard let oldSecretName = existingProfile?.secretName else {
@@ -320,6 +345,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
 public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
     case loadFailed(String)
     case missingAPIKey
+    case rollbackFailed(secretMutation: String, rollback: String)
 
     public var errorDescription: String? {
         switch self {
@@ -327,6 +353,8 @@ public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
             return message
         case .missingAPIKey:
             return "API key is required for this provider."
+        case .rollbackFailed(let secretMutation, let rollback):
+            return "Failed to update provider secret: \(secretMutation). Also failed to restore providers.json: \(rollback). Provider metadata may be staged on disk."
         }
     }
 }

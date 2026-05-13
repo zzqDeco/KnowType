@@ -56,7 +56,7 @@ swift test
 ./scripts/build-inputmethod-bundle.sh
 ```
 
-Provider profiles are persisted as JSON without API keys. Secrets are resolved through `SecretStore`; the macOS implementation uses Keychain. The settings app edits provider profiles for OpenAI, Anthropic, Gemini, Ollama, and custom HTTP endpoints. Cloud profiles require a new key or an existing Keychain secret. Switching a profile to a local/no-secret provider clears the draft API key and deletes the old profile-scoped secret only when no other saved profile still references it.
+Provider profiles are persisted as JSON without API keys. Secrets are resolved through `SecretStore`; the macOS implementation uses Keychain. The settings app edits provider profiles for OpenAI, Anthropic, Gemini, Ollama, and custom HTTP endpoints. Cloud profiles require a new key or an existing Keychain secret. Custom HTTP profiles may omit the API key for local proxy endpoints, or store an optional profile-scoped key when one is entered. Switching a profile to a local/no-secret provider clears the draft API key and deletes the old profile-scoped secret only when no other saved profile still references it.
 
 To install the local macOS input method bundle:
 
