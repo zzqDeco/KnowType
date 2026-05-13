@@ -12,7 +12,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private let hasProvider: Bool
     private let keyMapper = InputKeyCommandMapper()
     private let candidateListBuilder = InputCandidateListBuilder()
-    private let customCandidateSelectionPolicy = CustomCandidateSelectionPolicy()
     private var rawBuffer = ""
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
@@ -75,12 +74,16 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func recognizedEvents(_ sender: Any!) -> Int {
-        Int(NSEvent.EventTypeMask.keyDown.rawValue)
+        Int(
+            NSEvent.EventTypeMask.keyDown.rawValue
+                | NSEvent.EventTypeMask.keyUp.rawValue
+                | NSEvent.EventTypeMask.flagsChanged.rawValue
+        )
     }
 
     public override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event,
-              event.type == .keyDown else {
+              let eventKind = inputKeyEventKind(for: event.type) else {
             return false
         }
         let characters = event.modifierFlags.contains(.option)
@@ -89,7 +92,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         let stroke = InputKeyStroke(
             text: characters,
             keyCode: Int(event.keyCode),
-            modifiers: modifierSet(from: Int(event.modifierFlags.rawValue))
+            modifiers: modifierSet(from: Int(event.modifierFlags.rawValue)),
+            eventKind: eventKind
         )
         return handle(stroke: stroke, client: sender)
     }
@@ -109,9 +113,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private func handle(stroke: InputKeyStroke, client sender: Any!) -> Bool {
-        if handleCustomCandidateSelection(stroke: stroke, client: sender) {
-            return true
-        }
         return handle(intent: keyMapper.intent(for: stroke), client: sender)
     }
 
@@ -134,6 +135,31 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return true
         case .action(let action):
             return commit(action: action, client: sender)
+        case .cancelComposition:
+            guard !rawBuffer.isEmpty else {
+                return false
+            }
+            resetComposition(client: sender)
+            refreshComposition(client: sender)
+            return true
+        case .selectCandidate(let number):
+            if let result = InputSessionCommitPolicy.resultForCandidateNumber(
+                number,
+                rawInput: rawBuffer,
+                suggestion: lastSuggestion,
+                suggestionRawInput: lastSuggestionRawInput
+            ) {
+                return applyCommitResult(result, client: sender)
+            }
+            rawBuffer.append(String(number))
+            invalidateSuggestion()
+            publishLocalSuggestion(client: sender)
+            refreshSuggestion(client: sender)
+            return true
+        case .moveCandidateSelection(let navigation):
+            return moveCandidateSelection(navigation)
+        case .modifierFlagsChanged:
+            return false
         case .ignored:
             return false
         }
@@ -206,6 +232,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     @discardableResult
     private func commit(action: InputAction, client sender: Any!) -> Bool {
         let result = commitResult(for: action, client: sender)
+        return applyCommitResult(result, client: sender)
+    }
+
+    @discardableResult
+    private func applyCommitResult(_ result: InputCommitResult, client sender: Any!) -> Bool {
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
             insert(text, client: sender)
@@ -226,89 +257,14 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private func commitResult(for action: InputAction, client sender: Any!) -> InputCommitResult {
-        guard let suggestion = lastSuggestion,
-              SuggestionPublicationGuard.hasCurrentSuggestion(
-                suggestionRawInput: lastSuggestionRawInput,
-                currentRawInput: rawBuffer
-              ) else {
-            guard !rawBuffer.isEmpty else {
-                return .noAction
-            }
-            switch action {
-            case .space, .tab:
-                let context = InputContext(
-                    rawInput: rawBuffer,
-                    appBundleID: appBundleIdentifier(client: sender),
-                    locale: locale
-                )
-                let suggestion = InputMethodPipeline.localSuggestions(
-                    for: context,
-                    includeFallbackContinuations: true
-                )
-                return InputCompositionController().handle(
-                    action: action,
-                    prefixCandidates: suggestion.prefixCandidates,
-                    continuationCandidates: suggestion.continuationCandidates,
-                    originalText: rawBuffer
-                )
-            case .optionR:
-                return .polishRequested(rawBuffer)
-            case .optionNumber:
-                return .noAction
-            }
-        }
-
-        if let selectedNativeCandidate {
-            switch selectedNativeCandidate.kind {
-            case .rawInput:
-                switch action {
-                case .space, .tab:
-                    return .commit(selectedNativeCandidate.text)
-                case .optionR:
-                    return .polishRequested(selectedNativeCandidate.text)
-                case .optionNumber:
-                    return .noAction
-                }
-            case .prefixCandidate(let index):
-                if suggestion.prefixCandidates.indices.contains(index) {
-                    if index != 0 {
-                        switch action {
-                        case .space, .tab, .optionNumber:
-                            return .commit(suggestion.prefixCandidates[index].text)
-                        case .optionR:
-                            return .polishRequested(rawBuffer)
-                        }
-                    }
-                    return InputCompositionController().handle(
-                        action: action,
-                        prefixCandidates: [suggestion.prefixCandidates[index]],
-                        continuationCandidates: suggestion.continuationCandidates,
-                        originalText: rawBuffer
-                    )
-                }
-            case .continuationCandidate(let index):
-                guard suggestion.continuationCandidates.indices.contains(index) else {
-                    return .noAction
-                }
-                switch action {
-                case .space, .tab, .optionNumber:
-                    return InputCompositionController().handle(
-                        action: .optionNumber(index + 1),
-                        prefixCandidates: suggestion.prefixCandidates,
-                        continuationCandidates: suggestion.continuationCandidates,
-                        originalText: rawBuffer
-                    )
-                case .optionR:
-                    return .polishRequested(rawBuffer)
-                }
-            }
-        }
-
-        return InputCompositionController().handle(
-            action: action,
-            prefixCandidates: suggestion.prefixCandidates,
-            continuationCandidates: suggestion.continuationCandidates,
-            originalText: rawBuffer
+        InputSessionCommitPolicy.result(
+            for: action,
+            rawInput: rawBuffer,
+            suggestion: lastSuggestion,
+            suggestionRawInput: lastSuggestionRawInput,
+            selectedCandidate: sessionSelection(from: selectedNativeCandidate),
+            appBundleID: appBundleIdentifier(client: sender),
+            locale: locale
         )
     }
 
@@ -342,6 +298,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorRect: CGRect) {
         candidatePanelState.update(rawInput: rawBuffer, suggestion: suggestion, anchorRect: anchorRect)
+        selectedNativeCandidate = inputCandidateSelection(
+            for: candidatePanelState.windowState.selection,
+            in: candidatePanelState.windowState.viewModel
+        )
         MainActor.assumeIsolated {
             candidatePanelController.update(state: candidatePanelState, locale: locale)
         }
@@ -349,9 +309,24 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func hideCandidatePanel() {
         candidatePanelState.hide()
+        selectedNativeCandidate = nil
         MainActor.assumeIsolated {
             candidatePanelController.hide()
         }
+    }
+
+    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        guard candidatePanelState.moveSelection(navigation) else {
+            return false
+        }
+        selectedNativeCandidate = inputCandidateSelection(
+            for: candidatePanelState.windowState.selection,
+            in: candidatePanelState.windowState.viewModel
+        )
+        MainActor.assumeIsolated {
+            candidatePanelController.update(state: candidatePanelState, locale: locale)
+        }
+        return true
     }
 
     private func candidateAnchorRect(client sender: Any!) -> CGRect {
@@ -378,30 +353,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         return isUsableAnchorRect(lineRect) ? lineRect : .zero
     }
 
-    private func handleCustomCandidateSelection(stroke: InputKeyStroke, client sender: Any!) -> Bool {
-        switch customCandidateSelectionPolicy.decision(
-            for: stroke,
-            rawInput: rawBuffer,
-            suggestion: lastSuggestion,
-            suggestionRawInput: lastSuggestionRawInput
-        ) {
-        case .commitRawInput:
-            insert(rawBuffer, client: sender)
-            resetComposition(client: sender)
-            return true
-        case .commitPrefixCandidate(let index):
-            guard let suggestion = lastSuggestion,
-                  suggestion.prefixCandidates.indices.contains(index) else {
-                return false
-            }
-            insert(suggestion.prefixCandidates[index].text, client: sender)
-            resetComposition(client: sender)
-            return true
-        case .passThrough:
-            return false
-        }
-    }
-
     private func selectNativeCandidate(matching text: String?) {
         guard let text,
               let selection = displayedNativeCandidates.first(where: { $0.text == text }) else {
@@ -409,6 +360,53 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return
         }
         selectedNativeCandidate = selection
+    }
+
+    private func inputCandidateSelection(
+        for selection: CandidatePanelSelection?,
+        in viewModel: CandidatePanelViewModel
+    ) -> InputCandidateSelection? {
+        guard let selection else {
+            return nil
+        }
+
+        switch selection {
+        case .rawInput:
+            guard !viewModel.rawInput.isEmpty else {
+                return nil
+            }
+            return InputCandidateSelection(text: viewModel.rawInput, kind: .rawInput)
+        case .prefixCandidate(let index):
+            guard viewModel.prefixCandidates.indices.contains(index) else {
+                return nil
+            }
+            return InputCandidateSelection(
+                text: viewModel.prefixCandidates[index].text,
+                kind: .prefixCandidate(index: index)
+            )
+        case .continuationCandidate(let index):
+            guard viewModel.continuationCandidates.indices.contains(index) else {
+                return nil
+            }
+            return InputCandidateSelection(
+                text: viewModel.continuationCandidates[index].text,
+                kind: .continuationCandidate(index: index)
+            )
+        }
+    }
+
+    private func sessionSelection(from selection: InputCandidateSelection?) -> InputSessionCandidateSelection? {
+        guard let selection else {
+            return nil
+        }
+        switch selection.kind {
+        case .rawInput:
+            return .rawInput
+        case .prefixCandidate(let index):
+            return .prefixCandidate(index: index)
+        case .continuationCandidate(let index):
+            return .continuationCandidate(index: index)
+        }
     }
 
     private func refreshComposition(client sender: Any!) {
@@ -477,6 +475,19 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers.insert(.control)
         }
         return modifiers
+    }
+
+    private func inputKeyEventKind(for eventType: NSEvent.EventType) -> InputKeyEventKind? {
+        switch eventType {
+        case .keyDown:
+            return .keyDown
+        case .keyUp:
+            return .keyUp
+        case .flagsChanged:
+            return .flagsChanged
+        default:
+            return nil
+        }
     }
 
     private static let textOnlyKeyCode = -1

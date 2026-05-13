@@ -61,6 +61,22 @@ public struct CandidatePanelState: Sendable, Equatable {
         windowState = CandidatePanelWindowState()
     }
 
+    @discardableResult
+    public mutating func moveSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        let rows = selectableRows()
+        guard !rows.isEmpty else {
+            return false
+        }
+
+        let currentIndex = windowState.selection.flatMap { rows.firstIndex(of: $0) } ?? 0
+        let nextIndex = clampedIndex(
+            currentIndex + offset(for: navigation),
+            upperBound: rows.count - 1
+        )
+        windowState.selection = rows[nextIndex]
+        return true
+    }
+
     private func defaultSelection(
         rawInput: String,
         prefixCandidates: [CorrectionCandidate],
@@ -76,5 +92,39 @@ public struct CandidatePanelState: Sendable, Equatable {
             return .continuationCandidate(0)
         }
         return nil
+    }
+
+    private func selectableRows() -> [CandidatePanelSelection] {
+        let viewModel = windowState.viewModel
+        let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
+        var rows: [CandidatePanelSelection] = []
+
+        if !viewModel.rawInput.isEmpty && !hasSuggestions {
+            rows.append(.rawInput)
+        }
+        rows.append(
+            contentsOf: viewModel.prefixCandidates.indices.map { .prefixCandidate($0) }
+        )
+        rows.append(
+            contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
+        )
+        return rows
+    }
+
+    private func offset(for navigation: InputCandidateNavigation) -> Int {
+        switch navigation {
+        case .down, .right:
+            return 1
+        case .up, .left:
+            return -1
+        case .pageDown:
+            return 5
+        case .pageUp:
+            return -5
+        }
+    }
+
+    private func clampedIndex(_ index: Int, upperBound: Int) -> Int {
+        min(max(index, 0), upperBound)
     }
 }

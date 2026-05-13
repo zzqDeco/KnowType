@@ -68,8 +68,10 @@ final class InputSessionControllerTests: XCTestCase {
         let state = await controller.state
 
         XCTAssertEqual(suggestion, expected)
+        XCTAssertEqual(state.mode, .candidate)
         XCTAssertEqual(state.rawInput, "wo jue de zhege fagnan")
         XCTAssertEqual(state.latestSuggestion, expected)
+        XCTAssertEqual(state.latestSuggestionRawInput, "wo jue de zhege fagnan")
         XCTAssertEqual(state.selectedPrefixIndex, 0)
         XCTAssertNil(state.selectedContinuationIndex)
         XCTAssertFalse(state.polishRequested)
@@ -203,6 +205,8 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(suggestion.prefixCandidates.first?.source, "local-protection")
         XCTAssertEqual(suggestion.prefixCandidates.first?.correctionLevel, CorrectionLevel.none)
         XCTAssertTrue(suggestion.continuationCandidates.isEmpty)
+        let state = await controller.state
+        XCTAssertEqual(state.mode, .ascii)
 
         let tabResult = await controller.handle(action: .tab)
         XCTAssertEqual(tabResult, .commit("/Users/zq/project/KnowType"))
@@ -320,8 +324,126 @@ final class InputSessionControllerTests: XCTestCase {
         _ = await first
 
         let state = await controller.state
+        XCTAssertEqual(state.mode, .candidate)
         XCTAssertEqual(state.rawInput, "second")
         XCTAssertEqual(state.latestSuggestion?.prefixCandidates.first?.text, "second prefix")
+    }
+
+    func testPendingUpdateUsesAIPendingModeUntilLatestSuggestionPublishes() async throws {
+        let loader = ManualSuggestionLoader()
+        let controller = InputSessionController { context in
+            await loader.load(context)
+        }
+
+        async let update = controller.update(rawInput: "wo jue de zhege fagnan")
+        while await !loader.hasPending(rawInput: "wo jue de zhege fagnan") {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        var state = await controller.state
+        XCTAssertEqual(state.mode, .aiPending)
+        XCTAssertEqual(state.rawInput, "wo jue de zhege fagnan")
+        XCTAssertNil(state.latestSuggestion)
+        let pendingCommitResult = await controller.handle(action: .space)
+        XCTAssertEqual(pendingCommitResult, .noAction)
+
+        await loader.resume(rawInput: "wo jue de zhege fagnan", with: Self.makeSuggestion())
+        _ = await update
+
+        state = await controller.state
+        XCTAssertEqual(state.mode, .candidate)
+    }
+
+    func testNonEmptySuggestionWithoutCandidatesUsesComposingMode() async {
+        let controller = InputSessionController { _ in
+            Self.makeSuggestion(prefixes: [], continuations: [])
+        }
+
+        await controller.update(rawInput: "x")
+        let state = await controller.state
+
+        XCTAssertEqual(state.mode, .composing)
+        XCTAssertEqual(state.rawInput, "x")
+    }
+
+    func testPolishAndResetUpdateExplicitSessionMode() async {
+        let controller = InputSessionController { _ in
+            Self.makeSuggestion()
+        }
+        await controller.update(rawInput: "wo jue de zhege fagnan")
+
+        let polishResult = await controller.handle(action: .optionR)
+        var state = await controller.state
+
+        XCTAssertEqual(polishResult, .polishRequested("wo jue de zhege fagnan"))
+        XCTAssertEqual(state.mode, .polish)
+        XCTAssertTrue(state.polishRequested)
+
+        await controller.reset()
+        state = await controller.state
+
+        XCTAssertEqual(state.mode, .empty)
+        XCTAssertEqual(state.rawInput, "")
+        XCTAssertNil(state.latestSuggestion)
+    }
+
+    func testSessionCommitPolicyHandlesNativeCandidateSelectionAndFallbacks() {
+        let suggestion = Self.makeSuggestion()
+
+        let selectedPrefix = InputSessionCommitPolicy.result(
+            for: .tab,
+            rawInput: "wo jue de zhege fagnan",
+            suggestion: suggestion,
+            suggestionRawInput: "wo jue de zhege fagnan",
+            selectedCandidate: .prefixCandidate(index: 1),
+            locale: .zhCN
+        )
+        let selectedContinuation = InputSessionCommitPolicy.result(
+            for: .space,
+            rawInput: "wo jue de zhege fagnan",
+            suggestion: suggestion,
+            suggestionRawInput: "wo jue de zhege fagnan",
+            selectedCandidate: .continuationCandidate(index: 1),
+            locale: .zhCN
+        )
+        let staleFallback = InputSessionCommitPolicy.result(
+            for: .space,
+            rawInput: "wo jue de zhege fagnan",
+            suggestion: suggestion,
+            suggestionRawInput: "stale",
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(selectedPrefix, .commit("我觉得这个方法"))
+        XCTAssertEqual(selectedContinuation, .commit("我觉得这个方案在落地成本上可能偏高"))
+        XCTAssertEqual(staleFallback, .commit("我觉得这个方案"))
+    }
+
+    func testCandidateNumberPolicyMatchesNativeNumberSelectionRules() {
+        let suggestion = Self.makeSuggestion()
+
+        let rawResult = InputSessionCommitPolicy.resultForCandidateNumber(
+            0,
+            rawInput: "wo jue de zhege fagnan",
+            suggestion: suggestion,
+            suggestionRawInput: "wo jue de zhege fagnan"
+        )
+        let prefixResult = InputSessionCommitPolicy.resultForCandidateNumber(
+            2,
+            rawInput: "wo jue de zhege fagnan",
+            suggestion: suggestion,
+            suggestionRawInput: "wo jue de zhege fagnan"
+        )
+        let staleResult = InputSessionCommitPolicy.resultForCandidateNumber(
+            1,
+            rawInput: "wo jue de zhege fagnan",
+            suggestion: suggestion,
+            suggestionRawInput: "stale"
+        )
+
+        XCTAssertEqual(rawResult, .commit("wo jue de zhege fagnan"))
+        XCTAssertEqual(prefixResult, .commit("我觉得这个方法"))
+        XCTAssertNil(staleResult)
     }
 
     private static func makeSuggestion(

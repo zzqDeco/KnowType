@@ -1,25 +1,203 @@
 import Foundation
 import KnowTypeCore
 
+public enum InputSessionMode: Sendable, Equatable {
+    case empty
+    case composing
+    case candidate
+    case aiPending
+    case polish
+    case ascii
+}
+
 public struct InputSessionState: Sendable, Equatable {
+    public var mode: InputSessionMode
     public var rawInput: String
     public var latestSuggestion: SuggestionResponse?
+    public var latestSuggestionRawInput: String?
     public var selectedPrefixIndex: Int
     public var selectedContinuationIndex: Int?
     public var polishRequested: Bool
 
     public init(
+        mode: InputSessionMode = .empty,
         rawInput: String = "",
         latestSuggestion: SuggestionResponse? = nil,
+        latestSuggestionRawInput: String? = nil,
         selectedPrefixIndex: Int = 0,
         selectedContinuationIndex: Int? = nil,
         polishRequested: Bool = false
     ) {
+        self.mode = mode
         self.rawInput = rawInput
         self.latestSuggestion = latestSuggestion
+        self.latestSuggestionRawInput = latestSuggestionRawInput
         self.selectedPrefixIndex = selectedPrefixIndex
         self.selectedContinuationIndex = selectedContinuationIndex
         self.polishRequested = polishRequested
+    }
+}
+
+public enum InputSessionCandidateSelection: Sendable, Equatable {
+    case rawInput
+    case prefixCandidate(index: Int)
+    case continuationCandidate(index: Int)
+}
+
+public enum InputSessionCommitPolicy {
+    public static func result(
+        for action: InputAction,
+        rawInput: String,
+        suggestion: SuggestionResponse?,
+        suggestionRawInput: String?,
+        selectedCandidate: InputSessionCandidateSelection? = nil,
+        appBundleID: String? = nil,
+        locale: KnowTypeLocale = .mixed
+    ) -> InputCommitResult {
+        guard let suggestion,
+              SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: suggestionRawInput,
+                currentRawInput: rawInput
+              ) else {
+            return fallbackResult(
+                for: action,
+                rawInput: rawInput,
+                appBundleID: appBundleID,
+                locale: locale
+            )
+        }
+
+        if let selectedCandidate {
+            return result(
+                for: action,
+                rawInput: rawInput,
+                suggestion: suggestion,
+                selectedCandidate: selectedCandidate
+            )
+        }
+
+        return InputCompositionController().handle(
+            action: action,
+            prefixCandidates: suggestion.prefixCandidates,
+            continuationCandidates: suggestion.continuationCandidates,
+            originalText: rawInput
+        )
+    }
+
+    public static func resultForCandidateNumber(
+        _ number: Int,
+        rawInput: String,
+        suggestion: SuggestionResponse?,
+        suggestionRawInput: String?
+    ) -> InputCommitResult? {
+        guard number >= 0,
+              let suggestion,
+              SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: suggestionRawInput,
+                currentRawInput: rawInput
+              ) else {
+            return nil
+        }
+
+        if number == 0 {
+            guard !rawInput.isEmpty,
+                  !suggestion.prefixCandidates.isEmpty else {
+                return nil
+            }
+            return .commit(rawInput)
+        }
+
+        let prefixIndex = number - 1
+        guard suggestion.prefixCandidates.indices.contains(prefixIndex) else {
+            return nil
+        }
+        return .commit(suggestion.prefixCandidates[prefixIndex].text)
+    }
+
+    private static func fallbackResult(
+        for action: InputAction,
+        rawInput: String,
+        appBundleID: String?,
+        locale: KnowTypeLocale
+    ) -> InputCommitResult {
+        guard !rawInput.isEmpty else {
+            return .noAction
+        }
+
+        switch action {
+        case .space, .tab:
+            let context = InputContext(
+                rawInput: rawInput,
+                appBundleID: appBundleID,
+                locale: locale
+            )
+            let suggestion = InputMethodPipeline.localSuggestions(
+                for: context,
+                includeFallbackContinuations: true
+            )
+            return InputCompositionController().handle(
+                action: action,
+                prefixCandidates: suggestion.prefixCandidates,
+                continuationCandidates: suggestion.continuationCandidates,
+                originalText: rawInput
+            )
+        case .optionR:
+            return .polishRequested(rawInput)
+        case .optionNumber:
+            return .noAction
+        }
+    }
+
+    private static func result(
+        for action: InputAction,
+        rawInput: String,
+        suggestion: SuggestionResponse,
+        selectedCandidate: InputSessionCandidateSelection
+    ) -> InputCommitResult {
+        switch selectedCandidate {
+        case .rawInput:
+            switch action {
+            case .space, .tab:
+                return .commit(rawInput)
+            case .optionR:
+                return .polishRequested(rawInput)
+            case .optionNumber:
+                return .noAction
+            }
+        case .prefixCandidate(let index):
+            guard suggestion.prefixCandidates.indices.contains(index) else {
+                return .noAction
+            }
+            if index != 0 {
+                switch action {
+                case .space, .tab, .optionNumber:
+                    return .commit(suggestion.prefixCandidates[index].text)
+                case .optionR:
+                    return .polishRequested(rawInput)
+                }
+            }
+            return InputCompositionController().handle(
+                action: action,
+                prefixCandidates: [suggestion.prefixCandidates[index]],
+                continuationCandidates: suggestion.continuationCandidates,
+                originalText: rawInput
+            )
+        case .continuationCandidate(let index):
+            guard suggestion.continuationCandidates.indices.contains(index) else {
+                return .noAction
+            }
+            switch action {
+            case .space, .tab, .optionNumber:
+                return InputCompositionController().handle(
+                    action: .optionNumber(index + 1),
+                    prefixCandidates: suggestion.prefixCandidates,
+                    continuationCandidates: suggestion.continuationCandidates,
+                    originalText: rawInput
+                )
+            case .optionR:
+                return .polishRequested(rawInput)
+            }
+        }
     }
 }
 
@@ -75,6 +253,13 @@ public actor InputSessionController {
             : suggestionLoader
         updateGeneration &+= 1
         let generation = updateGeneration
+        state.rawInput = rawInput
+        state.mode = pendingMode(rawInput: rawInput, isLevelZero: isLevelZero)
+        state.latestSuggestion = nil
+        state.latestSuggestionRawInput = nil
+        state.selectedPrefixIndex = 0
+        state.selectedContinuationIndex = nil
+        state.polishRequested = false
         let loadedSuggestion = await loader(context)
         // The actor is reentrant while awaiting provider-backed suggestions; older completions must not publish stale state.
         guard generation == updateGeneration else {
@@ -88,9 +273,15 @@ public actor InputSessionController {
 
         state.rawInput = rawInput
         state.latestSuggestion = suggestion
+        state.latestSuggestionRawInput = rawInput
         state.selectedPrefixIndex = 0
         state.selectedContinuationIndex = nil
         state.polishRequested = false
+        state.mode = mode(
+            rawInput: rawInput,
+            suggestion: suggestion,
+            isLevelZero: isLevelZero
+        )
 
         return suggestion
     }
@@ -119,6 +310,7 @@ public actor InputSessionController {
 
     public func handle(action: InputAction) -> InputCommitResult {
         guard let suggestion = state.latestSuggestion,
+              state.latestSuggestionRawInput == state.rawInput,
               let prefix = selectedPrefix(in: suggestion),
               !prefix.text.isEmpty else {
             return .noAction
@@ -155,6 +347,7 @@ public actor InputSessionController {
 
         if case .polishRequested = result {
             state.polishRequested = true
+            state.mode = .polish
         }
 
         return result
@@ -167,7 +360,13 @@ public actor InputSessionController {
         }
         state.rawInput = rawInput
         state.polishRequested = true
+        state.mode = .polish
         return .polishRequested(rawInput)
+    }
+
+    public func reset() {
+        updateGeneration &+= 1
+        state = InputSessionState()
     }
 
     public var candidatePanelViewModel: CandidatePanelViewModel {
@@ -202,5 +401,28 @@ public actor InputSessionController {
             return [suggestion.continuationCandidates[index]]
         }
         return suggestion.continuationCandidates
+    }
+
+    private func pendingMode(rawInput: String, isLevelZero: Bool) -> InputSessionMode {
+        guard !rawInput.isEmpty else {
+            return .empty
+        }
+        return isLevelZero ? .ascii : .aiPending
+    }
+
+    private func mode(
+        rawInput: String,
+        suggestion: SuggestionResponse,
+        isLevelZero: Bool
+    ) -> InputSessionMode {
+        guard !rawInput.isEmpty else {
+            return .empty
+        }
+        if isLevelZero {
+            return .ascii
+        }
+        let hasCandidates = !suggestion.prefixCandidates.isEmpty
+            || !suggestion.continuationCandidates.isEmpty
+        return hasCandidates ? .candidate : .composing
     }
 }
