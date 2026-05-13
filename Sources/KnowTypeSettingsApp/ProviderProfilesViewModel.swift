@@ -98,7 +98,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
             draft.secretName = nil
             draft.apiKey = ""
         } else {
-            draft.secretName = Self.secretName(for: draft.id)
+            let existingProfile = profiles.first(where: { $0.id == draft.id })
+            draft.secretName = existingProfile?.secretName ?? Self.secretName(for: draft.id)
         }
         draft.customBodyTemplate = template.customBodyTemplate ?? ""
         draft.customResponsePath = template.customResponsePath ?? ""
@@ -123,15 +124,17 @@ public final class ProviderProfilesViewModel: ObservableObject {
         do {
             var profile = try draft.makeProfile()
             let existingProfile = profiles.first(where: { $0.id == profile.id })
-            if Self.requiresSecret(kind: profile.kind),
-               !draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let secretName = profile.secretName ?? Self.secretName(for: profile.id)
-                try secretStore.setSecret(draft.apiKey, named: secretName)
+            let secretMutation = Self.secretMutation(
+                for: profile,
+                existingProfile: existingProfile,
+                draftAPIKey: draft.apiKey
+            )
+
+            if case .set(_, let secretName, _) = secretMutation {
                 profile.secretName = secretName
-            } else if !Self.requiresSecret(kind: profile.kind) {
-                if let oldSecretName = existingProfile?.secretName {
-                    try secretStore.deleteSecret(named: oldSecretName)
-                }
+            } else if Self.requiresSecret(kind: profile.kind) {
+                profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
+            } else {
                 profile.secretName = nil
             }
 
@@ -153,6 +156,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
             var updatedFile = file
             updatedFile.profiles = updatedProfiles
             try profileStore.saveProfiles(updatedFile)
+            try apply(secretMutation)
             profiles = updatedProfiles
             file = updatedFile
             selectedProfileID = profile.id
@@ -174,13 +178,22 @@ public final class ProviderProfilesViewModel: ObservableObject {
         guard profiles.contains(where: { $0.id == id }) else {
             return
         }
-        profiles = profiles.map { profile in
+        let updatedProfiles = profiles.map { profile in
             var updated = profile
             updated.isDefault = profile.id == id
             return updated
         }
-        file.profiles = profiles
-        try profileStore.saveProfiles(file)
+        var updatedFile = file
+        updatedFile.profiles = updatedProfiles
+        do {
+            try profileStore.saveProfiles(updatedFile)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            throw error
+        }
+        profiles = updatedProfiles
+        file = updatedFile
+        lastErrorMessage = nil
         if selectedProfileID == id, let profile = profiles.first(where: { $0.id == id }) {
             draft = ProviderProfileDraft(profile: profile)
         }
@@ -227,6 +240,47 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
     private static func requiresSecret(kind: ProviderKind) -> Bool {
         ProviderProfileTemplates.defaultProfile(kind: kind).secretName != nil
+    }
+
+    private enum SecretMutation {
+        case none
+        case set(value: String, secretName: String, oldSecretName: String?)
+        case delete(secretName: String)
+    }
+
+    private static func secretMutation(
+        for profile: ProviderProfile,
+        existingProfile: ProviderProfile?,
+        draftAPIKey: String
+    ) -> SecretMutation {
+        let trimmedAPIKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if requiresSecret(kind: profile.kind) {
+            guard !trimmedAPIKey.isEmpty else {
+                return .none
+            }
+            let secretName = secretName(for: profile.id)
+            return .set(value: draftAPIKey, secretName: secretName, oldSecretName: existingProfile?.secretName)
+        }
+
+        guard let oldSecretName = existingProfile?.secretName else {
+            return .none
+        }
+        return .delete(secretName: oldSecretName)
+    }
+
+    private func apply(_ mutation: SecretMutation) throws {
+        switch mutation {
+        case .none:
+            return
+        case .set(let value, let secretName, let oldSecretName):
+            try secretStore.setSecret(value, named: secretName)
+            if let oldSecretName, oldSecretName != secretName {
+                try secretStore.deleteSecret(named: oldSecretName)
+            }
+        case .delete(let secretName):
+            try secretStore.deleteSecret(named: secretName)
+        }
     }
 
     private static func validHTTPURL(_ value: String) -> URL? {

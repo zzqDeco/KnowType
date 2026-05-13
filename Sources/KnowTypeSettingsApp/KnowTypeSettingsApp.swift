@@ -38,6 +38,10 @@ private struct FailingProviderProfileStore: ProviderProfileStore {
     }
 }
 
-private struct FailingProviderProfileStoreError: Error, CustomStringConvertible {
+struct FailingProviderProfileStoreError: Error, CustomStringConvertible, LocalizedError {
     let description: String
+
+    var errorDescription: String? {
+        description
+    }
 }
