@@ -12,8 +12,8 @@ public enum TextProtection {
         "brew": ["bundle", "cleanup", "doctor", "info", "install", "list", "search", "services", "tap", "uninstall", "update", "upgrade"],
         "bun": ["add", "build", "create", "install", "remove", "run", "test"],
         "cargo": ["add", "build", "check", "clean", "doc", "fmt", "install", "new", "run", "test", "update"],
-        "docker": ["build", "compose", "exec", "images", "inspect", "logs", "ps", "pull", "push", "rm", "run", "start", "stop"],
-        "git": ["add", "branch", "checkout", "clone", "commit", "diff", "fetch", "log", "merge", "pull", "push", "rebase", "restore", "status", "switch"],
+        "docker": ["build", "compose", "exec", "images", "inspect", "login", "logs", "ps", "pull", "push", "rm", "run", "start", "stop"],
+        "git": ["add", "branch", "checkout", "clone", "commit", "config", "diff", "fetch", "log", "merge", "pull", "push", "rebase", "restore", "stash", "status", "switch"],
         "go": ["build", "clean", "doc", "env", "fmt", "generate", "get", "install", "list", "mod", "run", "test", "tool", "vet", "version", "work"],
         "kubectl": ["apply", "config", "create", "delete", "describe", "edit", "exec", "get", "logs", "port-forward", "rollout", "scale"],
         "make": ["build", "check", "clean", "install", "lint", "release", "run", "test"],
@@ -24,7 +24,7 @@ public enum TextProtection {
         "yarn": ["add", "build", "create", "install", "remove", "run", "test", "upgrade"]
     ]
     private static let shellBuiltins: Set<String> = [
-        "cd", "export", "source"
+        "cd", "echo", "env", "export", "pwd", "source", "unset"
     ]
     private static let pathCommandNames: Set<String> = [
         "cat", "chmod", "chown", "cp", "grep", "ls", "mkdir", "mv", "rg", "rm", "touch", "vim"
@@ -83,7 +83,9 @@ public enum TextProtection {
     public static func detectProtectedRanges(in text: String) -> [ProtectedRange] {
         let patterns: [(String, String)] = [
             (#"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s]+"#, "url"),
-            (#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:/[^\s]*)"#, "url"),
+            (#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?"#, "url"),
+            (#"(?i)\blocalhost(?::\d+)?(?:/[^\s]*)?"#, "url"),
+            (#"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?"#, "url"),
             (#"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, "email"),
             (#"(?<!\S)(?:~?/|\./|\.\./)[^\s]+"#, "file_path"),
             (#"\b[A-Za-z]:[\\/][^\s]+"#, "file_path"),
@@ -116,7 +118,15 @@ public enum TextProtection {
     private static func isURL(_ text: String) -> Bool {
         text.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
             || text.range(
-                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:/[^\s]*)$"#,
+                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?$"#,
+                options: .regularExpression
+            ) != nil
+            || text.range(
+                of: #"(?i)^localhost(?::\d+)?(?:/[^\s]*)?$"#,
+                options: .regularExpression
+            ) != nil
+            || text.range(
+                of: #"^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?$"#,
                 options: .regularExpression
             ) != nil
     }
@@ -219,7 +229,7 @@ public enum TextProtection {
         }
 
         if tokens.count == 1 {
-            return command == "cd"
+            return command == "cd" || command == "env" || command == "pwd"
         }
 
         let arguments = Array(tokens.dropFirst())
@@ -244,6 +254,10 @@ public enum TextProtection {
                 || arguments.contains(where: isHostLikeArgument)
         }
         if executableCommandNames.contains(command) {
+            if let wrappedCommand = arguments.first,
+               isCommandInvocation(firstToken: wrappedCommand, tokens: arguments) {
+                return true
+            }
             return arguments.contains(where: isCommandPathArgument)
                 || arguments.contains(where: isScriptFileArgument)
                 || commandSubcommands[arguments[0].lowercased()] != nil
@@ -271,14 +285,24 @@ public enum TextProtection {
 
     private static func isShellBuiltinInvocation(command: String, arguments: [String]) -> Bool {
         switch command {
-        case "cd":
+        case "cd", "pwd":
             return true
+        case "echo":
+            return arguments.contains { argument in
+                argument.hasPrefix("$") || argument.contains("$")
+            }
+        case "env":
+            return arguments.isEmpty || arguments.contains(where: isCommandFlagOrAssignment)
         case "export":
             return arguments.contains(where: isCommandFlagOrAssignment)
         case "source":
             return arguments.contains(where: isCommandPathArgument)
                 || arguments.contains(where: isScriptFileArgument)
                 || arguments.contains(where: isDotfileArgument)
+        case "unset":
+            return arguments.contains { argument in
+                argument.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
+            }
         default:
             return false
         }

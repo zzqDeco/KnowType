@@ -72,6 +72,11 @@ final class CorrectionEngineTests: XCTestCase {
             "https://example.com/search?q=KnowType",
             "example.com/path?q=token",
             "go.dev/doc",
+            "visit example.com",
+            "send to go.dev",
+            "192.168.1.1",
+            "localhost:3000",
+            "127.0.0.1:8080",
             "open https://example.com/search?q=KnowType",
             "support@example.com",
             "send this to support@example.com",
@@ -79,7 +84,10 @@ final class CorrectionEngineTests: XCTestCase {
             "open /Users/zq/project/KnowType",
             "~/Library/Input Methods",
             "git status --short",
+            "git config user.email",
+            "git stash",
             "docker ps",
+            "docker login",
             "kubectl get pods",
             "brew install foo",
             "pnpm install",
@@ -96,6 +104,7 @@ final class CorrectionEngineTests: XCTestCase {
             "cat Package.swift",
             "vim secrets.txt",
             "rm README.md",
+            "sudo rm README.md",
             "cp .env backup.env",
             "touch /tmp/knowtype",
             "docker ps | rg api",
@@ -106,6 +115,10 @@ final class CorrectionEngineTests: XCTestCase {
             "swift test",
             "go test ./...",
             "make build",
+            "pwd",
+            "echo $GITHUB_TOKEN",
+            "unset API_KEY",
+            "env",
             "export PATH=/usr/local/bin:$PATH",
             "source .env",
             "source ./scripts/env.sh",
@@ -223,5 +236,30 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "open https://example.com/path?q=KnowType")
         XCTAssertEqual(candidates.first?.source, "local-protection")
         XCTAssertEqual(candidates.first?.protectedRanges.first?.reason, "url")
+    }
+
+    func testBareDomainsAndLocalEndpointsAreProtectedRanges() {
+        let examples = [
+            ("visit example.com", "example.com"),
+            ("send to go.dev", "go.dev"),
+            ("open localhost:3000", "localhost:3000"),
+            ("connect 127.0.0.1:8080", "127.0.0.1:8080"),
+            ("router 192.168.1.1", "192.168.1.1")
+        ]
+
+        for (input, protectedText) in examples {
+            let ranges = TextProtection.detectProtectedRanges(in: input)
+            let protectedRanges = ranges.filter { $0.reason == "url" }
+            let matchedTexts = protectedRanges.map { range in
+                let start = input.index(input.startIndex, offsetBy: range.start)
+                let end = input.index(start, offsetBy: range.length)
+                return String(input[start..<end])
+            }
+
+            XCTAssertTrue(
+                matchedTexts.contains(protectedText),
+                "\(input) should protect \(protectedText) as a URL-like range"
+            )
+        }
     }
 }
