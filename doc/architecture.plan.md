@@ -49,6 +49,8 @@ func complete(_ request: LLMRequest) async throws -> LLMResponse
 
 Adapters must not leak native response shapes into the core. All provider responses normalize into `LLMResponse`.
 
+Provider profiles are edited by the settings app and stored as JSON metadata plus profile-scoped `SecretStore` entries. API keys are never written to the profile file. When a profile switches to a local/no-secret provider such as Ollama, the settings model clears the draft key, deletes the old secret, and only publishes the updated profile list after the profile file save succeeds.
+
 ## Input Method Layer
 
 The current package includes:

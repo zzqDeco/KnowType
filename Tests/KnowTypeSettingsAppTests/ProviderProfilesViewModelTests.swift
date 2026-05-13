@@ -234,6 +234,98 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
     }
 
+    func testSavingProviderWithoutSecretDeletesPreviousSecret() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.work.apiKey",
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.changeDraftKind(.ollamaNative)
+
+        XCTAssertTrue(viewModel.saveDraft())
+
+        XCTAssertEqual(secrets.deleteSecretCalls, ["knowtype.provider.work.apiKey"])
+        XCTAssertNil(store.savedFiles.last?.profiles.first?.secretName)
+    }
+
+    func testDeleteSecretFailureBlocksProviderWithoutSecretSave() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.work.apiKey",
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore(deleteError: TestProfileStoreError(message: "delete failed"))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.changeDraftKind(.ollamaNative)
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(viewModel.lastErrorMessage, "delete failed")
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertEqual(viewModel.profiles, existing)
+    }
+
+    func testSaveDraftDoesNotPublishProfilesWhenStoreSaveFails() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.work.apiKey",
+                isDefault: true
+            ),
+            ProviderProfile(
+                id: "local",
+                displayName: "Local",
+                kind: .ollamaNative,
+                baseURL: URL(string: "http://localhost:11434")!,
+                model: "llama3.2",
+                isDefault: false
+            )
+        ]
+        let store = SavingThrowingProfileStore(
+            file: ProviderProfilesFile(profiles: existing),
+            error: TestProfileStoreError(message: "save failed")
+        )
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore()
+        )
+
+        viewModel.draft.displayName = "Unsaved Work"
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(viewModel.lastErrorMessage, "save failed")
+        XCTAssertEqual(viewModel.profiles, existing)
+        XCTAssertEqual(viewModel.draft.displayName, "Unsaved Work")
+        XCTAssertEqual(store.saveAttempts.last?.profiles.first?.displayName, "Unsaved Work")
+    }
+
     func testLoadFailureBlocksPersistenceUntilProfilesLoadSuccessfully() throws {
         let store = ThrowingProfileStore(error: TestProfileStoreError(message: "malformed profiles"))
         let viewModel = ProviderProfilesViewModel(
@@ -341,8 +433,34 @@ private final class ThrowingProfileStore: ProviderProfileStore, @unchecked Senda
     }
 }
 
+private final class SavingThrowingProfileStore: ProviderProfileStore, @unchecked Sendable {
+    private let file: ProviderProfilesFile
+    private let error: Error
+    private(set) var saveAttempts: [ProviderProfilesFile] = []
+
+    init(file: ProviderProfilesFile, error: Error) {
+        self.file = file
+        self.error = error
+    }
+
+    func loadProfiles() throws -> ProviderProfilesFile {
+        file
+    }
+
+    func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+        saveAttempts.append(profiles)
+        throw error
+    }
+}
+
 private final class RecordingSecretStore: SecretStore, @unchecked Sendable {
+    private let deleteError: Error?
     private(set) var setSecretCalls: [(value: String, name: String)] = []
+    private(set) var deleteSecretCalls: [String] = []
+
+    init(deleteError: Error? = nil) {
+        self.deleteError = deleteError
+    }
 
     func secret(named name: String) throws -> String? {
         nil
@@ -352,7 +470,12 @@ private final class RecordingSecretStore: SecretStore, @unchecked Sendable {
         setSecretCalls.append((value: value, name: name))
     }
 
-    func deleteSecret(named name: String) throws {}
+    func deleteSecret(named name: String) throws {
+        deleteSecretCalls.append(name)
+        if let deleteError {
+            throw deleteError
+        }
+    }
 }
 
 private struct TestProfileStoreError: LocalizedError {

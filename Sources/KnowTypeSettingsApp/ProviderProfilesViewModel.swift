@@ -122,31 +122,39 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
         do {
             var profile = try draft.makeProfile()
+            let existingProfile = profiles.first(where: { $0.id == profile.id })
             if Self.requiresSecret(kind: profile.kind),
                !draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let secretName = profile.secretName ?? Self.secretName(for: profile.id)
                 try secretStore.setSecret(draft.apiKey, named: secretName)
                 profile.secretName = secretName
             } else if !Self.requiresSecret(kind: profile.kind) {
+                if let oldSecretName = existingProfile?.secretName {
+                    try secretStore.deleteSecret(named: oldSecretName)
+                }
                 profile.secretName = nil
             }
 
+            var updatedProfiles = profiles
             if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-                profiles[index] = profile
+                updatedProfiles[index] = profile
             } else {
-                profiles.append(profile)
+                updatedProfiles.append(profile)
             }
 
             if profile.isDefault {
-                profiles = profiles.map { existing in
+                updatedProfiles = updatedProfiles.map { existing in
                     var updated = existing
                     updated.isDefault = existing.id == profile.id
                     return updated
                 }
             }
 
-            file.profiles = profiles
-            try profileStore.saveProfiles(file)
+            var updatedFile = file
+            updatedFile.profiles = updatedProfiles
+            try profileStore.saveProfiles(updatedFile)
+            profiles = updatedProfiles
+            file = updatedFile
             selectedProfileID = profile.id
             draft = ProviderProfileDraft(profile: profile)
             lastErrorMessage = nil

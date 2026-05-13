@@ -9,6 +9,7 @@ Implement the first usable KnowType core around multi-protocol provider compatib
 - Swift Package foundation with `KnowTypeCore`, `KnowTypeProviders`, and `KnowTypeInputMethod`.
 - Local Level 0/1 correction rules and examples for Chinese pinyin, English, and mixed input.
 - Provider adapters for OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini native, Ollama native, and custom HTTP.
+- Settings-app provider profiles with JSON metadata persistence, profile-scoped secrets, and local/no-secret provider cleanup.
 - Input action contract for Space, Tab, Option-number, and Option-R.
 - Unit tests for product invariants and adapter mapping.
 

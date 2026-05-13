@@ -58,6 +58,8 @@ ProviderProfile {
 
 `secretName` resolves through `SecretStore`. The macOS implementation uses Keychain; tests and non-UI code can use read-only dictionary-backed stores.
 
+`ProviderProfilesViewModel` owns settings-app draft validation and persistence. It rejects empty names, invalid non-HTTP(S) or hostless base URLs, missing models for non-custom providers, non-positive timeouts, and incomplete custom HTTP templates. Draft saves stage the updated profile list, write or delete any required profile-scoped secret, persist the staged profile file, and publish the new `profiles` value only after the store save succeeds.
+
 ## Candidate Types
 
 - `CorrectionCandidate`: prefix candidate with correction level and protected ranges.
