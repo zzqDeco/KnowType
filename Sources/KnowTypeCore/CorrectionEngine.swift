@@ -51,6 +51,9 @@ public final class CorrectionEngine: Sendable {
     }
 
     private func shouldAskCloud(context: InputContext) -> Bool {
+        if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
+            return false
+        }
         let tokenCount = tokenize(context.rawInput).count
         return tokenCount >= 4 || context.locale == .mixed
     }
@@ -217,8 +220,16 @@ private func normalizeToken(_ token: String) -> String {
     if let technical = TextProtection.canonicalTechnicalToken(token) {
         return technical
     }
+    if preservesCodeLikeToken(token) {
+        return token
+    }
     let lower = token.lowercased()
     return spellingCorrections[lower] ?? lower
+}
+
+private func preservesCodeLikeToken(_ token: String) -> Bool {
+    token.range(of: #"^[a-z]+_[A-Za-z0-9_]+$"#, options: .regularExpression) != nil
+        || token.range(of: #"^[a-z]+[A-Z][A-Za-z0-9]*$"#, options: .regularExpression) != nil
 }
 
 private func looksLikePinyinInput(_ tokens: [String]) -> Bool {

@@ -13,6 +13,15 @@ public final class PrefixContinuationEngine: Sendable {
         lengthLevel: ContinuationLengthLevel = .medium,
         maxCandidates: Int = 3
     ) async -> [ContinuationCandidate] {
+        if TextProtection.requiresNoCorrection(lockedPrefix.text, appBundleID: context?.appBundleID) {
+            return []
+        }
+
+        if let context,
+           TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
+            return []
+        }
+
         if let provider {
             let request = LLMRequest(
                 task: .continuation,

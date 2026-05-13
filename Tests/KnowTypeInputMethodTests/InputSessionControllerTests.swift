@@ -194,6 +194,62 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(tabResult, .commit("/Users/zq/project/KnowType"))
     }
 
+    func testProtectedAppBundleClearsContinuationsAndDoesNotCallProvider() async {
+        let provider = RecordingProvider()
+        let controller = InputSessionController(provider: provider)
+
+        let suggestion = await controller.update(
+            rawInput: "wo jue de zhege fagnan",
+            appBundleID: "com.apple.dt.Xcode",
+            locale: .zhCN
+        )
+        let requests = await provider.requests
+
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(suggestion.prefixCandidates.first?.text, "wo jue de zhege fagnan")
+        XCTAssertEqual(suggestion.prefixCandidates.first?.source, "local-protection")
+        XCTAssertTrue(suggestion.continuationCandidates.isEmpty)
+    }
+
+    func testLevelZeroURLAndCommandInputsClearContinuationsAndDoNotCallProvider() async {
+        let provider = RecordingProvider()
+        let controller = InputSessionController(provider: provider)
+
+        let urlSuggestion = await controller.update(
+            rawInput: "https://example.com/path?q=KnowType",
+            locale: .mixed
+        )
+        let commandSuggestion = await controller.update(
+            rawInput: "swift test",
+            locale: .mixed
+        )
+        let requests = await provider.requests
+
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(urlSuggestion.continuationCandidates.isEmpty)
+        XCTAssertEqual(urlSuggestion.prefixCandidates.first?.text, "https://example.com/path?q=KnowType")
+        XCTAssertTrue(commandSuggestion.continuationCandidates.isEmpty)
+        XCTAssertEqual(commandSuggestion.prefixCandidates.first?.text, "swift test")
+    }
+
+    func testPipelineLevelZeroDoesNotAskProviderForCorrectionOrContinuation() async {
+        let provider = RecordingProvider()
+        let pipeline = InputMethodPipeline(provider: provider)
+
+        let suggestion = await pipeline.suggestions(
+            for: InputContext(
+                rawInput: "dev@example.com",
+                appBundleID: "com.googlecode.iterm2",
+                locale: .mixed
+            )
+        )
+        let requests = await provider.requests
+
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(suggestion.prefixCandidates.first?.source, "local-protection")
+        XCTAssertTrue(suggestion.continuationCandidates.isEmpty)
+    }
+
     func testStaleUpdateCannotOverwriteNewerInputState() async throws {
         let loader = ManualSuggestionLoader()
         let controller = InputSessionController { context in
