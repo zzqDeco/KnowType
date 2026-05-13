@@ -2,7 +2,8 @@
 
 `TraditionalInputEngine` is the clean-room local Chinese input path for KnowType MVP.
 
-- It decodes a small license-clean seed lexicon through pinyin tokenization, compact pinyin segmentation, light typo normalization, compact-prefix completion, and candidate scoring.
+- It decodes a small license-clean seed lexicon through pinyin tokenization, compact pinyin segmentation, light typo normalization, syllable fallback composition, compact-prefix completion, and candidate scoring.
+- Phrase entries still rank above syllable fallback composition, but fallback syllables keep basic input such as `nishi -> 你是` working even when no phrase entry exists.
 - It includes a small high-frequency pinyin-initial abbreviation layer for MVP cases such as `wsm -> 为什么`, plus generic prefix completion over known compact entries for unfinished input such as `xianz -> 现在`.
 - It still allows provider-backed correction to improve or expand short ambiguous abbreviation and compact-prefix inputs.
 - It preserves technical and code-like tokens through `TextProtection` instead of forcing them into Chinese.

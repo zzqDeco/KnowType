@@ -210,12 +210,13 @@ public struct TraditionalInputEngine: Sendable {
             }
 
             let normalized = tokenSlice.map(\.normalized)
-            guard let entry = lexicon.first(where: { $0.pinyin == normalized }) else {
+            let outputs = lexiconOutputs(for: normalized)
+            guard !outputs.isEmpty else {
                 continue
             }
 
             let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
-            for output in entry.outputs {
+            for output in outputs {
                 for tail in parse(
                     tokens: tokens,
                     from: index + length,
@@ -466,6 +467,37 @@ private let xiaoheSyllables: [String: String] = [
     "ge": "ge"
 ]
 
+private let syllableFallbackOutputs: [String: [LexiconOutput]] = [
+    "ba": makeOutputs([("把", 0.86), ("吧", 0.78)]),
+    "bu": makeOutputs([("不", 0.90)]),
+    "de": makeOutputs([("的", 0.90), ("得", 0.82)]),
+    "fa": makeOutputs([("发", 0.78), ("法", 0.72)]),
+    "ge": makeOutputs([("个", 0.88)]),
+    "gao": makeOutputs([("高", 0.86)]),
+    "hao": makeOutputs([("好", 0.90), ("号", 0.72)]),
+    "hen": makeOutputs([("很", 0.88)]),
+    "hui": makeOutputs([("会", 0.84)]),
+    "jue": makeOutputs([("觉", 0.76)]),
+    "kan": makeOutputs([("看", 0.86)]),
+    "le": makeOutputs([("了", 0.88)]),
+    "ma": makeOutputs([("吗", 0.84)]),
+    "ni": makeOutputs([("你", 0.90), ("呢", 0.64)]),
+    "shi": makeOutputs([("是", 0.90), ("时", 0.80), ("事", 0.76)]),
+    "shu": makeOutputs([("数", 0.74), ("书", 0.72)]),
+    "ru": makeOutputs([("入", 0.74)]),
+    "wen": makeOutputs([("问", 0.78), ("文", 0.74)]),
+    "wo": makeOutputs([("我", 0.90)]),
+    "xian": makeOutputs([("先", 0.88), ("现", 0.80), ("线", 0.74)]),
+    "xiang": makeOutputs([("想", 0.88), ("像", 0.70)]),
+    "yao": makeOutputs([("要", 0.86)]),
+    "yi": makeOutputs([("一", 0.84), ("以", 0.80)]),
+    "you": makeOutputs([("有", 0.88), ("又", 0.72)]),
+    "zai": makeOutputs([("在", 0.88), ("再", 0.76)]),
+    "zhe": makeOutputs([("这", 0.88)]),
+    "zhi": makeOutputs([("只", 0.82), ("知", 0.72)]),
+    "zhong": makeOutputs([("中", 0.82)])
+]
+
 private let maxEntryLength = lexicon.map(\.pinyin.count).max() ?? 1
 
 private let knownPinyinTokens: Set<String> = {
@@ -475,16 +507,45 @@ private let knownPinyinTokens: Set<String> = {
             tokens.insert(token)
         }
     }
+    for token in syllableFallbackOutputs.keys {
+        tokens.insert(token)
+    }
     return tokens
 }()
 
 private func entry(_ pinyin: [String], _ outputs: [(String, Double)]) -> LexiconEntry {
     LexiconEntry(
         pinyin: pinyin,
-        outputs: outputs.map { text, confidence in
-            LexiconOutput(text: text, confidence: confidence)
-        }
+        outputs: makeOutputs(outputs)
     )
+}
+
+private func makeOutputs(_ outputs: [(String, Double)]) -> [LexiconOutput] {
+    outputs.map { text, confidence in
+        LexiconOutput(text: text, confidence: confidence)
+    }
+}
+
+private func lexiconOutputs(for pinyin: [String]) -> [LexiconOutput] {
+    var collected = lexicon
+        .filter { $0.pinyin == pinyin }
+        .flatMap(\.outputs)
+    if pinyin.count == 1,
+       let fallbackOutputs = syllableFallbackOutputs[pinyin[0]] {
+        collected.append(contentsOf: fallbackOutputs)
+    }
+    return uniqueOutputs(collected)
+}
+
+private func uniqueOutputs(_ outputs: [LexiconOutput]) -> [LexiconOutput] {
+    var seen = Set<String>()
+    return outputs.filter { output in
+        if seen.contains(output.text) {
+            return false
+        }
+        seen.insert(output.text)
+        return true
+    }
 }
 
 private func joinSegments(_ segments: [String]) -> String {

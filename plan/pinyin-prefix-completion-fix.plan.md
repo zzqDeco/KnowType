@@ -7,6 +7,7 @@ The first pinyin-initial fix covered high-frequency shortcuts such as `wsm -> �
 ## Changes
 
 - Add compact-prefix completion over known lexicon entries so unfinished input can still produce local candidates, for example `xianz -> 现在` and `xiansh -> 显示`.
+- Add syllable fallback composition so basic compact input does not require a whole phrase entry, for example `nishi -> 你是`.
 - Keep exact pinyin candidates ahead of longer prefix completions, so `xian` still prefers `先` while exposing longer options as candidates.
 - Treat compact-prefix input as provider-eligible correction input when a provider is configured.
 - Cap provider confidence for pinyin composition corrections below strong local candidates so cloud results expand coverage without replacing solid local decoding.

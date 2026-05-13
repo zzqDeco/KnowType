@@ -90,6 +90,16 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(requests.first?.rawInput, "xianz")
     }
 
+    func testBasicCompactPinyinUsesSyllableFallbacks() async {
+        let engine = CorrectionEngine()
+
+        let candidates = await engine.correct(
+            InputContext(rawInput: "nishi", locale: .zhCN)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "你是")
+    }
+
     func testTechnicalShortTokenDoesNotUsePinyinInitialCloudPath() async {
         let provider = RecordingProvider()
         let engine = CorrectionEngine(cloudProvider: provider)

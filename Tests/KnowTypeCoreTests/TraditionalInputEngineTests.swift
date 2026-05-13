@@ -44,6 +44,14 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertTrue(candidates.contains("现在"))
     }
 
+    func testSyllableFallbacksComposeBasicWords() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "nishi").first?.text, "你是")
+        XCTAssertEqual(engine.candidates(for: "ni shi").first?.text, "你是")
+        XCTAssertEqual(engine.candidates(for: "nixiang").first?.text, "你想")
+    }
+
     func testMVPExamplesDecodeThroughSeedLexicon() {
         let engine = TraditionalInputEngine()
         let examples = [
