@@ -185,6 +185,33 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(bodyObject["model"] as? String, "responses-local-model")
     }
 
+    func testOpenAIModelDiscoveryRejectsRemoteBlankModel() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":[{"id":"should-not-be-used"}]}"#, statusCode: 200)
+        ])
+        let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
+
+        do {
+            _ = try await discovery.resolvedModel(
+                for: ProviderConfiguration(
+                    kind: .openAIChat,
+                    baseURL: URL(string: "https://api.openai.com")!,
+                    apiKey: "remote-key",
+                    model: " \n "
+                )
+            )
+            XCTFail("Expected remote blank model discovery to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderError,
+                .invalidResponse("model is required for remote OpenAI-compatible providers")
+            )
+        }
+
+        let requests = await client.capturedRequests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testOpenAIModelDiscoveryCacheIsScopedByAPIKey() async throws {
         let client = SequencedMockHTTPClient(responses: [
             (json: #"{"data":[{"id":"model-for-key-a"}]}"#, statusCode: 200),

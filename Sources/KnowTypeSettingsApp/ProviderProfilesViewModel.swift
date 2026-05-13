@@ -131,14 +131,19 @@ public final class ProviderProfilesViewModel: ObservableObject {
             )
             try validateSecretAvailability(for: profile, mutation: secretMutation)
 
-            if case .set(_, let secretName, _) = secretMutation {
+            switch secretMutation {
+            case .set(_, let secretName, _):
                 profile.secretName = secretName
-            } else if Self.requiresSecret(profile) {
-                profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
-            } else if Self.acceptsOptionalSecret(profile) {
-                profile.secretName = existingProfile?.secretName
-            } else {
+            case .delete:
                 profile.secretName = nil
+            case .none:
+                if Self.requiresSecret(profile) {
+                    profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
+                } else if Self.acceptsOptionalSecret(profile) {
+                    profile.secretName = existingProfile?.secretName
+                } else {
+                    profile.secretName = nil
+                }
             }
 
             var updatedProfiles = profiles
@@ -220,10 +225,12 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append("Display name is required.")
         }
-        if Self.validHTTPURL(draft.baseURL) == nil {
+        let validBaseURL = Self.validHTTPURL(draft.baseURL)
+        if validBaseURL == nil {
             errors.append("Base URL must be an HTTP or HTTPS URL.")
         }
-        if Self.requiresModel(kind: draft.kind) && draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if Self.requiresModel(kind: draft.kind, baseURL: validBaseURL)
+            && draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append("Model is required.")
         }
         if draft.timeoutSeconds <= 0 {
@@ -276,11 +283,16 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
     }
 
-    private static func requiresModel(kind: ProviderKind) -> Bool {
+    private static func requiresModel(kind: ProviderKind, baseURL: URL?) -> Bool {
         switch kind {
         case .anthropicMessages, .geminiNative, .ollamaNative:
             return true
-        case .openAIChat, .openAIResponses, .customHTTP:
+        case .openAIChat, .openAIResponses:
+            guard let baseURL else {
+                return false
+            }
+            return !isLocalBaseURL(baseURL)
+        case .customHTTP:
             return false
         }
     }
@@ -321,8 +333,9 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
         if requiresSecret(profile) || acceptsOptionalSecret(profile) {
             guard !trimmedAPIKey.isEmpty else {
-                if requiresSecret(profile) {
-                    return .none
+                if shouldClearBlankOptionalSecret(for: profile),
+                   let oldSecretName = existingProfile?.secretName {
+                    return .delete(secretName: oldSecretName)
                 }
                 return .none
             }
@@ -334,6 +347,15 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return .none
         }
         return .delete(secretName: oldSecretName)
+    }
+
+    private static func shouldClearBlankOptionalSecret(for profile: ProviderProfile) -> Bool {
+        switch profile.kind {
+        case .openAIChat, .openAIResponses:
+            return isLocalBaseURL(profile.baseURL)
+        case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
+            return false
+        }
     }
 
     private func apply(_ mutation: SecretMutation, updatedProfiles: [ProviderProfile]) throws {

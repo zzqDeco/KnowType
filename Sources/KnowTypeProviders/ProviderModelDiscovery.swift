@@ -17,6 +17,9 @@ public actor OpenAICompatibleModelDiscovery: ProviderModelDiscovering {
         guard Self.requiresDiscovery(trimmedModel) else {
             return trimmedModel
         }
+        guard Self.allowsModelDiscovery(for: configuration.baseURL) else {
+            throw ProviderError.invalidResponse("model is required for remote OpenAI-compatible providers")
+        }
 
         let key = cacheKey(for: configuration)
         if let cached = cache[key] {
@@ -45,6 +48,16 @@ public actor OpenAICompatibleModelDiscovery: ProviderModelDiscovering {
             || lowercased == "your-model-id"
             || lowercased == "your_model_id"
             || lowercased == "todo"
+    }
+
+    public static func allowsModelDiscovery(for baseURL: URL) -> Bool {
+        guard let host = baseURL.host(percentEncoded: false)?.lowercased() else {
+            return false
+        }
+        return host == "localhost"
+            || host == "127.0.0.1"
+            || host == "::1"
+            || host.hasSuffix(".local")
     }
 
     private func discoverFirstModelID(configuration: ProviderConfiguration) async throws -> String {

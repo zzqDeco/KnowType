@@ -589,6 +589,41 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
     }
 
+    func testLocalOpenAICompatibleBlankAPIKeyClearsExistingSecret() throws {
+        let secretName = "knowtype.provider.work.apiKey"
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: secretName,
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore(values: [secretName: "sk-existing"])
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.draft.baseURL = "http://localhost:8317/v1"
+        viewModel.draft.model = " \n "
+        viewModel.draft.apiKey = " \n "
+
+        XCTAssertTrue(viewModel.saveDraft())
+
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertEqual(saved.baseURL.absoluteString, "http://localhost:8317/v1")
+        XCTAssertEqual(saved.model, "")
+        XCTAssertNil(saved.secretName)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+        XCTAssertEqual(secrets.deleteSecretCalls, [secretName])
+        XCTAssertNil(try secrets.secret(named: secretName))
+    }
+
     func testRemoteOpenAICompatibleProfileStillRequiresAPIKey() throws {
         let store = CapturingProfileStore(file: ProviderProfilesFile())
         let secrets = RecordingSecretStore()
@@ -601,7 +636,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.createProfile(kind: .openAIResponses)
         viewModel.draft.displayName = "Remote Responses"
         viewModel.draft.baseURL = "https://api.openai.com"
-        viewModel.draft.model = ""
+        viewModel.draft.model = "gpt-4.1-mini"
         viewModel.draft.apiKey = ""
         viewModel.draft.isDefault = true
 
@@ -610,6 +645,29 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.validationErrors.isEmpty)
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+    }
+
+    func testRemoteOpenAICompatibleProfileRequiresModelEvenWithAPIKey() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModel.createProfile(kind: .openAIResponses)
+        viewModel.draft.displayName = "Remote Responses"
+        viewModel.draft.baseURL = "https://api.openai.com"
+        viewModel.draft.model = " \n "
+        viewModel.draft.apiKey = "sk-remote"
+        viewModel.draft.isDefault = true
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertTrue(viewModel.validationErrors.contains("Model is required."))
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+        XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
     }
 
     func testSaveFailureDoesNotDeleteExistingSecretForNoSecretProvider() throws {
