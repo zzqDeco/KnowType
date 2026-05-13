@@ -10,14 +10,16 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private let sessionController = InputSessionController()
     private let keyMapper = InputKeyCommandMapper()
     private let candidateListBuilder = InputCandidateListBuilder()
+    private let customCandidateSelectionPolicy = CustomCandidateSelectionPolicy()
     private var rawBuffer = ""
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
     private var suggestionTask: Task<Void, Never>?
-    private var nativeCandidates: IMKCandidates?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
+    private var candidatePanelState = CandidatePanelState()
+    @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
         let stroke = InputKeyStroke(
@@ -26,7 +28,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: flags)
         )
 
-        return handle(intent: keyMapper.intent(for: stroke), client: sender)
+        return handle(stroke: stroke, client: sender)
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
@@ -80,11 +82,30 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             keyCode: Int(event.keyCode),
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue))
         )
-        return handle(intent: keyMapper.intent(for: stroke), client: sender)
+        return handle(stroke: stroke, client: sender)
     }
 
     public override func commitComposition(_ sender: Any!) {
         commit(action: .space, client: sender)
+    }
+
+    public override func hidePalettes() {
+        super.hidePalettes()
+        hideNativeCandidates()
+        hideCandidatePanel()
+    }
+
+    public override func inputControllerWillClose() {
+        hideNativeCandidates()
+        hideCandidatePanel()
+        super.inputControllerWillClose()
+    }
+
+    private func handle(stroke: InputKeyStroke, client sender: Any!) -> Bool {
+        if handleCustomCandidateSelection(stroke: stroke, client: sender) {
+            return true
+        }
+        return handle(intent: keyMapper.intent(for: stroke), client: sender)
     }
 
     private func handle(intent: InputKeyIntent, client sender: Any!) -> Bool {
@@ -94,6 +115,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             invalidateSuggestion()
             refreshComposition()
             updateNativeCandidates()
+            updateCandidatePanel(suggestion: nil, client: sender)
             refreshSuggestion(client: sender)
             return true
         case .deleteBackward:
@@ -104,6 +126,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             invalidateSuggestion()
             refreshComposition()
             updateNativeCandidates()
+            updateCandidatePanel(suggestion: nil, client: sender)
             refreshSuggestion(client: sender)
             return true
         case .action(let action):
@@ -120,6 +143,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return
         }
         let appBundleID = appBundleIdentifier(client: sender)
+        let anchorRect = candidateAnchorRect(client: sender)
         suggestionTask = Task { [weak self] in
             guard let self else {
                 return
@@ -144,6 +168,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 self.lastSuggestionRawInput = rawInput
                 self.refreshComposition()
                 self.updateNativeCandidates()
+                self.updateCandidatePanel(suggestion: suggestion, anchorRect: anchorRect)
             }
         }
     }
@@ -244,6 +269,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         invalidateSuggestion()
         refreshComposition()
         hideNativeCandidates()
+        hideCandidatePanel()
     }
 
     private func invalidateSuggestion() {
@@ -254,63 +280,72 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         suggestionTask = nil
     }
 
-    private func updateNativeCandidates() {
-        guard lastSuggestion != nil else {
-            displayedNativeCandidates = []
-            hideNativeCandidates()
+    private func updateCandidatePanel(suggestion: SuggestionResponse?, client sender: Any!) {
+        guard !rawBuffer.isEmpty || suggestion != nil else {
+            hideCandidatePanel()
             return
         }
-        let selections = candidateListBuilder.candidateSelections(rawInput: rawBuffer, suggestion: lastSuggestion)
-        displayedNativeCandidates = selections
-        guard !selections.isEmpty else {
-            hideNativeCandidates()
-            return
-        }
+        updateCandidatePanel(suggestion: suggestion, anchorRect: candidateAnchorRect(client: sender))
+    }
+
+    private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorRect: CGRect) {
+        candidatePanelState.update(rawInput: rawBuffer, suggestion: suggestion, anchorRect: anchorRect)
         MainActor.assumeIsolated {
-            guard let nativeCandidates = nativeCandidateWindow() else {
-                return
-            }
-            nativeCandidates.setCandidateData(selections.map(\.text))
-            refreshNativeCandidateWindow(nativeCandidates)
-            nativeCandidates.show(kIMKLocateCandidatesBelowHint)
+            candidatePanelController.update(state: candidatePanelState, locale: locale)
         }
+    }
+
+    private func hideCandidatePanel() {
+        candidatePanelState.hide()
+        MainActor.assumeIsolated {
+            candidatePanelController.hide()
+        }
+    }
+
+    private func candidateAnchorRect(client sender: Any!) -> CGRect {
+        guard let client = sender as? IMKTextInput else {
+            return .zero
+        }
+        guard let characterRange = CandidateAnchorPolicy.characterRange(for: client.selectedRange()) else {
+            return .zero
+        }
+        return client.firstRect(
+            forCharacterRange: characterRange,
+            actualRange: nil
+        )
+    }
+
+    private func handleCustomCandidateSelection(stroke: InputKeyStroke, client sender: Any!) -> Bool {
+        switch customCandidateSelectionPolicy.decision(
+            for: stroke,
+            rawInput: rawBuffer,
+            suggestion: lastSuggestion,
+            suggestionRawInput: lastSuggestionRawInput
+        ) {
+        case .commitRawInput:
+            insert(rawBuffer, client: sender)
+            resetComposition()
+            return true
+        case .commitPrefixCandidate(let index):
+            guard let suggestion = lastSuggestion,
+                  suggestion.prefixCandidates.indices.contains(index) else {
+                return false
+            }
+            insert(suggestion.prefixCandidates[index].text, client: sender)
+            resetComposition()
+            return true
+        case .passThrough:
+            return false
+        }
+    }
+
+    private func updateNativeCandidates() {
+        hideNativeCandidates()
     }
 
     private func hideNativeCandidates() {
-        MainActor.assumeIsolated {
-            nativeCandidates?.hide()
-        }
         displayedNativeCandidates = []
         selectedNativeCandidate = nil
-    }
-
-    @MainActor
-    private func nativeCandidateWindow() -> IMKCandidates? {
-        if let nativeCandidates {
-            return nativeCandidates
-        }
-        guard let server = server() else {
-            return nil
-        }
-        let candidates = IMKCandidates(
-            server: server,
-            panelType: kIMKSingleColumnScrollingCandidatePanel
-        )
-        candidates?.setDismissesAutomatically(false)
-        candidates?.setAttributes([IMKCandidatesSendServerKeyEventFirst as String: true])
-        candidates?.setSelectionKeys(Self.nativeCandidateSelectionKeyCodes)
-        nativeCandidates = candidates
-        return candidates
-    }
-
-    @MainActor
-    private func refreshNativeCandidateWindow(_ nativeCandidates: IMKCandidates) {
-        let updateCandidatesSelector = NSSelectorFromString("updateCandidates")
-        if nativeCandidates.responds(to: updateCandidatesSelector) {
-            nativeCandidates.perform(updateCandidatesSelector)
-        } else {
-            nativeCandidates.update()
-        }
     }
 
     private func selectNativeCandidate(matching text: String?) {
@@ -342,6 +377,5 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private static let textOnlyKeyCode = -1
-    private static let nativeCandidateSelectionKeyCodes = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 }
 #endif
