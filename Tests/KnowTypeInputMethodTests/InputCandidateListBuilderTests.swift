@@ -10,7 +10,7 @@ final class InputCandidateListBuilderTests: XCTestCase {
         XCTAssertEqual(builder.candidates(rawInput: "", suggestion: nil), [])
     }
 
-    func testNativeCandidateListExcludesContinuationOnlyRows() {
+    func testNativeCandidateListIncludesPrefixAndContinuationRows() {
         let suggestion = SuggestionResponse(
             prefixCandidates: [
                 CorrectionCandidate(
@@ -47,11 +47,11 @@ final class InputCandidateListBuilderTests: XCTestCase {
             suggestion: suggestion
         )
 
-        XCTAssertEqual(candidates, ["wo jue de zhege fagnan", "我觉得这个方案", "我觉得这个方法"])
-        XCTAssertFalse(candidates.contains("还有进一步优化空间"))
+        XCTAssertEqual(candidates, ["我觉得这个方案", "我觉得这个方法", "还有进一步优化空间"])
+        XCTAssertFalse(candidates.contains("wo jue de zhege fagnan"))
     }
 
-    func testNativeCandidateSelectionsKeepSelectablePrefixIndexes() {
+    func testNativeCandidateSelectionsKeepSelectablePrefixAndContinuationIndexes() {
         let suggestion = SuggestionResponse(
             prefixCandidates: [
                 CorrectionCandidate(
@@ -91,9 +91,9 @@ final class InputCandidateListBuilderTests: XCTestCase {
         XCTAssertEqual(
             selections,
             [
-                InputCandidateSelection(text: "wo jue de zhege fagnan", kind: .rawInput),
                 InputCandidateSelection(text: "我觉得这个方案", kind: .prefixCandidate(index: 0)),
-                InputCandidateSelection(text: "我觉得这个方法", kind: .prefixCandidate(index: 1))
+                InputCandidateSelection(text: "我觉得这个方法", kind: .prefixCandidate(index: 1)),
+                InputCandidateSelection(text: "还有进一步优化空间", kind: .continuationCandidate(index: 0))
             ]
         )
     }

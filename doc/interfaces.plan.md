@@ -81,6 +81,13 @@ The factory maps `ProviderKind` to one adapter and keeps provider-specific reque
 - `ContinuationCandidate`: text after the locked prefix only.
 - `SuggestionResponse`: complete UI-facing suggestion state.
 
+Input-method candidate presentation maps `SuggestionResponse` into native candidate rows:
+
+- raw input is shown only before any prefix or continuation suggestion exists
+- prefix candidates are first-class native candidates
+- continuation candidates are selectable native candidates but still commit as `locked prefix + continuation`
+- fallback local breadth is six medium candidates for both correction alternatives and continuations where available
+
 ## Shortcut Contract
 
 - `Space` -> commit prefix.

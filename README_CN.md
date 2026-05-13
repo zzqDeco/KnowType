@@ -36,7 +36,7 @@ KnowType 的“云端优先”不是绑定某一家厂商，而是优先兼容�
 ```text
 Sources/KnowTypeCore/          核心模型、纠错、前缀锁定延续
 Sources/KnowTypeProviders/     Provider profile、运行时加载、多协议 adapter
-Sources/KnowTypeInputMethod/   输入法交互、自定义候选窗、IMK 启动入口
+Sources/KnowTypeInputMethod/   输入法交互、原生候选窗、IMK 启动入口
 Sources/KnowTypeInputMethodApp 本地 macOS IMK 后台 app 入口
 Sources/KnowTypeSettingsApp/   SwiftUI 设置与 provider profile 编辑
 Tests/                         单元测试与协议 adapter 测试
@@ -74,6 +74,8 @@ bundle 会输出到 `dist/KnowType.app`。
 ```
 
 脚本会把 bundle 复制到 `~/Library/Input Methods/KnowType.app`。安装后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启需要使用输入法的 app。
+
+本地输入时，KnowType 会优先使用 macOS 原生候选窗。输入中的文本先作为 marked text 标记在当前 app 里；按 `Space` 会用最佳纠错前缀替换 marked text，按 `Tab` 会用前缀 + 第一条延续替换 marked text。
 
 移除本地 bundle：
 
@@ -129,6 +131,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 - `Tab`：提交当前选中的前缀 + 第一条或当前选中的延续。
 - `Option + 数字`：提交候选窗中对应快捷键显示的延续。`Option + 1` 对应第一条延续，候选窗中显示为 `Tab / Option+1`。
 - `Option + R`：主动润色，这时才允许改写前缀。
+
+原生候选列表会先显示前缀候选，再显示延续候选。provider 不可用时，本地 fallback 现在会提供最多 6 条中等长度延续候选。
 
 ## 隐私基线
 

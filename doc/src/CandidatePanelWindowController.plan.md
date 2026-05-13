@@ -1,6 +1,6 @@
 # CandidatePanelWindowController
 
-`CandidatePanelWindowController` owns the AppKit floating panel used by the macOS input method bundle.
+`CandidatePanelWindowController` owns the fallback AppKit floating panel used by the macOS input method bundle when native `IMKCandidates` cannot be shown.
 
 Current behavior:
 
@@ -8,8 +8,8 @@ Current behavior:
 - anchors near the IMK client's selected range using `IMKTextInput.firstRect`
 - clamps the panel to the visible frame of the caret's screen
 - hides from composition reset, `hidePalettes`, and input-controller close lifecycle
-- keeps raw/prefix selection on the custom panel so the native `IMKCandidates` window is not shown at the same time
-- uses a borderless AppKit floating panel with a `NSVisualEffectView` popover material, compact row sizing, full-width blue selected rows, and muted continuation styling to stay close to macOS native input method candidate windows
+- stays hidden while the native `IMKCandidates` window is active
+- uses a borderless AppKit floating panel with `NSVisualEffectView` menu material, compact row sizing, full-width blue selected rows, and muted continuation styling to stay close to macOS native input method candidate windows
 
 Selection shortcuts:
 

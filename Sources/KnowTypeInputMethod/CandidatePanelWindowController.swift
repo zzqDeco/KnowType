@@ -39,7 +39,7 @@ final class CandidatePanelWindowController {
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 340, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 96),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -145,11 +145,11 @@ private final class CandidatePanelContentView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        effectView.material = .popover
+        effectView.material = .menu
         effectView.blendingMode = .behindWindow
         effectView.state = .active
         effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = 8
+        effectView.layer?.cornerRadius = 7
         effectView.layer?.cornerCurve = .continuous
         effectView.layer?.masksToBounds = true
         effectView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
@@ -166,8 +166,8 @@ private final class CandidatePanelContentView: NSView {
 
         stackView.orientation = .vertical
         stackView.alignment = .width
-        stackView.spacing = 1
-        stackView.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        stackView.spacing = 0
+        stackView.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)
         stackView.translatesAutoresizingMaskIntoConstraints = false
         effectView.addSubview(stackView)
 
@@ -176,8 +176,8 @@ private final class CandidatePanelContentView: NSView {
             stackView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
             stackView.topAnchor.constraint(equalTo: effectView.topAnchor),
             stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-            widthAnchor.constraint(lessThanOrEqualToConstant: 520)
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 280),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 460)
         ])
     }
 
@@ -224,12 +224,12 @@ private final class CandidatePanelContentView: NSView {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = 8
-        container.edgeInsets = NSEdgeInsets(top: 5, left: 8, bottom: 2, right: 8)
-        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 19).isActive = true
+        container.spacing = 6
+        container.edgeInsets = NSEdgeInsets(top: 4, left: 7, bottom: 1, right: 7)
+        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 16).isActive = true
 
         let label = baseLabel(text)
-        label.font = .systemFont(ofSize: 10, weight: .medium)
+        label.font = .systemFont(ofSize: 9, weight: .medium)
         label.textColor = .tertiaryLabelColor
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -251,13 +251,13 @@ private final class CandidatePanelContentView: NSView {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = 10
-        container.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 10)
+        container.spacing = 8
+        container.edgeInsets = NSEdgeInsets(top: 2, left: 7, bottom: 2, right: 9)
         container.wantsLayer = true
-        container.layer?.cornerRadius = 5
+        container.layer?.cornerRadius = 4
         container.layer?.cornerCurve = .continuous
         container.layer?.backgroundColor = rowBackgroundColor(row).cgColor
-        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 26).isActive = true
+        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 23).isActive = true
 
         if let shortcutLabel = row.shortcutLabel {
             container.addArrangedSubview(makeShortcutLabel(shortcutLabel, isSelected: row.isSelected))
@@ -281,12 +281,12 @@ private final class CandidatePanelContentView: NSView {
 
     private func makeShortcutLabel(_ text: String, isSelected: Bool) -> NSTextField {
         let label = baseLabel(text)
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         label.textColor = isSelected ? .alternateSelectedControlTextColor : .secondaryLabelColor
         label.alignment = .right
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
-        label.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 42).isActive = true
         return label
     }
 
@@ -300,13 +300,13 @@ private final class CandidatePanelContentView: NSView {
     private func font(for role: CandidatePanelVisualRole) -> NSFont {
         switch role {
         case .lockedPrefix:
-            return .systemFont(ofSize: 13, weight: .medium)
+            return .systemFont(ofSize: 14, weight: .regular)
         case .continuation:
-            return .systemFont(ofSize: 13, weight: .regular)
+            return .systemFont(ofSize: 14, weight: .regular)
         case .rawInput:
             return .monospacedSystemFont(ofSize: 12, weight: .regular)
         case .sectionHeader:
-            return .systemFont(ofSize: 10, weight: .medium)
+            return .systemFont(ofSize: 9, weight: .medium)
         }
     }
 

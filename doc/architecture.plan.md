@@ -73,6 +73,12 @@ The current package includes:
 - `KnowTypeInputController` as the InputMethodKit session controller
 - `KnowTypeInputMethodApp` as the background app entry point assembled by `scripts/build-inputmethod-bundle.sh`
 
+The IMK controller uses `IMKTextInput.setMarkedText` for active composition so local pinyin can become marked Chinese text before commit. Commit calls replace the active marked range with either the locked prefix or the prefix plus selected continuation.
+
+The primary candidate surface is the native `IMKCandidates` panel. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available. The custom `NSPanel` candidate view remains as a fallback if native candidates cannot be created.
+
+Candidate positioning recalculates after local and async suggestion publication. Anchor lookup prefers the selected range, falls back to the marked range, then falls back to the client line-height rectangle before using the custom panel's screen fallback.
+
 ## Privacy and App Rules
 
 Level 0 protected input takes the no-provider path:

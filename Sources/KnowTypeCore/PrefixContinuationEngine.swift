@@ -105,11 +105,22 @@ public final class PrefixContinuationEngine: Sendable {
                 let technicalTexts: [String]
                 switch lengthLevel {
                 case .short:
-                    technicalTexts = ["需要排查", "可能偏慢", "先看链路"]
+                    technicalTexts = ["需要排查", "可能偏慢", "先看链路", "看 P95", "查缓存", "查数据库"]
                 case .medium:
-                    technicalTexts = ["需要进一步排查接口链路耗时", "可能和数据库查询耗时有关", "建议先看一下 P95 和 P99 延迟"]
+                    technicalTexts = [
+                        "需要进一步排查接口链路耗时",
+                        "可能和数据库查询耗时有关",
+                        "建议先看一下 P95 和 P99 延迟",
+                        "可以先确认缓存命中率是否异常",
+                        "需要把网关和服务端耗时拆开看",
+                        "可能还要检查下游服务的响应时间"
+                    ]
                 case .long:
-                    technicalTexts = ["需要进一步排查接口链路耗时，并结合 P95 和 P99 延迟确认瓶颈。"]
+                    technicalTexts = [
+                        "需要进一步排查接口链路耗时，并结合 P95 和 P99 延迟确认瓶颈。",
+                        "可以先把网关、服务端和数据库耗时拆开，再判断主要瓶颈在哪里。",
+                        "建议先确认缓存命中率和慢查询，再看是否存在下游服务阻塞。"
+                    ]
                 }
                 return technicalTexts.prefix(maxCandidates).map {
                     ContinuationCandidate(
@@ -122,20 +133,42 @@ public final class PrefixContinuationEngine: Sendable {
             }
             switch lengthLevel {
             case .short:
-                texts = ["可行", "需要优化", "还有问题"]
+                texts = ["可行", "需要优化", "还有问题", "可以推进", "需要评估", "先验证"]
             case .medium:
-                texts = ["还有进一步优化空间", "在落地成本上可能偏高", "需要先验证核心假设"]
+                texts = [
+                    "还有进一步优化空间",
+                    "在落地成本上可能偏高",
+                    "需要先验证核心假设",
+                    "可以先做一个小范围验证",
+                    "需要进一步明确边界条件",
+                    "整体方向可以继续推进"
+                ]
             case .long:
-                texts = ["整体方向是可行的，但需要进一步明确具体的落地路径。"]
+                texts = [
+                    "整体方向是可行的，但需要进一步明确具体的落地路径。",
+                    "可以先做一个小范围验证，再根据反馈决定是否继续投入。",
+                    "当前判断还需要更多数据支撑，否则后续实现风险会偏高。"
+                ]
             }
         } else {
             switch lengthLevel {
             case .short:
-                texts = ["works", "is feasible", "needs review"]
+                texts = ["works", "is feasible", "needs review", "looks reasonable", "needs cleanup", "can ship"]
             case .medium:
-                texts = ["still needs more validation", "could be simplified further", "may introduce extra complexity"]
+                texts = [
+                    "still needs more validation",
+                    "could be simplified further",
+                    "may introduce extra complexity",
+                    "needs a clearer rollout plan",
+                    "should be tested against edge cases",
+                    "looks reasonable for the MVP"
+                ]
             case .long:
-                texts = ["is feasible, but we should validate the edge cases before moving forward."]
+                texts = [
+                    "is feasible, but we should validate the edge cases before moving forward.",
+                    "could work for the MVP, but we should keep the rollout path narrow.",
+                    "needs a bit more validation before we treat it as the default approach."
+                ]
             }
         }
 

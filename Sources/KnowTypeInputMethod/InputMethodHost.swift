@@ -3,6 +3,9 @@ import KnowTypeCore
 import KnowTypeProviders
 
 public struct InputMethodPipeline: Sendable {
+    public static let defaultMaxPrefixCandidates = 6
+    public static let defaultMaxContinuationCandidates = 6
+
     private let correctionEngine: CorrectionEngine
     private let continuationEngine: PrefixContinuationEngine
 
@@ -28,7 +31,7 @@ public struct InputMethodPipeline: Sendable {
                 for: locked,
                 context: context,
                 lengthLevel: .medium,
-                maxCandidates: 3
+                maxCandidates: Self.defaultMaxContinuationCandidates
             )
         } else {
             continuations = []
@@ -62,7 +65,7 @@ public struct InputMethodPipeline: Sendable {
             continuations = continuationEngine.fallbackContinuations(
                 for: locked.text,
                 lengthLevel: .medium,
-                maxCandidates: 3
+                maxCandidates: Self.defaultMaxContinuationCandidates
             )
         } else {
             continuations = []

@@ -40,7 +40,7 @@ LLMResponse {
 ```text
 Sources/KnowTypeCore/          Core models, correction, prefix-locked continuation
 Sources/KnowTypeProviders/     Provider profiles, runtime loading, adapters, HTTP normalization
-Sources/KnowTypeInputMethod/   Input-method interaction, custom candidate panel, IMK bootstrap
+Sources/KnowTypeInputMethod/   Input-method interaction, native candidates, IMK bootstrap
 Sources/KnowTypeInputMethodApp Local macOS IMK background app entry point
 Sources/KnowTypeSettingsApp/   SwiftUI settings and provider profile editing
 Tests/                         Unit and adapter tests
@@ -78,6 +78,8 @@ To install the local macOS input method bundle:
 ```
 
 The script copies the bundle to `~/Library/Input Methods/KnowType.app`. Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. If the input source list does not refresh, log out and back in, or restart the affected app.
+
+During local input, KnowType uses the native macOS candidate panel where possible. It marks the composing text in the client app first, then `Space` replaces that marked text with the best corrected prefix, while `Tab` replaces it with prefix plus the first continuation.
 
 To remove the local bundle:
 
@@ -133,6 +135,8 @@ All provider responses must normalize into `LLMResponse` before reaching core or
 - `Tab`: commit the selected prefix plus the first or selected continuation.
 - `Option + number`: commit the selected prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation and is also shown as `Tab / Option+1`.
 - `Option + R`: request polish; this is the only default path that may rewrite the prefix.
+
+The native candidate list shows prefix candidates first and continuation candidates after them. Local fallback now provides up to six medium continuation candidates when the provider is unavailable.
 
 ## Privacy Baseline
 
