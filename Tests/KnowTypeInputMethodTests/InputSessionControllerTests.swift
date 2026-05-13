@@ -18,6 +18,20 @@ private actor RecordingProvider: LLMProvider {
     }
 }
 
+private actor ThrowingRecordingProvider: LLMProvider {
+    nonisolated let providerName = "throwing"
+    private var recordedRequests: [LLMRequest] = []
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        throw NSError(domain: "KnowTypeTests", code: 1)
+    }
+
+    var requests: [LLMRequest] {
+        recordedRequests
+    }
+}
+
 private actor ManualSuggestionLoader {
     private var continuations: [String: CheckedContinuation<SuggestionResponse, Never>] = [:]
 
@@ -248,6 +262,23 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
         XCTAssertEqual(suggestion.prefixCandidates.first?.source, "local-protection")
         XCTAssertTrue(suggestion.continuationCandidates.isEmpty)
+    }
+
+    func testProviderFailureDoesNotBlockLocalPrefixSubmission() async {
+        let provider = ThrowingRecordingProvider()
+        let controller = InputSessionController(provider: provider)
+
+        let suggestion = await controller.update(
+            rawInput: "wo jue de zhege fagnan",
+            appBundleID: nil,
+            locale: .zhCN
+        )
+        let result = await controller.handle(action: .space)
+        let requests = await provider.requests
+
+        XCTAssertFalse(requests.isEmpty)
+        XCTAssertEqual(suggestion.prefixCandidates.first?.text, "我觉得这个方案")
+        XCTAssertEqual(result, .commit("我觉得这个方案"))
     }
 
     func testStaleUpdateCannotOverwriteNewerInputState() async throws {

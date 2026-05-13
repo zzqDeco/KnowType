@@ -1,5 +1,6 @@
 import Foundation
 import KnowTypeCore
+import KnowTypeProviders
 
 #if canImport(InputMethodKit)
 import AppKit
@@ -7,7 +8,7 @@ import InputMethodKit
 
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
-    private let sessionController = InputSessionController()
+    private let sessionController: InputSessionController
     private let keyMapper = InputKeyCommandMapper()
     private let candidateListBuilder = InputCandidateListBuilder()
     private let customCandidateSelectionPolicy = CustomCandidateSelectionPolicy()
@@ -20,6 +21,13 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var selectedNativeCandidate: InputCandidateSelection?
     private var candidatePanelState = CandidatePanelState()
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
+
+    public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
+        self.sessionController = InputSessionController(
+            provider: ProviderRuntimeLoader.loadDefaultProvider()
+        )
+        super.init(server: server, delegate: delegate, client: inputClient)
+    }
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
         let stroke = InputKeyStroke(
