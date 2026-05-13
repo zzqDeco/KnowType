@@ -9,6 +9,7 @@ import AppKit
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
     private let sessionController: InputSessionController
+    private let hasProvider: Bool
     private let keyMapper = InputKeyCommandMapper()
     private let candidateListBuilder = InputCandidateListBuilder()
     private let customCandidateSelectionPolicy = CustomCandidateSelectionPolicy()
@@ -17,16 +18,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
     private var suggestionTask: Task<Void, Never>?
-    private var nativeCandidates: IMKCandidates?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
     private var candidatePanelState = CandidatePanelState()
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
-        self.sessionController = InputSessionController(
-            provider: ProviderRuntimeLoader.loadDefaultProvider()
-        )
+        let provider = ProviderRuntimeLoader.loadDefaultProvider()
+        self.hasProvider = provider != nil
+        self.sessionController = InputSessionController(provider: provider)
         super.init(server: server, delegate: delegate, client: inputClient)
     }
 
@@ -100,12 +100,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     public override func hidePalettes() {
         super.hidePalettes()
-        hideNativeCandidates()
         hideCandidatePanel()
     }
 
     public override func inputControllerWillClose() {
-        hideNativeCandidates()
         hideCandidatePanel()
         super.inputControllerWillClose()
     }
@@ -172,11 +170,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 self.lastSuggestion = suggestion
                 self.lastSuggestionRawInput = rawInput
                 self.refreshComposition(client: currentClient)
-                if self.updateNativeCandidates(client: currentClient) {
-                    self.hideCandidatePanel()
-                } else {
-                    self.updateCandidatePanel(suggestion: suggestion, client: currentClient)
-                }
+                self.updateCandidatePanel(suggestion: suggestion, client: currentClient)
             }
         }
     }
@@ -190,11 +184,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             lastSuggestion = nil
             lastSuggestionRawInput = nil
             refreshComposition(client: sender)
-            if updateNativeCandidates(client: sender) {
-                hideCandidatePanel()
-            } else {
-                updateCandidatePanel(suggestion: nil, client: sender)
-            }
+            updateCandidatePanel(suggestion: nil, client: sender)
             return
         }
 
@@ -203,15 +193,14 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             appBundleID: appBundleIdentifier(client: sender),
             locale: locale
         )
-        let suggestion = InputMethodPipeline.localSuggestions(for: context)
+        let suggestion = InputMethodPipeline.localSuggestions(
+            for: context,
+            includeFallbackContinuations: !hasProvider
+        )
         lastSuggestion = suggestion
         lastSuggestionRawInput = rawBuffer
         refreshComposition(client: sender)
-        if updateNativeCandidates(client: sender) {
-            hideCandidatePanel()
-        } else {
-            updateCandidatePanel(suggestion: suggestion, client: sender)
-        }
+        updateCandidatePanel(suggestion: suggestion, client: sender)
     }
 
     @discardableResult
@@ -252,7 +241,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                     appBundleID: appBundleIdentifier(client: sender),
                     locale: locale
                 )
-                let suggestion = InputMethodPipeline.localSuggestions(for: context)
+                let suggestion = InputMethodPipeline.localSuggestions(
+                    for: context,
+                    includeFallbackContinuations: true
+                )
                 return InputCompositionController().handle(
                     action: action,
                     prefixCandidates: suggestion.prefixCandidates,
@@ -329,7 +321,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private func resetComposition(client sender: Any!) {
         rawBuffer = ""
         invalidateSuggestion()
-        hideNativeCandidates()
         hideCandidatePanel()
     }
 
@@ -367,16 +358,19 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         guard let client = sender as? IMKTextInput else {
             return .zero
         }
-        let characterRange = CandidateAnchorPolicy.characterRange(
+        let characterRanges = CandidateAnchorPolicy.characterRanges(
             selectedRange: client.selectedRange(),
             markedRange: client.markedRange()
         )
-        let firstRect = client.firstRect(
-            forCharacterRange: characterRange,
-            actualRange: nil
-        )
-        if isUsableAnchorRect(firstRect) {
-            return firstRect
+
+        for characterRange in characterRanges {
+            let firstRect = client.firstRect(
+                forCharacterRange: characterRange,
+                actualRange: nil
+            )
+            if isUsableAnchorRect(firstRect) {
+                return firstRect
+            }
         }
 
         var lineRect = NSRect.zero
@@ -406,75 +400,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .passThrough:
             return false
         }
-    }
-
-    @discardableResult
-    private func updateNativeCandidates(client sender: Any!) -> Bool {
-        let selections = candidateListBuilder.candidateSelections(rawInput: rawBuffer, suggestion: lastSuggestion)
-        displayedNativeCandidates = selections
-        selectedNativeCandidate = nil
-        guard !selections.isEmpty,
-              nativeCandidates != nil || server() != nil else {
-            hideNativeCandidates()
-            return false
-        }
-        let topLeft = nativeCandidateTopLeft(client: sender)
-        let candidateStrings = selections.map(\.text)
-
-        return MainActor.assumeIsolated { () -> Bool in
-            guard let nativeCandidates = ensureNativeCandidates() else {
-                return false
-            }
-            nativeCandidates.setCandidateData(candidateStrings)
-            nativeCandidates.update()
-            if let topLeft {
-                nativeCandidates.setCandidateFrameTopLeft(topLeft)
-                nativeCandidates.show()
-            } else {
-                nativeCandidates.show(kIMKLocateCandidatesBelowHint)
-            }
-            return true
-        }
-    }
-
-    @MainActor
-    private func ensureNativeCandidates() -> IMKCandidates? {
-        if let nativeCandidates {
-            return nativeCandidates
-        }
-        guard let server = server() else {
-            return nil
-        }
-        let candidates = IMKCandidates(
-            server: server,
-            panelType: kIMKSingleColumnScrollingCandidatePanel
-        )
-        candidates?.setSelectionKeys([18, 19, 20, 21, 23, 22, 26, 28, 25])
-        candidates?.setDismissesAutomatically(false)
-        candidates?.setAttributes([
-            NSAttributedString.Key.font: NSFont.systemFont(ofSize: 15),
-            IMKCandidatesSendServerKeyEventFirst as String: true,
-            IMKCandidatesOpacityAttributeName as String: 1.0
-        ])
-        nativeCandidates = candidates
-        return candidates
-    }
-
-    private func hideNativeCandidates() {
-        displayedNativeCandidates = []
-        selectedNativeCandidate = nil
-        MainActor.assumeIsolated {
-            nativeCandidates?.hide()
-            nativeCandidates?.setCandidateData([])
-        }
-    }
-
-    private func nativeCandidateTopLeft(client sender: Any!) -> NSPoint? {
-        let anchorRect = candidateAnchorRect(client: sender)
-        guard isUsableAnchorRect(anchorRect) else {
-            return nil
-        }
-        return NSPoint(x: anchorRect.minX, y: anchorRect.minY - 4)
     }
 
     private func selectNativeCandidate(matching text: String?) {

@@ -10,7 +10,7 @@ final class InputCandidateListBuilderTests: XCTestCase {
         XCTAssertEqual(builder.candidates(rawInput: "", suggestion: nil), [])
     }
 
-    func testNativeCandidateListIncludesPrefixAndContinuationRows() {
+    func testCandidateListIncludesPrefixAndContinuationRows() {
         let suggestion = SuggestionResponse(
             prefixCandidates: [
                 CorrectionCandidate(
@@ -51,7 +51,7 @@ final class InputCandidateListBuilderTests: XCTestCase {
         XCTAssertFalse(candidates.contains("wo jue de zhege fagnan"))
     }
 
-    func testNativeCandidateSelectionsKeepSelectablePrefixAndContinuationIndexes() {
+    func testCandidateSelectionsKeepSelectablePrefixAndContinuationIndexes() {
         let suggestion = SuggestionResponse(
             prefixCandidates: [
                 CorrectionCandidate(

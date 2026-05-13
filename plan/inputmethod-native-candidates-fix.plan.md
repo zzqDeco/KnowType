@@ -5,11 +5,11 @@ Goal: make local macOS testing usable by fixing Chinese composition, caret-follo
 Scope:
 
 - use `IMKTextInput.setMarkedText` while composing, then replace the active marked range on commit
-- use `IMKCandidates` as the primary candidate surface when available
-- fall back to the custom AppKit panel only if native candidates cannot be created
+- use the custom AppKit panel as the primary visible candidate surface because `IMKCandidates` can silently fail to appear in some host apps
 - recalculate the caret anchor after async suggestion refresh instead of reusing a stale rect
-- use selected range, marked range, and line-height rect fallbacks for candidate anchoring
-- show prefix candidates and continuation candidates in the native candidate list
+- use marked range end, selected range, line-height rect, and pointer-location fallbacks for candidate anchoring
+- show prefix candidates and continuation candidates in one compact native-style list without preview/header chrome
+- defer local fallback continuation rows while a configured provider-backed suggestion is pending
 - raise default prefix/continuation breadth from 3 to 6 candidates
 
 Validation:

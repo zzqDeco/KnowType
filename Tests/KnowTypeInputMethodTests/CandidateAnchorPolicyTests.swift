@@ -24,6 +24,19 @@ final class CandidateAnchorPolicyTests: XCTestCase {
         )
     }
 
+    func testCharacterRangesPreferMarkedRangeEndThenSelectedRange() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.characterRanges(
+                selectedRange: NSRange(location: 42, length: 0),
+                markedRange: NSRange(location: 10, length: 4)
+            ),
+            [
+                NSRange(location: 14, length: 0),
+                NSRange(location: 42, length: 0)
+            ]
+        )
+    }
+
     func testCharacterRangeUsesDocumentStartWhenClientRangeIsUnknown() {
         XCTAssertEqual(
             CandidateAnchorPolicy.characterRange(

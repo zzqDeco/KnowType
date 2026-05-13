@@ -33,7 +33,7 @@ final class CandidatePanelRendererTests: XCTestCase {
         )
     ]
 
-    func testRendersChinesePanelWithSeparatePrefixAndContinuationRows() {
+    func testRendersChinesePanelAsCompactNativeStyleRows() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
             prefixCandidates: prefixCandidates,
@@ -45,56 +45,34 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(
             rendered.rows.map(\.kind),
             [
-                .sectionHeader,
-                .rawInput,
-                .sectionHeader,
                 .prefixCandidate,
                 .prefixCandidate,
-                .sectionHeader,
                 .continuationCandidate,
                 .continuationCandidate
             ]
         )
-        XCTAssertEqual(rendered.rows[0].text, "原始输入")
-        XCTAssertEqual(rendered.rows[2].text, "锁定前缀")
-        XCTAssertEqual(rendered.rows[5].text, "续写")
-        XCTAssertEqual(rendered.rows[3].visualRole, .lockedPrefix)
-        XCTAssertEqual(rendered.rows[4].visualRole, .lockedPrefix)
-        XCTAssertEqual(rendered.rows[6].visualRole, .continuation)
-        XCTAssertEqual(rendered.rows[7].visualRole, .continuation)
-        XCTAssertEqual(rendered.rows[1].shortcutLabel, "0")
-        XCTAssertEqual(rendered.rows[3].shortcutLabel, "1")
-        XCTAssertEqual(rendered.rows[4].shortcutLabel, "2")
-        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab  ⌥1")
-        XCTAssertEqual(rendered.rows[7].shortcutLabel, "⌥2")
+        XCTAssertEqual(rendered.rows[0].visualRole, .lockedPrefix)
+        XCTAssertEqual(rendered.rows[1].visualRole, .lockedPrefix)
+        XCTAssertEqual(rendered.rows[2].visualRole, .continuation)
+        XCTAssertEqual(rendered.rows[3].visualRole, .continuation)
+        XCTAssertEqual(rendered.rows[0].shortcutLabel, "1")
+        XCTAssertEqual(rendered.rows[1].shortcutLabel, "2")
+        XCTAssertEqual(rendered.rows[2].shortcutLabel, "⇥")
+        XCTAssertEqual(rendered.rows[3].shortcutLabel, "⌥2")
     }
 
-    func testRendersEnglishLabelsForEnglishLocale() {
+    func testRendersRawInputOnlyWhenNoSuggestionsExist() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "this is teh plan",
-            prefixCandidates: [
-                CorrectionCandidate(
-                    text: "this is the plan",
-                    source: "local",
-                    confidence: 1.0,
-                    correctionLevel: .light
-                )
-            ],
-            continuationCandidates: [
-                ContinuationCandidate(
-                    text: "for the next milestone",
-                    lengthLevel: .medium,
-                    confidence: 0.9,
-                    provider: "test"
-                )
-            ]
+            prefixCandidates: [],
+            continuationCandidates: []
         )
 
         let rendered = CandidatePanelRenderer(locale: .enUS).render(viewModel)
 
-        XCTAssertEqual(rendered.rows[0].text, "Raw Input")
-        XCTAssertEqual(rendered.rows[2].text, "Locked Prefix")
-        XCTAssertEqual(rendered.rows[4].text, "Continuation")
+        XCTAssertEqual(rendered.rows.map(\.kind), [.rawInput])
+        XCTAssertEqual(rendered.rows[0].text, "this is teh plan")
+        XCTAssertNil(rendered.rows[0].shortcutLabel)
     }
 
     func testMarksSelectedContinuationRow() {
@@ -109,12 +87,12 @@ final class CandidatePanelRendererTests: XCTestCase {
             selected: .continuationCandidate(1)
         )
 
-        XCTAssertFalse(rendered.rows[3].isSelected)
-        XCTAssertFalse(rendered.rows[6].isSelected)
-        XCTAssertTrue(rendered.rows[7].isSelected)
+        XCTAssertFalse(rendered.rows[0].isSelected)
+        XCTAssertFalse(rendered.rows[2].isSelected)
+        XCTAssertTrue(rendered.rows[3].isSelected)
     }
 
-    func testOmitsContinuationSectionWhenEmpty() {
+    func testOmitsContinuationRowsWhenEmpty() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
             prefixCandidates: prefixCandidates,
@@ -123,12 +101,12 @@ final class CandidatePanelRendererTests: XCTestCase {
 
         let rendered = CandidatePanelRenderer(locale: .zhCN).render(viewModel)
 
-        XCTAssertFalse(rendered.rows.contains { $0.text == "续写" })
         XCTAssertFalse(rendered.rows.contains { $0.kind == .continuationCandidate })
-        XCTAssertEqual(rendered.previewText, "我觉得这个方案")
+        XCTAssertEqual(rendered.rows.map(\.kind), [.prefixCandidate, .prefixCandidate])
+        XCTAssertNil(rendered.previewText)
     }
 
-    func testPreviewStringUsesLockedPrefixAndFirstContinuation() {
+    func testPreviewIsOmittedForNativeStyleCandidatePanel() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
             prefixCandidates: prefixCandidates,
@@ -137,7 +115,7 @@ final class CandidatePanelRendererTests: XCTestCase {
 
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
 
-        XCTAssertEqual(rendered.previewText, "我觉得这个方案 | 还有进一步优化空间")
+        XCTAssertNil(rendered.previewText)
     }
 
     func testOptionShortcutLabelsMatchCommitActions() {
@@ -149,8 +127,8 @@ final class CandidatePanelRendererTests: XCTestCase {
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
         let controller = InputCompositionController()
 
-        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab  ⌥1")
-        XCTAssertEqual(rendered.rows[7].shortcutLabel, "⌥2")
+        XCTAssertEqual(rendered.rows[2].shortcutLabel, "⇥")
+        XCTAssertEqual(rendered.rows[3].shortcutLabel, "⌥2")
         XCTAssertEqual(
             controller.handle(
                 action: .tab,
