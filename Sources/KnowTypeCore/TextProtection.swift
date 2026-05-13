@@ -84,6 +84,7 @@ public enum TextProtection {
         let patterns: [(String, String)] = [
             (#"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s]+"#, "url"),
             (#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?"#, "url"),
+            (#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?"#, "url"),
             (#"(?i)\blocalhost(?::\d+)?(?:/[^\s]*)?"#, "url"),
             (#"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?"#, "url"),
             (#"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, "email"),
@@ -119,6 +120,10 @@ public enum TextProtection {
         text.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
             || text.range(
                 of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?$"#,
+                options: .regularExpression
+            ) != nil
+            || text.range(
+                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?$"#,
                 options: .regularExpression
             ) != nil
             || text.range(
@@ -161,7 +166,7 @@ public enum TextProtection {
         if hasCommandOperator(in: text) {
             return true
         }
-        let tokens = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        let tokens = commandTokens(from: text)
         guard let firstToken = tokens.first else {
             return false
         }
@@ -233,6 +238,13 @@ public enum TextProtection {
         }
 
         let arguments = Array(tokens.dropFirst())
+        if command == "sudo" {
+            let sudoArguments = argumentsAfterSudoOptions(arguments)
+            guard let wrappedCommand = sudoArguments.first else {
+                return false
+            }
+            return isCommandInvocation(firstToken: wrappedCommand, tokens: sudoArguments)
+        }
         if shellBuiltins.contains(command) {
             return isShellBuiltinInvocation(command: command, arguments: arguments)
         }
@@ -265,6 +277,11 @@ public enum TextProtection {
         return false
     }
 
+    private static func commandTokens(from text: String) -> [String] {
+        let tokens = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        return Array(tokens.drop(while: isEnvironmentAssignment))
+    }
+
     private static func normalizedCommandName(_ token: String) -> String? {
         let stripped = token.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
         let knownCommands = Set(commandSubcommands.keys)
@@ -276,6 +293,50 @@ public enum TextProtection {
             return nil
         }
         return stripped
+    }
+
+    private static func isEnvironmentAssignment(_ token: String) -> Bool {
+        let stripped = token.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+        return stripped.range(
+            of: #"^[A-Za-z_][A-Za-z0-9_]*=.+"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func argumentsAfterSudoOptions(_ arguments: [String]) -> [String] {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index].trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+            if argument == "--" {
+                index += 1
+                break
+            }
+            guard argument.hasPrefix("-"), argument.count > 1 else {
+                break
+            }
+
+            index += 1
+            if sudoOptionTakesValue(argument), index < arguments.count {
+                index += 1
+            }
+        }
+        return Array(arguments.dropFirst(index))
+    }
+
+    private static func sudoOptionTakesValue(_ option: String) -> Bool {
+        let optionName = option.split(separator: "=", maxSplits: 1).first.map(String.init) ?? option
+        let optionsWithValue: Set<String> = [
+            "-C", "--close-from",
+            "-D", "--chdir",
+            "-g", "--group",
+            "-h", "--host",
+            "-p", "--prompt",
+            "-R", "--chroot",
+            "-r", "--role",
+            "-t", "--type",
+            "-u", "--user"
+        ]
+        return optionsWithValue.contains(optionName) && !option.contains("=")
     }
 
     private static func isCommandFlagOrAssignment(_ argument: String) -> Bool {
@@ -351,12 +412,12 @@ public enum TextProtection {
         guard scriptFileExtensions.contains(fileExtension) else {
             return false
         }
-        return trimmed.range(of: #"^[A-Za-z0-9_.~/-]+\.[A-Za-z0-9]+$"#, options: .regularExpression) != nil
+        return trimmed.range(of: #"^(?:(?:~|\.|\.\.)/)?[A-Za-z0-9][A-Za-z0-9_.-]*\.[A-Za-z0-9]+$"#, options: .regularExpression) != nil
     }
 
     private static func isDotfileArgument(_ argument: String) -> Bool {
         let trimmed = argument.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
-        return trimmed.range(of: #"^(?:\.|~?/|\.?/)?\.[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil
+        return trimmed.range(of: #"^(?:(?:~|\.|\.\.)/)?\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$"#, options: .regularExpression) != nil
     }
 
     private static func ranges(matching pattern: String, in text: String, reason: String) -> [ProtectedRange] {

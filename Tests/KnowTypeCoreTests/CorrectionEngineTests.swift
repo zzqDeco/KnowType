@@ -77,7 +77,11 @@ final class CorrectionEngineTests: XCTestCase {
             "192.168.1.1",
             "localhost:3000",
             "127.0.0.1:8080",
+            "api.local:8080",
+            "service.internal",
+            "example.sh",
             "open https://example.com/search?q=KnowType",
+            "open api.local:8080",
             "support@example.com",
             "send this to support@example.com",
             "/Users/zq/project/KnowType",
@@ -105,6 +109,8 @@ final class CorrectionEngineTests: XCTestCase {
             "vim secrets.txt",
             "rm README.md",
             "sudo rm README.md",
+            "sudo -E rm README.md",
+            "sudo -u deploy git pull",
             "cp .env backup.env",
             "touch /tmp/knowtype",
             "docker ps | rg api",
@@ -121,9 +127,15 @@ final class CorrectionEngineTests: XCTestCase {
             "env",
             "export PATH=/usr/local/bin:$PATH",
             "source .env",
+            "source .env.local",
+            "source .env.production",
             "source ./scripts/env.sh",
             "python main.py",
+            "python my-script.py",
             "node server.js",
+            "node build-prod.js",
+            "GITHUB_TOKEN=secret npm publish",
+            "API_KEY=secret curl example.com",
             "let appBundleID = context.appBundleID",
             "import Foundation",
             "snake_case",
@@ -244,7 +256,10 @@ final class CorrectionEngineTests: XCTestCase {
             ("send to go.dev", "go.dev"),
             ("open localhost:3000", "localhost:3000"),
             ("connect 127.0.0.1:8080", "127.0.0.1:8080"),
-            ("router 192.168.1.1", "192.168.1.1")
+            ("router 192.168.1.1", "192.168.1.1"),
+            ("open api.local:8080", "api.local:8080"),
+            ("check service.internal", "service.internal"),
+            ("run example.sh", "example.sh")
         ]
 
         for (input, protectedText) in examples {
