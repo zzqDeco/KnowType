@@ -62,7 +62,9 @@ public struct CandidatePanelRenderer: Sendable {
 
     public func render(
         _ viewModel: CandidatePanelViewModel,
-        selected selection: CandidatePanelSelection? = nil
+        selected selection: CandidatePanelSelection? = nil,
+        pageStart: Int = 0,
+        pageSize: Int = CandidatePanelWindowState.defaultPageSize
     ) -> CandidatePanelRenderModel {
         var rows: [CandidatePanelRenderRow] = []
         let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
@@ -84,7 +86,7 @@ public struct CandidatePanelRenderer: Sendable {
                 rows.append(
                     CandidatePanelRenderRow(
                         kind: .prefixCandidate,
-                        shortcutLabel: "\(index + 1)",
+                        shortcutLabel: nil,
                         text: candidate.text,
                         isSelected: selection == .prefixCandidate(index),
                         visualRole: .lockedPrefix
@@ -107,10 +109,12 @@ public struct CandidatePanelRenderer: Sendable {
             }
         }
 
+        let visibleRows = visibleRows(from: rows, pageStart: pageStart, pageSize: pageSize)
+
         return CandidatePanelRenderModel(
             title: viewModel.title,
             previewText: nil,
-            rows: rows
+            rows: relabelPrefixShortcuts(in: visibleRows)
         )
     }
 
@@ -119,5 +123,31 @@ public struct CandidatePanelRenderer: Sendable {
             return "⇥"
         }
         return "⌥\(index + 1)"
+    }
+
+    private func visibleRows(
+        from rows: [CandidatePanelRenderRow],
+        pageStart: Int,
+        pageSize: Int
+    ) -> [CandidatePanelRenderRow] {
+        guard !rows.isEmpty else {
+            return []
+        }
+        let start = min(max(0, pageStart), rows.count - 1)
+        let end = min(start + max(1, pageSize), rows.count)
+        return Array(rows[start..<end])
+    }
+
+    private func relabelPrefixShortcuts(in rows: [CandidatePanelRenderRow]) -> [CandidatePanelRenderRow] {
+        var prefixShortcut = 1
+        return rows.map { row in
+            guard row.kind == .prefixCandidate else {
+                return row
+            }
+            var updated = row
+            updated.shortcutLabel = "\(prefixShortcut)"
+            prefixShortcut += 1
+            return updated
+        }
     }
 }

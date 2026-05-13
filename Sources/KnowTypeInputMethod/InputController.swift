@@ -144,6 +144,24 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             refreshComposition(client: sender)
             return true
         case .selectCandidate(let number):
+            if number > 0,
+               let panelSelection = candidatePanelState.selectionForShortcutNumber(number),
+               let inputSelection = inputCandidateSelection(
+                for: panelSelection,
+                in: candidatePanelState.windowState.viewModel
+               ) {
+                selectedNativeCandidate = inputSelection
+                let result = InputSessionCommitPolicy.result(
+                    for: .space,
+                    rawInput: rawBuffer,
+                    suggestion: lastSuggestion,
+                    suggestionRawInput: lastSuggestionRawInput,
+                    selectedCandidate: sessionSelection(from: inputSelection),
+                    appBundleID: appBundleIdentifier(client: sender),
+                    locale: locale
+                )
+                return applyCommitResult(result, client: sender)
+            }
             if let result = InputSessionCommitPolicy.resultForCandidateNumber(
                 number,
                 rawInput: rawBuffer,

@@ -52,6 +52,26 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "nixiang").first?.text, "你想")
     }
 
+    func testSingleSyllableShowsExpandedHomophoneCandidates() {
+        let engine = TraditionalInputEngine()
+        let candidates = engine.candidates(for: "ni").map(\.text)
+
+        XCTAssertEqual(candidates.first, "你")
+        XCTAssertTrue(candidates.contains("呢"))
+        XCTAssertTrue(candidates.contains("尼"))
+        XCTAssertTrue(candidates.contains("拟"))
+        XCTAssertGreaterThanOrEqual(candidates.count, 10)
+    }
+
+    func testTrailingIncompleteSyllableCanStillCompose() {
+        let engine = TraditionalInputEngine()
+        let nihCandidates = engine.candidates(for: "nih").map(\.text)
+
+        XCTAssertEqual(engine.candidates(for: "niw").first?.text, "你我")
+        XCTAssertEqual(nihCandidates.first, "你好")
+        XCTAssertTrue(nihCandidates.contains("你"))
+    }
+
     func testMVPExamplesDecodeThroughSeedLexicon() {
         let engine = TraditionalInputEngine()
         let examples = [

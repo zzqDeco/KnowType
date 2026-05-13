@@ -86,6 +86,8 @@ The factory maps `ProviderKind` to one adapter and keeps provider-specific reque
 Input-method candidate presentation maps `SuggestionResponse` into compact macOS-style candidate rows:
 
 - raw input is shown only before any prefix or continuation suggestion exists
+- prefix candidates are paged in native-style slices of up to 9 shortcutable rows; `PageDown` / `PageUp` move the visible page and number keys select candidates from the current page
+- single-syllable pinyin such as `ni` may produce enough homophone prefix candidates to require paging
 - prefix candidates are first-class candidates
 - continuation candidates are selectable candidates but still commit as `locked prefix + continuation`
 - fallback local breadth is six medium candidates for both correction alternatives and continuations where available

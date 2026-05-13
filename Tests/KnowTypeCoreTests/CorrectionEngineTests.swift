@@ -100,6 +100,30 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "你是")
     }
 
+    func testTrailingIncompleteCompactPinyinUsesCompletion() async {
+        let engine = CorrectionEngine()
+
+        let candidates = await engine.correct(
+            InputContext(rawInput: "niw", locale: .zhCN)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "你我")
+    }
+
+    func testSingleSyllableCorrectionKeepsHomophoneCandidates() async {
+        let engine = CorrectionEngine()
+
+        let candidates = await engine.correct(
+            InputContext(rawInput: "ni", locale: .zhCN)
+        )
+        let texts = candidates.map(\.text)
+
+        XCTAssertEqual(texts.first, "你")
+        XCTAssertTrue(texts.contains("呢"))
+        XCTAssertTrue(texts.contains("尼"))
+        XCTAssertGreaterThanOrEqual(texts.count, 10)
+    }
+
     func testTechnicalShortTokenDoesNotUsePinyinInitialCloudPath() async {
         let provider = RecordingProvider()
         let engine = CorrectionEngine(cloudProvider: provider)

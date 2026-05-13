@@ -54,7 +54,7 @@ public struct TraditionalInputEngine: Sendable {
                 )
             }
 
-        return uniqueSorted(parsed + prefixCompletionCandidates)
+        return uniqueSorted(parsed + prefixCompletionCandidates + partialPrefixCandidates(from: tokens))
     }
 
     public func canCompletePinyinPrefix(
@@ -65,6 +65,7 @@ public struct TraditionalInputEngine: Sendable {
             for: rawInput,
             preserveCapitalizedPinyin: preserveCapitalizedPinyin
         ).isEmpty
+            || tokenize(rawInput)?.contains { $0.completionPenalty > 0 } == true
     }
 
     private func tokenize(_ rawInput: String) -> [InputToken]? {
@@ -74,7 +75,12 @@ public struct TraditionalInputEngine: Sendable {
 
         if separated.count > 1 {
             return separated.map { token in
-                InputToken(surface: token, normalized: normalize(token), isTypoNormalized: isTypo(token))
+                InputToken(
+                    surface: token,
+                    normalized: normalize(token),
+                    isTypoNormalized: isTypo(token),
+                    completionPenalty: 0
+                )
             }
         }
 
@@ -83,7 +89,14 @@ public struct TraditionalInputEngine: Sendable {
         }
 
         if isPassthroughToken(token) {
-            return [InputToken(surface: token, normalized: token, isTypoNormalized: false)]
+            return [
+                InputToken(
+                    surface: token,
+                    normalized: token,
+                    isTypoNormalized: false,
+                    completionPenalty: 0
+                )
+            ]
         }
 
         return segmentCompact(token)
@@ -92,9 +105,9 @@ public struct TraditionalInputEngine: Sendable {
     private func segmentCompact(_ token: String) -> [InputToken]? {
         let lower = token.lowercased()
         let end = lower.endIndex
-        var memo: [String.Index: [[String]]] = [:]
+        var memo: [String.Index: [[InputToken]]] = [:]
 
-        func paths(from index: String.Index) -> [[String]] {
+        func paths(from index: String.Index) -> [[InputToken]] {
             if index == end {
                 return [[]]
             }
@@ -103,17 +116,42 @@ public struct TraditionalInputEngine: Sendable {
             }
 
             let suffix = lower[index...]
-            var results: [[String]] = []
+            var results: [[InputToken]] = []
             for key in compactSegmentKeys where suffix.hasPrefix(key) {
                 let next = lower.index(index, offsetBy: key.count)
                 for path in paths(from: next) {
-                    results.append([key] + path)
+                    results.append([
+                        InputToken(
+                            surface: key,
+                            normalized: normalize(key),
+                            isTypoNormalized: isTypo(key),
+                            completionPenalty: 0
+                        )
+                    ] + path)
                     if results.count >= 8 {
                         break
                     }
                 }
                 if results.count >= 8 {
                     break
+                }
+            }
+            if results.isEmpty {
+                let suffixText = String(suffix)
+                for key in compactPrefixCompletionKeys where key.hasPrefix(suffixText) && key != suffixText {
+                    let completionRatio = Double(suffixText.count) / Double(key.count)
+                    let completionPenalty = 0.10 + (0.18 * (1.0 - completionRatio))
+                    results.append([
+                        InputToken(
+                            surface: suffixText,
+                            normalized: normalize(key),
+                            isTypoNormalized: false,
+                            completionPenalty: completionPenalty
+                        )
+                    ])
+                    if results.count >= 8 {
+                        break
+                    }
                 }
             }
             memo[index] = results
@@ -123,9 +161,7 @@ public struct TraditionalInputEngine: Sendable {
         guard let firstPath = paths(from: lower.startIndex).first else {
             return nil
         }
-        return firstPath.map { key in
-            InputToken(surface: key, normalized: normalize(key), isTypoNormalized: isTypo(key))
-        }
+        return firstPath
     }
 
     private func compactPrefixCompletionCandidates(
@@ -188,6 +224,28 @@ public struct TraditionalInputEngine: Sendable {
         return normalize(lower)
     }
 
+    private func partialPrefixCandidates(from tokens: [InputToken]) -> [TraditionalInputCandidate] {
+        guard let completionIndex = tokens.firstIndex(where: { $0.completionPenalty > 0 }),
+              completionIndex > 0 else {
+            return []
+        }
+
+        let prefixTokens = Array(tokens.prefix(upTo: completionIndex))
+        return parse(
+            tokens: prefixTokens,
+            from: 0,
+            preserveCapitalizedPinyin: false
+        )
+        .filter { $0.translatedCount > 0 }
+        .map { state in
+            TraditionalInputCandidate(
+                text: joinSegments(state.segments),
+                confidence: state.confidence * 0.60,
+                inputTokens: prefixTokens.map(\.surface)
+            )
+        }
+    }
+
     private func parse(
         tokens: [InputToken],
         from index: Int,
@@ -216,6 +274,7 @@ public struct TraditionalInputEngine: Sendable {
             }
 
             let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
+            let completionPenalty = tokenSlice.map(\.completionPenalty).reduce(0, +)
             for output in outputs {
                 for tail in parse(
                     tokens: tokens,
@@ -225,7 +284,8 @@ public struct TraditionalInputEngine: Sendable {
                     states.append(
                         ParseState(
                             segments: [output.text] + tail.segments,
-                            confidence: max(0.01, output.confidence - typoPenalty) * tail.confidence,
+                            confidence: max(0.01, output.confidence - typoPenalty - completionPenalty)
+                                * tail.confidence,
                             translatedCount: tail.translatedCount + 1
                         )
                     )
@@ -351,6 +411,7 @@ private struct InputToken: Sendable, Equatable {
     var surface: String
     var normalized: String
     var isTypoNormalized: Bool
+    var completionPenalty: Double
 }
 
 private struct ParseState: Sendable, Equatable {
@@ -481,11 +542,24 @@ private let syllableFallbackOutputs: [String: [LexiconOutput]] = [
     "kan": makeOutputs([("看", 0.86)]),
     "le": makeOutputs([("了", 0.88)]),
     "ma": makeOutputs([("吗", 0.84)]),
-    "ni": makeOutputs([("你", 0.90), ("呢", 0.64)]),
+    "ni": makeOutputs([
+        ("你", 0.90),
+        ("呢", 0.82),
+        ("尼", 0.78),
+        ("拟", 0.76),
+        ("泥", 0.74),
+        ("逆", 0.72),
+        ("妮", 0.70),
+        ("腻", 0.68),
+        ("倪", 0.66),
+        ("匿", 0.64),
+        ("霓", 0.62)
+    ]),
     "shi": makeOutputs([("是", 0.90), ("时", 0.80), ("事", 0.76)]),
     "shu": makeOutputs([("数", 0.74), ("书", 0.72)]),
     "ru": makeOutputs([("入", 0.74)]),
     "wen": makeOutputs([("问", 0.78), ("文", 0.74)]),
+    "wei": makeOutputs([("为", 0.80), ("未", 0.74), ("位", 0.70)]),
     "wo": makeOutputs([("我", 0.90)]),
     "xian": makeOutputs([("先", 0.88), ("现", 0.80), ("线", 0.74)]),
     "xiang": makeOutputs([("想", 0.88), ("像", 0.70)]),
@@ -511,6 +585,15 @@ private let knownPinyinTokens: Set<String> = {
         tokens.insert(token)
     }
     return tokens
+}()
+
+private let compactPrefixCompletionKeys: [String] = {
+    knownPinyinTokens.sorted { lhs, rhs in
+        if lhs.count == rhs.count {
+            return lhs < rhs
+        }
+        return lhs.count < rhs.count
+    }
 }()
 
 private func entry(_ pinyin: [String], _ outputs: [(String, Double)]) -> LexiconEntry {

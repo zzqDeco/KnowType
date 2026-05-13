@@ -3,10 +3,14 @@ import CoreGraphics
 import KnowTypeCore
 
 public struct CandidatePanelWindowState: Sendable, Equatable {
+    public static let defaultPageSize = 9
+
     public var isVisible: Bool
     public var anchorRect: CGRect
     public var viewModel: CandidatePanelViewModel
     public var selection: CandidatePanelSelection?
+    public var pageStart: Int
+    public var pageSize: Int
 
     public init(
         isVisible: Bool = false,
@@ -16,12 +20,16 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
             prefixCandidates: [],
             continuationCandidates: []
         ),
-        selection: CandidatePanelSelection? = nil
+        selection: CandidatePanelSelection? = nil,
+        pageStart: Int = 0,
+        pageSize: Int = CandidatePanelWindowState.defaultPageSize
     ) {
         self.isVisible = isVisible
         self.anchorRect = anchorRect
         self.viewModel = viewModel
         self.selection = selection
+        self.pageStart = pageStart
+        self.pageSize = pageSize
     }
 }
 
@@ -45,15 +53,17 @@ public struct CandidatePanelState: Sendable, Equatable {
             continuationCandidates: continuationCandidates
         )
         let isVisible = !rawInput.isEmpty || !prefixCandidates.isEmpty || !continuationCandidates.isEmpty
+        let selection = defaultSelection(
+            rawInput: rawInput,
+            prefixCandidates: prefixCandidates,
+            continuationCandidates: continuationCandidates
+        )
         windowState = CandidatePanelWindowState(
             isVisible: isVisible,
             anchorRect: anchorRect,
             viewModel: viewModel,
-            selection: defaultSelection(
-                rawInput: rawInput,
-                prefixCandidates: prefixCandidates,
-                continuationCandidates: continuationCandidates
-            )
+            selection: selection,
+            pageStart: pageStart(containing: selection, rows: selectableRows(in: viewModel))
         )
     }
 
@@ -69,12 +79,40 @@ public struct CandidatePanelState: Sendable, Equatable {
         }
 
         let currentIndex = windowState.selection.flatMap { rows.firstIndex(of: $0) } ?? 0
-        let nextIndex = clampedIndex(
-            currentIndex + offset(for: navigation),
-            upperBound: rows.count - 1
-        )
+        let nextIndex: Int
+        switch navigation {
+        case .pageDown:
+            nextIndex = clampedIndex(windowState.pageStart + windowState.pageSize, upperBound: rows.count - 1)
+        case .pageUp:
+            nextIndex = clampedIndex(windowState.pageStart - windowState.pageSize, upperBound: rows.count - 1)
+        case .down, .right, .up, .left:
+            nextIndex = clampedIndex(
+                currentIndex + offset(for: navigation),
+                upperBound: rows.count - 1
+            )
+        }
         windowState.selection = rows[nextIndex]
+        windowState.pageStart = pageStart(containingIndex: nextIndex, rowCount: rows.count)
         return true
+    }
+
+    public func selectionForShortcutNumber(_ number: Int) -> CandidatePanelSelection? {
+        guard number > 0,
+              number <= windowState.pageSize else {
+            return nil
+        }
+
+        let visiblePrefixRows = visibleRows().filter { selection in
+            if case .prefixCandidate = selection {
+                return true
+            }
+            return false
+        }
+        let shortcutIndex = number - 1
+        guard visiblePrefixRows.indices.contains(shortcutIndex) else {
+            return nil
+        }
+        return visiblePrefixRows[shortcutIndex]
     }
 
     private func defaultSelection(
@@ -95,7 +133,10 @@ public struct CandidatePanelState: Sendable, Equatable {
     }
 
     private func selectableRows() -> [CandidatePanelSelection] {
-        let viewModel = windowState.viewModel
+        selectableRows(in: windowState.viewModel)
+    }
+
+    private func selectableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection] {
         let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
         var rows: [CandidatePanelSelection] = []
 
@@ -111,6 +152,16 @@ public struct CandidatePanelState: Sendable, Equatable {
         return rows
     }
 
+    private func visibleRows() -> [CandidatePanelSelection] {
+        let rows = selectableRows()
+        guard !rows.isEmpty else {
+            return []
+        }
+        let start = min(windowState.pageStart, rows.count - 1)
+        let end = min(start + windowState.pageSize, rows.count)
+        return Array(rows[start..<end])
+    }
+
     private func offset(for navigation: InputCandidateNavigation) -> Int {
         switch navigation {
         case .down, .right:
@@ -118,13 +169,30 @@ public struct CandidatePanelState: Sendable, Equatable {
         case .up, .left:
             return -1
         case .pageDown:
-            return 5
+            return windowState.pageSize
         case .pageUp:
-            return -5
+            return -windowState.pageSize
         }
     }
 
     private func clampedIndex(_ index: Int, upperBound: Int) -> Int {
         min(max(index, 0), upperBound)
+    }
+
+    private func pageStart(containing selection: CandidatePanelSelection?, rows: [CandidatePanelSelection]) -> Int {
+        guard let selection,
+              let index = rows.firstIndex(of: selection) else {
+            return 0
+        }
+        return pageStart(containingIndex: index, rowCount: rows.count)
+    }
+
+    private func pageStart(containingIndex index: Int, rowCount: Int) -> Int {
+        guard rowCount > 0 else {
+            return 0
+        }
+        let pageSize = max(1, windowState.pageSize)
+        let start = (index / pageSize) * pageSize
+        return min(start, max(0, rowCount - 1))
     }
 }

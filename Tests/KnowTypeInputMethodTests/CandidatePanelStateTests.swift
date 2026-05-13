@@ -81,6 +81,34 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .rawInput)
     }
 
+    func testPageNavigationShowsNextPrefixCandidateSlice() {
+        var state = CandidatePanelState()
+        state.update(rawInput: "ni", suggestion: pagedSuggestion())
+
+        let firstPage = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            pageStart: state.windowState.pageStart,
+            pageSize: state.windowState.pageSize
+        )
+        XCTAssertEqual(firstPage.rows.map(\.text), (1...9).map { "候选\($0)" })
+        XCTAssertEqual(firstPage.rows.map(\.shortcutLabel), (1...9).map(String.init))
+
+        XCTAssertTrue(state.moveSelection(.pageDown))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(9))
+        XCTAssertEqual(state.windowState.pageStart, 9)
+        XCTAssertEqual(state.selectionForShortcutNumber(2), .prefixCandidate(10))
+
+        let secondPage = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            pageStart: state.windowState.pageStart,
+            pageSize: state.windowState.pageSize
+        )
+        XCTAssertEqual(secondPage.rows.map(\.text), ["候选10", "候选11"])
+        XCTAssertEqual(secondPage.rows.map(\.shortcutLabel), ["1", "2"])
+    }
+
     func testMoveSelectionReturnsFalseWhenPanelHasNoRows() {
         var state = CandidatePanelState()
 
@@ -174,6 +202,27 @@ final class CandidatePanelStateTests: XCTestCase {
                 )
             ],
             latencyMs: 5
+        )
+    }
+
+    private func pagedSuggestion() -> SuggestionResponse {
+        let prefixCandidates = (1...11).map { index in
+            CorrectionCandidate(
+                text: "候选\(index)",
+                source: "local",
+                confidence: 1.0 - Double(index) * 0.01,
+                correctionLevel: .contextual
+            )
+        }
+        return SuggestionResponse(
+            prefixCandidates: prefixCandidates,
+            lockedPrefix: LockedPrefix(
+                text: "候选1",
+                rawInput: "ni",
+                candidateID: "local"
+            ),
+            continuationCandidates: [],
+            latencyMs: 1
         )
     }
 }
