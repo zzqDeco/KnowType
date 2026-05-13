@@ -47,6 +47,7 @@ final class CandidatePanelRendererTests: XCTestCase {
             [
                 .prefixCandidate,
                 .prefixCandidate,
+                .continuationCandidate,
                 .continuationCandidate
             ]
         )
@@ -54,9 +55,11 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows[0].visualRole, .lockedPrefix)
         XCTAssertEqual(rendered.rows[1].visualRole, .lockedPrefix)
         XCTAssertEqual(rendered.rows[2].visualRole, .continuation)
+        XCTAssertEqual(rendered.rows[3].visualRole, .continuation)
         XCTAssertEqual(rendered.rows[0].shortcutLabel, "1")
         XCTAssertEqual(rendered.rows[1].shortcutLabel, "2")
         XCTAssertEqual(rendered.rows[2].shortcutLabel, "⇥")
+        XCTAssertEqual(rendered.rows[3].shortcutLabel, "⌥2")
     }
 
     func testRendersRawInputOnlyWhenNoSuggestionsExist() {
@@ -104,10 +107,13 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertNil(rendered.previewText)
     }
 
-    func testContinuationsExpandWhenPrefixCandidatesAreSparse() {
+    func testAllShortcutableCandidatesAreRendered() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
-            prefixCandidates: [prefixCandidates[0]],
+            prefixCandidates: prefixCandidates + [
+                CorrectionCandidate(text: "我觉得这个方向", source: "local", confidence: 0.7, correctionLevel: .contextual),
+                CorrectionCandidate(text: "我觉得这个方法", source: "local", confidence: 0.6, correctionLevel: .contextual)
+            ],
             continuationCandidates: continuationCandidates + [
                 ContinuationCandidate(
                     text: "但是需要更多测试数据",
@@ -126,31 +132,10 @@ final class CandidatePanelRendererTests: XCTestCase {
 
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
 
-        XCTAssertEqual(
-            rendered.rows.map(\.kind),
-            [
-                .prefixCandidate,
-                .continuationCandidate,
-                .continuationCandidate,
-                .continuationCandidate
-            ]
-        )
-        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "⇥", "⌥2", "⌥3"])
-        XCTAssertEqual(rendered.rows.dropFirst().map(\.visualRole), [.continuation, .continuation, .continuation])
-    }
-
-    func testContinuationRowsAreMutedAndLimitedWhenPrefixCandidatesArePrimary() {
-        let viewModel = CandidatePanelViewModel(
-            rawInput: "wo jue de zhege fangan",
-            prefixCandidates: prefixCandidates,
-            continuationCandidates: continuationCandidates
-        )
-
-        let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
-
-        XCTAssertEqual(rendered.rows.filter { $0.kind == .continuationCandidate }.count, 1)
-        XCTAssertEqual(rendered.rows.last?.visualRole, .continuation)
-        XCTAssertEqual(rendered.rows.last?.shortcutLabel, "⇥")
+        XCTAssertEqual(rendered.rows.filter { $0.kind == .prefixCandidate }.count, 4)
+        XCTAssertEqual(rendered.rows.filter { $0.kind == .continuationCandidate }.count, 4)
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3", "4", "⇥", "⌥2", "⌥3", "⌥4"])
+        XCTAssertEqual(rendered.rows.suffix(4).map(\.visualRole), [.continuation, .continuation, .continuation, .continuation])
     }
 
     func testOptionShortcutLabelsMatchCommitActions() {
@@ -160,18 +145,10 @@ final class CandidatePanelRendererTests: XCTestCase {
             continuationCandidates: continuationCandidates
         )
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
-        let expandedRendered = CandidatePanelRenderer(locale: .mixed).render(
-            CandidatePanelViewModel(
-                rawInput: viewModel.rawInput,
-                prefixCandidates: [prefixCandidates[0]],
-                continuationCandidates: continuationCandidates
-            )
-        )
         let controller = InputCompositionController()
 
         XCTAssertEqual(rendered.rows[2].shortcutLabel, "⇥")
-        XCTAssertEqual(expandedRendered.rows[1].shortcutLabel, "⇥")
-        XCTAssertEqual(expandedRendered.rows[2].shortcutLabel, "⌥2")
+        XCTAssertEqual(rendered.rows[3].shortcutLabel, "⌥2")
         XCTAssertEqual(
             controller.handle(
                 action: .tab,

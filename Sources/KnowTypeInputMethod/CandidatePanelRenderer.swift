@@ -54,10 +54,6 @@ public struct CandidatePanelRenderModel: Sendable, Equatable {
 }
 
 public struct CandidatePanelRenderer: Sendable {
-    private static let maxPrefixRows = 5
-    private static let compactContinuationRows = 1
-    private static let expandedContinuationRows = 3
-
     private let locale: KnowTypeLocale
 
     public init(locale: KnowTypeLocale = .mixed) {
@@ -84,7 +80,7 @@ public struct CandidatePanelRenderer: Sendable {
         }
 
         if !viewModel.prefixCandidates.isEmpty {
-            for (index, candidate) in viewModel.prefixCandidates.prefix(Self.maxPrefixRows).enumerated() {
+            for (index, candidate) in viewModel.prefixCandidates.enumerated() {
                 rows.append(
                     CandidatePanelRenderRow(
                         kind: .prefixCandidate,
@@ -97,9 +93,8 @@ public struct CandidatePanelRenderer: Sendable {
             }
         }
 
-        let visibleContinuationCount = continuationLimit(prefixCount: viewModel.prefixCandidates.count)
-        if visibleContinuationCount > 0 {
-            for (index, candidate) in viewModel.continuationCandidates.prefix(visibleContinuationCount).enumerated() {
+        if !viewModel.continuationCandidates.isEmpty {
+            for (index, candidate) in viewModel.continuationCandidates.enumerated() {
                 rows.append(
                     CandidatePanelRenderRow(
                         kind: .continuationCandidate,
@@ -117,10 +112,6 @@ public struct CandidatePanelRenderer: Sendable {
             previewText: nil,
             rows: rows
         )
-    }
-
-    private func continuationLimit(prefixCount: Int) -> Int {
-        prefixCount < 2 ? Self.expandedContinuationRows : Self.compactContinuationRows
     }
 
     private func continuationShortcutLabel(at index: Int) -> String {
