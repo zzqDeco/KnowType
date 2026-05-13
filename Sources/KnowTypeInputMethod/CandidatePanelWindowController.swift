@@ -61,9 +61,36 @@ final class CandidatePanelWindowController {
         let anchor = anchorRect.isNull || anchorRect.isEmpty || anchorRect == .zero
             ? fallbackAnchor
             : anchorRect
-        let x = anchor.minX
-        let y = anchor.minY - contentSize.height - 6
-        return NSPoint(x: max(8, x), y: max(8, y))
+        let visibleFrame = screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame
+        guard let visibleFrame else {
+            return NSPoint(x: max(8, anchor.minX), y: max(8, anchor.minY - contentSize.height - 6))
+        }
+
+        let inset: CGFloat = 8
+        let minX = visibleFrame.minX + inset
+        let maxX = visibleFrame.maxX - contentSize.width - inset
+        let minY = visibleFrame.minY + inset
+        let maxY = visibleFrame.maxY - contentSize.height - inset
+        let preferredY = anchor.minY - contentSize.height - 6
+        let fallbackY = anchor.maxY + 6
+
+        return NSPoint(
+            x: clamp(anchor.minX, minimum: minX, maximum: maxX),
+            y: clamp(preferredY < minY ? fallbackY : preferredY, minimum: minY, maximum: maxY)
+        )
+    }
+
+    private func screen(containing rect: CGRect) -> NSScreen? {
+        let point = NSPoint(x: rect.midX, y: rect.midY)
+        return NSScreen.screens.first { $0.frame.contains(point) }
+            ?? NSScreen.screens.first { $0.frame.intersects(rect) }
+    }
+
+    private func clamp(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+        guard maximum >= minimum else {
+            return minimum
+        }
+        return min(max(value, minimum), maximum)
     }
 
     private func fallbackAnchorRect() -> CGRect {
