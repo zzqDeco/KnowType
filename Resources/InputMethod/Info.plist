@@ -65,6 +65,8 @@
   <string>KnowTypeInputController</string>
   <key>InputMethodServerDelegateClass</key>
   <string>KnowTypeInputController</string>
+  <key>LSBackgroundOnly</key>
+  <true/>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>

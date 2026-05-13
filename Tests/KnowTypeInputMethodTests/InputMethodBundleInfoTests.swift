@@ -17,7 +17,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["InputMethodConnectionName"] as? String, "KnowType_Connection")
         XCTAssertEqual(plist["InputMethodServerControllerClass"] as? String, "KnowTypeInputController")
         XCTAssertEqual(plist["InputMethodServerDelegateClass"] as? String, "KnowTypeInputController")
-        XCTAssertNil(plist["LSBackgroundOnly"])
+        XCTAssertEqual(plist["LSBackgroundOnly"] as? Bool, true)
         XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
         XCTAssertEqual(plist["NSPrincipalClass"] as? String, "NSApplication")
         XCTAssertEqual(plist["TISIntendedLanguage"] as? String, "zh-Hans")
