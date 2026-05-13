@@ -53,6 +53,13 @@ func complete(_ request: LLMRequest) async throws -> LLMResponse
 
 Adapters must not leak native response shapes into the core. All provider responses normalize into `LLMResponse`.
 
+Provider runtime loading uses `ProviderProfile` plus `ProviderFactory`:
+
+- `ProviderProfile` stores display name, provider kind, base URL, model, timeout, headers, custom HTTP mapping fields, and `secretName`.
+- `ProviderProfileResolver` resolves `secretName` through `SecretStore` and returns `ProviderConfiguration`.
+- `ProviderFactory` selects the adapter for `openai_chat`, `openai_responses`, `anthropic_messages`, `gemini_native`, `ollama_native`, or `custom_http`.
+- Profile JSON must not contain API key values represented by `secretName`. Custom headers are stored in JSON as configured and should not contain secrets in the MVP. The macOS secret-store implementation uses Keychain.
+
 Provider profiles are edited by the settings app and stored as JSON metadata plus profile-scoped `SecretStore` entries. API keys are never written to the profile file. Cloud profiles require either a newly entered key or an existing reusable secret. Custom HTTP profiles accept a blank API key for unauthenticated endpoints, while still storing an optional profile-scoped secret when a key is entered. When a profile switches to a local/no-secret provider such as Ollama, the settings model clears the draft key and deletes the old secret only if no remaining saved profile references it. Profile saves publish the updated profile list only after both the metadata save and required secret mutation succeed; if a post-save secret mutation fails, the metadata file is restored to the previous state.
 
 ## Input Method Layer
@@ -61,6 +68,22 @@ The current package includes:
 
 - `InputCompositionController` for shortcut behavior
 - `CandidatePanelViewModel` for separated prefix and continuation sections
-- `KnowTypeIMKServerBootstrap` behind `canImport(InputMethodKit)` for future app-bundle integration
+- `CandidatePanelRenderer` for raw input, locked prefix, and continuation render rows
+- `KnowTypeIMKServerBootstrap` behind `canImport(InputMethodKit)` for IMK server integration
 - `KnowTypeInputController` as the InputMethodKit session controller
 - `KnowTypeInputMethodApp` as the background app entry point assembled by `scripts/build-inputmethod-bundle.sh`
+
+## Privacy and App Rules
+
+Level 0 protected input takes the no-provider path:
+
+- URL, email, path, command-like, and code-like text is committed unchanged by default.
+- Terminal, iTerm, and Xcode contexts are Level 0 by app bundle identifier.
+- Level 0 responses clear continuation candidates so cloud continuation is not offered.
+- Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit` are preserved or canonicalized, but they are not by themselves a no-cloud Level 0 trigger.
+
+Manual MVP acceptance must cover TextEdit, Safari, Chrome, Xcode, Terminal, WeChat, and Feishu because IMK behavior depends on host-app text systems.
+
+## Release Readiness
+
+MVP release docs should be finalized after the runtime provider branch is integrated on `dev`. Rebase the docs branch on that combined state, keep documentation-only commits separate from runtime code, and validate with `swift build`, `swift test`, candidate panel manual checks, provider profile/Keychain checks, Level 0 no-cloud checks, and `git diff --check`.

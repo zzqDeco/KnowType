@@ -18,5 +18,5 @@
 - `handle(action:)` delegates commit assembly to `InputCompositionController` while applying session selection:
   - Space commits the selected prefix only.
   - Tab commits the selected prefix plus selected or first continuation.
-  - Option-number commits the continuation shown with that shortcut; `Tab` owns index `0`, so `Option+1` commits continuation index `1`.
+  - Option-number commits the continuation shown with that shortcut; `Option+1` commits continuation index `0`, matching the first continuation also available through `Tab`.
   - Option-R marks `polishRequested` and returns `.polishRequested(rawInput)`.
