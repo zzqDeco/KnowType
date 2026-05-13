@@ -8,18 +8,32 @@ public enum TextProtection {
     private static let protectedAppBundleIDPrefixes = [
         "com.googlecode.iterm2"
     ]
-    private static let unambiguousCommandNames: Set<String> = [
-        "brew", "bun", "cargo", "cat", "cd", "chmod", "chown", "cp", "curl",
-        "docker", "git", "grep", "kubectl", "ls", "mkdir",
-        "mv", "node", "npm", "pnpm", "python", "python3", "rg", "rm",
-        "ssh", "sudo", "swift", "touch", "vim", "yarn", "zsh"
+    private static let commandSubcommands: [String: Set<String>] = [
+        "brew": ["bundle", "cleanup", "doctor", "info", "install", "list", "search", "services", "tap", "uninstall", "update", "upgrade"],
+        "bun": ["add", "build", "create", "install", "remove", "run", "test"],
+        "cargo": ["add", "build", "check", "clean", "doc", "fmt", "install", "new", "run", "test", "update"],
+        "docker": ["build", "compose", "exec", "images", "inspect", "logs", "ps", "pull", "push", "rm", "run", "start", "stop"],
+        "git": ["add", "branch", "checkout", "clone", "commit", "diff", "fetch", "log", "merge", "pull", "push", "rebase", "restore", "status", "switch"],
+        "go": ["build", "clean", "doc", "env", "fmt", "generate", "get", "install", "list", "mod", "run", "test", "tool", "vet", "version", "work"],
+        "kubectl": ["apply", "config", "create", "delete", "describe", "edit", "exec", "get", "logs", "port-forward", "rollout", "scale"],
+        "make": ["build", "check", "clean", "install", "lint", "release", "run", "test"],
+        "node": ["--check", "--eval", "--print"],
+        "npm": ["add", "audit", "build", "ci", "create", "exec", "install", "link", "publish", "remove", "run", "test", "update"],
+        "pnpm": ["add", "audit", "build", "create", "exec", "install", "link", "publish", "remove", "run", "test", "update"],
+        "swift": ["build", "format", "package", "run", "test"],
+        "yarn": ["add", "build", "create", "install", "remove", "run", "test", "upgrade"]
     ]
-    private static let goSubcommands: Set<String> = [
-        "build", "clean", "doc", "env", "fmt", "generate", "get", "install",
-        "list", "mod", "run", "test", "tool", "vet", "version", "work"
+    private static let shellBuiltins: Set<String> = [
+        "cd", "export", "source"
     ]
-    private static let makeProseArguments: Set<String> = [
-        "a", "an", "it", "me", "this", "that", "the", "these", "those", "us"
+    private static let pathCommandNames: Set<String> = [
+        "cat", "chmod", "chown", "cp", "grep", "ls", "mkdir", "mv", "rg", "rm", "touch", "vim"
+    ]
+    private static let networkCommandNames: Set<String> = [
+        "curl", "ssh"
+    ]
+    private static let executableCommandNames: Set<String> = [
+        "python", "python3", "sudo", "zsh"
     ]
     private static let protectedTokens: [String: String] = [
         "api": "API",
@@ -116,9 +130,16 @@ public enum TextProtection {
     }
 
     private static func isCommand(_ text: String) -> Bool {
-        if text.hasPrefix("$ ") || text.hasPrefix("> ") {
+        if text.hasPrefix("$ ") {
             return true
         }
+        if text.hasPrefix("> ") {
+            return isCommandShape(String(text.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return isCommandShape(text)
+    }
+
+    private static func isCommandShape(_ text: String) -> Bool {
         if hasCommandOperator(in: text) {
             return true
         }
@@ -126,10 +147,7 @@ public enum TextProtection {
         guard let firstToken = tokens.first else {
             return false
         }
-        if unambiguousCommandNames.contains(firstToken) {
-            return true
-        }
-        return isAmbiguousCommand(tokens)
+        return isCommandInvocation(firstToken: firstToken, tokens: tokens)
     }
 
     private static func isCodeLike(_ text: String) -> Bool {
@@ -192,27 +210,73 @@ public enum TextProtection {
                 character == "|" || character == "<" || character == ">" || character == "&"
             }
         ).first.map(String.init) ?? text
-        return isCommand(commandPrefix.trimmingCharacters(in: .whitespacesAndNewlines))
+        return isCommandShape(commandPrefix.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private static func isAmbiguousCommand(_ tokens: [String]) -> Bool {
-        guard tokens.count >= 2 else {
+    private static func isCommandInvocation(firstToken: String, tokens: [String]) -> Bool {
+        let command = normalizedCommandName(firstToken)
+        guard let command else {
             return false
         }
-        switch tokens[0] {
-        case "go":
-            return goSubcommands.contains(tokens[1])
-        case "make":
-            let target = tokens[1]
-            return target.hasPrefix("-")
-                || target.contains("=")
-                || target.contains(":")
-                || target.contains("_")
-                || (target.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil
-                    && !makeProseArguments.contains(target.lowercased()))
-        default:
+
+        if shellBuiltins.contains(command) {
+            return true
+        }
+        if tokens.count == 1 {
             return false
         }
+
+        let arguments = Array(tokens.dropFirst())
+        if arguments.contains(where: isCommandFlagOrAssignment) {
+            return true
+        }
+        if let subcommands = commandSubcommands[command],
+           subcommands.contains(arguments[0].lowercased()) {
+            return true
+        }
+        if pathCommandNames.contains(command) {
+            return arguments.contains(where: isCommandPathArgument)
+        }
+        if networkCommandNames.contains(command) {
+            return arguments.contains(where: isURLLikeArgument) || arguments.contains(where: isCommandPathArgument)
+        }
+        if executableCommandNames.contains(command) {
+            return arguments.contains(where: isCommandPathArgument)
+                || commandSubcommands[arguments[0].lowercased()] != nil
+        }
+        return false
+    }
+
+    private static func normalizedCommandName(_ token: String) -> String? {
+        let stripped = token.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+        let knownCommands = Set(commandSubcommands.keys)
+            .union(shellBuiltins)
+            .union(pathCommandNames)
+            .union(networkCommandNames)
+            .union(executableCommandNames)
+        guard knownCommands.contains(stripped) else {
+            return nil
+        }
+        return stripped
+    }
+
+    private static func isCommandFlagOrAssignment(_ argument: String) -> Bool {
+        argument.hasPrefix("-")
+            || argument.range(of: #"^[A-Za-z_][A-Za-z0-9_]*="#, options: .regularExpression) != nil
+    }
+
+    private static func isCommandPathArgument(_ argument: String) -> Bool {
+        argument.hasPrefix("/")
+            || argument.hasPrefix("~/")
+            || argument.hasPrefix("./")
+            || argument.hasPrefix("../")
+            || argument.hasPrefix("file://")
+            || argument.contains("/")
+            || argument.range(of: #"^[A-Za-z]:[\\/]"#, options: .regularExpression) != nil
+    }
+
+    private static func isURLLikeArgument(_ argument: String) -> Bool {
+        argument.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
     }
 
     private static func ranges(matching pattern: String, in text: String, reason: String) -> [ProtectedRange] {

@@ -78,6 +78,9 @@ final class PrefixContinuationEngineTests: XCTestCase {
             "kubectl get pods",
             "brew install foo",
             "pnpm install",
+            "> docker ps",
+            "cat ./Package.swift",
+            "touch /tmp/knowtype",
             "swift test > test.log",
             "let appBundleID = context.appBundleID"
         ]
@@ -102,6 +105,12 @@ final class PrefixContinuationEngineTests: XCTestCase {
         let prefixes = [
             "go to market plan",
             "make this easier",
+            "make sure this works",
+            "make changes later",
+            "> I think this",
+            "cat is cute",
+            "touch base later",
+            "brew coffee",
             "I think A > B",
             "price is < expected",
             "I think we should import data",
