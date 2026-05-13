@@ -2,9 +2,14 @@ import Foundation
 
 public final class CorrectionEngine: Sendable {
     private let cloudProvider: (any LLMProvider)?
+    private let traditionalInputEngine: TraditionalInputEngine
 
-    public init(cloudProvider: (any LLMProvider)? = nil) {
+    public init(
+        cloudProvider: (any LLMProvider)? = nil,
+        traditionalInputEngine: TraditionalInputEngine = TraditionalInputEngine()
+    ) {
         self.cloudProvider = cloudProvider
+        self.traditionalInputEngine = traditionalInputEngine
     }
 
     public func localCorrect(_ context: InputContext) -> [CorrectionCandidate] {
@@ -59,12 +64,12 @@ public final class CorrectionEngine: Sendable {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
         }
-        let tokenCount = tokenize(context.rawInput).count
+        let tokenCount = tokenizeWords(context.rawInput).count
         return tokenCount >= 4 || context.locale == .mixed
     }
 
     private func localCandidates(for raw: String, protectedRanges: [ProtectedRange]) -> [CorrectionCandidate] {
-        let tokens = tokenize(raw)
+        let tokens = tokenizeWords(raw)
         guard !tokens.isEmpty else {
             return []
         }
@@ -72,24 +77,32 @@ public final class CorrectionEngine: Sendable {
         var candidates: [CorrectionCandidate] = []
 
         let normalizedTokens = tokens.map(normalizeToken)
-        if let decoded = decodeMixedTokens(normalizedTokens), decoded != raw {
-            candidates.append(
-                CorrectionCandidate(
-                    text: decoded,
-                    source: "local-decoder",
-                    confidence: 0.92,
-                    correctionLevel: .contextual,
-                    protectedRanges: TextProtection.detectProtectedRanges(in: decoded)
-                )
-            )
+        let normalizedInput = normalizedTokens.joined(separator: " ")
+        let traditionalInputs = [normalizedInput, raw]
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { inputs, input in
+                if !inputs.contains(input) {
+                    inputs.append(input)
+                }
+            }
 
-            for alternative in prefixAlternatives(for: decoded) {
-                candidates.append(alternative)
+        for input in traditionalInputs {
+            let normalizationBonus = input == normalizedInput && input != raw ? 0.01 : 0
+            for candidate in traditionalInputEngine.candidates(for: input) where candidate.text != raw {
+                candidates.append(
+                    CorrectionCandidate(
+                        text: candidate.text,
+                        source: "local-traditional-input",
+                        confidence: min(1.0, candidate.confidence + normalizationBonus),
+                        correctionLevel: .contextual,
+                        protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text)
+                    )
+                )
             }
         }
 
         let english = normalizedTokens.joined(separator: " ")
-        if english != raw, isLikelyEnglish(raw), !looksLikePinyinInput(tokens) {
+        if english != raw, isLikelyEnglish(raw), candidates.isEmpty {
             candidates.append(
                 CorrectionCandidate(
                     text: english,
@@ -141,113 +154,17 @@ public final class CorrectionEngine: Sendable {
     }
 }
 
-private func prefixAlternatives(for decoded: String) -> [CorrectionCandidate] {
-    let suffixAlternatives: [(suffix: String, replacements: [(String, Double)])] = [
-        ("方案", [("方法", 0.72), ("方向", 0.69), ("计划", 0.64), ("思路", 0.61)]),
-        ("功能", [("工具", 0.66), ("模块", 0.63)]),
-        ("问题", [("需求", 0.64), ("bug", 0.6)]),
-        ("接口", [("API", 0.66), ("服务", 0.62)])
-    ]
-
-    guard let match = suffixAlternatives.first(where: { decoded.hasSuffix($0.suffix) }) else {
-        return []
-    }
-
-    let stem = String(decoded.dropLast(match.suffix.count))
-    return match.replacements.map { replacement, confidence in
-        CorrectionCandidate(
-            text: stem + replacement,
-            source: "local-decoder",
-            confidence: confidence,
-            correctionLevel: .contextual,
-            protectedRanges: TextProtection.detectProtectedRanges(in: stem + replacement)
-        )
-    }
-}
-
 private let spellingCorrections: [String: String] = [
     "thikn": "think",
     "approch": "approach",
-    "latnecy": "latency",
-    "fagnan": "fangan",
-    "faangan": "fangan",
-    "fangam": "fangan",
-    "fangn": "fangan"
+    "latnecy": "latency"
 ]
 
-private let phraseMap: [String: String] = [
-    "wo": "我",
-    "wo jue": "我觉得",
-    "wo jue de": "我觉得",
-    "wo xiang": "我想",
-    "zhege": "这个",
-    "zhe ge": "这个",
-    "fangan": "方案",
-    "fangfa": "方法",
-    "fangxiang": "方向",
-    "gongneng": "功能",
-    "bushi": "不是",
-    "hen": "很",
-    "wending": "稳定",
-    "jiekou": "接口",
-    "yan chi": "延迟",
-    "yanchi": "延迟",
-    "youdian": "有点",
-    "gao": "高",
-    "ba": "把",
-    "wenti": "问题",
-    "xiugai": "修改",
-    "yixia": "一下"
-]
-
-private func tokenize(_ raw: String) -> [String] {
-    let separated = raw
+private func tokenizeWords(_ raw: String) -> [String] {
+    raw
         .split(whereSeparator: { $0.isWhitespace })
         .map(String.init)
-    if separated.count > 1 {
-        return separated
-    }
-    return separated.flatMap(segmentCompactPinyin)
 }
-
-private func segmentCompactPinyin(_ token: String) -> [String] {
-    let lower = token.lowercased()
-    let known = compactPinyinSegments
-        .sorted { $0.count > $1.count }
-    var output: [String] = []
-    var cursor = lower.startIndex
-
-    while cursor < lower.endIndex {
-        let suffix = lower[cursor...]
-        if let match = known.first(where: { suffix.hasPrefix($0) }) {
-            output.append(match)
-            cursor = lower.index(cursor, offsetBy: match.count)
-        } else {
-            return [token]
-        }
-    }
-    return output.isEmpty ? [token] : output
-}
-
-private let compactPinyinSegments: [String] = {
-    var segments = Set<String>()
-
-    for key in phraseMap.keys {
-        if !key.contains(" ") {
-            segments.insert(key)
-        }
-        for part in key.split(separator: " ") {
-            segments.insert(String(part))
-        }
-    }
-
-    for (misspelled, corrected) in spellingCorrections {
-        segments.insert(misspelled)
-        segments.insert(corrected)
-    }
-
-    return Array(segments)
-}()
 
 private func normalizeToken(_ token: String) -> String {
     if token == "I" {
@@ -268,74 +185,6 @@ private func preservesCodeLikeToken(_ token: String) -> Bool {
         || token.range(of: #"^[a-z]+[A-Z][A-Za-z0-9]*$"#, options: .regularExpression) != nil
 }
 
-private func looksLikePinyinInput(_ tokens: [String]) -> Bool {
-    tokens.contains { token in
-        phraseMap.keys.contains(token.lowercased()) || spellingCorrections[token.lowercased()] == "fangan"
-    }
-}
-
 private func isLikelyEnglish(_ raw: String) -> Bool {
     raw.range(of: #"[A-Za-z]"#, options: .regularExpression) != nil
-}
-
-private func decodeMixedTokens(_ tokens: [String]) -> String? {
-    var segments: [String] = []
-    var index = 0
-
-    while index < tokens.count {
-        var matched = false
-        for length in stride(from: min(3, tokens.count - index), through: 1, by: -1) {
-            let key = tokens[index..<(index + length)].joined(separator: " ").lowercased()
-            if let phrase = phraseMap[key] {
-                segments.append(phrase)
-                index += length
-                matched = true
-                break
-            }
-        }
-        if matched {
-            continue
-        }
-
-        let token = tokens[index]
-        if TextProtection.canonicalTechnicalToken(token) != nil || token == "latency" {
-            segments.append(token)
-            index += 1
-            continue
-        }
-
-        if isASCIIWord(token), !looksLikePinyinInput([token]) {
-            segments.append(token)
-            index += 1
-            continue
-        }
-
-        return nil
-    }
-
-    return joinSegments(segments)
-}
-
-private func joinSegments(_ segments: [String]) -> String {
-    var output = ""
-    var previousWasASCII = false
-
-    for segment in segments {
-        let currentIsASCII = isASCIIWord(segment)
-        if !output.isEmpty, (previousWasASCII || currentIsASCII) {
-            output += " "
-        }
-        output += segment
-        previousWasASCII = currentIsASCII
-    }
-    return output
-}
-
-private func isASCIIWord(_ text: String) -> Bool {
-    guard !text.isEmpty else {
-        return false
-    }
-    return text.unicodeScalars.allSatisfy { scalar in
-        scalar.value < 128 && (CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-")
-    }
 }

@@ -4,9 +4,11 @@
 
 - shared request/response models
 - text protection and Level 0 detection
-- local correction examples and ranking
+- clean-room traditional pinyin decoding, compact segmentation, typo normalization, and local correction ranking
 - prefix-locked continuation sanitization and fallback
 
 Level 0 detection is pure core policy. It covers URLs, emails, file paths, command-like input, code-like tokens, and protected app bundle IDs for Terminal, iTerm2, and Xcode. Level 0 correction returns local identity protection and Level 0 continuation returns no candidates.
 
 Provider-specific protocol details must not be added here.
+
+`TraditionalInputEngine` is intentionally small in MVP. It provides a license-clean seed lexicon, multiple candidates for ambiguous pinyin such as `fangan`, compact input support for examples like `wojuedezhegefagnan`, and technical-token passthrough for mixed Chinese/English input.
