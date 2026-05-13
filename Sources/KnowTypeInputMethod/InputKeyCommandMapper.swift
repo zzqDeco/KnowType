@@ -52,7 +52,7 @@ public struct InputKeyCommandMapper: Sendable {
         if stroke.keyCode == Self.spaceKeyCode || stroke.text == " " {
             return .action(.space)
         }
-        guard !stroke.text.isEmpty else {
+        guard isPrintableText(stroke.text) else {
             return .ignored
         }
         return .append(stroke.text)
@@ -60,6 +60,16 @@ public struct InputKeyCommandMapper: Sendable {
 
     private func optionDigit(for keyCode: Int) -> Int? {
         Self.digitKeyCodes[keyCode]
+    }
+
+    private func isPrintableText(_ text: String) -> Bool {
+        guard !text.isEmpty else {
+            return false
+        }
+        return text.unicodeScalars.allSatisfy { scalar in
+            !CharacterSet.controlCharacters.contains(scalar)
+                && !CharacterSet.newlines.contains(scalar)
+        }
     }
 
     private static let tabKeyCode = 48

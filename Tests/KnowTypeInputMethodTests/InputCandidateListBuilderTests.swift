@@ -47,7 +47,35 @@ final class InputCandidateListBuilderTests: XCTestCase {
             suggestion: suggestion
         )
 
-        XCTAssertEqual(candidates, ["我觉得这个方案", "我觉得这个方法"])
+        XCTAssertEqual(candidates, ["wo jue de zhege fagnan", "我觉得这个方案", "我觉得这个方法"])
         XCTAssertFalse(candidates.contains("还有进一步优化空间"))
+    }
+
+    func testDoesNotDuplicateRawInputWhenItMatchesPrefixCandidate() {
+        let suggestion = SuggestionResponse(
+            prefixCandidates: [
+                CorrectionCandidate(
+                    text: "I think this approach",
+                    source: "test",
+                    confidence: 1.0,
+                    correctionLevel: .light
+                )
+            ],
+            lockedPrefix: LockedPrefix(
+                text: "I think this approach",
+                rawInput: "I think this approach",
+                candidateID: "test"
+            ),
+            continuationCandidates: [],
+            latencyMs: 1
+        )
+
+        XCTAssertEqual(
+            InputCandidateListBuilder().candidates(
+                rawInput: "I think this approach",
+                suggestion: suggestion
+            ),
+            ["I think this approach"]
+        )
     }
 }

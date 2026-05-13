@@ -8,6 +8,10 @@ public struct InputCandidateListBuilder: Sendable {
         guard let suggestion else {
             return rawInput.isEmpty ? [] : [rawInput]
         }
-        return suggestion.prefixCandidates.map(\.text)
+        var candidates: [String] = rawInput.isEmpty ? [] : [rawInput]
+        for prefix in suggestion.prefixCandidates.map(\.text) where !candidates.contains(prefix) {
+            candidates.append(prefix)
+        }
+        return candidates
     }
 }
