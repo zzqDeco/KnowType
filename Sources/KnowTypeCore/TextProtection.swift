@@ -8,11 +8,18 @@ public enum TextProtection {
     private static let protectedAppBundleIDPrefixes = [
         "com.googlecode.iterm2"
     ]
-    private static let commandNames: Set<String> = [
+    private static let unambiguousCommandNames: Set<String> = [
         "brew", "bun", "cargo", "cat", "cd", "chmod", "chown", "cp", "curl",
-        "docker", "git", "go", "grep", "kubectl", "ls", "make", "mkdir",
+        "docker", "git", "grep", "kubectl", "ls", "mkdir",
         "mv", "node", "npm", "pnpm", "python", "python3", "rg", "rm",
         "ssh", "sudo", "swift", "touch", "vim", "yarn", "zsh"
+    ]
+    private static let goSubcommands: Set<String> = [
+        "build", "clean", "doc", "env", "fmt", "generate", "get", "install",
+        "list", "mod", "run", "test", "tool", "vet", "version", "work"
+    ]
+    private static let makeProseArguments: Set<String> = [
+        "a", "an", "it", "me", "this", "that", "the", "these", "those", "us"
     ]
     private static let protectedTokens: [String: String] = [
         "api": "API",
@@ -112,18 +119,45 @@ public enum TextProtection {
         if text.hasPrefix("$ ") || text.hasPrefix("> ") {
             return true
         }
-        if text.contains("&&") || text.contains("||") || text.contains("|") || text.contains(">") || text.contains("<") {
+        if hasCommandOperator(in: text) {
             return true
         }
-        let firstToken = text.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
-        return commandNames.contains(firstToken)
+        let tokens = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard let firstToken = tokens.first else {
+            return false
+        }
+        if unambiguousCommandNames.contains(firstToken) {
+            return true
+        }
+        return isAmbiguousCommand(tokens)
     }
 
     private static func isCodeLike(_ text: String) -> Bool {
         if text.contains(";") || text.contains("{") || text.contains("}") || text.contains("=>") {
             return true
         }
-        if text.range(of: #"\b(?:let|var|func|class|struct|enum|import)\b"#, options: .regularExpression) != nil {
+        if text.range(
+            of: #"^(?:\s*)?(?:let|var)\s+[A-Za-z_][A-Za-z0-9_]*\s*(?::|=)"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        if text.range(
+            of: #"^(?:\s*)?(?:func|class|struct|enum)\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*[({:]|\s*$)"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        if text.range(
+            of: #"^(?:\s*)?import\s+(?:[A-Z][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+)(?:\s*$|;)"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        if text.range(
+            of: #"^[A-Za-z_][A-Za-z0-9_.]*\s*(?:=|\+=|-=|\*=|/=|==|!=|<=|>=)\s*\S+"#,
+            options: .regularExpression
+        ) != nil {
             return true
         }
         if text.range(of: #"^[A-Za-z_][A-Za-z0-9_]*\("#, options: .regularExpression) != nil {
@@ -138,6 +172,47 @@ public enum TextProtection {
                 || text.range(of: #"^[a-z]+[A-Z][A-Za-z0-9]*$"#, options: .regularExpression) != nil
         }
         return false
+    }
+
+    private static func hasCommandOperator(in text: String) -> Bool {
+        let operatorPatterns = [
+            #"(^|\s)(?:&&|\|\|)\s*"#,
+            #"\s\|\s"#,
+            #"\s(?:[0-9]?>|>>|<|<<|&>)\s*\S+"#
+        ]
+        guard operatorPatterns.contains(where: {
+            text.range(of: $0, options: .regularExpression) != nil
+        }) else {
+            return false
+        }
+
+        let commandPrefix = text.split(
+            maxSplits: 1,
+            whereSeparator: { character in
+                character == "|" || character == "<" || character == ">" || character == "&"
+            }
+        ).first.map(String.init) ?? text
+        return isCommand(commandPrefix.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func isAmbiguousCommand(_ tokens: [String]) -> Bool {
+        guard tokens.count >= 2 else {
+            return false
+        }
+        switch tokens[0] {
+        case "go":
+            return goSubcommands.contains(tokens[1])
+        case "make":
+            let target = tokens[1]
+            return target.hasPrefix("-")
+                || target.contains("=")
+                || target.contains(":")
+                || target.contains("_")
+                || (target.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil
+                    && !makeProseArguments.contains(target.lowercased()))
+        default:
+            return false
+        }
     }
 
     private static func ranges(matching pattern: String, in text: String, reason: String) -> [ProtectedRange] {

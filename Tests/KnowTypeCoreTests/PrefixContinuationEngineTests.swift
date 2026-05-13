@@ -75,6 +75,10 @@ final class PrefixContinuationEngineTests: XCTestCase {
             "support@example.com",
             "/Users/zq/project/KnowType",
             "docker ps",
+            "kubectl get pods",
+            "brew install foo",
+            "pnpm install",
+            "swift test > test.log",
             "let appBundleID = context.appBundleID"
         ]
 
@@ -90,5 +94,31 @@ final class PrefixContinuationEngineTests: XCTestCase {
 
         let requests = await provider.requests
         XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testProseCommandAndCodeKeywordsStillProduceContinuations() async {
+        let provider = RecordingContinuationProvider()
+        let engine = PrefixContinuationEngine(provider: provider)
+        let prefixes = [
+            "go to market plan",
+            "make this easier",
+            "I think A > B",
+            "price is < expected",
+            "I think we should import data",
+            "let me know the plan"
+        ]
+
+        for prefix in prefixes {
+            let continuations = await engine.continuations(
+                for: LockedPrefix(text: prefix, rawInput: prefix, candidateID: "test"),
+                context: InputContext(rawInput: prefix, locale: .enUS),
+                lengthLevel: .medium
+            )
+
+            XCTAssertFalse(continuations.isEmpty, "\(prefix) should produce continuations")
+        }
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, prefixes.count)
     }
 }

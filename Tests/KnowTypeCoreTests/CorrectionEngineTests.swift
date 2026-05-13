@@ -81,8 +81,15 @@ final class CorrectionEngineTests: XCTestCase {
             "kubectl get pods",
             "brew install foo",
             "pnpm install",
+            "npm install",
+            "curl https://example.com",
+            "docker ps | rg api",
+            "swift test > test.log",
             "swift test",
+            "go test ./...",
+            "make build",
             "let appBundleID = context.appBundleID",
+            "import Foundation",
             "snake_case",
             "camelCase"
         ]
@@ -93,6 +100,33 @@ final class CorrectionEngineTests: XCTestCase {
                 "\(input) should be Level 0"
             )
         }
+    }
+
+    func testProseThatLooksCommandAdjacentStillCorrects() async {
+        let proseInputs = [
+            "go to market plan",
+            "make this easier",
+            "I thikn A > B",
+            "price is < expected",
+            "I thikn we should import data",
+            "let me know the plan",
+            "import data"
+        ]
+
+        for input in proseInputs {
+            XCTAssertFalse(
+                TextProtection.requiresNoCorrection(input),
+                "\(input) should not be Level 0"
+            )
+        }
+
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "I thikn A > B", locale: .enUS)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "I think a > b")
+        XCTAssertNotEqual(candidates.first?.source, "local-protection")
     }
 
     func testProtectedAppBundleIDsRequireNoCorrection() {
