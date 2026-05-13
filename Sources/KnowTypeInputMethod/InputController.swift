@@ -69,21 +69,18 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     public override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event,
-              event.type == .keyDown,
-              event.modifierFlags.contains(.option) else {
+              event.type == .keyDown else {
             return false
         }
+        let characters = event.modifierFlags.contains(.option)
+            ? event.charactersIgnoringModifiers ?? event.characters ?? ""
+            : event.characters ?? event.charactersIgnoringModifiers ?? ""
         let stroke = InputKeyStroke(
-            text: event.charactersIgnoringModifiers ?? event.characters ?? "",
+            text: characters,
             keyCode: Int(event.keyCode),
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue))
         )
-        switch keyMapper.intent(for: stroke) {
-        case .action(.optionNumber), .action(.optionR):
-            return handle(intent: keyMapper.intent(for: stroke), client: sender)
-        case .append, .deleteBackward, .action, .ignored:
-            return false
-        }
+        return handle(intent: keyMapper.intent(for: stroke), client: sender)
     }
 
     public override func commitComposition(_ sender: Any!) {
@@ -295,7 +292,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             panelType: kIMKSingleColumnScrollingCandidatePanel
         )
         candidates?.setDismissesAutomatically(false)
-        candidates?.setSelectionKeys([])
+        candidates?.setSelectionKeys(Self.nativeCandidateSelectionKeyCodes)
         nativeCandidates = candidates
         return candidates
     }
@@ -335,5 +332,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private static let textOnlyKeyCode = -1
+    private static let nativeCandidateSelectionKeyCodes = [122, 120, 99, 118, 96, 97, 98, 100, 101]
 }
 #endif
