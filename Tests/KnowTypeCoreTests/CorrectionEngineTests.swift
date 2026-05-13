@@ -30,6 +30,15 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(candidates.count, 5)
     }
 
+    func testChinesePinyinCorrectionDecodesCapitalizedInitialToken() async {
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "Wo jue de zhege fagnan", locale: .zhCN)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
+    }
+
     func testCompactPinyinCorrectionHandlesTypingWithoutSpaces() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
@@ -59,6 +68,26 @@ final class CorrectionEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(candidates.first?.text, "I think this approach")
+    }
+
+    func testEnglishCorrectionChecksCapitalizedSentenceInitialTypo() async {
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "Thikn this approch", locale: .enUS)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "Think this approach")
+    }
+
+    func testEnglishLocaleDoesNotDecodeLowercasePinyinBeforeSpellcheck() async {
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "I thikn xiang", locale: .enUS)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "I think xiang")
+        XCTAssertEqual(candidates.first?.source, "local-spellcheck")
+        XCTAssertFalse(candidates.map(\.text).contains { $0.contains("想") })
     }
 
     func testEnglishNameLikePinyinIsNotTranslatedBeforeSpellcheck() async {

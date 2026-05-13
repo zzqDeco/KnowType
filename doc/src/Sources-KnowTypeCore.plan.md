@@ -12,3 +12,5 @@ Level 0 detection is pure core policy. It covers URLs, emails, file paths, comma
 Provider-specific protocol details must not be added here.
 
 `TraditionalInputEngine` is intentionally small in MVP. It provides a license-clean seed lexicon, multiple candidates for ambiguous pinyin such as `fangan`, compact input support for examples like `wojuedezhegefagnan`, and technical-token passthrough for mixed Chinese/English input.
+
+`CorrectionEngine` gates local traditional pinyin decoding by locale. `en-US` input stays on the English spellcheck path, while `zh-CN` input can decode capitalized pinyin used at the start of a composition.

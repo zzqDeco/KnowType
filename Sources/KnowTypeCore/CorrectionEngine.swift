@@ -28,7 +28,9 @@ public final class CorrectionEngine: Sendable {
             ]
         }
 
-        return uniqueSorted(localCandidates(for: raw, protectedRanges: protectedRanges))
+        return uniqueSorted(
+            localCandidates(for: raw, locale: context.locale, protectedRanges: protectedRanges)
+        )
     }
 
     public func correct(_ context: InputContext) async -> [CorrectionCandidate] {
@@ -64,23 +66,30 @@ public final class CorrectionEngine: Sendable {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
         }
-        let tokenCount = correctionTokenCount(context.rawInput)
+        let tokenCount = correctionTokenCount(context.rawInput, locale: context.locale)
         return tokenCount >= 4 || context.locale == .mixed
     }
 
-    private func correctionTokenCount(_ rawInput: String) -> Int {
+    private func correctionTokenCount(_ rawInput: String, locale: KnowTypeLocale) -> Int {
         let words = tokenizeWords(rawInput)
-        if words.count != 1 {
+        if words.count != 1 || !usesTraditionalInput(locale: locale) {
             return words.count
         }
 
         return traditionalInputEngine
-            .candidates(for: rawInput)
+            .candidates(
+                for: rawInput,
+                preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: locale)
+            )
             .map(\.inputTokens.count)
             .max() ?? words.count
     }
 
-    private func localCandidates(for raw: String, protectedRanges: [ProtectedRange]) -> [CorrectionCandidate] {
+    private func localCandidates(
+        for raw: String,
+        locale: KnowTypeLocale,
+        protectedRanges: [ProtectedRange]
+    ) -> [CorrectionCandidate] {
         let tokens = tokenizeWords(raw)
         guard !tokens.isEmpty else {
             return []
@@ -88,28 +97,34 @@ public final class CorrectionEngine: Sendable {
 
         var candidates: [CorrectionCandidate] = []
 
-        let normalizedTokens = tokens.map(normalizeToken)
+        let normalizedTokens = tokens.map { normalizeToken($0, locale: locale) }
         let normalizedInput = normalizedTokens.joined(separator: " ")
-        let traditionalInputs = [normalizedInput, raw]
-            .filter { !$0.isEmpty }
-            .reduce(into: [String]()) { inputs, input in
-                if !inputs.contains(input) {
-                    inputs.append(input)
+        if usesTraditionalInput(locale: locale) {
+            let preserveCapitalizedPinyin = preservesCapitalizedPinyin(locale: locale)
+            let traditionalInputs = [normalizedInput, raw]
+                .filter { !$0.isEmpty }
+                .reduce(into: [String]()) { inputs, input in
+                    if !inputs.contains(input) {
+                        inputs.append(input)
+                    }
                 }
-            }
 
-        for input in traditionalInputs {
-            let normalizationBonus = input == normalizedInput && input != raw ? 0.01 : 0
-            for candidate in traditionalInputEngine.candidates(for: input) where candidate.text != raw {
-                candidates.append(
-                    CorrectionCandidate(
-                        text: candidate.text,
-                        source: "local-traditional-input",
-                        confidence: min(1.0, candidate.confidence + normalizationBonus),
-                        correctionLevel: .contextual,
-                        protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text)
+            for input in traditionalInputs {
+                let normalizationBonus = input == normalizedInput && input != raw ? 0.01 : 0
+                for candidate in traditionalInputEngine.candidates(
+                    for: input,
+                    preserveCapitalizedPinyin: preserveCapitalizedPinyin
+                ) where candidate.text != raw {
+                    candidates.append(
+                        CorrectionCandidate(
+                            text: candidate.text,
+                            source: "local-traditional-input",
+                            confidence: min(1.0, candidate.confidence + normalizationBonus),
+                            correctionLevel: .contextual,
+                            protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text)
+                        )
                     )
-                )
+                }
             }
         }
 
@@ -172,13 +187,21 @@ private let spellingCorrections: [String: String] = [
     "latnecy": "latency"
 ]
 
+private func usesTraditionalInput(locale: KnowTypeLocale) -> Bool {
+    locale != .enUS
+}
+
+private func preservesCapitalizedPinyin(locale: KnowTypeLocale) -> Bool {
+    locale != .zhCN
+}
+
 private func tokenizeWords(_ raw: String) -> [String] {
     raw
         .split(whereSeparator: { $0.isWhitespace })
         .map(String.init)
 }
 
-private func normalizeToken(_ token: String) -> String {
+private func normalizeToken(_ token: String, locale: KnowTypeLocale) -> String {
     if token == "I" {
         return "I"
     }
@@ -188,11 +211,15 @@ private func normalizeToken(_ token: String) -> String {
     if preservesCodeLikeToken(token) {
         return token
     }
-    if preservesCapitalizedWord(token) {
+
+    let lower = token.lowercased()
+    if let correction = spellingCorrections[lower] {
+        return applyCapitalization(from: token, to: correction)
+    }
+    if preservesCapitalizedPinyin(locale: locale), preservesCapitalizedWord(token) {
         return token
     }
-    let lower = token.lowercased()
-    return spellingCorrections[lower] ?? lower
+    return lower
 }
 
 private func preservesCodeLikeToken(_ token: String) -> Bool {
@@ -208,6 +235,28 @@ private func preservesCapitalizedWord(_ token: String) -> Bool {
     }
     return token.unicodeScalars.allSatisfy { scalar in
         scalar.value < 128 && CharacterSet.letters.contains(scalar)
+    }
+}
+
+private func applyCapitalization(from source: String, to correction: String) -> String {
+    if isAllUppercaseASCIIWord(source) {
+        return correction.uppercased()
+    }
+    if preservesCapitalizedWord(source) {
+        guard let first = correction.first else {
+            return correction
+        }
+        return String(first).uppercased() + correction.dropFirst()
+    }
+    return correction
+}
+
+private func isAllUppercaseASCIIWord(_ token: String) -> Bool {
+    guard token.count > 1 else {
+        return false
+    }
+    return token.unicodeScalars.allSatisfy { scalar in
+        scalar.value < 128 && CharacterSet.uppercaseLetters.contains(scalar)
     }
 }
 

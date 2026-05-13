@@ -61,6 +61,16 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertFalse(candidateTexts.contains("I thikn 想"))
     }
 
+    func testCapitalizedPinyinCanDecodeWhenNamePreservationIsDisabled() {
+        let engine = TraditionalInputEngine()
+        let candidates = engine.candidates(
+            for: "Wo jue de zhege fagnan",
+            preserveCapitalizedPinyin: false
+        )
+
+        XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
+    }
+
     func testXiaoheHookCanMapKnownDoublePinyinSyllables() {
         let engine = TraditionalInputEngine(scheme: .xiaohe)
         let candidates = engine.candidates(for: "ni hc")

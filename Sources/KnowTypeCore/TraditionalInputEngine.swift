@@ -24,13 +24,20 @@ public struct TraditionalInputEngine: Sendable {
         self.scheme = scheme
     }
 
-    public func candidates(for rawInput: String) -> [TraditionalInputCandidate] {
+    public func candidates(
+        for rawInput: String,
+        preserveCapitalizedPinyin: Bool = true
+    ) -> [TraditionalInputCandidate] {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let tokens = tokenize(trimmed) else {
             return []
         }
 
-        let parsed = parse(tokens: tokens, from: 0)
+        let parsed = parse(
+            tokens: tokens,
+            from: 0,
+            preserveCapitalizedPinyin: preserveCapitalizedPinyin
+        )
             .filter { $0.translatedCount > 0 }
             .map { state in
                 TraditionalInputCandidate(
@@ -104,7 +111,11 @@ public struct TraditionalInputEngine: Sendable {
         }
     }
 
-    private func parse(tokens: [InputToken], from index: Int) -> [ParseState] {
+    private func parse(
+        tokens: [InputToken],
+        from index: Int,
+        preserveCapitalizedPinyin: Bool
+    ) -> [ParseState] {
         if index >= tokens.count {
             return [ParseState(segments: [], confidence: 1.0, translatedCount: 0)]
         }
@@ -113,10 +124,12 @@ public struct TraditionalInputEngine: Sendable {
 
         for length in stride(from: min(maxEntryLength, tokens.count - index), through: 1, by: -1) {
             let tokenSlice = tokens[index..<(index + length)]
-            guard !tokenSlice.contains(where: { token in
-                isCapitalizedASCIIWord(token.surface) && knownPinyinTokens.contains(token.normalized)
-            }) else {
-                continue
+            if preserveCapitalizedPinyin {
+                guard !tokenSlice.contains(where: { token in
+                    isCapitalizedASCIIWord(token.surface) && knownPinyinTokens.contains(token.normalized)
+                }) else {
+                    continue
+                }
             }
 
             let normalized = tokenSlice.map(\.normalized)
@@ -126,7 +139,11 @@ public struct TraditionalInputEngine: Sendable {
 
             let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
             for output in entry.outputs {
-                for tail in parse(tokens: tokens, from: index + length) {
+                for tail in parse(
+                    tokens: tokens,
+                    from: index + length,
+                    preserveCapitalizedPinyin: preserveCapitalizedPinyin
+                ) {
                     states.append(
                         ParseState(
                             segments: [output.text] + tail.segments,
@@ -139,8 +156,15 @@ public struct TraditionalInputEngine: Sendable {
         }
 
         let token = tokens[index]
-        if let passthrough = passthroughText(for: token) {
-            for tail in parse(tokens: tokens, from: index + 1) {
+        if let passthrough = passthroughText(
+            for: token,
+            preserveCapitalizedPinyin: preserveCapitalizedPinyin
+        ) {
+            for tail in parse(
+                tokens: tokens,
+                from: index + 1,
+                preserveCapitalizedPinyin: preserveCapitalizedPinyin
+            ) {
                 states.append(
                     ParseState(
                         segments: [passthrough] + tail.segments,
@@ -178,7 +202,10 @@ public struct TraditionalInputEngine: Sendable {
         }
     }
 
-    private func passthroughText(for token: InputToken) -> String? {
+    private func passthroughText(
+        for token: InputToken,
+        preserveCapitalizedPinyin: Bool
+    ) -> String? {
         if let technical = TextProtection.canonicalTechnicalToken(token.surface) {
             return technical
         }
@@ -188,7 +215,9 @@ public struct TraditionalInputEngine: Sendable {
         if isCodeLikeToken(token.surface) {
             return token.surface
         }
-        if isCapitalizedASCIIWord(token.surface), knownPinyinTokens.contains(token.normalized) {
+        if preserveCapitalizedPinyin,
+           isCapitalizedASCIIWord(token.surface),
+           knownPinyinTokens.contains(token.normalized) {
             return token.surface
         }
         if isASCIIWord(token.normalized), !knownPinyinTokens.contains(token.normalized) {
