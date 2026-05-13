@@ -5,13 +5,20 @@ public struct OpenAIResponsesProvider: LLMProvider {
     public let providerName = "openai_responses"
     private let configuration: ProviderConfiguration
     private let httpClient: any HTTPClient
+    private let modelDiscovery: any ProviderModelDiscovering
 
-    public init(configuration: ProviderConfiguration, httpClient: any HTTPClient = URLSessionHTTPClient()) {
+    public init(
+        configuration: ProviderConfiguration,
+        httpClient: any HTTPClient = URLSessionHTTPClient(),
+        modelDiscovery: (any ProviderModelDiscovering)? = nil
+    ) {
         self.configuration = configuration
         self.httpClient = httpClient
+        self.modelDiscovery = modelDiscovery ?? OpenAICompatibleModelDiscovery(httpClient: httpClient)
     }
 
     public func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        let model = try await modelDiscovery.resolvedModel(for: configuration)
         var urlRequest = URLRequest(url: configuration.endpoint(path: "/v1/responses"))
         applyCommonHeaders(&urlRequest, configuration: configuration)
         if let apiKey = configuration.apiKey, !apiKey.isEmpty {
@@ -19,7 +26,7 @@ public struct OpenAIResponsesProvider: LLMProvider {
         }
 
         urlRequest.httpBody = try jsonData([
-            "model": configuration.model,
+            "model": model,
             "instructions": PromptBuilder.systemPrompt,
             "input": PromptBuilder.userPayload(for: request),
             "temperature": 0.2,

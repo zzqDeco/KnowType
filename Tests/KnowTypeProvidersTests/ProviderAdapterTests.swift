@@ -29,6 +29,41 @@ private actor MockHTTPClient: HTTPClient {
     }
 }
 
+private actor SequencedMockHTTPClient: HTTPClient {
+    private struct Stub {
+        var data: Data
+        var statusCode: Int
+    }
+
+    private var stubs: [Stub]
+    private var captured: [URLRequest] = []
+
+    init(responses: [(json: String, statusCode: Int)]) {
+        self.stubs = responses.map { response in
+            Stub(data: Data(response.json.utf8), statusCode: response.statusCode)
+        }
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        captured.append(request)
+        guard !stubs.isEmpty else {
+            throw ProviderError.invalidResponse("missing mock response")
+        }
+        let stub = stubs.removeFirst()
+        let response = HTTPURLResponse(
+            url: request.url ?? URL(string: "https://example.com")!,
+            statusCode: stub.statusCode,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (stub.data, response)
+    }
+
+    func capturedRequests() -> [URLRequest] {
+        captured
+    }
+}
+
 final class ProviderAdapterTests: XCTestCase {
     private let llmRequest = LLMRequest(
         task: .continuation,
@@ -92,6 +127,127 @@ final class ProviderAdapterTests: XCTestCase {
         let request = await client.capturedRequest()
 
         XCTAssertEqual(request?.url?.absoluteString, "https://api.example.com/v1/chat/completions")
+    }
+
+    func testOpenAIChatDiscoversBlankModelBeforeCompletion() async throws {
+        let content = #"{"candidates":[{"text":"本地模型返回的续写"}]}"#
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"object":"list","data":[{"id":"local-model-a"},{"id":"local-model-b"}]}"#, statusCode: 200),
+            (json: #"{"choices":[{"message":{"content":"\#(content.replacingOccurrences(of: "\"", with: "\\\""))"}}]}"#, statusCode: 200)
+        ])
+        let provider = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://localhost:8000/v1")!,
+                apiKey: "local-key",
+                model: " \n ",
+                headers: ["X-Local-Runtime": "1"]
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(response.candidates.first?.text, "本地模型返回的续写")
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.first?.httpMethod, "GET")
+        XCTAssertEqual(requests.first?.url?.absoluteString, "http://localhost:8000/v1/models")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer local-key")
+        XCTAssertEqual(requests.first?.value(forHTTPHeaderField: "X-Local-Runtime"), "1")
+        XCTAssertEqual(requests.last?.url?.absoluteString, "http://localhost:8000/v1/chat/completions")
+        let body = try XCTUnwrap(requests.last?.httpBody)
+        let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(bodyObject["model"] as? String, "local-model-a")
+    }
+
+    func testOpenAIResponsesDiscoversPlaceholderModelBeforeCompletion() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":[{"id":"responses-local-model"}]}"#, statusCode: 200),
+            (json: #"{"output_text":"{\"candidates\":[{\"text\":\"response continuation\"}]}"}"#, statusCode: 200)
+        ])
+        let provider = OpenAIResponsesProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIResponses,
+                baseURL: URL(string: "http://localhost:8000")!,
+                model: "<model-id>"
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(response.candidates.first?.text, "response continuation")
+        XCTAssertEqual(requests.compactMap { $0.url?.path }, ["/v1/models", "/v1/responses"])
+        let body = try XCTUnwrap(requests.last?.httpBody)
+        let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(bodyObject["model"] as? String, "responses-local-model")
+    }
+
+    func testOpenAIModelDiscoveryThrowsForEmptyModelList() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"object":"list","data":[]}"#, statusCode: 200)
+        ])
+        let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
+
+        do {
+            _ = try await discovery.resolvedModel(
+                for: ProviderConfiguration(
+                    kind: .openAIChat,
+                    baseURL: URL(string: "http://localhost:8000")!,
+                    model: ""
+                )
+            )
+            XCTFail("Expected empty model discovery to throw")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("empty models data"))
+        }
+    }
+
+    func testOpenAIModelDiscoveryThrowsForHTTPError() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"error":"model list unavailable"}"#, statusCode: 503)
+        ])
+        let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
+
+        do {
+            _ = try await discovery.resolvedModel(
+                for: ProviderConfiguration(
+                    kind: .openAIChat,
+                    baseURL: URL(string: "http://localhost:8000")!,
+                    model: "{{model}}"
+                )
+            )
+            XCTFail("Expected HTTP model discovery failure to throw")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .httpStatus(503, #"{"error":"model list unavailable"}"#))
+        }
+    }
+
+    func testOpenAIProviderRequestThrowsForInvalidModelDiscoveryJSON() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":"not a model array"}"#, statusCode: 200)
+        ])
+        let provider = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://localhost:8000")!,
+                model: "placeholder"
+            ),
+            httpClient: client
+        )
+
+        do {
+            _ = try await provider.complete(llmRequest)
+            XCTFail("Expected invalid discovery JSON to throw before completion")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("missing models data"))
+        }
+
+        let requests = await client.capturedRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.url?.path, "/v1/models")
     }
 
     func testAnthropicMessagesUsesNativeHeaders() async throws {
