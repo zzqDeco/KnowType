@@ -65,4 +65,30 @@ final class PrefixContinuationEngineTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
         XCTAssertTrue(continuations.isEmpty)
     }
+
+    func testNilContextLevelZeroLockedPrefixReturnsEmptyAndDoesNotCallProvider() async {
+        let provider = RecordingContinuationProvider()
+        let engine = PrefixContinuationEngine(provider: provider)
+
+        let protectedPrefixes = [
+            "https://example.com/search?q=KnowType",
+            "support@example.com",
+            "/Users/zq/project/KnowType",
+            "docker ps",
+            "let appBundleID = context.appBundleID"
+        ]
+
+        for prefix in protectedPrefixes {
+            let continuations = await engine.continuations(
+                for: LockedPrefix(text: prefix, rawInput: prefix, candidateID: "test"),
+                context: nil,
+                lengthLevel: .medium
+            )
+
+            XCTAssertTrue(continuations.isEmpty, "\(prefix) should not produce continuations")
+        }
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+    }
 }

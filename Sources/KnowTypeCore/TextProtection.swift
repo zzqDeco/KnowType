@@ -9,9 +9,10 @@ public enum TextProtection {
         "com.googlecode.iterm2"
     ]
     private static let commandNames: Set<String> = [
-        "cat", "cd", "chmod", "chown", "cp", "curl", "git", "grep", "ls",
-        "mkdir", "mv", "npm", "python", "python3", "rg", "rm", "ssh",
-        "sudo", "swift", "touch", "vim", "zsh"
+        "brew", "bun", "cargo", "cat", "cd", "chmod", "chown", "cp", "curl",
+        "docker", "git", "go", "grep", "kubectl", "ls", "make", "mkdir",
+        "mv", "node", "npm", "pnpm", "python", "python3", "rg", "rm",
+        "ssh", "sudo", "swift", "touch", "vim", "yarn", "zsh"
     ]
     private static let protectedTokens: [String: String] = [
         "api": "API",
