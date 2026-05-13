@@ -85,10 +85,19 @@ public actor OpenAICompatibleModelDiscovery: ProviderModelDiscovering {
         [
             configuration.kind.rawValue,
             configuration.baseURL.absoluteString,
+            apiKeyFingerprint(configuration.apiKey),
             configuration.headers
                 .sorted { $0.key < $1.key }
                 .map { "\($0.key):\($0.value)" }
                 .joined(separator: "|")
         ].joined(separator: "\n")
+    }
+
+    private func apiKeyFingerprint(_ apiKey: String?) -> String {
+        guard let apiKey,
+              !apiKey.isEmpty else {
+            return "api-key:none"
+        }
+        return "api-key:\(apiKey.hashValue)"
     }
 }

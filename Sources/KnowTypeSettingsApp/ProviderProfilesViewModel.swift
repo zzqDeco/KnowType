@@ -133,10 +133,10 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
             if case .set(_, let secretName, _) = secretMutation {
                 profile.secretName = secretName
-            } else if Self.requiresSecret(kind: profile.kind) {
+            } else if Self.requiresSecret(profile) {
                 profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
-            } else if Self.acceptsOptionalSecret(kind: profile.kind) {
-                profile.secretName = existingProfile?.secretName ?? profile.secretName
+            } else if Self.acceptsOptionalSecret(profile) {
+                profile.secretName = existingProfile?.secretName
             } else {
                 profile.secretName = nil
             }
@@ -223,7 +223,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if Self.validHTTPURL(draft.baseURL) == nil {
             errors.append("Base URL must be an HTTP or HTTPS URL.")
         }
-        if draft.kind != .customHTTP && draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if Self.requiresModel(kind: draft.kind) && draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append("Model is required.")
         }
         if draft.timeoutSeconds <= 0 {
@@ -254,21 +254,49 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
     }
 
-    private static func requiresSecret(kind: ProviderKind) -> Bool {
-        switch kind {
-        case .openAIChat, .openAIResponses, .anthropicMessages, .geminiNative:
+    private static func requiresSecret(_ profile: ProviderProfile) -> Bool {
+        switch profile.kind {
+        case .openAIChat, .openAIResponses:
+            return !isLocalBaseURL(profile.baseURL)
+        case .anthropicMessages, .geminiNative:
             return true
         case .ollamaNative, .customHTTP:
             return false
         }
     }
 
-    private static func acceptsOptionalSecret(kind: ProviderKind) -> Bool {
-        kind == .customHTTP
+    private static func acceptsOptionalSecret(_ profile: ProviderProfile) -> Bool {
+        switch profile.kind {
+        case .openAIChat, .openAIResponses:
+            return isLocalBaseURL(profile.baseURL)
+        case .customHTTP:
+            return true
+        case .anthropicMessages, .geminiNative, .ollamaNative:
+            return false
+        }
+    }
+
+    private static func requiresModel(kind: ProviderKind) -> Bool {
+        switch kind {
+        case .anthropicMessages, .geminiNative, .ollamaNative:
+            return true
+        case .openAIChat, .openAIResponses, .customHTTP:
+            return false
+        }
+    }
+
+    private static func isLocalBaseURL(_ url: URL) -> Bool {
+        guard let host = url.host(percentEncoded: false)?.lowercased() else {
+            return false
+        }
+        return host == "localhost"
+            || host == "127.0.0.1"
+            || host == "::1"
+            || host.hasSuffix(".local")
     }
 
     private func validateSecretAvailability(for profile: ProviderProfile, mutation: SecretMutation) throws {
-        guard Self.requiresSecret(kind: profile.kind), case .none = mutation else {
+        guard Self.requiresSecret(profile), case .none = mutation else {
             return
         }
         guard let secretName = profile.secretName,
@@ -291,9 +319,9 @@ public final class ProviderProfilesViewModel: ObservableObject {
     ) -> SecretMutation {
         let trimmedAPIKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if requiresSecret(kind: profile.kind) || acceptsOptionalSecret(kind: profile.kind) {
+        if requiresSecret(profile) || acceptsOptionalSecret(profile) {
             guard !trimmedAPIKey.isEmpty else {
-                if requiresSecret(kind: profile.kind) {
+                if requiresSecret(profile) {
                     return .none
                 }
                 return .none

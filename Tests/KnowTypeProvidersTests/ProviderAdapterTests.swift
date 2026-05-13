@@ -185,6 +185,38 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(bodyObject["model"] as? String, "responses-local-model")
     }
 
+    func testOpenAIModelDiscoveryCacheIsScopedByAPIKey() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":[{"id":"model-for-key-a"}]}"#, statusCode: 200),
+            (json: #"{"data":[{"id":"model-for-key-b"}]}"#, statusCode: 200)
+        ])
+        let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
+        let baseConfiguration = ProviderConfiguration(
+            kind: .openAIChat,
+            baseURL: URL(string: "http://localhost:8000")!,
+            model: ""
+        )
+
+        var keyAConfiguration = baseConfiguration
+        keyAConfiguration.apiKey = "key-a"
+        var keyBConfiguration = baseConfiguration
+        keyBConfiguration.apiKey = "key-b"
+
+        let first = try await discovery.resolvedModel(for: keyAConfiguration)
+        let second = try await discovery.resolvedModel(for: keyBConfiguration)
+        let cachedFirst = try await discovery.resolvedModel(for: keyAConfiguration)
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(first, "model-for-key-a")
+        XCTAssertEqual(second, "model-for-key-b")
+        XCTAssertEqual(cachedFirst, "model-for-key-a")
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map { $0.value(forHTTPHeaderField: "Authorization") }, [
+            "Bearer key-a",
+            "Bearer key-b"
+        ])
+    }
+
     func testOpenAIModelDiscoveryThrowsForEmptyModelList() async throws {
         let client = SequencedMockHTTPClient(responses: [
             (json: #"{"object":"list","data":[]}"#, statusCode: 200)
