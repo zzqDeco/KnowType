@@ -159,8 +159,8 @@ public struct CandidatePanelRenderer: Sendable {
 
     private func continuationShortcutLabel(at index: Int) -> String {
         guard index > 0 else {
-            return "Tab / Option+1"
+            return "Tab  ⌥1"
         }
-        return "Option+\(index + 1)"
+        return "⌥\(index + 1)"
     }
 }

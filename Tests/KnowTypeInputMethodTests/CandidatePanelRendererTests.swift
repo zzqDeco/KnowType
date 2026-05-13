@@ -65,8 +65,8 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows[1].shortcutLabel, "0")
         XCTAssertEqual(rendered.rows[3].shortcutLabel, "1")
         XCTAssertEqual(rendered.rows[4].shortcutLabel, "2")
-        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab / Option+1")
-        XCTAssertEqual(rendered.rows[7].shortcutLabel, "Option+2")
+        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab  ⌥1")
+        XCTAssertEqual(rendered.rows[7].shortcutLabel, "⌥2")
     }
 
     func testRendersEnglishLabelsForEnglishLocale() {
@@ -149,8 +149,8 @@ final class CandidatePanelRendererTests: XCTestCase {
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
         let controller = InputCompositionController()
 
-        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab / Option+1")
-        XCTAssertEqual(rendered.rows[7].shortcutLabel, "Option+2")
+        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab  ⌥1")
+        XCTAssertEqual(rendered.rows[7].shortcutLabel, "⌥2")
         XCTAssertEqual(
             controller.handle(
                 action: .tab,

@@ -9,4 +9,4 @@ The renderer does not draw UI and does not assign colors. It emits semantic role
 - `rawInput` for the original input row
 - `sectionHeader` for localized grouping labels
 
-Prefix rows and continuation rows are rendered as separate sections. When corrections are present, the raw input row is labeled `0`, prefix shortcuts are numbered `1...n`, and continuation shortcuts use `Tab / Option+1`, `Option+2`, etc.
+Prefix rows and continuation rows are rendered as separate sections. When corrections are present, the raw input row is labeled `0`, prefix shortcuts are numbered `1...n`, and continuation shortcuts use compact macOS-style labels such as `Tab  ⌥1`, `⌥2`, etc.
