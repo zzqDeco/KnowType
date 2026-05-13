@@ -2,7 +2,6 @@ import Foundation
 import KnowTypeCore
 
 public enum CandidatePanelRowKind: Sendable, Equatable {
-    case sectionHeader
     case rawInput
     case prefixCandidate
     case continuationCandidate
@@ -12,7 +11,6 @@ public enum CandidatePanelVisualRole: Sendable, Equatable {
     case lockedPrefix
     case continuation
     case rawInput
-    case sectionHeader
 }
 
 public enum CandidatePanelSelection: Sendable, Equatable {

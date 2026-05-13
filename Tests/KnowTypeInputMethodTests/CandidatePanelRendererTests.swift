@@ -33,7 +33,7 @@ final class CandidatePanelRendererTests: XCTestCase {
         )
     ]
 
-    func testRendersChinesePanelAsCompactNativeStyleRows() {
+    func testRendersChinesePanelAsCompactNativeStyleRowsWithoutHeadersOrPreview() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
             prefixCandidates: prefixCandidates,
@@ -51,6 +51,7 @@ final class CandidatePanelRendererTests: XCTestCase {
                 .continuationCandidate
             ]
         )
+        XCTAssertNil(rendered.previewText)
         XCTAssertEqual(rendered.rows[0].visualRole, .lockedPrefix)
         XCTAssertEqual(rendered.rows[1].visualRole, .lockedPrefix)
         XCTAssertEqual(rendered.rows[2].visualRole, .continuation)
@@ -78,7 +79,7 @@ final class CandidatePanelRendererTests: XCTestCase {
     func testMarksSelectedContinuationRow() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
-            prefixCandidates: prefixCandidates,
+            prefixCandidates: [prefixCandidates[0]],
             continuationCandidates: continuationCandidates
         )
 
@@ -88,8 +89,8 @@ final class CandidatePanelRendererTests: XCTestCase {
         )
 
         XCTAssertFalse(rendered.rows[0].isSelected)
-        XCTAssertFalse(rendered.rows[2].isSelected)
-        XCTAssertTrue(rendered.rows[3].isSelected)
+        XCTAssertFalse(rendered.rows[1].isSelected)
+        XCTAssertTrue(rendered.rows[2].isSelected)
     }
 
     func testOmitsContinuationRowsWhenEmpty() {
@@ -106,16 +107,35 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertNil(rendered.previewText)
     }
 
-    func testPreviewIsOmittedForNativeStyleCandidatePanel() {
+    func testAllShortcutableCandidatesAreRendered() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
-            prefixCandidates: prefixCandidates,
-            continuationCandidates: continuationCandidates
+            prefixCandidates: prefixCandidates + [
+                CorrectionCandidate(text: "我觉得这个方向", source: "local", confidence: 0.7, correctionLevel: .contextual),
+                CorrectionCandidate(text: "我觉得这个方法", source: "local", confidence: 0.6, correctionLevel: .contextual)
+            ],
+            continuationCandidates: continuationCandidates + [
+                ContinuationCandidate(
+                    text: "但是需要更多测试数据",
+                    lengthLevel: .medium,
+                    confidence: 0.7,
+                    provider: "test"
+                ),
+                ContinuationCandidate(
+                    text: "可以先做小范围验证",
+                    lengthLevel: .medium,
+                    confidence: 0.6,
+                    provider: "test"
+                )
+            ]
         )
 
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
 
-        XCTAssertNil(rendered.previewText)
+        XCTAssertEqual(rendered.rows.filter { $0.kind == .prefixCandidate }.count, 4)
+        XCTAssertEqual(rendered.rows.filter { $0.kind == .continuationCandidate }.count, 4)
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3", "4", "⇥", "⌥2", "⌥3", "⌥4"])
+        XCTAssertEqual(rendered.rows.suffix(4).map(\.visualRole), [.continuation, .continuation, .continuation, .continuation])
     }
 
     func testOptionShortcutLabelsMatchCommitActions() {

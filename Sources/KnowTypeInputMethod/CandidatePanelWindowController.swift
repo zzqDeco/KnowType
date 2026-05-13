@@ -39,7 +39,7 @@ final class CandidatePanelWindowController {
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 260, height: 64),
+            contentRect: NSRect(x: 0, y: 0, width: 220, height: 32),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -161,10 +161,10 @@ private final class CandidatePanelContentView: NSView {
             effectView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
-        stackView.orientation = .vertical
-        stackView.alignment = .width
-        stackView.spacing = 0
-        stackView.edgeInsets = NSEdgeInsets(top: 3, left: 3, bottom: 3, right: 3)
+        stackView.orientation = .horizontal
+        stackView.alignment = .centerY
+        stackView.spacing = 2
+        stackView.edgeInsets = NSEdgeInsets(top: 4, left: 5, bottom: 4, right: 5)
         stackView.translatesAutoresizingMaskIntoConstraints = false
         effectView.addSubview(stackView)
 
@@ -173,91 +173,33 @@ private final class CandidatePanelContentView: NSView {
             stackView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
             stackView.topAnchor.constraint(equalTo: effectView.topAnchor),
             stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            widthAnchor.constraint(lessThanOrEqualToConstant: 420)
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 560),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
+            heightAnchor.constraint(lessThanOrEqualToConstant: 44)
         ])
     }
 
-    private func makePreviewLabel(_ text: String) -> NSTextField {
-        let label = baseLabel("")
-        label.attributedStringValue = previewString(text)
-        label.cell?.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        label.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
-        return label
-    }
-
-    private func previewString(_ text: String) -> NSAttributedString {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = .byTruncatingTail
-        let attributed = NSMutableAttributedString(
-            string: text,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-                .foregroundColor: NSColor.labelColor,
-                .paragraphStyle: paragraphStyle
-            ]
-        )
-        let separator = " | "
-        guard let separatorRange = text.range(of: separator) else {
-            return attributed
-        }
-
-        let nsSeparatorRange = NSRange(separatorRange, in: text)
-        attributed.addAttributes(
-            [.foregroundColor: NSColor.separatorColor],
-            range: nsSeparatorRange
-        )
-        let continuationStart = nsSeparatorRange.location + nsSeparatorRange.length
-        attributed.addAttributes(
-            [.foregroundColor: NSColor.secondaryLabelColor],
-            range: NSRange(location: continuationStart, length: attributed.length - continuationStart)
-        )
-        return attributed
-    }
-
-    private func makeSectionHeader(_ text: String) -> NSView {
-        let container = NSStackView()
-        container.orientation = .horizontal
-        container.alignment = .centerY
-        container.spacing = 6
-        container.edgeInsets = NSEdgeInsets(top: 4, left: 7, bottom: 1, right: 7)
-        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 16).isActive = true
-
-        let label = baseLabel(text)
-        label.font = .systemFont(ofSize: 9, weight: .medium)
-        label.textColor = .tertiaryLabelColor
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        container.addArrangedSubview(label)
-        container.addArrangedSubview(separator)
-        return container
-    }
-
     private func makeRowView(_ row: CandidatePanelRenderRow) -> NSView {
-        if row.kind == .sectionHeader {
-            return makeSectionHeader(row.text)
-        }
-
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = 7
-        container.edgeInsets = NSEdgeInsets(top: 1, left: 7, bottom: 1, right: 9)
+        container.spacing = 4
+        container.edgeInsets = NSEdgeInsets(top: 1, left: 5, bottom: 1, right: 7)
         container.wantsLayer = true
-        container.layer?.cornerRadius = 3
+        container.layer?.cornerRadius = 4
         container.layer?.cornerCurve = .continuous
         container.layer?.backgroundColor = rowBackgroundColor(row).cgColor
-        container.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
+        container.heightAnchor.constraint(equalToConstant: 24).isActive = true
 
         if let shortcutLabel = row.shortcutLabel {
-            container.addArrangedSubview(makeShortcutLabel(shortcutLabel, isSelected: row.isSelected))
+            container.addArrangedSubview(
+                makeShortcutLabel(
+                    shortcutLabel,
+                    role: row.visualRole,
+                    isSelected: row.isSelected
+                )
+            )
         }
 
         let textLabel = baseLabel(row.text)
@@ -265,6 +207,7 @@ private final class CandidatePanelContentView: NSView {
         textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected)
         textLabel.lineBreakMode = .byTruncatingTail
         textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: textWidthLimit(for: row.visualRole)).isActive = true
         container.addArrangedSubview(textLabel)
         return container
     }
@@ -276,14 +219,18 @@ private final class CandidatePanelContentView: NSView {
         return .selectedContentBackgroundColor
     }
 
-    private func makeShortcutLabel(_ text: String, isSelected: Bool) -> NSTextField {
+    private func makeShortcutLabel(
+        _ text: String,
+        role: CandidatePanelVisualRole,
+        isSelected: Bool
+    ) -> NSTextField {
         let label = baseLabel(text)
         label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        label.textColor = isSelected ? .alternateSelectedControlTextColor : .secondaryLabelColor
+        label.textColor = shortcutColor(for: role, isSelected: isSelected)
         label.alignment = .right
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
-        label.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 20).isActive = true
         return label
     }
 
@@ -302,8 +249,17 @@ private final class CandidatePanelContentView: NSView {
             return .systemFont(ofSize: 15, weight: .regular)
         case .rawInput:
             return .monospacedSystemFont(ofSize: 13, weight: .regular)
-        case .sectionHeader:
-            return .systemFont(ofSize: 9, weight: .medium)
+        }
+    }
+
+    private func textWidthLimit(for role: CandidatePanelVisualRole) -> CGFloat {
+        switch role {
+        case .lockedPrefix:
+            return 148
+        case .continuation:
+            return 188
+        case .rawInput:
+            return 260
         }
     }
 
@@ -318,8 +274,18 @@ private final class CandidatePanelContentView: NSView {
             return .secondaryLabelColor
         case .rawInput:
             return .tertiaryLabelColor
-        case .sectionHeader:
+        }
+    }
+
+    private func shortcutColor(for role: CandidatePanelVisualRole, isSelected: Bool) -> NSColor {
+        if isSelected {
+            return .alternateSelectedControlTextColor
+        }
+        switch role {
+        case .lockedPrefix:
             return .secondaryLabelColor
+        case .continuation, .rawInput:
+            return .tertiaryLabelColor
         }
     }
 }

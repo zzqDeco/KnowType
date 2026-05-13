@@ -27,9 +27,6 @@ struct KnowTypeDemo {
             print("KnowType Demo")
             print("Input: \(options.rawInput)")
             print("Latency: \(suggestion.latencyMs)ms")
-            if let preview = rendered.previewText {
-                print("Preview: \(preview)")
-            }
             print("")
             printRows(rendered.rows)
             print("")
@@ -90,13 +87,8 @@ struct KnowTypeDemo {
 
     private static func printRows(_ rows: [CandidatePanelRenderRow]) {
         for row in rows {
-            switch row.kind {
-            case .sectionHeader:
-                print("[\(row.text)]")
-            case .rawInput, .prefixCandidate, .continuationCandidate:
-                let shortcut = row.shortcutLabel.map { "\($0) " } ?? ""
-                print("  \(shortcut)\(row.text)")
-            }
+            let shortcut = row.shortcutLabel.map { "\($0) " } ?? ""
+            print("  \(shortcut)\(row.text)")
         }
     }
 
