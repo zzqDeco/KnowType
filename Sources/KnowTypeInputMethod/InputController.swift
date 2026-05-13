@@ -298,6 +298,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorRect: CGRect) {
         candidatePanelState.update(rawInput: rawBuffer, suggestion: suggestion, anchorRect: anchorRect)
+        selectedNativeCandidate = inputCandidateSelection(
+            for: candidatePanelState.windowState.selection,
+            in: candidatePanelState.windowState.viewModel
+        )
         MainActor.assumeIsolated {
             candidatePanelController.update(state: candidatePanelState, locale: locale)
         }
@@ -305,6 +309,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func hideCandidatePanel() {
         candidatePanelState.hide()
+        selectedNativeCandidate = nil
         MainActor.assumeIsolated {
             candidatePanelController.hide()
         }
