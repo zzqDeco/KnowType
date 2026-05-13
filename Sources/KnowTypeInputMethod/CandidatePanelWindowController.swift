@@ -180,7 +180,10 @@ private final class CandidatePanelContentView: NSView {
         label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         label.textColor = .secondaryLabelColor
         label.alignment = .center
-        label.widthAnchor.constraint(equalToConstant: text == "Tab" ? 32 : 54).isActive = true
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        let minimumWidth = max(32, ceil(label.intrinsicContentSize.width) + 10)
+        label.widthAnchor.constraint(greaterThanOrEqualToConstant: minimumWidth).isActive = true
         return label
     }
 
