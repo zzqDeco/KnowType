@@ -43,7 +43,7 @@ public struct InputKeyCommandMapper: Sendable {
             return .ignored
         }
 
-        if stroke.keyCode == Self.deleteKeyCode {
+        if stroke.keyCode == Self.deleteKeyCode || stroke.text == Self.deleteText {
             return .deleteBackward
         }
         if stroke.keyCode == Self.tabKeyCode || stroke.text == "\t" {
@@ -76,6 +76,7 @@ public struct InputKeyCommandMapper: Sendable {
     private static let tabKeyCode = 48
     private static let spaceKeyCode = 49
     private static let deleteKeyCode = 51
+    private static let deleteText = "\u{7F}"
     private static let rKeyCode = 15
     private static let appKitFunctionKeyScalarRange: ClosedRange<UInt32> = 0xF700...0xF8FF
 

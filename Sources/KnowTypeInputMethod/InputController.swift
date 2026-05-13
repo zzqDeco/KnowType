@@ -15,6 +15,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
     private var suggestionTask: Task<Void, Never>?
+    private var nativeCandidates: IMKCandidates?
+    private var displayedNativeCandidates: [InputCandidateSelection] = []
+    private var selectedNativeCandidate: InputCandidateSelection?
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
         let stroke = InputKeyStroke(
@@ -23,39 +26,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: flags)
         )
 
-        switch keyMapper.intent(for: stroke) {
-        case .append(let text):
-            rawBuffer.append(text)
-            invalidateSuggestion()
-            updateComposition()
-            refreshSuggestion(client: sender)
-            return true
-        case .deleteBackward:
-            guard !rawBuffer.isEmpty else {
-                return false
-            }
-            rawBuffer.removeLast()
-            invalidateSuggestion()
-            refreshSuggestion(client: sender)
-            updateComposition()
-            return true
-        case .action(let action):
-            return commit(action: action, client: sender)
-        case .ignored:
-            return false
-        }
+        return handle(intent: keyMapper.intent(for: stroke), client: sender)
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
-        let text = string ?? ""
-        guard InputKeyCommandMapper.isAppendableText(text) else {
-            return false
-        }
-        rawBuffer.append(text)
-        invalidateSuggestion()
-        updateComposition()
-        refreshSuggestion(client: sender)
-        return true
+        let stroke = InputKeyStroke(
+            text: string ?? "",
+            keyCode: Self.textOnlyKeyCode
+        )
+        return handle(intent: keyMapper.intent(for: stroke), client: sender)
     }
 
     public override func composedString(_ sender: Any!) -> Any! {
@@ -70,11 +49,48 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func candidates(_ sender: Any!) -> [Any]! {
-        candidateListBuilder.candidates(rawInput: rawBuffer, suggestion: lastSuggestion)
+        let selections = candidateListBuilder.candidateSelections(rawInput: rawBuffer, suggestion: lastSuggestion)
+        displayedNativeCandidates = selections
+        return selections.map(\.text)
+    }
+
+    public override func candidateSelectionChanged(_ candidateString: NSAttributedString!) {
+        selectNativeCandidate(matching: candidateString?.string)
+    }
+
+    public override func candidateSelected(_ candidateString: NSAttributedString!) {
+        selectNativeCandidate(matching: candidateString?.string)
+        commit(action: .space, client: client())
     }
 
     public override func commitComposition(_ sender: Any!) {
         commit(action: .space, client: sender)
+    }
+
+    private func handle(intent: InputKeyIntent, client sender: Any!) -> Bool {
+        switch intent {
+        case .append(let text):
+            rawBuffer.append(text)
+            invalidateSuggestion()
+            updateComposition()
+            updateNativeCandidates()
+            refreshSuggestion(client: sender)
+            return true
+        case .deleteBackward:
+            guard !rawBuffer.isEmpty else {
+                return false
+            }
+            rawBuffer.removeLast()
+            invalidateSuggestion()
+            updateComposition()
+            updateNativeCandidates()
+            refreshSuggestion(client: sender)
+            return true
+        case .action(let action):
+            return commit(action: action, client: sender)
+        case .ignored:
+            return false
+        }
     }
 
     private func refreshSuggestion(client sender: Any!) {
@@ -107,6 +123,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 self.lastSuggestion = suggestion
                 self.lastSuggestionRawInput = rawInput
                 self.updateComposition()
+                self.updateNativeCandidates()
             }
         }
     }
@@ -155,6 +172,30 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 return .noAction
             }
         }
+
+        if let selectedNativeCandidate {
+            switch selectedNativeCandidate.kind {
+            case .rawInput:
+                switch action {
+                case .space, .tab:
+                    return .commit(selectedNativeCandidate.text)
+                case .optionR:
+                    return .polishRequested(selectedNativeCandidate.text)
+                case .optionNumber:
+                    return .noAction
+                }
+            case .prefixCandidate(let index):
+                if suggestion.prefixCandidates.indices.contains(index) {
+                    return InputCompositionController().handle(
+                        action: action,
+                        prefixCandidates: [suggestion.prefixCandidates[index]],
+                        continuationCandidates: suggestion.continuationCandidates,
+                        originalText: rawBuffer
+                    )
+                }
+            }
+        }
+
         return InputCompositionController().handle(
             action: action,
             prefixCandidates: suggestion.prefixCandidates,
@@ -174,13 +215,66 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         rawBuffer = ""
         invalidateSuggestion()
         updateComposition()
+        hideNativeCandidates()
     }
 
     private func invalidateSuggestion() {
         lastSuggestion = nil
         lastSuggestionRawInput = nil
+        selectedNativeCandidate = nil
         suggestionTask?.cancel()
         suggestionTask = nil
+    }
+
+    private func updateNativeCandidates() {
+        let selections = candidateListBuilder.candidateSelections(rawInput: rawBuffer, suggestion: lastSuggestion)
+        displayedNativeCandidates = selections
+        guard !selections.isEmpty else {
+            hideNativeCandidates()
+            return
+        }
+        MainActor.assumeIsolated {
+            guard let nativeCandidates = nativeCandidateWindow() else {
+                return
+            }
+            nativeCandidates.setCandidateData(selections.map(\.text))
+            nativeCandidates.update()
+            nativeCandidates.show(kIMKLocateCandidatesBelowHint)
+        }
+    }
+
+    private func hideNativeCandidates() {
+        MainActor.assumeIsolated {
+            nativeCandidates?.hide()
+        }
+        displayedNativeCandidates = []
+        selectedNativeCandidate = nil
+    }
+
+    @MainActor
+    private func nativeCandidateWindow() -> IMKCandidates? {
+        if let nativeCandidates {
+            return nativeCandidates
+        }
+        guard let server = server() else {
+            return nil
+        }
+        let candidates = IMKCandidates(
+            server: server,
+            panelType: kIMKSingleColumnScrollingCandidatePanel
+        )
+        candidates?.setDismissesAutomatically(false)
+        nativeCandidates = candidates
+        return candidates
+    }
+
+    private func selectNativeCandidate(matching text: String?) {
+        guard let text,
+              let selection = displayedNativeCandidates.first(where: { $0.text == text }) else {
+            selectedNativeCandidate = nil
+            return
+        }
+        selectedNativeCandidate = selection
     }
 
     private func modifierSet(from flags: Int) -> Set<InputModifier> {
@@ -197,5 +291,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         }
         return modifiers
     }
+
+    private static let textOnlyKeyCode = -1
 }
 #endif

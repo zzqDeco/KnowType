@@ -51,6 +51,53 @@ final class InputCandidateListBuilderTests: XCTestCase {
         XCTAssertFalse(candidates.contains("还有进一步优化空间"))
     }
 
+    func testNativeCandidateSelectionsKeepSelectablePrefixIndexes() {
+        let suggestion = SuggestionResponse(
+            prefixCandidates: [
+                CorrectionCandidate(
+                    text: "我觉得这个方案",
+                    source: "test",
+                    confidence: 1.0,
+                    correctionLevel: .contextual
+                ),
+                CorrectionCandidate(
+                    text: "我觉得这个方法",
+                    source: "test",
+                    confidence: 0.8,
+                    correctionLevel: .contextual
+                )
+            ],
+            lockedPrefix: LockedPrefix(
+                text: "我觉得这个方案",
+                rawInput: "wo jue de zhege fagnan",
+                candidateID: "test"
+            ),
+            continuationCandidates: [
+                ContinuationCandidate(
+                    text: "还有进一步优化空间",
+                    lengthLevel: .medium,
+                    confidence: 0.9,
+                    provider: "test"
+                )
+            ],
+            latencyMs: 1
+        )
+
+        let selections = InputCandidateListBuilder().candidateSelections(
+            rawInput: "wo jue de zhege fagnan",
+            suggestion: suggestion
+        )
+
+        XCTAssertEqual(
+            selections,
+            [
+                InputCandidateSelection(text: "wo jue de zhege fagnan", kind: .rawInput),
+                InputCandidateSelection(text: "我觉得这个方案", kind: .prefixCandidate(index: 0)),
+                InputCandidateSelection(text: "我觉得这个方法", kind: .prefixCandidate(index: 1))
+            ]
+        )
+    }
+
     func testDoesNotDuplicateRawInputWhenItMatchesPrefixCandidate() {
         let suggestion = SuggestionResponse(
             prefixCandidates: [

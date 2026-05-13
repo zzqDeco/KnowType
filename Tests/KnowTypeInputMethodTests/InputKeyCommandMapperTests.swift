@@ -10,6 +10,12 @@ final class InputKeyCommandMapperTests: XCTestCase {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "", keyCode: 51)), .deleteBackward)
     }
 
+    func testMapsTextOnlySpaceTabAndDelete() {
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: " ", keyCode: -1)), .action(.space))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\t", keyCode: -1)), .action(.tab))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{7F}", keyCode: -1)), .deleteBackward)
+    }
+
     func testMapsOptionNumberToContinuationIndex() {
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: "", keyCode: 18, modifiers: [.option])),
