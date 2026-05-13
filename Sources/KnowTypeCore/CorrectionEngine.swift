@@ -51,7 +51,7 @@ public final class CorrectionEngine: Sendable {
                         text: $0.text,
                         source: cloudProvider.providerName,
                         confidence: $0.confidence ?? 0.62,
-                        correctionLevel: .strongAlternative,
+                        correctionLevel: cloudCorrectionLevel(for: raw, locale: context.locale),
                         protectedRanges: TextProtection.detectProtectedRanges(in: $0.text)
                     )
                 }
@@ -65,6 +65,10 @@ public final class CorrectionEngine: Sendable {
     private func shouldAskCloud(context: InputContext) -> Bool {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
+        }
+        if usesTraditionalInput(locale: context.locale),
+           isLikelyPinyinInitialAbbreviation(context.rawInput) {
+            return true
         }
         let tokenCount = correctionTokenCount(context.rawInput, locale: context.locale)
         return tokenCount >= 4 || context.locale == .mixed
@@ -181,6 +185,14 @@ public final class CorrectionEngine: Sendable {
     }
 }
 
+private func cloudCorrectionLevel(for rawInput: String, locale: KnowTypeLocale) -> CorrectionLevel {
+    if usesTraditionalInput(locale: locale),
+       isLikelyPinyinInitialAbbreviation(rawInput) {
+        return .contextual
+    }
+    return .strongAlternative
+}
+
 private let spellingCorrections: [String: String] = [
     "thikn": "think",
     "approch": "approach",
@@ -200,6 +212,21 @@ private func tokenizeWords(_ raw: String) -> [String] {
         .split(whereSeparator: { $0.isWhitespace })
         .map(String.init)
 }
+
+private func isLikelyPinyinInitialAbbreviation(_ raw: String) -> Bool {
+    let words = tokenizeWords(raw)
+    guard words.count == 1,
+          let word = words.first,
+          (2...6).contains(word.count) else {
+        return false
+    }
+
+    return word.unicodeScalars.allSatisfy { scalar in
+        scalar.value < 128 && pinyinInitialScalars.contains(scalar)
+    }
+}
+
+private let pinyinInitialScalars = Set("bpmfdtnlgkhjqxzcsryw".unicodeScalars)
 
 private func normalizeToken(_ token: String, locale: KnowTypeLocale) -> String {
     if token == "I" {

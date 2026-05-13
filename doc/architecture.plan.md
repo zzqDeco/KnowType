@@ -28,6 +28,7 @@ Current local coverage:
 
 - clean-room `TraditionalInputEngine` pinyin decoding with compact segmentation, light typo normalization, and multiple prefix candidates
 - pinyin typo examples such as `fagnan -> fangan -> 方案/方法/方向`
+- high-frequency pinyin-initial abbreviations such as `wsm -> 为什么`, with provider-backed correction still enabled for short ambiguous abbreviation inputs
 - MVP full-pinyin examples such as `zhege gongneng bushi hen wending -> 这个功能不是很稳定`
 - locale-gated traditional decoding: `en-US` keeps English spellcheck available, while `zh-CN` can decode capitalized pinyin composition starts such as `Wo`
 - a small table-driven Xiaohe double-pinyin hook for smoke-test coverage
@@ -81,7 +82,7 @@ The IMK controller uses `IMKTextInput.setMarkedText` for active composition so l
 
 The primary candidate surface is a controlled AppKit `NSPanel` styled as a compact macOS candidate list. We do not rely on `IMKCandidates` for active display because it can silently fail to appear in some host apps. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available.
 
-Candidate positioning recalculates after local and async suggestion publication. Anchor lookup prefers the marked range end, falls back to selected range, then falls back to the client line-height rectangle before using pointer location as the screen fallback.
+Candidate positioning recalculates after local and async suggestion publication. Anchor lookup prefers the marked range end, falls back through marked/selected range starts and ends, then tries client line-height rectangles at those indexes before using pointer location as the screen fallback.
 
 When a provider is configured, the immediate local pass publishes correction/prefix rows only. Continuation rows are published after the provider-backed suggestion returns; local fallback continuations are reserved for no-provider and provider-failure paths.
 

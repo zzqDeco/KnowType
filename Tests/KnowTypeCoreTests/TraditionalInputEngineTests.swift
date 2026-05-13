@@ -18,6 +18,14 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
     }
 
+    func testPinyinInitialAbbreviationsDecodeHighFrequencyPrefixes() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "wsm").first?.text, "为什么")
+        XCTAssertEqual(engine.candidates(for: "sm").first?.text, "什么")
+        XCTAssertEqual(engine.candidates(for: "zmb").first?.text, "怎么办")
+    }
+
     func testMVPExamplesDecodeThroughSeedLexicon() {
         let engine = TraditionalInputEngine()
         let examples = [

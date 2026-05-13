@@ -295,7 +295,21 @@ private let lexicon: [LexiconEntry] = [
     entry(["wo", "jue", "de"], [("我觉得", 0.99)]),
     entry(["wo", "jue"], [("我觉得", 0.94)]),
     entry(["wo", "xiang"], [("我想", 0.99)]),
+    entry(["wsm"], [
+        ("为什么", 0.98),
+        ("我什么", 0.58)
+    ]),
+    entry(["sm"], [("什么", 0.96)]),
+    entry(["zm"], [("怎么", 0.94)]),
+    entry(["zmb"], [("怎么办", 0.94)]),
+    entry(["zmy"], [("怎么样", 0.94)]),
+    entry(["zms"], [("怎么说", 0.90)]),
+    entry(["ws"], [("我是", 0.86)]),
+    entry(["ns"], [("你是", 0.86)]),
     entry(["jue", "de"], [("觉得", 0.96)]),
+    entry(["shen", "me"], [("什么", 0.97)]),
+    entry(["zen", "me"], [("怎么", 0.96)]),
+    entry(["wei", "shen", "me"], [("为什么", 0.99)]),
     entry(["zhege"], [("这个", 0.99)]),
     entry(["zhe", "ge"], [("这个", 0.98)]),
     entry(["fangan"], [

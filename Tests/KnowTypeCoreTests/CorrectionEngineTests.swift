@@ -61,6 +61,32 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(requests.first?.rawInput, "wojuedezhegefagnan")
     }
 
+    func testPinyinInitialAbbreviationAsksConfiguredProvider() async {
+        let provider = RecordingProvider()
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        let candidates = await engine.correct(
+            InputContext(rawInput: "wsm", locale: .zhCN)
+        )
+
+        let requests = await provider.requests
+        XCTAssertTrue(candidates.map(\.text).contains("为什么"))
+        XCTAssertEqual(requests.first?.task, .correction)
+        XCTAssertEqual(requests.first?.rawInput, "wsm")
+    }
+
+    func testTechnicalShortTokenDoesNotUsePinyinInitialCloudPath() async {
+        let provider = RecordingProvider()
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        _ = await engine.correct(
+            InputContext(rawInput: "api", locale: .zhCN)
+        )
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testEnglishCorrectionPreservesSentenceShape() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(

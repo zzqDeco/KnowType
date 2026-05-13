@@ -44,12 +44,13 @@ final class CandidatePanelWindowController {
             backing: .buffered,
             defer: true
         )
-        panel.level = .floating
+        panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.hasShadow = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hidesOnDeactivate = false
+        panel.worksWhenModal = true
         panel.isReleasedWhenClosed = false
         panel.contentView = contentView
         self.panel = panel

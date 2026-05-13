@@ -20,6 +20,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
     private var candidatePanelState = CandidatePanelState()
+    private var lastUsableCandidateAnchorRect: CGRect?
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
@@ -310,6 +311,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private func hideCandidatePanel() {
         candidatePanelState.hide()
         selectedNativeCandidate = nil
+        lastUsableCandidateAnchorRect = nil
         MainActor.assumeIsolated {
             candidatePanelController.hide()
         }
@@ -344,13 +346,28 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 actualRange: nil
             )
             if isUsableAnchorRect(firstRect) {
+                lastUsableCandidateAnchorRect = firstRect
                 return firstRect
             }
         }
 
-        var lineRect = NSRect.zero
-        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &lineRect)
-        return isUsableAnchorRect(lineRect) ? lineRect : .zero
+        let lineHeightIndexes = CandidateAnchorPolicy.lineHeightCharacterIndexes(
+            selectedRange: client.selectedRange(),
+            markedRange: client.markedRange()
+        )
+        for index in lineHeightIndexes {
+            var lineRect = NSRect.zero
+            _ = client.attributes(forCharacterIndex: index, lineHeightRectangle: &lineRect)
+            if isUsableAnchorRect(lineRect) {
+                lastUsableCandidateAnchorRect = lineRect
+                return lineRect
+            }
+        }
+
+        if let lastUsableCandidateAnchorRect {
+            return lastUsableCandidateAnchorRect
+        }
+        return .zero
     }
 
     private func selectNativeCandidate(matching text: String?) {
