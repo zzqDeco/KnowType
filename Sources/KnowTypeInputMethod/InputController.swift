@@ -76,13 +76,17 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private func refreshSuggestion(client sender: Any!) {
         suggestionTask?.cancel()
         let rawInput = rawBuffer
+        guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawInput) else {
+            return
+        }
+        let appBundleID = appBundleIdentifier(client: sender)
         suggestionTask = Task { [weak self] in
             guard let self else {
                 return
             }
             let suggestion = await self.sessionController.update(
                 rawInput: rawInput,
-                appBundleID: nil,
+                appBundleID: appBundleID,
                 locale: self.locale
             )
             guard !Task.isCancelled else {
@@ -101,6 +105,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 self.updateComposition()
             }
         }
+    }
+
+    private func appBundleIdentifier(client sender: Any!) -> String? {
+        (sender as? IMKTextInput)?.bundleIdentifier()
     }
 
     @discardableResult

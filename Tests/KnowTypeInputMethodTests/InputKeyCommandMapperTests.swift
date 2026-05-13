@@ -39,6 +39,13 @@ final class InputKeyCommandMapperTests: XCTestCase {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\n", keyCode: 76)), .ignored)
     }
 
+    func testAppKitFunctionKeyScalarsAreIgnored() {
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{F700}", keyCode: 126)), .ignored)
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{F701}", keyCode: 125)), .ignored)
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{F702}", keyCode: 123)), .ignored)
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{F703}", keyCode: 124)), .ignored)
+    }
+
     func testCommandAndControlModifiedInputIsIgnored() {
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: "c", keyCode: 8, modifiers: [.command])),

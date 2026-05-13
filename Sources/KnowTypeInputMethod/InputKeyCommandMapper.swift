@@ -69,6 +69,7 @@ public struct InputKeyCommandMapper: Sendable {
         return text.unicodeScalars.allSatisfy { scalar in
             !CharacterSet.controlCharacters.contains(scalar)
                 && !CharacterSet.newlines.contains(scalar)
+                && !Self.appKitFunctionKeyScalarRange.contains(scalar.value)
         }
     }
 
@@ -76,6 +77,7 @@ public struct InputKeyCommandMapper: Sendable {
     private static let spaceKeyCode = 49
     private static let deleteKeyCode = 51
     private static let rKeyCode = 15
+    private static let appKitFunctionKeyScalarRange: ClosedRange<UInt32> = 0xF700...0xF8FF
 
     private static let digitKeyCodes: [Int: Int] = [
         18: 1,
