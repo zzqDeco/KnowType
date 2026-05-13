@@ -83,6 +83,7 @@ public enum TextProtection {
     public static func detectProtectedRanges(in text: String) -> [ProtectedRange] {
         let patterns: [(String, String)] = [
             (#"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s]+"#, "url"),
+            (#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:/[^\s]*)"#, "url"),
             (#"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, "email"),
             (#"(?<!\S)(?:~?/|\./|\.\./)[^\s]+"#, "file_path"),
             (#"\b[A-Za-z]:[\\/][^\s]+"#, "file_path"),
@@ -114,6 +115,10 @@ public enum TextProtection {
 
     private static func isURL(_ text: String) -> Bool {
         text.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
+            || text.range(
+                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:/[^\s]*)$"#,
+                options: .regularExpression
+            ) != nil
     }
 
     private static func isEmail(_ text: String) -> Bool {
@@ -196,23 +201,14 @@ public enum TextProtection {
     }
 
     private static func hasCommandOperator(in text: String) -> Bool {
-        let operatorPatterns = [
-            #"(^|\s)(?:&&|\|\|)\s*"#,
-            #"\s\|\s"#,
-            #"\s(?:[0-9]?>|>>|<|<<|&>)\s*\S+"#
-        ]
-        guard operatorPatterns.contains(where: {
-            text.range(of: $0, options: .regularExpression) != nil
-        }) else {
+        guard let operatorRange = text.range(
+            of: #"(?:&&|\|\||\||[0-9]?>|>>|<|<<|&>)"#,
+            options: .regularExpression
+        ) else {
             return false
         }
 
-        let commandPrefix = text.split(
-            maxSplits: 1,
-            whereSeparator: { character in
-                character == "|" || character == "<" || character == ">" || character == "&"
-            }
-        ).first.map(String.init) ?? text
+        let commandPrefix = String(text[..<operatorRange.lowerBound])
         return isCommandShape(commandPrefix.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
@@ -238,7 +234,9 @@ public enum TextProtection {
             return true
         }
         if pathCommandNames.contains(command) {
-            return arguments.contains(where: isCommandPathArgument)
+            return arguments.contains { argument in
+                isCommandPathArgument(argument) || isBasenameFileArgument(argument)
+            }
         }
         if networkCommandNames.contains(command) {
             return arguments.contains(where: isURLLikeArgument)
@@ -303,7 +301,18 @@ public enum TextProtection {
     private static func isHostLikeArgument(_ argument: String) -> Bool {
         let trimmed = argument.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
         return trimmed.range(
-            of: #"^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?(?:localhost|[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+|[A-Za-z0-9][A-Za-z0-9-]*-[A-Za-z0-9][A-Za-z0-9-]*|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?$"#,
+            of: #"^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?(?:localhost|[A-Za-z0-9][A-Za-z0-9-]*|[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func isBasenameFileArgument(_ argument: String) -> Bool {
+        let trimmed = argument.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+        if isDotfileArgument(trimmed) {
+            return true
+        }
+        return trimmed.range(
+            of: #"^[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)+$"#,
             options: .regularExpression
         ) != nil
     }
