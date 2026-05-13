@@ -70,15 +70,38 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 
     public func createProfile(kind: ProviderKind) {
-        let profile = ProviderProfileTemplates.defaultProfile(kind: kind)
+        var profile = ProviderProfileTemplates.defaultProfile(kind: kind)
+        if profile.secretName != nil {
+            profile.secretName = Self.secretName(for: profile.id)
+        }
         selectedProfileID = profile.id
         draft = ProviderProfileDraft(profile: profile)
+        validationErrors = []
+    }
+
+    public func changeDraftKind(_ kind: ProviderKind) {
+        guard draft.kind != kind else {
+            return
+        }
+
+        let template = ProviderProfileTemplates.defaultProfile(kind: kind)
+        draft.kind = kind
+        draft.baseURL = template.baseURL.absoluteString
+        draft.model = template.model
+        draft.timeoutSeconds = template.timeoutSeconds
+        draft.headers = template.headers
+        draft.secretName = template.secretName == nil ? nil : Self.secretName(for: draft.id)
+        draft.customBodyTemplate = template.customBodyTemplate ?? ""
+        draft.customResponsePath = template.customResponsePath ?? ""
         validationErrors = []
     }
 
     @discardableResult
     public func saveDraft() -> Bool {
         validationErrors = validate(draft)
+        if !draft.isDefault && !profiles.contains(where: { $0.id != draft.id && $0.isDefault }) {
+            validationErrors.append("At least one default provider is required.")
+        }
         guard validationErrors.isEmpty else {
             return false
         }
@@ -103,10 +126,6 @@ public final class ProviderProfilesViewModel: ObservableObject {
                     updated.isDefault = existing.id == profile.id
                     return updated
                 }
-            }
-
-            if !profiles.contains(where: \.isDefault), let firstIndex = profiles.indices.first {
-                profiles[firstIndex].isDefault = true
             }
 
             file.profiles = profiles
@@ -142,7 +161,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append("Display name is required.")
         }
-        if URL(string: draft.baseURL)?.scheme.map({ $0 == "http" || $0 == "https" }) != true {
+        if Self.validHTTPURL(draft.baseURL) == nil {
             errors.append("Base URL must be an HTTP or HTTPS URL.")
         }
         if draft.kind != .customHTTP && draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -164,6 +183,16 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
     private static func secretName(for profileID: String) -> String {
         "knowtype.provider.\(profileID).apiKey"
+    }
+
+    private static func validHTTPURL(_ value: String) -> URL? {
+        guard let url = URL(string: value),
+              let scheme = url.scheme,
+              (scheme == "http" || scheme == "https"),
+              url.host?.isEmpty == false else {
+            return nil
+        }
+        return url
     }
 }
 
@@ -197,7 +226,10 @@ public struct ProviderProfileDraft: Equatable, Sendable, Identifiable {
     }
 
     public func makeProfile() throws -> ProviderProfile {
-        guard let url = URL(string: baseURL) else {
+        guard let url = URL(string: baseURL),
+              let scheme = url.scheme,
+              (scheme == "http" || scheme == "https"),
+              url.host?.isEmpty == false else {
             throw ProviderProfileDraftError.invalidBaseURL
         }
         return ProviderProfile(

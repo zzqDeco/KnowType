@@ -37,6 +37,19 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(errors.contains("Timeout must be greater than zero."))
     }
 
+    func testValidationRejectsBaseURLWithoutHost() {
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
+            secretStore: InMemorySecretStore()
+        )
+
+        viewModel.draft.baseURL = "https:"
+
+        let errors = viewModel.validate(viewModel.draft)
+
+        XCTAssertTrue(errors.contains("Base URL must be an HTTP or HTTPS URL."))
+    }
+
     func testSaveCreatesProfileAndWritesAPIKeyToSecretStoreOnly() throws {
         let store = CapturingProfileStore(file: ProviderProfilesFile())
         let secrets = InMemorySecretStore()
@@ -58,11 +71,45 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let savedProfile = try XCTUnwrap(store.savedFiles.last?.profiles.first)
         XCTAssertEqual(savedProfile.displayName, "Work OpenAI")
         XCTAssertEqual(savedProfile.kind, .openAIResponses)
-        XCTAssertEqual(savedProfile.secretName, "knowtype.openai_responses.apiKey")
+        XCTAssertEqual(savedProfile.secretName, "knowtype.provider.\(savedProfile.id).apiKey")
         XCTAssertEqual(try secrets.secret(named: savedProfile.secretName ?? ""), "sk-secret")
 
         let savedJSON = String(data: try JSONEncoder().encode(store.savedFiles.last), encoding: .utf8)
         XCTAssertFalse(savedJSON?.contains("sk-secret") ?? true)
+    }
+
+    func testNewProfilesUseProfileScopedSecretNames() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = InMemorySecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModel.createProfile(kind: .openAIChat)
+        let firstID = viewModel.draft.id
+        viewModel.draft.displayName = "Work OpenAI"
+        viewModel.draft.apiKey = "sk-work"
+        viewModel.draft.isDefault = true
+        XCTAssertTrue(viewModel.saveDraft())
+
+        viewModel.createProfile(kind: .openAIChat)
+        let secondID = viewModel.draft.id
+        viewModel.draft.displayName = "Personal OpenAI"
+        viewModel.draft.apiKey = "sk-personal"
+        viewModel.draft.isDefault = true
+        XCTAssertTrue(viewModel.saveDraft())
+
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles)
+        let first = try XCTUnwrap(saved.first(where: { $0.id == firstID }))
+        let second = try XCTUnwrap(saved.first(where: { $0.id == secondID }))
+
+        XCTAssertNotEqual(first.secretName, second.secretName)
+        XCTAssertEqual(first.secretName, "knowtype.provider.\(firstID).apiKey")
+        XCTAssertEqual(second.secretName, "knowtype.provider.\(secondID).apiKey")
+        XCTAssertEqual(try secrets.secret(named: first.secretName ?? ""), "sk-work")
+        XCTAssertEqual(try secrets.secret(named: second.secretName ?? ""), "sk-personal")
     }
 
     func testSaveUpdatesExistingProfileAndKeepsSingleDefault() throws {
@@ -86,6 +133,55 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let saved = try XCTUnwrap(store.savedFiles.last?.profiles)
         XCTAssertEqual(saved.first(where: { $0.id == anthropicID })?.displayName, "Claude Fast")
         XCTAssertEqual(saved.filter(\.isDefault).map(\.id), [anthropicID])
+    }
+
+    func testChangingKindAppliesProviderTemplateDefaults() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://openrouter.ai/api/v1")!,
+                model: "openai/custom",
+                headers: ["anthropic-version": "stale"],
+                secretName: "knowtype.openai_chat.apiKey",
+                customBodyTemplate: #"{"stale":true}"#,
+                customResponsePath: "stale",
+                isDefault: true
+            )
+        ]
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile(profiles: existing)),
+            secretStore: InMemorySecretStore()
+        )
+
+        viewModel.changeDraftKind(.geminiNative)
+
+        XCTAssertEqual(viewModel.draft.kind, .geminiNative)
+        XCTAssertEqual(viewModel.draft.baseURL, "https://generativelanguage.googleapis.com")
+        XCTAssertEqual(viewModel.draft.model, "gemini-1.5-flash")
+        XCTAssertTrue(viewModel.draft.headers.isEmpty)
+        XCTAssertEqual(viewModel.draft.secretName, "knowtype.provider.work.apiKey")
+        XCTAssertEqual(viewModel.draft.customBodyTemplate, "")
+        XCTAssertEqual(viewModel.draft.customResponsePath, "")
+    }
+
+    func testSaveRejectsRemovingOnlyDefaultProfile() throws {
+        let existing = [
+            ProviderProfileTemplates.defaultProfile(kind: .openAIChat, isDefault: true),
+            ProviderProfileTemplates.defaultProfile(kind: .anthropicMessages)
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore()
+        )
+
+        viewModel.draft.isDefault = false
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertTrue(viewModel.validationErrors.contains("At least one default provider is required."))
+        XCTAssertTrue(store.savedFiles.isEmpty)
     }
 
     func testCustomHTTPRequiresTemplateAndResponsePath() {

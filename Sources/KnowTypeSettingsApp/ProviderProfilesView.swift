@@ -42,7 +42,13 @@ public struct ProviderProfilesView: View {
             Form {
                 Section("Provider") {
                     TextField("Display Name", text: $viewModel.draft.displayName)
-                    Picker("Kind", selection: $viewModel.draft.kind) {
+                    Picker(
+                        "Kind",
+                        selection: Binding(
+                            get: { viewModel.draft.kind },
+                            set: { viewModel.changeDraftKind($0) }
+                        )
+                    ) {
                         ForEach(ProviderKind.allCases, id: \.self) { kind in
                             Text(kind.rawValue).tag(kind)
                         }
