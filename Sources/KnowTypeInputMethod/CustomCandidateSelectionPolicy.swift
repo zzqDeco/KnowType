@@ -28,6 +28,9 @@ public struct CustomCandidateSelectionPolicy: Sendable {
         }
 
         if number == 0 {
+            guard !suggestion.prefixCandidates.isEmpty else {
+                return .passThrough
+            }
             return rawInput.isEmpty ? .passThrough : .commitRawInput
         }
 

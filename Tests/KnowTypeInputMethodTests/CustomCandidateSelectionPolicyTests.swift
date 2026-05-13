@@ -29,6 +29,18 @@ final class CustomCandidateSelectionPolicyTests: XCTestCase {
         )
     }
 
+    func testZeroPassesThroughWhenRawShortcutIsNotVisible() {
+        XCTAssertEqual(
+            policy.decision(
+                for: InputKeyStroke(text: "0", keyCode: 29),
+                rawInput: "wo jue",
+                suggestion: suggestion(prefixCount: 0),
+                suggestionRawInput: "wo jue"
+            ),
+            .passThrough
+        )
+    }
+
     func testShiftedDigitPassesThrough() {
         XCTAssertEqual(
             policy.decision(
