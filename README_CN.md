@@ -114,7 +114,7 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 `secretName` 通过 `SecretStore` 解析。macOS 上的 `KeychainSecretStore` 会把 API key 存入 Keychain，service 为 `KnowType`；provider JSON 保存 `secretName`，不保存 API key 明文。自定义 `headers` 会按配置写入 provider JSON，因此 MVP 阶段不要把 bearer token 或其他密钥放进 headers。测试和非 UI 流程可以使用内存或只读字典 secret store。
 
-设置 App 会读写同一套 profile schema，可编辑 OpenAI、Anthropic、Gemini、Ollama 和自定义 HTTP profile。云端 profile 需要填写新 key，或复用已有 Keychain 密钥。远程 OpenAI 兼容 profile 必须显式填写真实 model ID，并拒绝 `<model-id>` 这类发现占位符；本地 OpenAI 兼容运行时可以留空 model，由本地 `/v1/models` 发现。自定义 HTTP profile 可不填写 API key，以支持本地代理 endpoint；如果填写 key，则会保存为 profile 级密钥。把 profile 切换到本地或不需要密钥的 provider 时，会清除过期的非本地密钥引用；只有没有其他已保存 profile 继续引用旧密钥时，才会删除旧的 profile 级密钥。已有本地 OpenAI 兼容 profile 的 API key 留空保存时，会保留已有的可选密钥。
+设置 App 会读写同一套 profile schema，可编辑 OpenAI、Anthropic、Gemini、Ollama 和自定义 HTTP profile。云端 profile 需要填写新 key，或复用已有 Keychain 密钥。远程 OpenAI 兼容 profile 必须显式填写真实 model ID，并拒绝 `<model-id>` 这类发现占位符；本地 OpenAI 兼容运行时可以留空 model，由本地 `/v1/models` 发现。自定义 HTTP profile 可不填写 API key，以支持本地代理 endpoint；如果填写 key，则会保存为 profile 级密钥。把 profile 切换到本地或不需要密钥的 provider 时，会清除过期的非本地密钥引用；只有没有其他已保存 profile 继续引用旧密钥时，才会删除旧的 profile 级密钥。已有本地 OpenAI 兼容 profile 的 API key 留空保存时，只有对应 Keychain 项仍可解析，才会保留已有的可选密钥。
 
 设置 App 按 MVP 分为 Input、Candidates、AI Provider、Privacy 和 Debug Install。Debug Install 会概括本地开发流程：构建/签名输入法 bundle，可通过 `CODESIGN_IDENTITY` 传入 Apple Development 身份，安装到 `~/Library/Input Methods`，必要时刷新 macOS 输入源注册状态，在系统设置中启用 KnowType，并通过 Console.app 或 `log stream` 查看 `KnowTypeInputMethodApp` 日志。
 

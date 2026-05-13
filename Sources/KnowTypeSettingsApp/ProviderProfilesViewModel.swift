@@ -140,7 +140,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 if Self.requiresSecret(profile) {
                     profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
                 } else if Self.acceptsOptionalSecret(profile) {
-                    profile.secretName = existingProfile?.secretName
+                    profile.secretName = try retainedOptionalSecretName(from: existingProfile)
                 } else {
                     profile.secretName = nil
                 }
@@ -339,6 +339,17 @@ public final class ProviderProfilesViewModel: ObservableObject {
               !existingSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ProviderProfilesViewModelError.missingAPIKey
         }
+    }
+
+    private func retainedOptionalSecretName(from existingProfile: ProviderProfile?) throws -> String? {
+        guard let secretName = existingProfile?.secretName else {
+            return nil
+        }
+        guard let existingSecret = try secretStore.secret(named: secretName),
+              !existingSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return secretName
     }
 
     private enum SecretMutation {

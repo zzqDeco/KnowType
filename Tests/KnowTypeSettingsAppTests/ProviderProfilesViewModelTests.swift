@@ -655,6 +655,36 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(try secrets.secret(named: secretName), "local-key")
     }
 
+    func testLocalOpenAICompatibleBlankAPIKeyClearsMissingLocalSecretReference() throws {
+        let secretName = "knowtype.provider.local.apiKey"
+        let existing = [
+            ProviderProfile(
+                id: "local",
+                displayName: "Local",
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: "gpt-5.2",
+                secretName: secretName,
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore(values: [:])
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.draft.apiKey = " \n "
+
+        XCTAssertTrue(viewModel.saveDraft())
+
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertNil(saved.secretName)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+        XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
+    }
+
     func testRemoteOpenAICompatibleProfileStillRequiresAPIKey() throws {
         let store = CapturingProfileStore(file: ProviderProfilesFile())
         let secrets = RecordingSecretStore()
