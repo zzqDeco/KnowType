@@ -5,6 +5,8 @@
 Current package-level implementation covers:
 
 - candidate panel view model
+- custom candidate selection policy for raw/prefix numeric shortcuts
+- candidate anchor range policy for IMK clients with known or unknown selection ranges
 - custom AppKit candidate panel window
 - shortcut-to-commit behavior
 - async suggestion pipeline wiring

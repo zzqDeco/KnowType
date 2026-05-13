@@ -10,6 +10,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private let sessionController = InputSessionController()
     private let keyMapper = InputKeyCommandMapper()
     private let candidateListBuilder = InputCandidateListBuilder()
+    private let customCandidateSelectionPolicy = CustomCandidateSelectionPolicy()
     private var rawBuffer = ""
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
@@ -305,41 +306,37 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         guard let client = sender as? IMKTextInput else {
             return .zero
         }
-        let selectedRange = client.selectedRange()
-        let location = selectedRange.location == NSNotFound ? 0 : selectedRange.location
+        guard let characterRange = CandidateAnchorPolicy.characterRange(for: client.selectedRange()) else {
+            return .zero
+        }
         return client.firstRect(
-            forCharacterRange: NSRange(location: location, length: 0),
+            forCharacterRange: characterRange,
             actualRange: nil
         )
     }
 
     private func handleCustomCandidateSelection(stroke: InputKeyStroke, client sender: Any!) -> Bool {
-        guard stroke.modifiers.isEmpty,
-              let number = Self.candidateSelectionNumberByKeyCode[stroke.keyCode],
-              let suggestion = lastSuggestion,
-              SuggestionPublicationGuard.hasCurrentSuggestion(
-                suggestionRawInput: lastSuggestionRawInput,
-                currentRawInput: rawBuffer
-              ) else {
-            return false
-        }
-
-        if number == 0 {
-            guard !rawBuffer.isEmpty else {
-                return true
-            }
+        switch customCandidateSelectionPolicy.decision(
+            for: stroke,
+            rawInput: rawBuffer,
+            suggestion: lastSuggestion,
+            suggestionRawInput: lastSuggestionRawInput
+        ) {
+        case .commitRawInput:
             insert(rawBuffer, client: sender)
             resetComposition()
             return true
-        }
-
-        let prefixIndex = number - 1
-        guard suggestion.prefixCandidates.indices.contains(prefixIndex) else {
+        case .commitPrefixCandidate(let index):
+            guard let suggestion = lastSuggestion,
+                  suggestion.prefixCandidates.indices.contains(index) else {
+                return false
+            }
+            insert(suggestion.prefixCandidates[index].text, client: sender)
+            resetComposition()
             return true
+        case .passThrough:
+            return false
         }
-        insert(suggestion.prefixCandidates[prefixIndex].text, client: sender)
-        resetComposition()
-        return true
     }
 
     private func updateNativeCandidates() {
@@ -380,17 +377,5 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private static let textOnlyKeyCode = -1
-    private static let candidateSelectionNumberByKeyCode: [Int: Int] = [
-        29: 0,
-        18: 1,
-        19: 2,
-        20: 3,
-        21: 4,
-        23: 5,
-        22: 6,
-        26: 7,
-        28: 8,
-        25: 9
-    ]
 }
 #endif
