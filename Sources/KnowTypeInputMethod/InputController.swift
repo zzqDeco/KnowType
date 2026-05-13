@@ -92,7 +92,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .append(let text):
             rawBuffer.append(text)
             invalidateSuggestion()
-            updateComposition()
+            refreshComposition()
             updateNativeCandidates()
             refreshSuggestion(client: sender)
             return true
@@ -102,7 +102,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             }
             rawBuffer.removeLast()
             invalidateSuggestion()
-            updateComposition()
+            refreshComposition()
             updateNativeCandidates()
             refreshSuggestion(client: sender)
             return true
@@ -142,7 +142,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 }
                 self.lastSuggestion = suggestion
                 self.lastSuggestionRawInput = rawInput
-                self.updateComposition()
+                self.refreshComposition()
                 self.updateNativeCandidates()
             }
         }
@@ -164,10 +164,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             Task { [sessionController] in
                 await sessionController.requestPolish(rawInput: text)
             }
-            updateComposition()
+            refreshComposition()
             return true
         case .keepComposition:
-            updateComposition()
+            refreshComposition()
             return true
         case .noAction:
             return InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: !rawBuffer.isEmpty)
@@ -242,7 +242,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private func resetComposition() {
         rawBuffer = ""
         invalidateSuggestion()
-        updateComposition()
+        refreshComposition()
         hideNativeCandidates()
     }
 
@@ -255,6 +255,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private func updateNativeCandidates() {
+        guard lastSuggestion != nil else {
+            displayedNativeCandidates = []
+            hideNativeCandidates()
+            return
+        }
         let selections = candidateListBuilder.candidateSelections(rawInput: rawBuffer, suggestion: lastSuggestion)
         displayedNativeCandidates = selections
         guard !selections.isEmpty else {
@@ -292,6 +297,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             panelType: kIMKSingleColumnScrollingCandidatePanel
         )
         candidates?.setDismissesAutomatically(false)
+        candidates?.setAttributes([IMKCandidatesSendServerKeyEventFirst as String: true])
         candidates?.setSelectionKeys(Self.nativeCandidateSelectionKeyCodes)
         nativeCandidates = candidates
         return candidates
@@ -316,6 +322,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         selectedNativeCandidate = selection
     }
 
+    private func refreshComposition() {
+        super.updateComposition()
+    }
+
     private func modifierSet(from flags: Int) -> Set<InputModifier> {
         let eventFlags = NSEvent.ModifierFlags(rawValue: UInt(flags))
         var modifiers: Set<InputModifier> = []
@@ -332,6 +342,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private static let textOnlyKeyCode = -1
-    private static let nativeCandidateSelectionKeyCodes = [122, 120, 99, 118, 96, 97, 98, 100, 101]
+    private static let nativeCandidateSelectionKeyCodes = [18, 19, 20, 21, 23, 22, 26, 28, 25]
 }
 #endif
