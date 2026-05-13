@@ -50,7 +50,11 @@ public final class CorrectionEngine: Sendable {
                     CorrectionCandidate(
                         text: $0.text,
                         source: cloudProvider.providerName,
-                        confidence: $0.confidence ?? 0.62,
+                        confidence: cloudCorrectionConfidence(
+                            $0.confidence,
+                            rawInput: raw,
+                            locale: context.locale
+                        ),
                         correctionLevel: cloudCorrectionLevel(for: raw, locale: context.locale),
                         protectedRanges: TextProtection.detectProtectedRanges(in: $0.text)
                     )
@@ -67,7 +71,11 @@ public final class CorrectionEngine: Sendable {
             return false
         }
         if usesTraditionalInput(locale: context.locale),
-           isLikelyPinyinInitialAbbreviation(context.rawInput) {
+           isLikelyPinyinCompositionInput(
+               context.rawInput,
+               traditionalInputEngine: traditionalInputEngine,
+               locale: context.locale
+           ) {
             return true
         }
         let tokenCount = correctionTokenCount(context.rawInput, locale: context.locale)
@@ -187,10 +195,23 @@ public final class CorrectionEngine: Sendable {
 
 private func cloudCorrectionLevel(for rawInput: String, locale: KnowTypeLocale) -> CorrectionLevel {
     if usesTraditionalInput(locale: locale),
-       isLikelyPinyinInitialAbbreviation(rawInput) {
+       isLikelyPinyinCompositionInput(rawInput, traditionalInputEngine: TraditionalInputEngine(), locale: locale) {
         return .contextual
     }
     return .strongAlternative
+}
+
+private func cloudCorrectionConfidence(
+    _ providerConfidence: Double?,
+    rawInput: String,
+    locale: KnowTypeLocale
+) -> Double {
+    let confidence = providerConfidence ?? 0.62
+    if usesTraditionalInput(locale: locale),
+       isLikelyPinyinCompositionInput(rawInput, traditionalInputEngine: TraditionalInputEngine(), locale: locale) {
+        return min(confidence, 0.86)
+    }
+    return confidence
 }
 
 private let spellingCorrections: [String: String] = [
@@ -227,6 +248,52 @@ private func isLikelyPinyinInitialAbbreviation(_ raw: String) -> Bool {
 }
 
 private let pinyinInitialScalars = Set("bpmfdtnlgkhjqxzcsryw".unicodeScalars)
+
+private func isLikelyPinyinCompositionInput(
+    _ raw: String,
+    traditionalInputEngine: TraditionalInputEngine,
+    locale: KnowTypeLocale
+) -> Bool {
+    if isLikelyPinyinInitialAbbreviation(raw) {
+        return true
+    }
+    if traditionalInputEngine.canCompletePinyinPrefix(
+        for: raw,
+        preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: locale)
+    ) {
+        return true
+    }
+    return isLikelyUncoveredCompactPinyinFragment(raw)
+}
+
+private func isLikelyUncoveredCompactPinyinFragment(_ raw: String) -> Bool {
+    let words = tokenizeWords(raw)
+    guard words.count == 1,
+          let word = words.first,
+          (4...24).contains(word.count) else {
+        return false
+    }
+    if TextProtection.canonicalTechnicalToken(word) != nil || preservesCodeLikeToken(word) {
+        return false
+    }
+
+    let lower = word.lowercased()
+    guard lower == word,
+          lower.unicodeScalars.allSatisfy({ scalar in
+              scalar.value < 128 && CharacterSet.lowercaseLetters.contains(scalar)
+          }) else {
+        return false
+    }
+
+    return pinyinFragmentSignals.contains { lower.contains($0) }
+}
+
+private let pinyinFragmentSignals = [
+    "zh", "ch", "sh",
+    "iang", "iong", "uang", "eng", "ang", "ong",
+    "ian", "iao", "ing", "uai", "uan", "ue",
+    "ai", "ei", "ao", "ou"
+]
 
 private func normalizeToken(_ token: String, locale: KnowTypeLocale) -> String {
     if token == "I" {

@@ -75,6 +75,21 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(requests.first?.rawInput, "wsm")
     }
 
+    func testCompactPinyinPrefixCompletionAsksConfiguredProvider() async {
+        let provider = RecordingProvider()
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        let candidates = await engine.correct(
+            InputContext(rawInput: "xianz", locale: .zhCN)
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(candidates.first?.text, "现在")
+        XCTAssertTrue(candidates.map(\.text).contains("限制"))
+        XCTAssertEqual(requests.first?.task, .correction)
+        XCTAssertEqual(requests.first?.rawInput, "xianz")
+    }
+
     func testTechnicalShortTokenDoesNotUsePinyinInitialCloudPath() async {
         let provider = RecordingProvider()
         let engine = CorrectionEngine(cloudProvider: provider)

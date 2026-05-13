@@ -28,7 +28,8 @@ Current local coverage:
 
 - clean-room `TraditionalInputEngine` pinyin decoding with compact segmentation, light typo normalization, and multiple prefix candidates
 - pinyin typo examples such as `fagnan -> fangan -> 方案/方法/方向`
-- high-frequency pinyin-initial abbreviations such as `wsm -> 为什么`, with provider-backed correction still enabled for short ambiguous abbreviation inputs
+- high-frequency pinyin-initial abbreviations such as `wsm -> 为什么`, plus compact-prefix completion for unfinished pinyin such as `xianz -> 现在`
+- provider-backed correction remains enabled for short ambiguous abbreviation and compact-prefix inputs, but cloud candidates are capped below stronger local pinyin candidates
 - MVP full-pinyin examples such as `zhege gongneng bushi hen wending -> 这个功能不是很稳定`
 - locale-gated traditional decoding: `en-US` keeps English spellcheck available, while `zh-CN` can decode capitalized pinyin composition starts such as `Wo`
 - a small table-driven Xiaohe double-pinyin hook for smoke-test coverage

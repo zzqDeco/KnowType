@@ -29,8 +29,15 @@ public struct TraditionalInputEngine: Sendable {
         preserveCapitalizedPinyin: Bool = true
     ) -> [TraditionalInputCandidate] {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let tokens = tokenize(trimmed) else {
+        guard !trimmed.isEmpty else {
             return []
+        }
+        let prefixCompletionCandidates = compactPrefixCompletionCandidates(
+            for: trimmed,
+            preserveCapitalizedPinyin: preserveCapitalizedPinyin
+        )
+        guard let tokens = tokenize(trimmed) else {
+            return uniqueSorted(prefixCompletionCandidates)
         }
 
         let parsed = parse(
@@ -47,7 +54,17 @@ public struct TraditionalInputEngine: Sendable {
                 )
             }
 
-        return uniqueSorted(parsed)
+        return uniqueSorted(parsed + prefixCompletionCandidates)
+    }
+
+    public func canCompletePinyinPrefix(
+        for rawInput: String,
+        preserveCapitalizedPinyin: Bool = true
+    ) -> Bool {
+        !compactPrefixCompletionCandidates(
+            for: rawInput,
+            preserveCapitalizedPinyin: preserveCapitalizedPinyin
+        ).isEmpty
     }
 
     private func tokenize(_ rawInput: String) -> [InputToken]? {
@@ -109,6 +126,66 @@ public struct TraditionalInputEngine: Sendable {
         return firstPath.map { key in
             InputToken(surface: key, normalized: normalize(key), isTypoNormalized: isTypo(key))
         }
+    }
+
+    private func compactPrefixCompletionCandidates(
+        for rawInput: String,
+        preserveCapitalizedPinyin: Bool
+    ) -> [TraditionalInputCandidate] {
+        guard let compactPrefix = compactPinyinPrefixToken(
+            rawInput,
+            preserveCapitalizedPinyin: preserveCapitalizedPinyin
+        ) else {
+            return []
+        }
+
+        return lexicon.flatMap { entry -> [TraditionalInputCandidate] in
+            let compactEntry = entry.pinyin.joined()
+            guard compactEntry.hasPrefix(compactPrefix),
+                  compactEntry != compactPrefix else {
+                return []
+            }
+
+            let completionRatio = Double(compactPrefix.count) / Double(compactEntry.count)
+            let prefixPenalty = 0.04 + (0.10 * (1.0 - completionRatio))
+            return entry.outputs.map { output in
+                TraditionalInputCandidate(
+                    text: output.text,
+                    confidence: max(0.01, output.confidence - prefixPenalty),
+                    inputTokens: [rawInput]
+                )
+            }
+        }
+    }
+
+    private func compactPinyinPrefixToken(
+        _ rawInput: String,
+        preserveCapitalizedPinyin: Bool
+    ) -> String? {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pieces = trimmed.split(whereSeparator: { $0.isWhitespace })
+        guard pieces.count == 1,
+              let piece = pieces.first else {
+            return nil
+        }
+
+        let token = String(piece)
+        if isPassthroughToken(token) {
+            return nil
+        }
+        if preserveCapitalizedPinyin, isCapitalizedASCIIWord(token) {
+            return nil
+        }
+
+        let lower = token.lowercased()
+        guard lower.count >= 3,
+              lower.unicodeScalars.allSatisfy({ scalar in
+                  scalar.value < 128 && CharacterSet.lowercaseLetters.contains(scalar)
+              }) else {
+            return nil
+        }
+
+        return normalize(lower)
     }
 
     private func parse(
@@ -310,6 +387,30 @@ private let lexicon: [LexiconEntry] = [
     entry(["shen", "me"], [("什么", 0.97)]),
     entry(["zen", "me"], [("怎么", 0.96)]),
     entry(["wei", "shen", "me"], [("为什么", 0.99)]),
+    entry(["xian", "zai"], [("现在", 0.99)]),
+    entry(["xian", "zhi"], [
+        ("限制", 0.94),
+        ("先知", 0.56)
+    ]),
+    entry(["xian", "shi"], [
+        ("显示", 0.95),
+        ("现实", 0.82)
+    ]),
+    entry(["xian"], [
+        ("先", 0.92),
+        ("现", 0.84),
+        ("线", 0.78)
+    ]),
+    entry(["zai"], [("在", 0.96)]),
+    entry(["zhi"], [
+        ("只", 0.88),
+        ("知", 0.76)
+    ]),
+    entry(["shi"], [
+        ("是", 0.94),
+        ("时", 0.84),
+        ("事", 0.80)
+    ]),
     entry(["zhege"], [("这个", 0.99)]),
     entry(["zhe", "ge"], [("这个", 0.98)]),
     entry(["fangan"], [

@@ -26,6 +26,24 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "zmb").first?.text, "怎么办")
     }
 
+    func testCompactPinyinPrefixCompletionDecodesUnfinishedSyllable() {
+        let engine = TraditionalInputEngine()
+        let xianzCandidates = engine.candidates(for: "xianz").map(\.text)
+        let xianshCandidates = engine.candidates(for: "xiansh").map(\.text)
+
+        XCTAssertEqual(xianzCandidates.first, "现在")
+        XCTAssertTrue(xianzCandidates.contains("限制"))
+        XCTAssertEqual(xianshCandidates.first, "显示")
+    }
+
+    func testExactPinyinStaysAheadOfLongerPrefixCompletions() {
+        let engine = TraditionalInputEngine()
+        let candidates = engine.candidates(for: "xian").map(\.text)
+
+        XCTAssertEqual(candidates.first, "先")
+        XCTAssertTrue(candidates.contains("现在"))
+    }
+
     func testMVPExamplesDecodeThroughSeedLexicon() {
         let engine = TraditionalInputEngine()
         let examples = [
