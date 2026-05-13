@@ -50,6 +50,44 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
     }
 
+    func testMoveSelectionNavigatesVisibleSuggestionRows() {
+        var state = CandidatePanelState()
+        state.update(rawInput: "wo jue de", suggestion: suggestion())
+
+        XCTAssertTrue(state.moveSelection(.down))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
+
+        XCTAssertTrue(state.moveSelection(.right))
+        XCTAssertEqual(state.windowState.selection, .continuationCandidate(0))
+
+        XCTAssertTrue(state.moveSelection(.down))
+        XCTAssertEqual(state.windowState.selection, .continuationCandidate(1))
+
+        XCTAssertTrue(state.moveSelection(.pageDown))
+        XCTAssertEqual(state.windowState.selection, .continuationCandidate(1))
+
+        XCTAssertTrue(state.moveSelection(.up))
+        XCTAssertEqual(state.windowState.selection, .continuationCandidate(0))
+
+        XCTAssertTrue(state.moveSelection(.pageUp))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+    }
+
+    func testMoveSelectionUsesRawInputOnlyWhenNoSuggestionsAreVisible() {
+        var state = CandidatePanelState()
+        state.update(rawInput: "raw", suggestion: nil)
+
+        XCTAssertTrue(state.moveSelection(.down))
+        XCTAssertEqual(state.windowState.selection, .rawInput)
+    }
+
+    func testMoveSelectionReturnsFalseWhenPanelHasNoRows() {
+        var state = CandidatePanelState()
+
+        XCTAssertFalse(state.moveSelection(.down))
+        XCTAssertNil(state.windowState.selection)
+    }
+
     func testDefaultSelectionFallsBackToFirstContinuationWhenSuggestionHasNoPrefixOrRawInput() {
         var state = CandidatePanelState()
 

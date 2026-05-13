@@ -156,8 +156,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             publishLocalSuggestion(client: sender)
             refreshSuggestion(client: sender)
             return true
-        case .moveCandidateSelection:
-            return !rawBuffer.isEmpty || lastSuggestion != nil
+        case .moveCandidateSelection(let navigation):
+            return moveCandidateSelection(navigation)
         case .modifierFlagsChanged:
             return false
         case .ignored:
@@ -310,6 +310,20 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         }
     }
 
+    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        guard candidatePanelState.moveSelection(navigation) else {
+            return false
+        }
+        selectedNativeCandidate = inputCandidateSelection(
+            for: candidatePanelState.windowState.selection,
+            in: candidatePanelState.windowState.viewModel
+        )
+        MainActor.assumeIsolated {
+            candidatePanelController.update(state: candidatePanelState, locale: locale)
+        }
+        return true
+    }
+
     private func candidateAnchorRect(client sender: Any!) -> CGRect {
         guard let client = sender as? IMKTextInput else {
             return .zero
@@ -341,6 +355,39 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return
         }
         selectedNativeCandidate = selection
+    }
+
+    private func inputCandidateSelection(
+        for selection: CandidatePanelSelection?,
+        in viewModel: CandidatePanelViewModel
+    ) -> InputCandidateSelection? {
+        guard let selection else {
+            return nil
+        }
+
+        switch selection {
+        case .rawInput:
+            guard !viewModel.rawInput.isEmpty else {
+                return nil
+            }
+            return InputCandidateSelection(text: viewModel.rawInput, kind: .rawInput)
+        case .prefixCandidate(let index):
+            guard viewModel.prefixCandidates.indices.contains(index) else {
+                return nil
+            }
+            return InputCandidateSelection(
+                text: viewModel.prefixCandidates[index].text,
+                kind: .prefixCandidate(index: index)
+            )
+        case .continuationCandidate(let index):
+            guard viewModel.continuationCandidates.indices.contains(index) else {
+                return nil
+            }
+            return InputCandidateSelection(
+                text: viewModel.continuationCandidates[index].text,
+                kind: .continuationCandidate(index: index)
+            )
+        }
     }
 
     private func sessionSelection(from selection: InputCandidateSelection?) -> InputSessionCandidateSelection? {
