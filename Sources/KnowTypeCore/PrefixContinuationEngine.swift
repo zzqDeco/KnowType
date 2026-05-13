@@ -92,7 +92,7 @@ public final class PrefixContinuationEngine: Sendable {
         }
     }
 
-    private func fallbackContinuations(
+    public func fallbackContinuations(
         for prefix: String,
         lengthLevel: ContinuationLengthLevel,
         maxCandidates: Int

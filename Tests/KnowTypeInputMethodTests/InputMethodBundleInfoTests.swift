@@ -14,7 +14,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         )
 
         XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.knowtype.inputmethod.KnowType")
-        XCTAssertEqual(plist["InputMethodConnectionName"] as? String, "KnowType_Connection")
+        XCTAssertEqual(plist["InputMethodConnectionName"] as? String, "com.knowtype.inputmethod.KnowType_Connection")
         XCTAssertEqual(plist["InputMethodServerControllerClass"] as? String, "KnowTypeInputController")
         XCTAssertEqual(plist["InputMethodServerDelegateClass"] as? String, "KnowTypeInputController")
         XCTAssertEqual(plist["LSBackgroundOnly"] as? Bool, true)
@@ -35,8 +35,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(mode["tsInputModeCharacterRepertoireKey"] as? [String], ["Hans", "Latn"])
         XCTAssertEqual(mode["tsInputModeDefaultStateKey"] as? Bool, true)
         XCTAssertEqual(mode["tsInputModeIsVisibleKey"] as? Bool, true)
-        XCTAssertEqual(mode["tsInputModeMenuIconFileKey"] as? String, "KnowTypeInputMethodIcon.icns")
-        XCTAssertEqual(mode["tsInputModePaletteIconFileKey"] as? String, "KnowTypeInputMethodIcon.icns")
+        XCTAssertEqual(mode["tsInputModeMenuIconFileKey"] as? String, "KnowTypeInputMethodIcon.tiff")
+        XCTAssertEqual(mode["tsInputModePaletteIconFileKey"] as? String, "KnowTypeInputMethodIcon.tiff")
         XCTAssertEqual(mode["tsInputModePrimaryInScriptKey"] as? Bool, true)
         XCTAssertEqual(mode["tsInputModeScriptKey"] as? String, "smSimpChinese")
     }

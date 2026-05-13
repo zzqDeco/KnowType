@@ -7,7 +7,7 @@ public final class CorrectionEngine: Sendable {
         self.cloudProvider = cloudProvider
     }
 
-    public func correct(_ context: InputContext) async -> [CorrectionCandidate] {
+    public func localCorrect(_ context: InputContext) -> [CorrectionCandidate] {
         let raw = context.rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let protectedRanges = TextProtection.detectProtectedRanges(in: raw)
 
@@ -23,7 +23,12 @@ public final class CorrectionEngine: Sendable {
             ]
         }
 
-        var candidates = localCandidates(for: raw, protectedRanges: protectedRanges)
+        return uniqueSorted(localCandidates(for: raw, protectedRanges: protectedRanges))
+    }
+
+    public func correct(_ context: InputContext) async -> [CorrectionCandidate] {
+        let raw = context.rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        var candidates = localCorrect(context)
 
         if shouldAskCloud(context: context), let cloudProvider {
             let request = LLMRequest(
@@ -162,6 +167,8 @@ private let spellingCorrections: [String: String] = [
 ]
 
 private let phraseMap: [String: String] = [
+    "wo": "我",
+    "wo jue": "我觉得",
     "wo jue de": "我觉得",
     "wo xiang": "我想",
     "zhege": "这个",
@@ -196,7 +203,7 @@ private func tokenize(_ raw: String) -> [String] {
 
 private func segmentCompactPinyin(_ token: String) -> [String] {
     let lower = token.lowercased()
-    let known = ["zhege", "wo", "jue", "de", "zhe", "ge", "fangan", "gongneng", "bushi", "wending", "jiekou", "yanchi", "youdian", "gao"]
+    let known = compactPinyinSegments
         .sorted { $0.count > $1.count }
     var output: [String] = []
     var cursor = lower.startIndex
@@ -212,6 +219,26 @@ private func segmentCompactPinyin(_ token: String) -> [String] {
     }
     return output.isEmpty ? [token] : output
 }
+
+private let compactPinyinSegments: [String] = {
+    var segments = Set<String>()
+
+    for key in phraseMap.keys {
+        if !key.contains(" ") {
+            segments.insert(key)
+        }
+        for part in key.split(separator: " ") {
+            segments.insert(String(part))
+        }
+    }
+
+    for (misspelled, corrected) in spellingCorrections {
+        segments.insert(misspelled)
+        segments.insert(corrected)
+    }
+
+    return Array(segments)
+}()
 
 private func normalizeToken(_ token: String) -> String {
     if token == "I" {
