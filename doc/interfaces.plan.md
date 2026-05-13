@@ -58,7 +58,7 @@ ProviderProfile {
 
 `secretName` resolves through `SecretStore`. The macOS implementation uses Keychain; tests and non-UI code can use read-only dictionary-backed stores.
 
-`ProviderProfilesViewModel` owns settings-app draft validation and persistence. It rejects empty names, invalid non-HTTP(S) or hostless base URLs, missing models for non-custom providers, non-positive timeouts, and incomplete custom HTTP templates. Draft saves stage the updated profile list, write or delete any required profile-scoped secret, persist the staged profile file, and publish the new `profiles` value only after the store save succeeds.
+`ProviderProfilesViewModel` owns settings-app draft validation and persistence. It rejects empty names, invalid non-HTTP(S) or hostless base URLs, missing models for non-custom providers, non-positive timeouts, incomplete custom HTTP templates, and blank cloud-provider API keys when no existing `SecretStore` entry can be reused. Draft saves stage the updated profile list, persist the staged profile file, apply any required secret write or delete, roll the profile file back if the secret mutation fails, and publish the new `profiles` value only after both stores succeed. Secret deletion is skipped while another saved profile still references the same `secretName`.
 
 ## Candidate Types
 

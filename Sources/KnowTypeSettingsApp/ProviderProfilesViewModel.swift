@@ -129,6 +129,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 existingProfile: existingProfile,
                 draftAPIKey: draft.apiKey
             )
+            try validateSecretAvailability(for: profile, mutation: secretMutation)
 
             if case .set(_, let secretName, _) = secretMutation {
                 profile.secretName = secretName
@@ -156,7 +157,12 @@ public final class ProviderProfilesViewModel: ObservableObject {
             var updatedFile = file
             updatedFile.profiles = updatedProfiles
             try profileStore.saveProfiles(updatedFile)
-            try apply(secretMutation)
+            do {
+                try apply(secretMutation, updatedProfiles: updatedProfiles)
+            } catch {
+                try? profileStore.saveProfiles(file)
+                throw error
+            }
             profiles = updatedProfiles
             file = updatedFile
             selectedProfileID = profile.id
@@ -242,6 +248,15 @@ public final class ProviderProfilesViewModel: ObservableObject {
         ProviderProfileTemplates.defaultProfile(kind: kind).secretName != nil
     }
 
+    private func validateSecretAvailability(for profile: ProviderProfile, mutation: SecretMutation) throws {
+        guard Self.requiresSecret(kind: profile.kind), case .none = mutation else {
+            return
+        }
+        guard let secretName = profile.secretName, try secretStore.secret(named: secretName) != nil else {
+            throw ProviderProfilesViewModelError.missingAPIKey
+        }
+    }
+
     private enum SecretMutation {
         case none
         case set(value: String, secretName: String, oldSecretName: String?)
@@ -269,18 +284,26 @@ public final class ProviderProfilesViewModel: ObservableObject {
         return .delete(secretName: oldSecretName)
     }
 
-    private func apply(_ mutation: SecretMutation) throws {
+    private func apply(_ mutation: SecretMutation, updatedProfiles: [ProviderProfile]) throws {
         switch mutation {
         case .none:
             return
         case .set(let value, let secretName, let oldSecretName):
             try secretStore.setSecret(value, named: secretName)
-            if let oldSecretName, oldSecretName != secretName {
+            if let oldSecretName,
+               oldSecretName != secretName,
+               !Self.isSecretReferenced(oldSecretName, in: updatedProfiles) {
                 try secretStore.deleteSecret(named: oldSecretName)
             }
         case .delete(let secretName):
-            try secretStore.deleteSecret(named: secretName)
+            if !Self.isSecretReferenced(secretName, in: updatedProfiles) {
+                try secretStore.deleteSecret(named: secretName)
+            }
         }
+    }
+
+    private static func isSecretReferenced(_ secretName: String, in profiles: [ProviderProfile]) -> Bool {
+        profiles.contains { $0.secretName == secretName }
     }
 
     private static func validHTTPURL(_ value: String) -> URL? {
@@ -296,11 +319,14 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
 public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
     case loadFailed(String)
+    case missingAPIKey
 
     public var errorDescription: String? {
         switch self {
         case .loadFailed(let message):
             return message
+        case .missingAPIKey:
+            return "API key is required for this provider."
         }
     }
 }
