@@ -34,6 +34,9 @@ public enum TextProtection {
         if isProtectedAppBundleID(appBundleID) {
             return true
         }
+        if containsLevelZeroProtectedRange(in: trimmed) {
+            return true
+        }
         if isURL(trimmed) {
             return true
         }
@@ -77,6 +80,11 @@ public enum TextProtection {
             return true
         }
         return protectedAppBundleIDPrefixes.contains { appBundleID.hasPrefix($0) }
+    }
+
+    private static func containsLevelZeroProtectedRange(in text: String) -> Bool {
+        let levelZeroReasons: Set<String> = ["url", "email", "file_path", "snake_case", "camelCase"]
+        return detectProtectedRanges(in: text).contains { levelZeroReasons.contains($0.reason) }
     }
 
     private static func isURL(_ text: String) -> Bool {

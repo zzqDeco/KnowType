@@ -70,8 +70,11 @@ final class CorrectionEngineTests: XCTestCase {
     func testLevelZeroContentClassesRequireNoCorrection() {
         let protectedInputs = [
             "https://example.com/search?q=KnowType",
+            "open https://example.com/search?q=KnowType",
             "support@example.com",
+            "send this to support@example.com",
             "/Users/zq/project/KnowType",
+            "open /Users/zq/project/KnowType",
             "~/Library/Input Methods",
             "git status --short",
             "swift test",
@@ -116,5 +119,20 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
         XCTAssertEqual(candidates.first?.text, "git status --short")
         XCTAssertEqual(candidates.first?.source, "local-protection")
+    }
+
+    func testEmbeddedProtectedContentDoesNotCallProvider() async {
+        let provider = RecordingProvider()
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        let candidates = await engine.correct(
+            InputContext(rawInput: "open https://example.com/path?q=KnowType", locale: .mixed)
+        )
+        let requests = await provider.requests
+
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(candidates.first?.text, "open https://example.com/path?q=KnowType")
+        XCTAssertEqual(candidates.first?.source, "local-protection")
+        XCTAssertEqual(candidates.first?.protectedRanges.first?.reason, "url")
     }
 }
