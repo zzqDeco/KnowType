@@ -5,13 +5,20 @@ public struct OpenAIChatProvider: LLMProvider {
     public let providerName = "openai_chat"
     private let configuration: ProviderConfiguration
     private let httpClient: any HTTPClient
+    private let modelDiscovery: any ProviderModelDiscovering
 
-    public init(configuration: ProviderConfiguration, httpClient: any HTTPClient = URLSessionHTTPClient()) {
+    public init(
+        configuration: ProviderConfiguration,
+        httpClient: any HTTPClient = URLSessionHTTPClient(),
+        modelDiscovery: (any ProviderModelDiscovering)? = nil
+    ) {
         self.configuration = configuration
         self.httpClient = httpClient
+        self.modelDiscovery = modelDiscovery ?? OpenAICompatibleModelDiscovery(httpClient: httpClient)
     }
 
     public func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        let model = try await modelDiscovery.resolvedModel(for: configuration)
         var urlRequest = URLRequest(url: configuration.endpoint(path: "/v1/chat/completions"))
         applyCommonHeaders(&urlRequest, configuration: configuration)
         if let apiKey = configuration.apiKey, !apiKey.isEmpty {
@@ -19,7 +26,7 @@ public struct OpenAIChatProvider: LLMProvider {
         }
 
         urlRequest.httpBody = try jsonData([
-            "model": configuration.model,
+            "model": model,
             "stream": false,
             "temperature": 0.2,
             "max_tokens": 256,

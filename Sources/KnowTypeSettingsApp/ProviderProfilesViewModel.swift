@@ -131,14 +131,19 @@ public final class ProviderProfilesViewModel: ObservableObject {
             )
             try validateSecretAvailability(for: profile, mutation: secretMutation)
 
-            if case .set(_, let secretName, _) = secretMutation {
+            switch secretMutation {
+            case .set(_, let secretName, _):
                 profile.secretName = secretName
-            } else if Self.requiresSecret(kind: profile.kind) {
-                profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
-            } else if Self.acceptsOptionalSecret(kind: profile.kind) {
-                profile.secretName = existingProfile?.secretName ?? profile.secretName
-            } else {
+            case .delete:
                 profile.secretName = nil
+            case .none:
+                if Self.requiresSecret(profile) {
+                    profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
+                } else if Self.acceptsOptionalSecret(profile) {
+                    profile.secretName = try retainedOptionalSecretName(from: existingProfile)
+                } else {
+                    profile.secretName = nil
+                }
             }
 
             var updatedProfiles = profiles
@@ -220,11 +225,19 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append("Display name is required.")
         }
-        if Self.validHTTPURL(draft.baseURL) == nil {
+        let validBaseURL = Self.validHTTPURL(draft.baseURL)
+        if validBaseURL == nil {
             errors.append("Base URL must be an HTTP or HTTPS URL.")
         }
-        if draft.kind != .customHTTP && draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errors.append("Model is required.")
+        if Self.requiresModel(kind: draft.kind, baseURL: validBaseURL) {
+            let model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            if model.isEmpty || Self.isRemoteOpenAIPlaceholderModel(
+                kind: draft.kind,
+                baseURL: validBaseURL,
+                model: model
+            ) {
+                errors.append("Model is required.")
+            }
         }
         if draft.timeoutSeconds <= 0 {
             errors.append("Timeout must be greater than zero.")
@@ -254,21 +267,71 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
     }
 
-    private static func requiresSecret(kind: ProviderKind) -> Bool {
-        switch kind {
-        case .openAIChat, .openAIResponses, .anthropicMessages, .geminiNative:
+    private static func requiresSecret(_ profile: ProviderProfile) -> Bool {
+        switch profile.kind {
+        case .openAIChat, .openAIResponses:
+            return !isLocalBaseURL(profile.baseURL)
+        case .anthropicMessages, .geminiNative:
             return true
         case .ollamaNative, .customHTTP:
             return false
         }
     }
 
-    private static func acceptsOptionalSecret(kind: ProviderKind) -> Bool {
-        kind == .customHTTP
+    private static func acceptsOptionalSecret(_ profile: ProviderProfile) -> Bool {
+        switch profile.kind {
+        case .openAIChat, .openAIResponses:
+            return isLocalBaseURL(profile.baseURL)
+        case .customHTTP:
+            return true
+        case .anthropicMessages, .geminiNative, .ollamaNative:
+            return false
+        }
+    }
+
+    private static func requiresModel(kind: ProviderKind, baseURL: URL?) -> Bool {
+        switch kind {
+        case .anthropicMessages, .geminiNative, .ollamaNative:
+            return true
+        case .openAIChat, .openAIResponses:
+            guard let baseURL else {
+                return false
+            }
+            return !isLocalBaseURL(baseURL)
+        case .customHTTP:
+            return false
+        }
+    }
+
+    private static func isRemoteOpenAIPlaceholderModel(
+        kind: ProviderKind,
+        baseURL: URL?,
+        model: String
+    ) -> Bool {
+        switch kind {
+        case .openAIChat, .openAIResponses:
+            guard let baseURL,
+                  !isLocalBaseURL(baseURL) else {
+                return false
+            }
+            return OpenAICompatibleModelDiscovery.requiresDiscovery(model)
+        case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
+            return false
+        }
+    }
+
+    private static func isLocalBaseURL(_ url: URL) -> Bool {
+        guard let host = url.host(percentEncoded: false)?.lowercased() else {
+            return false
+        }
+        return host == "localhost"
+            || host == "127.0.0.1"
+            || host == "::1"
+            || host.hasSuffix(".local")
     }
 
     private func validateSecretAvailability(for profile: ProviderProfile, mutation: SecretMutation) throws {
-        guard Self.requiresSecret(kind: profile.kind), case .none = mutation else {
+        guard Self.requiresSecret(profile), case .none = mutation else {
             return
         }
         guard let secretName = profile.secretName,
@@ -276,6 +339,17 @@ public final class ProviderProfilesViewModel: ObservableObject {
               !existingSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ProviderProfilesViewModelError.missingAPIKey
         }
+    }
+
+    private func retainedOptionalSecretName(from existingProfile: ProviderProfile?) throws -> String? {
+        guard let secretName = existingProfile?.secretName else {
+            return nil
+        }
+        guard let existingSecret = try secretStore.secret(named: secretName),
+              !existingSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return secretName
     }
 
     private enum SecretMutation {
@@ -291,10 +365,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
     ) -> SecretMutation {
         let trimmedAPIKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if requiresSecret(kind: profile.kind) || acceptsOptionalSecret(kind: profile.kind) {
+        if requiresSecret(profile) || acceptsOptionalSecret(profile) {
             guard !trimmedAPIKey.isEmpty else {
-                if requiresSecret(kind: profile.kind) {
-                    return .none
+                if shouldClearBlankOptionalSecret(for: profile, existingProfile: existingProfile),
+                   let oldSecretName = existingProfile?.secretName {
+                    return .delete(secretName: oldSecretName)
                 }
                 return .none
             }
@@ -306,6 +381,22 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return .none
         }
         return .delete(secretName: oldSecretName)
+    }
+
+    private static func shouldClearBlankOptionalSecret(
+        for profile: ProviderProfile,
+        existingProfile: ProviderProfile?
+    ) -> Bool {
+        guard let existingProfile else {
+            return false
+        }
+        switch profile.kind {
+        case .openAIChat, .openAIResponses:
+            return isLocalBaseURL(profile.baseURL)
+                && (profile.kind != existingProfile.kind || !isLocalBaseURL(existingProfile.baseURL))
+        case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
+            return false
+        }
     }
 
     private func apply(_ mutation: SecretMutation, updatedProfiles: [ProviderProfile]) throws {
