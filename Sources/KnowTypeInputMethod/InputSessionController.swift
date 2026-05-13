@@ -157,6 +157,16 @@ public actor InputSessionController {
         return result
     }
 
+    @discardableResult
+    public func requestPolish(rawInput: String) -> InputCommitResult {
+        guard !rawInput.isEmpty else {
+            return .noAction
+        }
+        state.rawInput = rawInput
+        state.polishRequested = true
+        return .polishRequested(rawInput)
+    }
+
     public var candidatePanelViewModel: CandidatePanelViewModel {
         guard let suggestion = state.latestSuggestion else {
             return CandidatePanelViewModel(

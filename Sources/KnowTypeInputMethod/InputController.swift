@@ -9,6 +9,7 @@ import InputMethodKit
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
     private let sessionController = InputSessionController()
     private let keyMapper = InputKeyCommandMapper()
+    private let candidateListBuilder = InputCandidateListBuilder()
     private var rawBuffer = ""
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
@@ -66,10 +67,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func candidates(_ sender: Any!) -> [Any]! {
-        guard let suggestion = lastSuggestion else {
-            return rawBuffer.isEmpty ? [] : [rawBuffer]
-        }
-        return suggestion.prefixCandidates.map(\.text) + suggestion.continuationCandidates.map(\.text)
+        candidateListBuilder.candidates(rawInput: rawBuffer, suggestion: lastSuggestion)
     }
 
     public override func commitComposition(_ sender: Any!) {
@@ -112,6 +110,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .insertAndReset(let text):
             insert(text, client: sender)
             resetComposition()
+        case .requestPolishAndKeepComposition(let text):
+            Task { [sessionController] in
+                await sessionController.requestPolish(rawInput: text)
+            }
+            updateComposition()
         case .keepComposition:
             updateComposition()
         case .noAction:

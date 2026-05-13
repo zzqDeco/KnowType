@@ -144,6 +144,19 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(optionRResult, .noAction)
     }
 
+    func testExplicitPolishRequestMarksStateWithoutCommitting() async {
+        let controller = InputSessionController { _ in
+            Self.makeSuggestion()
+        }
+
+        let result = await controller.requestPolish(rawInput: "我觉得这个接口慢")
+        let state = await controller.state
+
+        XCTAssertEqual(result, .polishRequested("我觉得这个接口慢"))
+        XCTAssertEqual(state.rawInput, "我觉得这个接口慢")
+        XCTAssertTrue(state.polishRequested)
+    }
+
     func testLevelZeroInputUsesNoProviderPath() async {
         let provider = RecordingProvider()
         let controller = InputSessionController(provider: provider)

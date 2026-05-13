@@ -12,7 +12,7 @@ final class InputCommitResultPolicyTests: XCTestCase {
     func testPolishRequestsKeepComposition() {
         XCTAssertEqual(
             InputCommitResultPolicy.directive(for: .polishRequested("我觉得这个接口慢")),
-            .keepComposition
+            .requestPolishAndKeepComposition("我觉得这个接口慢")
         )
     }
 
