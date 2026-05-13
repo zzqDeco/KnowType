@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "KnowTypeCore", targets: ["KnowTypeCore"]),
         .library(name: "KnowTypeProviders", targets: ["KnowTypeProviders"]),
         .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"]),
+        .executable(name: "KnowTypeSettingsApp", targets: ["KnowTypeSettingsApp"]),
         .executable(name: "KnowTypeInputMethodApp", targets: ["KnowTypeInputMethodApp"]),
         .executable(name: "knowtype-demo", targets: ["KnowTypeDemo"])
     ],
@@ -38,6 +39,14 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "KnowTypeSettingsApp",
+            dependencies: ["KnowTypeProviders"],
+            path: "Sources/KnowTypeSettingsApp",
+            linkerSettings: [
+                .linkedFramework("SwiftUI", .when(platforms: [.macOS]))
+            ]
+        ),
+        .executableTarget(
             name: "KnowTypeInputMethodApp",
             dependencies: ["KnowTypeInputMethod"],
             path: "Sources/KnowTypeInputMethodApp",
@@ -60,6 +69,11 @@ let package = Package(
             name: "KnowTypeProvidersTests",
             dependencies: ["KnowTypeCore", "KnowTypeProviders"],
             path: "Tests/KnowTypeProvidersTests"
+        ),
+        .testTarget(
+            name: "KnowTypeSettingsAppTests",
+            dependencies: ["KnowTypeSettingsApp", "KnowTypeProviders"],
+            path: "Tests/KnowTypeSettingsAppTests"
         ),
         .testTarget(
             name: "KnowTypeInputMethodTests",
