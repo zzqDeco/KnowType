@@ -45,9 +45,9 @@
         <key>tsInputModeIsVisibleKey</key>
         <true/>
         <key>tsInputModeMenuIconFileKey</key>
-        <string>KnowTypeInputMethodIcon.icns</string>
+        <string>KnowTypeInputMethodIcon.tiff</string>
         <key>tsInputModePaletteIconFileKey</key>
-        <string>KnowTypeInputMethodIcon.icns</string>
+        <string>KnowTypeInputMethodIcon.tiff</string>
         <key>tsInputModePrimaryInScriptKey</key>
         <true/>
         <key>tsInputModeScriptKey</key>
@@ -60,15 +60,15 @@
     </array>
   </dict>
   <key>InputMethodConnectionName</key>
-  <string>KnowType_Connection</string>
+  <string>com.knowtype.inputmethod.KnowType_Connection</string>
   <key>InputMethodServerControllerClass</key>
   <string>KnowTypeInputController</string>
   <key>InputMethodServerDelegateClass</key>
   <string>KnowTypeInputController</string>
-  <key>LSBackgroundOnly</key>
-  <true/>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
+  <key>LSBackgroundOnly</key>
+  <true/>
   <key>LSUIElement</key>
   <true/>
   <key>NSPrincipalClass</key>
@@ -84,7 +84,7 @@
   <key>TISInputSourceID</key>
   <string>com.knowtype.inputmethod.KnowType</string>
   <key>tsInputMethodIconFileKey</key>
-  <string>KnowTypeInputMethodIcon.icns</string>
+  <string>KnowTypeInputMethodIcon.tiff</string>
   <key>tsInputMethodCharacterRepertoireKey</key>
   <array>
     <string>Hans</string>

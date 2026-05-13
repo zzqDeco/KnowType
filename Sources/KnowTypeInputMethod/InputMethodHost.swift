@@ -42,6 +42,38 @@ public struct InputMethodPipeline: Sendable {
             latencyMs: milliseconds
         )
     }
+
+    public static func localSuggestions(for context: InputContext) -> SuggestionResponse {
+        let correctionEngine = CorrectionEngine()
+        let continuationEngine = PrefixContinuationEngine()
+        let prefixes = correctionEngine.localCorrect(context)
+        let locked = prefixes.first.map {
+            LockedPrefix(
+                text: $0.text,
+                rawInput: context.rawInput,
+                candidateID: $0.source,
+                protectedRanges: $0.protectedRanges
+            )
+        }
+        let continuations: [ContinuationCandidate]
+        if let locked,
+           !TextProtection.requiresNoCorrection(locked.text, appBundleID: context.appBundleID),
+           !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
+            continuations = continuationEngine.fallbackContinuations(
+                for: locked.text,
+                lengthLevel: .medium,
+                maxCandidates: 3
+            )
+        } else {
+            continuations = []
+        }
+        return SuggestionResponse(
+            prefixCandidates: prefixes,
+            lockedPrefix: locked,
+            continuationCandidates: continuations,
+            latencyMs: 0
+        )
+    }
 }
 
 #if canImport(InputMethodKit)

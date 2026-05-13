@@ -20,6 +20,23 @@ final class MVPAcceptanceTests: XCTestCase {
         XCTAssertEqual(result, .commit("我觉得这个方案还有进一步优化空间"))
     }
 
+    func testChineseCorrectionSupportsContinuousPinyinInput() async {
+        let pipeline = InputMethodPipeline()
+        let response = await pipeline.suggestions(
+            for: InputContext(rawInput: "wojuedezhegefagnan", locale: .zhCN)
+        )
+        let controller = InputCompositionController()
+        let result = controller.handle(
+            action: .space,
+            prefixCandidates: response.prefixCandidates,
+            continuationCandidates: response.continuationCandidates,
+            originalText: "wojuedezhegefagnan"
+        )
+
+        XCTAssertEqual(response.lockedPrefix?.text, "我觉得这个方案")
+        XCTAssertEqual(result, .commit("我觉得这个方案"))
+    }
+
     func testMixedInputKeepsTechnicalTokensAndCommitsContinuation() async {
         let pipeline = InputMethodPipeline()
         let response = await pipeline.suggestions(

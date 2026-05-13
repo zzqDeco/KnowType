@@ -121,9 +121,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .append(let text):
             rawBuffer.append(text)
             invalidateSuggestion()
-            refreshComposition()
-            updateNativeCandidates()
-            updateCandidatePanel(suggestion: nil, client: sender)
+            publishLocalSuggestion(client: sender)
             refreshSuggestion(client: sender)
             return true
         case .deleteBackward:
@@ -132,9 +130,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             }
             rawBuffer.removeLast()
             invalidateSuggestion()
-            refreshComposition()
-            updateNativeCandidates()
-            updateCandidatePanel(suggestion: nil, client: sender)
+            publishLocalSuggestion(client: sender)
             refreshSuggestion(client: sender)
             return true
         case .action(let action):
@@ -185,9 +181,32 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         (sender as? IMKTextInput)?.bundleIdentifier()
     }
 
+    private func publishLocalSuggestion(client sender: Any!) {
+        guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
+            lastSuggestion = nil
+            lastSuggestionRawInput = nil
+            refreshComposition()
+            updateNativeCandidates()
+            updateCandidatePanel(suggestion: nil, client: sender)
+            return
+        }
+
+        let context = InputContext(
+            rawInput: rawBuffer,
+            appBundleID: appBundleIdentifier(client: sender),
+            locale: locale
+        )
+        let suggestion = InputMethodPipeline.localSuggestions(for: context)
+        lastSuggestion = suggestion
+        lastSuggestionRawInput = rawBuffer
+        refreshComposition()
+        updateNativeCandidates()
+        updateCandidatePanel(suggestion: suggestion, client: sender)
+    }
+
     @discardableResult
     private func commit(action: InputAction, client sender: Any!) -> Bool {
-        let result = commitResult(for: action)
+        let result = commitResult(for: action, client: sender)
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
             insert(text, client: sender)
@@ -207,7 +226,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         }
     }
 
-    private func commitResult(for action: InputAction) -> InputCommitResult {
+    private func commitResult(for action: InputAction, client sender: Any!) -> InputCommitResult {
         guard let suggestion = lastSuggestion,
               SuggestionPublicationGuard.hasCurrentSuggestion(
                 suggestionRawInput: lastSuggestionRawInput,
@@ -218,7 +237,18 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             }
             switch action {
             case .space, .tab:
-                return .commit(rawBuffer)
+                let context = InputContext(
+                    rawInput: rawBuffer,
+                    appBundleID: appBundleIdentifier(client: sender),
+                    locale: locale
+                )
+                let suggestion = InputMethodPipeline.localSuggestions(for: context)
+                return InputCompositionController().handle(
+                    action: action,
+                    prefixCandidates: suggestion.prefixCandidates,
+                    continuationCandidates: suggestion.continuationCandidates,
+                    originalText: rawBuffer
+                )
             case .optionR:
                 return .polishRequested(rawBuffer)
             case .optionNumber:

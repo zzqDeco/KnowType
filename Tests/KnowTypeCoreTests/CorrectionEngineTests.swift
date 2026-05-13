@@ -29,6 +29,15 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertTrue(candidates.map(\.text).contains("我觉得这个方向"))
     }
 
+    func testCompactPinyinCorrectionHandlesTypingWithoutSpaces() async {
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "wojuedezhegefagnan", locale: .zhCN)
+        )
+
+        XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
+    }
+
     func testEnglishCorrectionPreservesSentenceShape() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
