@@ -47,7 +47,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
-        rawBuffer.append(string ?? "")
+        let text = string ?? ""
+        guard InputKeyCommandMapper.isAppendableText(text) else {
+            return false
+        }
+        rawBuffer.append(text)
         invalidateSuggestion()
         updateComposition()
         refreshSuggestion(client: sender)

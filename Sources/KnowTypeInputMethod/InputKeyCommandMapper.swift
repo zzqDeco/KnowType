@@ -52,7 +52,7 @@ public struct InputKeyCommandMapper: Sendable {
         if stroke.keyCode == Self.spaceKeyCode || stroke.text == " " {
             return .action(.space)
         }
-        guard isPrintableText(stroke.text) else {
+        guard Self.isAppendableText(stroke.text) else {
             return .ignored
         }
         return .append(stroke.text)
@@ -62,14 +62,14 @@ public struct InputKeyCommandMapper: Sendable {
         Self.digitKeyCodes[keyCode]
     }
 
-    private func isPrintableText(_ text: String) -> Bool {
+    public static func isAppendableText(_ text: String) -> Bool {
         guard !text.isEmpty else {
             return false
         }
         return text.unicodeScalars.allSatisfy { scalar in
             !CharacterSet.controlCharacters.contains(scalar)
                 && !CharacterSet.newlines.contains(scalar)
-                && !Self.appKitFunctionKeyScalarRange.contains(scalar.value)
+                && !appKitFunctionKeyScalarRange.contains(scalar.value)
         }
     }
 

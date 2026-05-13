@@ -37,6 +37,7 @@ final class InputKeyCommandMapperTests: XCTestCase {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\r", keyCode: 36)), .ignored)
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{1B}", keyCode: 53)), .ignored)
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\n", keyCode: 76)), .ignored)
+        XCTAssertFalse(InputKeyCommandMapper.isAppendableText("\r"))
     }
 
     func testAppKitFunctionKeyScalarsAreIgnored() {
@@ -44,6 +45,8 @@ final class InputKeyCommandMapperTests: XCTestCase {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{F701}", keyCode: 125)), .ignored)
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{F702}", keyCode: 123)), .ignored)
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\u{F703}", keyCode: 124)), .ignored)
+        XCTAssertFalse(InputKeyCommandMapper.isAppendableText("\u{F700}"))
+        XCTAssertTrue(InputKeyCommandMapper.isAppendableText("中英 mixed text"))
     }
 
     func testCommandAndControlModifiedInputIsIgnored() {
