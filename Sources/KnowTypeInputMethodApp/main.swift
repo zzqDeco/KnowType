@@ -8,7 +8,7 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundle = Bundle.main
-        let bundleIdentifier = bundle.bundleIdentifier ?? "com.knowtype.inputmethod"
+        let bundleIdentifier = bundle.bundleIdentifier ?? "com.knowtype.inputmethod.KnowType"
         let connectionName = bundle.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String
             ?? "KnowType_Connection"
         server = IMKServer(name: connectionName, bundleIdentifier: bundleIdentifier)

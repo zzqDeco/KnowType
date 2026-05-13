@@ -22,4 +22,7 @@ for resource_file in "$ROOT_DIR"/Resources/InputMethod/*; do
 done
 chmod +x "$MACOS_DIR/KnowTypeInputMethodApp"
 
+SIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+codesign --force --deep --sign "$SIGN_IDENTITY" "$BUNDLE_DIR" >/dev/null
+
 echo "$BUNDLE_DIR"
