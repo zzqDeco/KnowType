@@ -34,6 +34,8 @@
   <false/>
   <key>NSSupportsSuddenTermination</key>
   <false/>
+  <key>tsInputMethodIconFileKey</key>
+  <string>KnowTypeInputMethodIcon.icns</string>
   <key>tsInputMethodCharacterRepertoireKey</key>
   <array>
     <string>Latn</string>
