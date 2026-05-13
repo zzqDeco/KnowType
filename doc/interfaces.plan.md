@@ -56,7 +56,21 @@ ProviderProfile {
 }
 ```
 
-`secretName` resolves through `SecretStore`. The macOS implementation uses Keychain; tests and non-UI code can use read-only dictionary-backed stores.
+`secretName` resolves through `SecretStore`. The macOS implementation uses Keychain under the `KnowType` service; tests and non-UI code can use in-memory or read-only dictionary-backed stores.
+
+Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory. This file stores provider metadata, configured headers, and secret names. API key values represented by `secretName` must move through `SecretStore`; custom header values are persisted as configured and should not contain secrets in the MVP.
+
+Settings UI code should treat `ProviderProfile` as the persistence boundary for provider profiles. It may create profiles, edit profiles, and select defaults, but API key values must move through `SecretStore` instead of the profile file.
+
+## Provider Factory
+
+Runtime provider loading uses:
+
+```text
+ProviderFactory.makeProvider(configuration:httpClient:) -> LLMProvider
+```
+
+The factory maps `ProviderKind` to one adapter and keeps provider-specific request and response shapes inside `KnowTypeProviders`.
 
 `ProviderProfilesViewModel` owns settings-app draft validation and persistence. It rejects empty names, invalid non-HTTP(S) or hostless base URLs, missing models for non-custom providers, non-positive timeouts, incomplete custom HTTP templates, and blank cloud-provider API keys when no existing non-empty `SecretStore` entry can be reused. Custom HTTP profiles can be saved without an API key, but a non-blank entered key is stored as a profile-scoped secret. Draft saves stage the updated profile list, persist the staged profile file, apply any required secret write or delete, roll the profile file back if the secret mutation fails, and publish the new `profiles` value only after both stores succeed. Secret deletion is skipped while another saved profile still references the same `secretName`.
 
@@ -71,5 +85,11 @@ ProviderProfile {
 
 - `Space` -> commit prefix.
 - `Tab` -> commit prefix plus first continuation.
-- `Option + number` -> commit prefix plus the continuation shown with that shortcut. `Tab` owns the first continuation; `Option + 1` starts at the second continuation.
+- `Option + number` -> commit prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation, which is also available through `Tab`.
 - `Option + R` -> request polish for original text.
+
+## Level 0 Contract
+
+Level 0 input must not call cloud providers. The session controller routes protected input through a no-provider pipeline, clears continuation candidates, and preserves the protected text for commit.
+
+Level 0 includes URL-like input, email-like input, file paths, command-like input, code-like snippets, and protected Terminal, iTerm, and Xcode contexts.
