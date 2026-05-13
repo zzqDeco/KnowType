@@ -9,6 +9,7 @@ Current behavior:
 - clamps the panel to the visible frame of the caret's screen
 - hides from composition reset, `hidePalettes`, and input-controller close lifecycle
 - keeps raw/prefix selection on the custom panel so the native `IMKCandidates` window is not shown at the same time
+- uses a borderless AppKit floating panel with a `NSVisualEffectView` popover material, compact row sizing, full-width blue selected rows, and muted continuation styling to stay close to macOS native input method candidate windows
 
 Selection shortcuts:
 
