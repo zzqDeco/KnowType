@@ -156,7 +156,11 @@ public struct ProviderProfileResolver {
     public func configuration(for profile: ProviderProfile) throws -> ProviderConfiguration {
         let apiKey: String?
         if let secretName = profile.secretName {
-            apiKey = try secretStore.secret(named: secretName)
+            guard let resolvedSecret = try secretStore.secret(named: secretName),
+                  !resolvedSecret.isEmpty else {
+                throw ProviderError.missingAPIKey
+            }
+            apiKey = resolvedSecret
         } else {
             apiKey = nil
         }
