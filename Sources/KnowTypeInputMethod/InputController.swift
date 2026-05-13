@@ -18,6 +18,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var nativeCandidates: IMKCandidates?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
+    private var candidatePanelState = CandidatePanelState()
+    @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
         let stroke = InputKeyStroke(
@@ -94,6 +96,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             invalidateSuggestion()
             refreshComposition()
             updateNativeCandidates()
+            updateCandidatePanel(suggestion: nil, client: sender)
             refreshSuggestion(client: sender)
             return true
         case .deleteBackward:
@@ -104,6 +107,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             invalidateSuggestion()
             refreshComposition()
             updateNativeCandidates()
+            updateCandidatePanel(suggestion: nil, client: sender)
             refreshSuggestion(client: sender)
             return true
         case .action(let action):
@@ -120,6 +124,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return
         }
         let appBundleID = appBundleIdentifier(client: sender)
+        let anchorRect = candidateAnchorRect(client: sender)
         suggestionTask = Task { [weak self] in
             guard let self else {
                 return
@@ -144,6 +149,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 self.lastSuggestionRawInput = rawInput
                 self.refreshComposition()
                 self.updateNativeCandidates()
+                self.updateCandidatePanel(suggestion: suggestion, anchorRect: anchorRect)
             }
         }
     }
@@ -244,6 +250,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         invalidateSuggestion()
         refreshComposition()
         hideNativeCandidates()
+        hideCandidatePanel()
     }
 
     private func invalidateSuggestion() {
@@ -252,6 +259,38 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         selectedNativeCandidate = nil
         suggestionTask?.cancel()
         suggestionTask = nil
+    }
+
+    private func updateCandidatePanel(suggestion: SuggestionResponse?, client sender: Any!) {
+        guard !rawBuffer.isEmpty || suggestion != nil else {
+            hideCandidatePanel()
+            return
+        }
+        updateCandidatePanel(suggestion: suggestion, anchorRect: candidateAnchorRect(client: sender))
+    }
+
+    private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorRect: CGRect) {
+        candidatePanelState.update(rawInput: rawBuffer, suggestion: suggestion, anchorRect: anchorRect)
+        MainActor.assumeIsolated {
+            candidatePanelController.update(state: candidatePanelState, locale: locale)
+        }
+    }
+
+    private func hideCandidatePanel() {
+        candidatePanelState.hide()
+        MainActor.assumeIsolated {
+            candidatePanelController.hide()
+        }
+    }
+
+    private func candidateAnchorRect(client sender: Any!) -> CGRect {
+        guard let client = sender as? NSTextInputClient else {
+            return .zero
+        }
+        return client.firstRect(
+            forCharacterRange: NSRange(location: rawBuffer.utf16.count, length: 0),
+            actualRange: nil
+        )
     }
 
     private func updateNativeCandidates() {
