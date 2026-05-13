@@ -478,7 +478,6 @@ public enum ProviderProfileTemplates {
                 kind: kind,
                 baseURL: URL(string: "https://api.example.com/v1/complete")!,
                 model: "",
-                secretName: "knowtype.custom_http.apiKey",
                 customBodyTemplate: #"{"request":{{request_json}}}"#,
                 customResponsePath: "candidates",
                 isDefault: isDefault

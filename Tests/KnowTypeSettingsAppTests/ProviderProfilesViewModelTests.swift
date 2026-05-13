@@ -27,6 +27,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         for profile in viewModel.profiles where profile.secretName != nil {
             XCTAssertEqual(profile.secretName, "knowtype.provider.\(profile.id).apiKey")
         }
+        XCTAssertNil(viewModel.profiles.first(where: { $0.kind == .customHTTP })?.secretName)
         XCTAssertFalse(viewModel.profiles.contains { $0.secretName == "knowtype.openai_chat.apiKey" })
         XCTAssertFalse(viewModel.profiles.contains { $0.secretName == "knowtype.custom_http.apiKey" })
     }
