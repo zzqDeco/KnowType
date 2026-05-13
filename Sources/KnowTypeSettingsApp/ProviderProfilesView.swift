@@ -102,6 +102,7 @@ public struct ProviderProfilesView: View {
                 } label: {
                     Label("Save", systemImage: "square.and.arrow.down")
                 }
+                .disabled(viewModel.isPersistenceBlocked)
                 .keyboardShortcut("s", modifiers: [.command])
             }
             .padding()

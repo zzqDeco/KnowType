@@ -18,6 +18,19 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.profiles.first(where: { $0.kind == .customHTTP })?.customResponsePath, "candidates")
     }
 
+    func testSeededProviderDefaultsUseProfileScopedSecretNames() {
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
+            secretStore: InMemorySecretStore()
+        )
+
+        for profile in viewModel.profiles where profile.secretName != nil {
+            XCTAssertEqual(profile.secretName, "knowtype.provider.\(profile.id).apiKey")
+        }
+        XCTAssertFalse(viewModel.profiles.contains { $0.secretName == "knowtype.openai_chat.apiKey" })
+        XCTAssertFalse(viewModel.profiles.contains { $0.secretName == "knowtype.custom_http.apiKey" })
+    }
+
     func testValidationRejectsMissingRequiredFields() {
         let viewModel = ProviderProfilesViewModel(
             profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
@@ -166,6 +179,84 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.draft.customResponsePath, "")
     }
 
+    func testChangingKindToProviderWithoutSecretClearsAPIKey() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.work.apiKey",
+                isDefault: true
+            )
+        ]
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile(profiles: existing)),
+            secretStore: InMemorySecretStore()
+        )
+        viewModel.draft.apiKey = "sk-typed"
+
+        viewModel.changeDraftKind(.ollamaNative)
+
+        XCTAssertEqual(viewModel.draft.kind, .ollamaNative)
+        XCTAssertNil(viewModel.draft.secretName)
+        XCTAssertEqual(viewModel.draft.apiKey, "")
+    }
+
+    func testSavingProviderWithoutSecretDoesNotWriteStaleSecret() throws {
+        let existing = [
+            ProviderProfile(
+                id: "work",
+                displayName: "Work",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.work.apiKey",
+                isDefault: true
+            )
+        ]
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: existing))
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets
+        )
+
+        viewModel.changeDraftKind(.ollamaNative)
+        viewModel.draft.apiKey = "sk-stale"
+
+        XCTAssertTrue(viewModel.saveDraft())
+
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertEqual(saved.kind, .ollamaNative)
+        XCTAssertNil(saved.secretName)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+    }
+
+    func testLoadFailureBlocksPersistenceUntilProfilesLoadSuccessfully() throws {
+        let store = ThrowingProfileStore(error: TestProfileStoreError(message: "malformed profiles"))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore(),
+            loadDefaultsWhenEmpty: false
+        )
+
+        XCTAssertTrue(viewModel.isPersistenceBlocked)
+        XCTAssertEqual(viewModel.lastErrorMessage, "malformed profiles")
+
+        viewModel.createProfile(kind: .openAIChat)
+        viewModel.draft.displayName = "Work OpenAI"
+        viewModel.draft.apiKey = "sk-secret"
+        viewModel.draft.isDefault = true
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertThrowsError(try viewModel.setDefaultProfile(id: viewModel.draft.id))
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertEqual(viewModel.lastErrorMessage, "malformed profiles")
+    }
+
     func testSaveRejectsRemovingOnlyDefaultProfile() throws {
         let existing = [
             ProviderProfileTemplates.defaultProfile(kind: .openAIChat, isDefault: true),
@@ -230,5 +321,44 @@ private final class CapturingProfileStore: ProviderProfileStore, @unchecked Send
 
     func saveProfiles(_ profiles: ProviderProfilesFile) throws {
         savedFiles.append(profiles)
+    }
+}
+
+private final class ThrowingProfileStore: ProviderProfileStore, @unchecked Sendable {
+    private let error: Error
+    private(set) var savedFiles: [ProviderProfilesFile] = []
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func loadProfiles() throws -> ProviderProfilesFile {
+        throw error
+    }
+
+    func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+        savedFiles.append(profiles)
+    }
+}
+
+private final class RecordingSecretStore: SecretStore, @unchecked Sendable {
+    private(set) var setSecretCalls: [(value: String, name: String)] = []
+
+    func secret(named name: String) throws -> String? {
+        nil
+    }
+
+    func setSecret(_ value: String, named name: String) throws {
+        setSecretCalls.append((value: value, name: name))
+    }
+
+    func deleteSecret(named name: String) throws {}
+}
+
+private struct TestProfileStoreError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? {
+        message
     }
 }

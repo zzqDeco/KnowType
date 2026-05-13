@@ -9,10 +9,12 @@ public final class ProviderProfilesViewModel: ObservableObject {
     @Published public var draft: ProviderProfileDraft
     @Published public private(set) var validationErrors: [String]
     @Published public private(set) var lastErrorMessage: String?
+    @Published public private(set) var isPersistenceBlocked: Bool
 
     private let profileStore: any ProviderProfileStore
     private let secretStore: any SecretStore
     private var file: ProviderProfilesFile
+    private var persistenceBlockedError: Error?
 
     public init(
         profileStore: any ProviderProfileStore,
@@ -30,7 +32,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         do {
             let loaded = try profileStore.loadProfiles()
             if loaded.profiles.isEmpty && loadDefaultsWhenEmpty {
-                let defaults = ProviderProfileTemplates.defaultProfiles()
+                let defaults = Self.profileScopedSecrets(ProviderProfileTemplates.defaultProfiles())
                 resolvedFile = ProviderProfilesFile(schemaVersion: loaded.schemaVersion, profiles: defaults)
                 resolvedProfiles = defaults
             } else {
@@ -50,6 +52,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
         self.selectedProfileID = firstProfile?.id
         self.draft = ProviderProfileDraft(profile: firstProfile ?? ProviderProfileTemplates.defaultProfile(kind: .openAIChat))
         self.lastErrorMessage = resolvedErrorMessage
+        self.persistenceBlockedError = resolvedErrorMessage == nil ? nil : ProviderProfilesViewModelError.loadFailed(resolvedErrorMessage ?? "")
+        self.isPersistenceBlocked = self.persistenceBlockedError != nil
     }
 
     public convenience init() throws {
@@ -90,7 +94,12 @@ public final class ProviderProfilesViewModel: ObservableObject {
         draft.model = template.model
         draft.timeoutSeconds = template.timeoutSeconds
         draft.headers = template.headers
-        draft.secretName = template.secretName == nil ? nil : Self.secretName(for: draft.id)
+        if template.secretName == nil {
+            draft.secretName = nil
+            draft.apiKey = ""
+        } else {
+            draft.secretName = Self.secretName(for: draft.id)
+        }
         draft.customBodyTemplate = template.customBodyTemplate ?? ""
         draft.customResponsePath = template.customResponsePath ?? ""
         validationErrors = []
@@ -98,6 +107,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
     @discardableResult
     public func saveDraft() -> Bool {
+        if let persistenceBlockedError {
+            lastErrorMessage = persistenceBlockedError.localizedDescription
+            return false
+        }
+
         validationErrors = validate(draft)
         if !draft.isDefault && !profiles.contains(where: { $0.id != draft.id && $0.isDefault }) {
             validationErrors.append("At least one default provider is required.")
@@ -108,10 +122,13 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
         do {
             var profile = try draft.makeProfile()
-            if !draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if Self.requiresSecret(kind: profile.kind),
+               !draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let secretName = profile.secretName ?? Self.secretName(for: profile.id)
                 try secretStore.setSecret(draft.apiKey, named: secretName)
                 profile.secretName = secretName
+            } else if !Self.requiresSecret(kind: profile.kind) {
+                profile.secretName = nil
             }
 
             if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
@@ -141,6 +158,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 
     public func setDefaultProfile(id: String) throws {
+        if let persistenceBlockedError {
+            lastErrorMessage = persistenceBlockedError.localizedDescription
+            throw persistenceBlockedError
+        }
+
         guard profiles.contains(where: { $0.id == id }) else {
             return
         }
@@ -185,6 +207,20 @@ public final class ProviderProfilesViewModel: ObservableObject {
         "knowtype.provider.\(profileID).apiKey"
     }
 
+    private static func profileScopedSecrets(_ profiles: [ProviderProfile]) -> [ProviderProfile] {
+        profiles.map { profile in
+            var scoped = profile
+            if scoped.secretName != nil {
+                scoped.secretName = secretName(for: scoped.id)
+            }
+            return scoped
+        }
+    }
+
+    private static func requiresSecret(kind: ProviderKind) -> Bool {
+        ProviderProfileTemplates.defaultProfile(kind: kind).secretName != nil
+    }
+
     private static func validHTTPURL(_ value: String) -> URL? {
         guard let url = URL(string: value),
               let scheme = url.scheme,
@@ -193,6 +229,17 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return nil
         }
         return url
+    }
+}
+
+public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
+    case loadFailed(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .loadFailed(let message):
+            return message
+        }
     }
 }
 
