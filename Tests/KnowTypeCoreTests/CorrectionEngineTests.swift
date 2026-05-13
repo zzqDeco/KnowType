@@ -83,7 +83,10 @@ final class CorrectionEngineTests: XCTestCase {
             "pnpm install",
             "npm install",
             "curl https://example.com",
+            "curl example.com",
+            "ssh production-box",
             "> docker ps",
+            "$ docker ps",
             "cat ./Package.swift",
             "touch /tmp/knowtype",
             "docker ps | rg api",
@@ -91,6 +94,11 @@ final class CorrectionEngineTests: XCTestCase {
             "swift test",
             "go test ./...",
             "make build",
+            "export PATH=/usr/local/bin:$PATH",
+            "source .env",
+            "source ./scripts/env.sh",
+            "python main.py",
+            "node server.js",
             "let appBundleID = context.appBundleID",
             "import Foundation",
             "snake_case",
@@ -112,6 +120,7 @@ final class CorrectionEngineTests: XCTestCase {
             "make sure this works",
             "make changes later",
             "> I thikn this",
+            "$ I thikn this",
             "cat is cute",
             "touch base later",
             "brew coffee",
@@ -119,7 +128,11 @@ final class CorrectionEngineTests: XCTestCase {
             "price is < expected",
             "I thikn we should import data",
             "let me know the plan",
-            "import data"
+            "import data",
+            "export data later",
+            "source material",
+            "I thikn camelCase naming works",
+            "I thikn snake_case naming works"
         ]
 
         for input in proseInputs {
@@ -136,6 +149,23 @@ final class CorrectionEngineTests: XCTestCase {
 
         XCTAssertEqual(candidates.first?.text, "I think a > b")
         XCTAssertNotEqual(candidates.first?.source, "local-protection")
+    }
+
+    func testProseWithCodeTokensStillCorrectsWhilePreservingTokens() async {
+        let engine = CorrectionEngine()
+        let camelCandidates = await engine.correct(
+            InputContext(rawInput: "I thikn camelCase naming works", locale: .enUS)
+        )
+        let snakeCandidates = await engine.correct(
+            InputContext(rawInput: "I thikn snake_case naming works", locale: .enUS)
+        )
+
+        XCTAssertEqual(camelCandidates.first?.text, "I think camelCase naming works")
+        XCTAssertNotEqual(camelCandidates.first?.source, "local-protection")
+        XCTAssertEqual(camelCandidates.first?.protectedRanges.first?.reason, "camelCase")
+        XCTAssertEqual(snakeCandidates.first?.text, "I think snake_case naming works")
+        XCTAssertNotEqual(snakeCandidates.first?.source, "local-protection")
+        XCTAssertEqual(snakeCandidates.first?.protectedRanges.first?.reason, "snake_case")
     }
 
     func testProtectedAppBundleIDsRequireNoCorrection() {

@@ -78,10 +78,17 @@ final class PrefixContinuationEngineTests: XCTestCase {
             "kubectl get pods",
             "brew install foo",
             "pnpm install",
+            "curl example.com",
+            "ssh production-box",
             "> docker ps",
+            "$ docker ps",
             "cat ./Package.swift",
             "touch /tmp/knowtype",
             "swift test > test.log",
+            "export PATH=/usr/local/bin:$PATH",
+            "source .env",
+            "python main.py",
+            "node server.js",
             "let appBundleID = context.appBundleID"
         ]
 
@@ -108,13 +115,18 @@ final class PrefixContinuationEngineTests: XCTestCase {
             "make sure this works",
             "make changes later",
             "> I think this",
+            "$ I think this",
             "cat is cute",
             "touch base later",
             "brew coffee",
             "I think A > B",
             "price is < expected",
             "I think we should import data",
-            "let me know the plan"
+            "let me know the plan",
+            "export data later",
+            "source material",
+            "I think camelCase naming works",
+            "I think snake_case naming works"
         ]
 
         for prefix in prefixes {

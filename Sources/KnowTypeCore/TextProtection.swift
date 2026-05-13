@@ -33,7 +33,10 @@ public enum TextProtection {
         "curl", "ssh"
     ]
     private static let executableCommandNames: Set<String> = [
-        "python", "python3", "sudo", "zsh"
+        "node", "python", "python3", "sudo", "zsh"
+    ]
+    private static let scriptFileExtensions: Set<String> = [
+        "js", "mjs", "py", "rb", "sh", "swift", "ts"
     ]
     private static let protectedTokens: [String: String] = [
         "api": "API",
@@ -105,7 +108,7 @@ public enum TextProtection {
     }
 
     private static func containsLevelZeroProtectedRange(in text: String) -> Bool {
-        let levelZeroReasons: Set<String> = ["url", "email", "file_path", "snake_case", "camelCase"]
+        let levelZeroReasons: Set<String> = ["url", "email", "file_path"]
         return detectProtectedRanges(in: text).contains { levelZeroReasons.contains($0.reason) }
     }
 
@@ -131,7 +134,7 @@ public enum TextProtection {
 
     private static func isCommand(_ text: String) -> Bool {
         if text.hasPrefix("$ ") {
-            return true
+            return isCommandShape(String(text.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         if text.hasPrefix("> ") {
             return isCommandShape(String(text.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines))
@@ -219,14 +222,14 @@ public enum TextProtection {
             return false
         }
 
-        if shellBuiltins.contains(command) {
-            return true
-        }
         if tokens.count == 1 {
-            return false
+            return command == "cd"
         }
 
         let arguments = Array(tokens.dropFirst())
+        if shellBuiltins.contains(command) {
+            return isShellBuiltinInvocation(command: command, arguments: arguments)
+        }
         if arguments.contains(where: isCommandFlagOrAssignment) {
             return true
         }
@@ -238,10 +241,13 @@ public enum TextProtection {
             return arguments.contains(where: isCommandPathArgument)
         }
         if networkCommandNames.contains(command) {
-            return arguments.contains(where: isURLLikeArgument) || arguments.contains(where: isCommandPathArgument)
+            return arguments.contains(where: isURLLikeArgument)
+                || arguments.contains(where: isCommandPathArgument)
+                || arguments.contains(where: isHostLikeArgument)
         }
         if executableCommandNames.contains(command) {
             return arguments.contains(where: isCommandPathArgument)
+                || arguments.contains(where: isScriptFileArgument)
                 || commandSubcommands[arguments[0].lowercased()] != nil
         }
         return false
@@ -265,6 +271,21 @@ public enum TextProtection {
             || argument.range(of: #"^[A-Za-z_][A-Za-z0-9_]*="#, options: .regularExpression) != nil
     }
 
+    private static func isShellBuiltinInvocation(command: String, arguments: [String]) -> Bool {
+        switch command {
+        case "cd":
+            return true
+        case "export":
+            return arguments.contains(where: isCommandFlagOrAssignment)
+        case "source":
+            return arguments.contains(where: isCommandPathArgument)
+                || arguments.contains(where: isScriptFileArgument)
+                || arguments.contains(where: isDotfileArgument)
+        default:
+            return false
+        }
+    }
+
     private static func isCommandPathArgument(_ argument: String) -> Bool {
         argument.hasPrefix("/")
             || argument.hasPrefix("~/")
@@ -277,6 +298,32 @@ public enum TextProtection {
 
     private static func isURLLikeArgument(_ argument: String) -> Bool {
         argument.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
+    }
+
+    private static func isHostLikeArgument(_ argument: String) -> Bool {
+        let trimmed = argument.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+        return trimmed.range(
+            of: #"^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?(?:localhost|[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+|[A-Za-z0-9][A-Za-z0-9-]*-[A-Za-z0-9][A-Za-z0-9-]*|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func isScriptFileArgument(_ argument: String) -> Bool {
+        let trimmed = argument.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+        guard let extensionStart = trimmed.lastIndex(of: "."),
+              extensionStart != trimmed.startIndex else {
+            return false
+        }
+        let fileExtension = String(trimmed[trimmed.index(after: extensionStart)...]).lowercased()
+        guard scriptFileExtensions.contains(fileExtension) else {
+            return false
+        }
+        return trimmed.range(of: #"^[A-Za-z0-9_.~/-]+\.[A-Za-z0-9]+$"#, options: .regularExpression) != nil
+    }
+
+    private static func isDotfileArgument(_ argument: String) -> Bool {
+        let trimmed = argument.trimmingCharacters(in: CharacterSet(charactersIn: "`'\""))
+        return trimmed.range(of: #"^(?:\.|~?/|\.?/)?\.[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil
     }
 
     private static func ranges(matching pattern: String, in text: String, reason: String) -> [ProtectedRange] {
