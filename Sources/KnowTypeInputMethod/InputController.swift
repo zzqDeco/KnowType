@@ -63,6 +63,29 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         commit(action: .space, client: client())
     }
 
+    public override func recognizedEvents(_ sender: Any!) -> Int {
+        Int(NSEvent.EventTypeMask.keyDown.rawValue)
+    }
+
+    public override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
+        guard let event,
+              event.type == .keyDown,
+              event.modifierFlags.contains(.option) else {
+            return false
+        }
+        let stroke = InputKeyStroke(
+            text: event.charactersIgnoringModifiers ?? event.characters ?? "",
+            keyCode: Int(event.keyCode),
+            modifiers: modifierSet(from: Int(event.modifierFlags.rawValue))
+        )
+        switch keyMapper.intent(for: stroke) {
+        case .action(.optionNumber), .action(.optionR):
+            return handle(intent: keyMapper.intent(for: stroke), client: sender)
+        case .append, .deleteBackward, .action, .ignored:
+            return false
+        }
+    }
+
     public override func commitComposition(_ sender: Any!) {
         commit(action: .space, client: sender)
     }
@@ -186,6 +209,14 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 }
             case .prefixCandidate(let index):
                 if suggestion.prefixCandidates.indices.contains(index) {
+                    if index != 0 {
+                        switch action {
+                        case .space, .tab, .optionNumber:
+                            return .commit(suggestion.prefixCandidates[index].text)
+                        case .optionR:
+                            return .polishRequested(rawBuffer)
+                        }
+                    }
                     return InputCompositionController().handle(
                         action: action,
                         prefixCandidates: [suggestion.prefixCandidates[index]],

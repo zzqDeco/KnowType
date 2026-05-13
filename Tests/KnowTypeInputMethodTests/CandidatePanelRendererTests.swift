@@ -64,8 +64,8 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows[7].visualRole, .continuation)
         XCTAssertEqual(rendered.rows[3].shortcutLabel, "1")
         XCTAssertEqual(rendered.rows[4].shortcutLabel, "2")
-        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab")
-        XCTAssertEqual(rendered.rows[7].shortcutLabel, "Option+1")
+        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab / Option+1")
+        XCTAssertEqual(rendered.rows[7].shortcutLabel, "Option+2")
     }
 
     func testRendersEnglishLabelsForEnglishLocale() {
@@ -148,8 +148,8 @@ final class CandidatePanelRendererTests: XCTestCase {
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
         let controller = InputCompositionController()
 
-        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab")
-        XCTAssertEqual(rendered.rows[7].shortcutLabel, "Option+1")
+        XCTAssertEqual(rendered.rows[6].shortcutLabel, "Tab / Option+1")
+        XCTAssertEqual(rendered.rows[7].shortcutLabel, "Option+2")
         XCTAssertEqual(
             controller.handle(
                 action: .tab,
@@ -162,6 +162,15 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(
             controller.handle(
                 action: .optionNumber(1),
+                prefixCandidates: prefixCandidates,
+                continuationCandidates: continuationCandidates,
+                originalText: viewModel.rawInput
+            ),
+            .commit("我觉得这个方案还有进一步优化空间")
+        )
+        XCTAssertEqual(
+            controller.handle(
+                action: .optionNumber(2),
                 prefixCandidates: prefixCandidates,
                 continuationCandidates: continuationCandidates,
                 originalText: viewModel.rawInput

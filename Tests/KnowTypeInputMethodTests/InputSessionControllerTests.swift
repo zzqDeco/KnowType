@@ -81,6 +81,20 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.selectedPrefixIndex, 1)
     }
 
+    func testSelectedNonFirstPrefixDoesNotReuseFirstPrefixContinuations() async {
+        let controller = InputSessionController { _ in
+            Self.makeSuggestion()
+        }
+        await controller.update(rawInput: "wo jue de zhege fagnan")
+        await controller.selectPrefix(index: 1)
+
+        let tabResult = await controller.handle(action: .tab)
+        let optionResult = await controller.handle(action: .optionNumber(1))
+
+        XCTAssertEqual(tabResult, .commit("我觉得这个方法"))
+        XCTAssertEqual(optionResult, .commit("我觉得这个方法"))
+    }
+
     func testContinuationSelectionUsesSelectedContinuationAndChecksBounds() async {
         let controller = InputSessionController { _ in
             Self.makeSuggestion()
@@ -108,9 +122,11 @@ final class InputSessionControllerTests: XCTestCase {
         await controller.update(rawInput: "wo jue de zhege fagnan")
 
         let continuationResult = await controller.handle(action: .optionNumber(1))
+        let secondContinuationResult = await controller.handle(action: .optionNumber(2))
         var state = await controller.state
 
-        XCTAssertEqual(continuationResult, .commit("我觉得这个方案在落地成本上可能偏高"))
+        XCTAssertEqual(continuationResult, .commit("我觉得这个方案还有进一步优化空间"))
+        XCTAssertEqual(secondContinuationResult, .commit("我觉得这个方案在落地成本上可能偏高"))
         XCTAssertEqual(state.selectedContinuationIndex, 1)
         XCTAssertFalse(state.polishRequested)
 

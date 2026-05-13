@@ -68,7 +68,7 @@ public struct InputCompositionController: Sendable {
             guard number > 0 else {
                 return .noAction
             }
-            let index = number
+            let index = number - 1
             guard continuationCandidates.indices.contains(index) else {
                 return .noAction
             }
