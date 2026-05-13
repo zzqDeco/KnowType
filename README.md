@@ -118,6 +118,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 The settings app edits provider profiles for OpenAI, Anthropic, Gemini, Ollama, and custom HTTP endpoints. Cloud profiles require a new key or an existing Keychain secret. Custom HTTP profiles may omit the API key for local proxy endpoints, or store an optional profile-scoped key when one is entered. Switching a profile to a local/no-secret provider clears the draft API key and deletes the old profile-scoped secret only when no other saved profile still references it.
 
+The settings app is split into MVP sections for Input, Candidates, AI Provider, Privacy, and Debug Install. The Debug Install section summarizes the local development flow: build/sign the input method bundle, optionally pass an Apple Development identity through `CODESIGN_IDENTITY`, install it to `~/Library/Input Methods`, refresh macOS input source registration if needed, enable KnowType in System Settings, and inspect `KnowTypeInputMethodApp` logs with Console.app or `log stream`.
+
 The provider runtime supports:
 
 - `openai_chat`: `/v1/chat/completions`

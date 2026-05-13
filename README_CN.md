@@ -114,6 +114,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 设置 App 会读写同一套 profile schema，可编辑 OpenAI、Anthropic、Gemini、Ollama 和自定义 HTTP profile。云端 profile 需要填写新 key，或复用已有 Keychain 密钥。自定义 HTTP profile 可不填写 API key，以支持本地代理 endpoint；如果填写 key，则会保存为 profile 级密钥。把 profile 切换到本地或不需要密钥的 provider 时，会清空草稿 API key；只有没有其他已保存 profile 继续引用旧密钥时，才会删除旧的 profile 级密钥。
 
+设置 App 按 MVP 分为 Input、Candidates、AI Provider、Privacy 和 Debug Install。Debug Install 会概括本地开发流程：构建/签名输入法 bundle，可通过 `CODESIGN_IDENTITY` 传入 Apple Development 身份，安装到 `~/Library/Input Methods`，必要时刷新 macOS 输入源注册状态，在系统设置中启用 KnowType，并通过 Console.app 或 `log stream` 查看 `KnowTypeInputMethodApp` 日志。
+
 当前运行时支持：
 
 - `openai_chat`：兼容 `/v1/chat/completions`
