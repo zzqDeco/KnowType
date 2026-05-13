@@ -9,10 +9,11 @@ CONTENTS_DIR="$BUNDLE_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 
 swift build --configuration "$CONFIGURATION" --product KnowTypeInputMethodApp >&2
+BIN_DIR="$(swift build --configuration "$CONFIGURATION" --show-bin-path 2>/dev/null)"
 
 rm -rf "$BUNDLE_DIR"
 mkdir -p "$MACOS_DIR" "$CONTENTS_DIR/Resources"
-cp "$ROOT_DIR/.build/$CONFIGURATION/KnowTypeInputMethodApp" "$MACOS_DIR/KnowTypeInputMethodApp"
+cp "$BIN_DIR/KnowTypeInputMethodApp" "$MACOS_DIR/KnowTypeInputMethodApp"
 cp "$ROOT_DIR/Resources/InputMethod/Info.plist" "$CONTENTS_DIR/Info.plist"
 chmod +x "$MACOS_DIR/KnowTypeInputMethodApp"
 
