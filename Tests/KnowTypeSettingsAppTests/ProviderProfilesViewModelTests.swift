@@ -670,6 +670,52 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
     }
 
+    func testRemoteOpenAICompatibleProfileRejectsPlaceholderModel() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModel.createProfile(kind: .openAIChat)
+        viewModel.draft.displayName = "Remote Chat"
+        viewModel.draft.baseURL = "https://api.openai.com"
+        viewModel.draft.model = "<model-id>"
+        viewModel.draft.apiKey = "sk-remote"
+        viewModel.draft.isDefault = true
+
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertTrue(viewModel.validationErrors.contains("Model is required."))
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+        XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
+    }
+
+    func testLocalOpenAICompatibleProfileAllowsPlaceholderModelForDiscovery() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = RecordingSecretStore()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModel.createProfile(kind: .openAIChat)
+        viewModel.draft.displayName = "Local Chat"
+        viewModel.draft.baseURL = "http://127.0.0.1:8317/v1"
+        viewModel.draft.model = "<model-id>"
+        viewModel.draft.apiKey = ""
+        viewModel.draft.isDefault = true
+
+        XCTAssertTrue(viewModel.saveDraft())
+        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertEqual(saved.model, "<model-id>")
+        XCTAssertNil(saved.secretName)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+    }
+
     func testSaveFailureDoesNotDeleteExistingSecretForNoSecretProvider() throws {
         let existing = [
             ProviderProfile(

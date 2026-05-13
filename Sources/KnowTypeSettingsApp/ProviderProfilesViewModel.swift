@@ -229,9 +229,15 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if validBaseURL == nil {
             errors.append("Base URL must be an HTTP or HTTPS URL.")
         }
-        if Self.requiresModel(kind: draft.kind, baseURL: validBaseURL)
-            && draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errors.append("Model is required.")
+        if Self.requiresModel(kind: draft.kind, baseURL: validBaseURL) {
+            let model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            if model.isEmpty || Self.isRemoteOpenAIPlaceholderModel(
+                kind: draft.kind,
+                baseURL: validBaseURL,
+                model: model
+            ) {
+                errors.append("Model is required.")
+            }
         }
         if draft.timeoutSeconds <= 0 {
             errors.append("Timeout must be greater than zero.")
@@ -293,6 +299,23 @@ public final class ProviderProfilesViewModel: ObservableObject {
             }
             return !isLocalBaseURL(baseURL)
         case .customHTTP:
+            return false
+        }
+    }
+
+    private static func isRemoteOpenAIPlaceholderModel(
+        kind: ProviderKind,
+        baseURL: URL?,
+        model: String
+    ) -> Bool {
+        switch kind {
+        case .openAIChat, .openAIResponses:
+            guard let baseURL,
+                  !isLocalBaseURL(baseURL) else {
+                return false
+            }
+            return OpenAICompatibleModelDiscovery.requiresDiscovery(model)
+        case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
             return false
         }
     }
