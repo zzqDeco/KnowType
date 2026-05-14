@@ -53,17 +53,20 @@ public struct CandidatePanelState: Sendable, Equatable {
             continuationCandidates: continuationCandidates
         )
         let isVisible = !rawInput.isEmpty || !prefixCandidates.isEmpty || !continuationCandidates.isEmpty
-        let selection = defaultSelection(
+        let rows = selectableRows(in: viewModel)
+        let selection = nextSelection(
             rawInput: rawInput,
+            rows: rows,
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates
         )
+        let nextPageStart = nextPageStart(rawInput: rawInput, selection: selection, rows: rows)
         windowState = CandidatePanelWindowState(
             isVisible: isVisible,
             anchorRect: anchorRect,
             viewModel: viewModel,
             selection: selection,
-            pageStart: pageStart(containing: selection, rows: selectableRows(in: viewModel))
+            pageStart: nextPageStart
         )
     }
 
@@ -130,6 +133,52 @@ public struct CandidatePanelState: Sendable, Equatable {
             return .continuationCandidate(0)
         }
         return nil
+    }
+
+    private func nextSelection(
+        rawInput: String,
+        rows: [CandidatePanelSelection],
+        prefixCandidates: [CorrectionCandidate],
+        continuationCandidates: [ContinuationCandidate]
+    ) -> CandidatePanelSelection? {
+        let rawInputDidNotChange = rawInput == windowState.viewModel.rawInput
+        if rawInputDidNotChange {
+            if let selection = windowState.selection,
+               rows.contains(selection) {
+                return selection
+            }
+            if !rows.isEmpty {
+                let preservedPageStart = min(windowState.pageStart, rows.count - 1)
+                return rows[preservedPageStart]
+            }
+        }
+
+        return defaultSelection(
+            rawInput: rawInput,
+            prefixCandidates: prefixCandidates,
+            continuationCandidates: continuationCandidates
+        )
+    }
+
+    private func nextPageStart(
+        rawInput: String,
+        selection: CandidatePanelSelection?,
+        rows: [CandidatePanelSelection]
+    ) -> Int {
+        guard !rows.isEmpty else {
+            return 0
+        }
+        let rawInputDidNotChange = rawInput == windowState.viewModel.rawInput
+        if rawInputDidNotChange {
+            let preservedPageStart = min(windowState.pageStart, rows.count - 1)
+            if let selection,
+               let selectedIndex = rows.firstIndex(of: selection),
+               selectedIndex >= preservedPageStart,
+               selectedIndex < preservedPageStart + windowState.pageSize {
+                return preservedPageStart
+            }
+        }
+        return pageStart(containing: selection, rows: rows)
     }
 
     private func selectableRows() -> [CandidatePanelSelection] {

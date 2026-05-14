@@ -70,4 +70,11 @@ final class CandidateAnchorPolicyTests: XCTestCase {
             NSRange(location: 0, length: 0)
         )
     }
+
+    func testCurrentInsertionPointFallbackUsesIMKUnknownLocation() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.currentInsertionPointFallbackRange,
+            NSRange(location: NSNotFound, length: 0)
+        )
+    }
 }

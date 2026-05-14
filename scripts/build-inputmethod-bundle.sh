@@ -20,6 +20,12 @@ for resource_file in "$ROOT_DIR"/Resources/InputMethod/*; do
   [[ "$(basename "$resource_file")" == "Info.plist" ]] && continue
   cp "$resource_file" "$CONTENTS_DIR/Resources/"
 done
+if [[ -d "$ROOT_DIR/Sources/KnowTypeCore/Resources" ]]; then
+  for resource_file in "$ROOT_DIR"/Sources/KnowTypeCore/Resources/*; do
+    [[ -f "$resource_file" ]] || continue
+    cp "$resource_file" "$CONTENTS_DIR/Resources/"
+  done
+fi
 chmod +x "$MACOS_DIR/KnowTypeInputMethodApp"
 
 SIGN_IDENTITY="${CODESIGN_IDENTITY:--}"

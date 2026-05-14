@@ -109,6 +109,28 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(secondPage.rows.map(\.shortcutLabel), ["1", "2"])
     }
 
+    func testSameRawInputRefreshKeepsVisiblePageAndSelection() {
+        var state = CandidatePanelState()
+        state.update(rawInput: "ni", suggestion: pagedSuggestion())
+        XCTAssertTrue(state.moveSelection(.pageDown))
+
+        state.update(rawInput: "ni", suggestion: pagedSuggestion())
+
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(9))
+        XCTAssertEqual(state.windowState.pageStart, 9)
+    }
+
+    func testChangedRawInputResetsCandidatePage() {
+        var state = CandidatePanelState()
+        state.update(rawInput: "ni", suggestion: pagedSuggestion())
+        XCTAssertTrue(state.moveSelection(.pageDown))
+
+        state.update(rawInput: "nish", suggestion: pagedSuggestion())
+
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+        XCTAssertEqual(state.windowState.pageStart, 0)
+    }
+
     func testMoveSelectionReturnsFalseWhenPanelHasNoRows() {
         var state = CandidatePanelState()
 

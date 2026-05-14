@@ -1,6 +1,8 @@
 import Foundation
 
 public enum CandidateAnchorPolicy {
+    public static let currentInsertionPointFallbackRange = NSRange(location: NSNotFound, length: 0)
+
     public static func characterRange(for selectedRange: NSRange) -> NSRange? {
         guard isKnown(selectedRange) else {
             return nil

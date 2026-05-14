@@ -50,6 +50,7 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "nishi").first?.text, "你是")
         XCTAssertEqual(engine.candidates(for: "ni shi").first?.text, "你是")
         XCTAssertEqual(engine.candidates(for: "nixiang").first?.text, "你想")
+        XCTAssertEqual(engine.candidates(for: "nishishei").first?.text, "你是谁")
     }
 
     func testSingleSyllableShowsExpandedHomophoneCandidates() {
@@ -60,7 +61,7 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertTrue(candidates.contains("呢"))
         XCTAssertTrue(candidates.contains("尼"))
         XCTAssertTrue(candidates.contains("拟"))
-        XCTAssertGreaterThanOrEqual(candidates.count, 10)
+        XCTAssertGreaterThanOrEqual(candidates.count, 14)
     }
 
     func testTrailingIncompleteSyllableCanStillCompose() {
@@ -68,8 +69,22 @@ final class TraditionalInputEngineTests: XCTestCase {
         let nihCandidates = engine.candidates(for: "nih").map(\.text)
 
         XCTAssertEqual(engine.candidates(for: "niw").first?.text, "你我")
+        XCTAssertEqual(engine.candidates(for: "nish").first?.text, "你是")
         XCTAssertEqual(nihCandidates.first, "你好")
         XCTAssertTrue(nihCandidates.contains("你"))
+        XCTAssertTrue(nihCandidates.contains("呢"))
+        XCTAssertLessThan(nihCandidates.firstIndex(of: "你") ?? Int.max, 9)
+        XCTAssertLessThan(nihCandidates.firstIndex(of: "呢") ?? Int.max, 9)
+    }
+
+    func testCommonCompactPinyinComposesBeyondSeedExamples() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "zhongguoren").first?.text, "中国人")
+        XCTAssertEqual(engine.candidates(for: "zhongwen").first?.text, "中文")
+        XCTAssertEqual(engine.candidates(for: "keyi").first?.text, "可以")
+        XCTAssertEqual(engine.candidates(for: "meiyou").first?.text, "没有")
+        XCTAssertEqual(engine.candidates(for: "woxiangqukan").first?.text, "我想去看")
     }
 
     func testMVPExamplesDecodeThroughSeedLexicon() {

@@ -1,6 +1,7 @@
 #if canImport(InputMethodKit)
 import AppKit
 import InputMethodKit
+import KnowTypeCore
 import KnowTypeInputMethod
 
 final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
@@ -12,6 +13,9 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
         let connectionName = bundle.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String
             ?? "KnowType_Connection"
         server = IMKServer(name: connectionName, bundleIdentifier: bundleIdentifier)
+        Task.detached(priority: .utility) {
+            TraditionalInputEngine.preloadResources()
+        }
     }
 }
 

@@ -9,7 +9,6 @@ import AppKit
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
     private let sessionController: InputSessionController
-    private let hasProvider: Bool
     private let keyMapper = InputKeyCommandMapper()
     private let candidateListBuilder = InputCandidateListBuilder()
     private var rawBuffer = ""
@@ -25,7 +24,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
-        self.hasProvider = provider != nil
         self.sessionController = InputSessionController(provider: provider)
         super.init(server: server, delegate: delegate, client: inputClient)
     }
@@ -66,7 +64,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func candidateSelectionChanged(_ candidateString: NSAttributedString!) {
-        selectNativeCandidate(matching: candidateString?.string)
+        // The primary candidate UI is our NSPanel. Some IMK clients still emit
+        // native candidate selection-change callbacks for the composed string's
+        // alternatives, which can otherwise overwrite the default prefix commit.
     }
 
     public override func candidateSelected(_ candidateString: NSAttributedString!) {
@@ -240,7 +240,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         )
         let suggestion = InputMethodPipeline.localSuggestions(
             for: context,
-            includeFallbackContinuations: !hasProvider
+            includeFallbackContinuations: false
         )
         lastSuggestion = suggestion
         lastSuggestionRawInput = rawBuffer
@@ -380,6 +380,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 lastUsableCandidateAnchorRect = lineRect
                 return lineRect
             }
+        }
+
+        let insertionPointRect = client.firstRect(
+            forCharacterRange: CandidateAnchorPolicy.currentInsertionPointFallbackRange,
+            actualRange: nil
+        )
+        if isUsableAnchorRect(insertionPointRect) {
+            lastUsableCandidateAnchorRect = insertionPointRect
+            return insertionPointRect
         }
 
         if let lastUsableCandidateAnchorRect {

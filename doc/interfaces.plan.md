@@ -86,17 +86,20 @@ The factory maps `ProviderKind` to one adapter and keeps provider-specific reque
 Input-method candidate presentation maps `SuggestionResponse` into compact macOS-style candidate rows:
 
 - raw input is shown only before any prefix or continuation suggestion exists
-- prefix candidates are paged in native-style slices of up to 9 shortcutable rows; `PageDown` / `PageUp` move the visible page and number keys select candidates from the current page
+- prefix candidates are paged in native-style slices of up to 9 shortcutable rows; `PageDown` / `PageUp`, `-` / `=`, and `[` / `]` move the visible page and number keys select candidates from the current page
 - single-syllable pinyin such as `ni` may produce enough homophone prefix candidates to require paging
+- trailing incomplete pinyin such as `nih` can show the completed phrase candidate `你好` while retaining `ni` homophone prefix candidates on later rows/pages
 - prefix candidates are first-class candidates
 - continuation candidates are selectable candidates but still commit as `locked prefix + continuation`
-- fallback local breadth is six medium candidates for both correction alternatives and continuations where available
-- when a provider is configured, the immediate local pass may omit fallback continuations until the provider-backed suggestion publishes
+- fallback local breadth is six medium candidates for correction alternatives where available
+- the IME's immediate local pass omits fallback/mock continuations; continuation rows appear after real provider output or when non-IME code explicitly opts into fallback continuations
 
 ## Shortcut Contract
 
 - `Space` -> commit prefix.
 - `Tab` -> commit prefix plus first continuation.
+- `PageDown`, `=`, `]` -> next candidate page.
+- `PageUp`, `-`, `[` -> previous candidate page.
 - `Option + number` -> commit prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation, which is also available through `Tab` and displayed as `⇥`.
 - `Option + R` -> request polish for original text.
 

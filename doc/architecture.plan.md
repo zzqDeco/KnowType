@@ -26,11 +26,12 @@ Level 0 contexts include URLs, emails, file paths, command-like input, code-like
 
 Current local coverage:
 
-- clean-room `TraditionalInputEngine` pinyin decoding with compact segmentation, light typo normalization, and multiple prefix candidates
+- clean-room `TraditionalInputEngine` pinyin decoding with multi-path compact segmentation, light typo normalization, generated pinyin-resource lookup, and multiple prefix candidates
 - pinyin typo examples such as `fagnan -> fangan -> 方案/方法/方向`
 - syllable fallback composition for basic compact pinyin such as `nishi -> 你是`
+- broader clean-room fallback and CC-CEDICT-derived coverage for common compact input such as `zhongguoren -> 中国人`, `keyi -> 可以`, `meiyou -> 没有`, and `nishishei -> 你是谁`
 - expanded single-syllable homophone candidates such as `ni -> 你/呢/尼/...`
-- trailing incomplete syllable completion such as `niw -> 你我`, while still surfacing completed-prefix candidates such as `你` for `nih`
+- trailing incomplete syllable completion such as `niw -> 你我` and `nih -> 你好`, while still surfacing completed-prefix candidates such as `你/呢/尼/...` for `nih`
 - high-frequency pinyin-initial abbreviations such as `wsm -> 为什么`, plus compact-prefix completion for unfinished pinyin such as `xianz -> 现在`
 - provider-backed correction remains enabled for short ambiguous abbreviation and compact-prefix inputs, but cloud candidates are capped below stronger local pinyin candidates
 - MVP full-pinyin examples such as `zhege gongneng bushi hen wending -> 这个功能不是很稳定`
@@ -39,6 +40,8 @@ Current local coverage:
 - English typo examples such as `thikn -> think`
 - mixed technical input such as `zhege api latnecy youdian gao`
 - technical token canonicalization for `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`
+
+The generated resource is built by `scripts/build-cedict-pinyin-lexicon.py` from CC-CEDICT and loaded through SwiftPM resources, with an app-bundle fallback for the installed input method. It is indexed by pinyin tokens at runtime so lookup does not depend on scanning a hardcoded Swift array.
 
 Cloud correction may add Level 2/3 alternatives, but strong correction is treated as an alternative, not an automatic replacement.
 
@@ -86,9 +89,11 @@ The IMK controller uses `IMKTextInput.setMarkedText` for active composition so l
 
 The primary candidate surface is a controlled AppKit `NSPanel` styled as a compact macOS candidate list. We do not rely on `IMKCandidates` for active display because it can silently fail to appear in some host apps. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available.
 
-Candidate positioning recalculates after local and async suggestion publication. Anchor lookup prefers the marked range end, falls back through marked/selected range starts and ends, then tries client line-height rectangles at those indexes before using pointer location as the screen fallback.
+Candidate positioning recalculates after local and async suggestion publication. Anchor lookup prefers the marked range end, falls back through marked/selected range starts and ends, then tries client line-height rectangles, the IMK current insertion-point range, and the last usable text anchor. The moving fallback is no longer the mouse pointer.
 
-When a provider is configured, the immediate local pass publishes correction/prefix rows only. Continuation rows are published after the provider-backed suggestion returns; local fallback continuations are reserved for no-provider and provider-failure paths.
+The immediate local input pass publishes correction/prefix rows only. Continuation rows are published after real provider output returns, or when a non-IME caller explicitly requests fallback continuations.
+
+Candidate pagination accepts `PageUp` / `PageDown`, `-` / `=`, and `[` / `]` in addition to number selection on the current page.
 
 ## Privacy and App Rules
 

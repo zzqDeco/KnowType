@@ -83,6 +83,13 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
     }
 
+    func testMapsCommonCandidatePaginationKeys() {
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "-", keyCode: 27)), .moveCandidateSelection(.pageUp))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "[", keyCode: 33)), .moveCandidateSelection(.pageUp))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "=", keyCode: 24)), .moveCandidateSelection(.pageDown))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "]", keyCode: 30)), .moveCandidateSelection(.pageDown))
+    }
+
     func testMapsPlainNumberKeysToCandidateSelectionIntent() {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "0", keyCode: 29)), .selectCandidate(0))
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "1", keyCode: 18)), .selectCandidate(1))

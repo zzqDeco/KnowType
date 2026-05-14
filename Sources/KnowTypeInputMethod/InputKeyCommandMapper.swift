@@ -90,6 +90,9 @@ public struct InputKeyCommandMapper: Sendable {
         if stroke.keyCode == Self.spaceKeyCode || stroke.text == " " {
             return .action(.space)
         }
+        if let navigation = Self.paginationByText[stroke.text] {
+            return .moveCandidateSelection(navigation)
+        }
         if let navigation = Self.navigationByKeyCode[stroke.keyCode] {
             return .moveCandidateSelection(navigation)
         }
@@ -150,6 +153,13 @@ public struct InputKeyCommandMapper: Sendable {
         26: 7,
         28: 8,
         25: 9
+    ]
+
+    private static let paginationByText: [String: InputCandidateNavigation] = [
+        "-": .pageUp,
+        "[": .pageUp,
+        "=": .pageDown,
+        "]": .pageDown
     ]
 
     private static let navigationByKeyCode: [Int: InputCandidateNavigation] = [

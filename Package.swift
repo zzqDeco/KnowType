@@ -19,7 +19,10 @@ let package = Package(
     targets: [
         .target(
             name: "KnowTypeCore",
-            path: "Sources/KnowTypeCore"
+            path: "Sources/KnowTypeCore",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .target(
             name: "KnowTypeProviders",
@@ -48,7 +51,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "KnowTypeInputMethodApp",
-            dependencies: ["KnowTypeInputMethod"],
+            dependencies: ["KnowTypeCore", "KnowTypeInputMethod"],
             path: "Sources/KnowTypeInputMethodApp",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),

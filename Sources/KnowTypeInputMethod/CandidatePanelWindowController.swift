@@ -97,9 +97,8 @@ final class CandidatePanelWindowController {
     }
 
     private func fallbackAnchorRect() -> CGRect {
-        let mouseLocation = NSEvent.mouseLocation
-        if NSScreen.screens.contains(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
-            return CGRect(x: mouseLocation.x, y: mouseLocation.y, width: 1, height: 18)
+        if let panel, panel.isVisible {
+            return CGRect(x: panel.frame.minX, y: panel.frame.maxY, width: 1, height: 18)
         }
         if let screen = NSScreen.main {
             return CGRect(x: screen.visibleFrame.minX + 24, y: screen.visibleFrame.maxY - 80, width: 1, height: 1)

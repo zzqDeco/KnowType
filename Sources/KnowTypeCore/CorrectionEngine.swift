@@ -169,15 +169,17 @@ public final class CorrectionEngine: Sendable {
     }
 
     private func uniqueSorted(_ candidates: [CorrectionCandidate]) -> [CorrectionCandidate] {
-        var seen = Set<String>()
-        return candidates
-            .filter { candidate in
-                if seen.contains(candidate.text) {
-                    return false
-                }
-                seen.insert(candidate.text)
-                return true
+        var bestByText: [String: CorrectionCandidate] = [:]
+        for candidate in candidates {
+            guard let existing = bestByText[candidate.text] else {
+                bestByText[candidate.text] = candidate
+                continue
             }
+            if candidate.confidence > existing.confidence {
+                bestByText[candidate.text] = candidate
+            }
+        }
+        return Array(bestByText.values)
             .sorted {
                 if $0.correctionLevel == .strongAlternative, $1.correctionLevel != .strongAlternative {
                     return false

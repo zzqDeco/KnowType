@@ -75,9 +75,11 @@ bundle 会输出到 `dist/KnowType.app`。
 
 脚本会把 bundle 复制到 `~/Library/Input Methods/KnowType.app`。安装后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启需要使用输入法的 app。
 
-本地输入时，KnowType 会先把输入中的文本作为 marked text 标记在当前 app 里，然后在客户端提供可用文本位置时把紧凑的 macOS 风格候选窗锚定到光标附近；拿不到可靠位置时，会依次回退到 marked/selected range 的起止位置、line-height rect，最后回退到鼠标指针附近。按 `Space` 会用最佳纠错前缀替换 marked text，按 `Tab` 会用前缀 + 第一条延续替换 marked text，数字键选择当前页前缀候选，`PageDown` / `PageUp` 翻页查看更多候选。
+本地输入时，KnowType 会先把输入中的文本作为 marked text 标记在当前 app 里，然后在客户端提供可用文本位置时把紧凑的 macOS 风格候选窗锚定到光标附近；拿不到可靠位置时，会依次回退到 marked/selected range 的起止位置、line-height rect、IMK 当前插入点范围以及上一次可用文本锚点，不再把鼠标指针作为移动候选窗锚点。按 `Space` 会用最佳纠错前缀替换 marked text，按 `Tab` 会用前缀 + 第一条真实延续替换 marked text，数字键选择当前页前缀候选，`PageDown` / `PageUp`、`-` / `=`、`[` / `]` 都可以翻页查看更多候选。
 
-本地纠错路径包含一个 clean-room 的 MVP 拼音引擎。它支持文档中的全拼例子、`wojuedezhegefagnan` 这类连续拼音、`ni -> 你/呢/尼/...` 这类单音节同音候选展开、`nishi -> 你是` 这类基础音节组句、`niw -> 你我` 这类末尾未完成音节、`xianz -> 现在` 这类未完成连续拼音前缀、`fangan` 常见错拼、`wsm -> 为什么` 这类高频首字母缩写、`方案/方法/方向` 这类多前缀候选，以及中英混输里的技术 token 保护。短拼音首字母和连续拼音前缀输入也会请求已配置的 provider 参与纠错，但云端结果不会轻易盖过更强的本地候选。在 `en-US` 模式下，本地纠错会保留英文拼写纠错路径，不会先把拼音解码成中文。
+本地纠错路径包含一个 clean-room 的 MVP 拼音引擎。它现在使用多路径连续拼音切分、短语词表、较宽的单音节同音 fallback，以及由 CC-CEDICT 生成的拼音资源词库。它支持文档中的全拼例子、`wojuedezhegefagnan` 这类连续拼音、`zhongguoren -> 中国人` 和 `nishishei -> 你是谁` 这类常见输入、`ni -> 你/呢/尼/...` 这类单音节同音候选展开、`niw -> 你我` 和 `nih -> 你好` 这类末尾未完成音节并保留 `ni` 的候选、`xianz -> 现在` 这类未完成连续拼音前缀、`fangan` 常见错拼、`wsm -> 为什么` 这类高频首字母缩写、`方案/方法/方向` 这类多前缀候选，以及中英混输里的技术 token 保护。短拼音首字母和连续拼音前缀输入也会请求已配置的 provider 参与纠错，但云端结果不会轻易盖过更强的本地候选。在 `en-US` 模式下，本地纠错会保留英文拼写纠错路径，不会先把拼音解码成中文。
+
+内置拼音资源通过 `scripts/build-cedict-pinyin-lexicon.py` 从 CC-CEDICT 生成。授权和署名见 `Sources/KnowTypeCore/Resources/NOTICE-CC-CEDICT.md`。
 
 移除本地 bundle：
 
