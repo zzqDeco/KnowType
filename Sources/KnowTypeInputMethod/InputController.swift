@@ -157,14 +157,31 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             refreshComposition(client: sender)
             return true
         case .selectCandidate(let number):
-            if candidatePanelState.windowState.isVisible,
-               let result = InputSessionCommitPolicy.resultForCandidateNumber(
-                number,
-                rawInput: rawBuffer,
-                suggestion: lastSuggestion,
-                suggestionRawInput: lastSuggestionRawInput
-            ) {
-                return applyCommitResult(result, client: sender)
+            if candidatePanelState.windowState.isVisible {
+                if let visibleSelection = candidatePanelState.selectVisiblePrefixCandidate(shortcutNumber: number),
+                   let selectedCandidate = sessionSelection(from: inputCandidateSelection(
+                       for: visibleSelection,
+                       in: candidatePanelState.windowState.viewModel
+                   )) {
+                    let result = InputSessionCommitPolicy.result(
+                        for: .space,
+                        rawInput: rawBuffer,
+                        suggestion: lastSuggestion,
+                        suggestionRawInput: lastSuggestionRawInput,
+                        selectedCandidate: selectedCandidate,
+                        appBundleID: appBundleIdentifier(client: sender),
+                        locale: locale
+                    )
+                    return applyCommitResult(result, client: sender)
+                }
+                if let result = InputSessionCommitPolicy.resultForCandidateNumber(
+                    number,
+                    rawInput: rawBuffer,
+                    suggestion: lastSuggestion,
+                    suggestionRawInput: lastSuggestionRawInput
+                ) {
+                    return applyCommitResult(result, client: sender)
+                }
             }
             beginCompositionIfNeeded()
             rawBuffer.append(String(number))

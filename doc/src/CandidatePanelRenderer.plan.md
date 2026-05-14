@@ -7,4 +7,8 @@ The renderer does not draw UI and does not assign colors. It emits semantic role
 - `lockedPrefix` for correction/prefix candidates
 - `continuation` for continuation candidates
 - `rawInput` for the original input row
-Prefix rows and continuation rows remain separate semantic rows, but the visible fallback panel is a flat native-style strip without section headers or preview text. Raw input is only exposed while no suggestion is available. Labels keep `1...n` for prefix shortcuts and compact macOS-style continuation labels such as `⇥`, `⌥2`, etc. The renderer shows the same prefix and continuation range that the shortcut handlers can commit, so hidden rows are never shortcutable.
+Prefix rows and continuation rows remain separate semantic rows, but the visible fallback panel is a flat native-style strip without section headers or preview text. Raw input is only exposed while no suggestion is available.
+
+Candidate rows are paged through `CandidatePanelPagingState`, with a default page size of 9 rows to match compact macOS-style candidate panels. `CandidatePanelState` owns the active page and moves PageDown/PageUp to the first row of the target page; arrow navigation advances by one visible row and crosses page boundaries only when the selection moves past a page edge.
+
+The renderer emits only rows from the current visible page. Prefix shortcut labels reset to `1...n` for the visible page, and continuation labels reset within the visible continuation rows using compact macOS-style labels such as `⇥`, `⌥2`, etc. When a caller does not pass paging explicitly, the renderer infers the page that contains the selected row so existing panel update paths continue to show the selected candidate page.

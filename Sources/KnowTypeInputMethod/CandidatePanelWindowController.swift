@@ -18,7 +18,8 @@ final class CandidatePanelWindowController {
 
         let renderModel = CandidatePanelRenderer(locale: locale).render(
             windowState.viewModel,
-            selected: windowState.selection
+            selected: windowState.selection,
+            paging: windowState.paging
         )
         contentView.update(model: renderModel)
 

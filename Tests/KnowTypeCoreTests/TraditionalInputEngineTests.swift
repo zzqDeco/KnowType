@@ -18,6 +18,45 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
     }
 
+    func testStandaloneSyllableReturnsManySingleCharacterCandidates() {
+        let engine = TraditionalInputEngine()
+        let candidateTexts = engine.candidates(for: "ni").map(\.text)
+
+        XCTAssertEqual(candidateTexts.first, "你")
+        XCTAssertTrue(candidateTexts.contains("尼"))
+        XCTAssertTrue(candidateTexts.contains("呢"))
+        XCTAssertGreaterThanOrEqual(candidateTexts.count, 10)
+    }
+
+    func testTrailingPartialSyllableKeepsPrefixAndOffersPhraseCandidates() {
+        let engine = TraditionalInputEngine()
+        let candidateTexts = engine.candidates(for: "nih").map(\.text)
+
+        XCTAssertEqual(candidateTexts.first, "你好")
+        XCTAssertTrue(candidateTexts.contains("你"))
+        XCTAssertTrue(candidateTexts.contains("尼"))
+    }
+
+    func testCompactSentencePinyinDecodesCommonPhrase() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "nishi").first?.text, "你是")
+        XCTAssertEqual(engine.candidates(for: "nishishei").first?.text, "你是谁")
+    }
+
+    func testPartialSecondSyllableUsesLegalPinyinPrefixes() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "xianz").first?.text, "现在")
+        XCTAssertEqual(engine.candidates(for: "niw").first?.text, "你我")
+    }
+
+    func testInitialAbbreviationDecodesCommonExpression() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "wsm").first?.text, "为什么")
+    }
+
     func testMVPExamplesDecodeThroughSeedLexicon() {
         let engine = TraditionalInputEngine()
         let examples = [

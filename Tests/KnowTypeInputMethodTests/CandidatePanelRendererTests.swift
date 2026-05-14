@@ -138,6 +138,66 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows.suffix(4).map(\.visualRole), [.continuation, .continuation, .continuation, .continuation])
     }
 
+    func testRendersOnlyVisiblePageRows() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "hou xuan",
+            prefixCandidates: prefixCandidates(count: 12),
+            continuationCandidates: []
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            viewModel,
+            selected: .prefixCandidate(9),
+            paging: CandidatePanelPagingState(currentPage: 1)
+        )
+
+        XCTAssertEqual(rendered.rows.count, 3)
+        XCTAssertEqual(rendered.rows.map(\.text), ["候选10", "候选11", "候选12"])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3"])
+        XCTAssertTrue(rendered.rows[0].isSelected)
+    }
+
+    func testRendererInfersVisiblePageFromSelectionWhenPagingIsOmitted() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "hou xuan",
+            prefixCandidates: prefixCandidates(count: 12),
+            continuationCandidates: []
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            viewModel,
+            selected: .prefixCandidate(10)
+        )
+
+        XCTAssertEqual(rendered.rows.map(\.text), ["候选10", "候选11", "候选12"])
+        XCTAssertTrue(rendered.rows[1].isSelected)
+    }
+
+    func testContinuationShortcutLabelsResetForVisiblePage() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "continue",
+            prefixCandidates: [],
+            continuationCandidates: (0..<11).map {
+                ContinuationCandidate(
+                    text: "续写\($0 + 1)",
+                    lengthLevel: .medium,
+                    confidence: 0.9,
+                    provider: "test"
+                )
+            }
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .mixed).render(
+            viewModel,
+            selected: .continuationCandidate(9),
+            paging: CandidatePanelPagingState(currentPage: 1)
+        )
+
+        XCTAssertEqual(rendered.rows.map(\.text), ["续写10", "续写11"])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["⇥", "⌥2"])
+        XCTAssertTrue(rendered.rows[0].isSelected)
+    }
+
     func testOptionShortcutLabelsMatchCommitActions() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",
@@ -176,5 +236,16 @@ final class CandidatePanelRendererTests: XCTestCase {
             ),
             .commit("我觉得这个方案在落地成本上可能偏高")
         )
+    }
+
+    private func prefixCandidates(count: Int) -> [CorrectionCandidate] {
+        (0..<count).map {
+            CorrectionCandidate(
+                text: "候选\($0 + 1)",
+                source: "local",
+                confidence: 1.0,
+                correctionLevel: .contextual
+            )
+        }
     }
 }

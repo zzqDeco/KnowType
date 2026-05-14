@@ -88,6 +88,7 @@ Input-method candidate presentation maps `SuggestionResponse` into compact macOS
 - panel anchoring consumes `CandidateAnchorResult` from the geometry resolver rather than using pointer location fallback
 - prefix candidates are first-class candidates
 - continuation candidates are selectable candidates but still commit as `locked prefix + continuation`
+- rows are paged through `CandidatePanelPagingState` with a default page size of 9 visible rows
 - fallback local breadth is six medium candidates for both correction alternatives and continuations where available
 - when a provider is configured, the immediate local pass may omit fallback continuations until the provider-backed suggestion publishes
 
@@ -95,6 +96,7 @@ Input-method candidate presentation maps `SuggestionResponse` into compact macOS
 
 - `Space` -> commit prefix.
 - `Tab` -> commit prefix plus first continuation.
+- visible numeric prefix shortcuts commit the prefix candidate shown on the current candidate page, not the same global candidate index on every page
 - `Option + number` -> commit prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation, which is also available through `Tab` and displayed as `⇥`.
 - `Option + R` -> request polish for original text.
 

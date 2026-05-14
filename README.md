@@ -81,7 +81,7 @@ The script copies the bundle to `~/Library/Input Methods/KnowType.app`. Then ena
 
 During local input, KnowType marks the composing text in the client app first, then shows a compact macOS-style candidate panel anchored through a dedicated geometry resolver. The resolver prefers IMK caret rectangles, line-height rectangles, optional Accessibility focused-range bounds, and a same-composition last usable anchor; it does not follow the mouse pointer as a moving fallback. `Space` replaces the marked text with the best corrected prefix, while `Tab` replaces it with prefix plus the first continuation.
 
-The local correction path includes a small clean-room pinyin engine for MVP testing. It supports the documented full-pinyin examples, compact input such as `wojuedezhegefagnan`, common `fangan` typos, multiple prefix candidates like `方案/方法/方向`, and technical-token passthrough for mixed Chinese/English text. In `en-US` mode, local correction stays on English spellcheck instead of decoding pinyin.
+The local correction path includes a clean-room pinyin engine for MVP testing. It supports documented full-pinyin examples, compact input such as `wojuedezhegefagnan`, common `fangan` typos, standalone same-pinyin candidates such as `ni -> 你/尼/呢`, partial input such as `nih`, `niw`, and `xianz`, initial abbreviations such as `wsm`, and technical-token passthrough for mixed Chinese/English text. In `en-US` mode, local correction stays on English spellcheck instead of decoding pinyin.
 
 To remove the local bundle:
 
@@ -140,7 +140,7 @@ All provider responses must normalize into `LLMResponse` before reaching core or
 - `Option + number`: commit the selected prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation, which is displayed with the `⇥` shortcut because `Tab` commits it directly.
 - `Option + R`: request polish; this is the only default path that may rewrite the prefix.
 
-The candidate panel is intentionally flat: prefix candidates appear first, continuation candidates appear after them, and raw input is shown only when there are no correction candidates yet. When a provider is configured, the immediate local pass shows prefix candidates only; continuation rows are published when the provider result arrives. Local fallback continuations are used when no provider is configured or the provider path fails.
+The candidate panel is intentionally flat: prefix candidates appear first, continuation candidates appear after them, and raw input is shown only when there are no correction candidates yet. Candidate rows are paged in 9-row windows with PageUp/PageDown navigation. When a provider is configured, the immediate local pass shows prefix candidates only; continuation rows are published when the provider result arrives. Local fallback continuations are used when no provider is configured or the provider path fails.
 
 ## Privacy Baseline
 

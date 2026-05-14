@@ -62,49 +62,31 @@ public struct CandidatePanelRenderer: Sendable {
 
     public func render(
         _ viewModel: CandidatePanelViewModel,
-        selected selection: CandidatePanelSelection? = nil
+        selected selection: CandidatePanelSelection? = nil,
+        paging explicitPaging: CandidatePanelPagingState? = nil
     ) -> CandidatePanelRenderModel {
-        var rows: [CandidatePanelRenderRow] = []
-        let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
-
-        if !viewModel.rawInput.isEmpty && !hasSuggestions {
-            rows.append(
-                CandidatePanelRenderRow(
-                    kind: .rawInput,
-                    shortcutLabel: nil,
-                    text: viewModel.rawInput,
-                    isSelected: selection == .rawInput,
-                    visualRole: .rawInput
-                )
+        let allRows = selectableRows(in: viewModel)
+        let paging = explicitPaging ?? pagingState(containing: selection, in: allRows)
+        let visibleRange = paging.visibleRange(totalRows: allRows.count)
+        var visibleContinuationIndex = 0
+        let rows = allRows[visibleRange].enumerated().map { offset, item in
+            let shortcutLabel: String?
+            switch item.selection {
+            case .rawInput:
+                shortcutLabel = nil
+            case .prefixCandidate:
+                shortcutLabel = "\(offset + 1)"
+            case .continuationCandidate:
+                shortcutLabel = continuationShortcutLabel(atVisibleIndex: visibleContinuationIndex)
+                visibleContinuationIndex += 1
+            }
+            return CandidatePanelRenderRow(
+                kind: item.kind,
+                shortcutLabel: shortcutLabel,
+                text: item.text,
+                isSelected: selection == item.selection,
+                visualRole: item.visualRole
             )
-        }
-
-        if !viewModel.prefixCandidates.isEmpty {
-            for (index, candidate) in viewModel.prefixCandidates.enumerated() {
-                rows.append(
-                    CandidatePanelRenderRow(
-                        kind: .prefixCandidate,
-                        shortcutLabel: "\(index + 1)",
-                        text: candidate.text,
-                        isSelected: selection == .prefixCandidate(index),
-                        visualRole: .lockedPrefix
-                    )
-                )
-            }
-        }
-
-        if !viewModel.continuationCandidates.isEmpty {
-            for (index, candidate) in viewModel.continuationCandidates.enumerated() {
-                rows.append(
-                    CandidatePanelRenderRow(
-                        kind: .continuationCandidate,
-                        shortcutLabel: continuationShortcutLabel(at: index),
-                        text: candidate.text,
-                        isSelected: selection == .continuationCandidate(index),
-                        visualRole: .continuation
-                    )
-                )
-            }
         }
 
         return CandidatePanelRenderModel(
@@ -114,10 +96,74 @@ public struct CandidatePanelRenderer: Sendable {
         )
     }
 
-    private func continuationShortcutLabel(at index: Int) -> String {
+    private func selectableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRenderableRow] {
+        var rows: [CandidatePanelRenderableRow] = []
+        let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
+
+        if !viewModel.rawInput.isEmpty && !hasSuggestions {
+            rows.append(
+                CandidatePanelRenderableRow(
+                    selection: .rawInput,
+                    kind: .rawInput,
+                    text: viewModel.rawInput,
+                    visualRole: .rawInput
+                )
+            )
+        }
+
+        if !viewModel.prefixCandidates.isEmpty {
+            for (index, candidate) in viewModel.prefixCandidates.enumerated() {
+                rows.append(
+                    CandidatePanelRenderableRow(
+                        selection: .prefixCandidate(index),
+                        kind: .prefixCandidate,
+                        text: candidate.text,
+                        visualRole: .lockedPrefix
+                    )
+                )
+            }
+        }
+
+        if !viewModel.continuationCandidates.isEmpty {
+            for (index, candidate) in viewModel.continuationCandidates.enumerated() {
+                rows.append(
+                    CandidatePanelRenderableRow(
+                        selection: .continuationCandidate(index),
+                        kind: .continuationCandidate,
+                        text: candidate.text,
+                        visualRole: .continuation
+                    )
+                )
+            }
+        }
+
+        return rows
+    }
+
+    private func pagingState(
+        containing selection: CandidatePanelSelection?,
+        in rows: [CandidatePanelRenderableRow]
+    ) -> CandidatePanelPagingState {
+        guard let selection,
+              let index = rows.firstIndex(where: { $0.selection == selection }) else {
+            return CandidatePanelPagingState()
+        }
+        return CandidatePanelPagingState(
+            currentPage: index / CandidatePanelPagingState.defaultPageSize
+        )
+    }
+
+    private func continuationShortcutLabel(atVisibleIndex index: Int) -> String {
         guard index > 0 else {
             return "⇥"
         }
         return "⌥\(index + 1)"
     }
+}
+
+private struct CandidatePanelRenderableRow: Sendable, Equatable {
+    var selection: CandidatePanelSelection
+    var kind: CandidatePanelRowKind
+    var text: String
+    var visualRole: CandidatePanelVisualRole
 }
