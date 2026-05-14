@@ -171,6 +171,29 @@ final class CandidateAnchorResolverTests: XCTestCase {
         )
     }
 
+    func testAccessibilityCoordinateConversionUsesGlobalTopForVerticalDisplays() {
+        let screens = [
+            CandidateAnchorScreen(
+                identifier: "main",
+                frame: CGRect(x: 0, y: 0, width: 800, height: 800),
+                visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 760)
+            ),
+            CandidateAnchorScreen(
+                identifier: "upper",
+                frame: CGRect(x: 0, y: 800, width: 800, height: 600),
+                visibleFrame: CGRect(x: 0, y: 800, width: 800, height: 560)
+            )
+        ]
+
+        XCTAssertEqual(
+            CandidateAnchorCoordinateConverter.appKitRect(
+                fromAccessibilityRect: CGRect(x: 100, y: 380, width: 0, height: 20),
+                screens: screens
+            ),
+            CGRect(x: 100, y: 1_000, width: 0, height: 20)
+        )
+    }
+
     func testLastUsableIsScopedToCompositionBundleAndScreen() {
         let client = FakeInputClientGeometry(
             selectedRange: NSRange(location: 0, length: 0),
@@ -224,7 +247,7 @@ final class CandidateAnchorResolverTests: XCTestCase {
                 currentRawInput: "ni",
                 snapshotCompositionID: 3,
                 currentCompositionID: 3,
-                isPanelVisible: true
+                hasActiveComposition: true
             )
         )
         XCTAssertFalse(
@@ -233,7 +256,7 @@ final class CandidateAnchorResolverTests: XCTestCase {
                 currentRawInput: "nish",
                 snapshotCompositionID: 3,
                 currentCompositionID: 3,
-                isPanelVisible: true
+                hasActiveComposition: true
             )
         )
         XCTAssertFalse(
@@ -242,7 +265,16 @@ final class CandidateAnchorResolverTests: XCTestCase {
                 currentRawInput: "ni",
                 snapshotCompositionID: 3,
                 currentCompositionID: 4,
-                isPanelVisible: true
+                hasActiveComposition: true
+            )
+        )
+        XCTAssertFalse(
+            CandidateAnchorRefreshPolicy.shouldApplyDelayedAnchor(
+                snapshotRawInput: "ni",
+                currentRawInput: "ni",
+                snapshotCompositionID: 3,
+                currentCompositionID: 3,
+                hasActiveComposition: false
             )
         )
     }

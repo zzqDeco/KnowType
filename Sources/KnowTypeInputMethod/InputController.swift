@@ -157,7 +157,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             refreshComposition(client: sender)
             return true
         case .selectCandidate(let number):
-            if let result = InputSessionCommitPolicy.resultForCandidateNumber(
+            if candidatePanelState.windowState.isVisible,
+               let result = InputSessionCommitPolicy.resultForCandidateNumber(
                 number,
                 rawInput: rawBuffer,
                 suggestion: lastSuggestion,
@@ -272,7 +273,12 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private func commitResult(for action: InputAction, client sender: Any!) -> InputCommitResult {
-        InputSessionCommitPolicy.result(
+        if case .optionNumber = action,
+           !candidatePanelState.windowState.isVisible {
+            return .noAction
+        }
+
+        return InputSessionCommitPolicy.result(
             for: action,
             rawInput: rawBuffer,
             suggestion: lastSuggestion,
@@ -321,15 +327,23 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             hideCandidatePanel()
             return
         }
-        updateCandidatePanel(suggestion: suggestion, anchorRect: candidateAnchorResult(client: sender).rect)
+        updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: sender))
     }
 
-    private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorRect: CGRect) {
-        candidatePanelState.update(rawInput: rawBuffer, suggestion: suggestion, anchorRect: anchorRect)
-        selectedNativeCandidate = inputCandidateSelection(
-            for: candidatePanelState.windowState.selection,
-            in: candidatePanelState.windowState.viewModel
+    private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
+        let isDisplayable = anchorResult.source != .none
+        candidatePanelState.update(
+            rawInput: rawBuffer,
+            suggestion: suggestion,
+            anchorRect: anchorResult.rect,
+            isDisplayable: isDisplayable
         )
+        selectedNativeCandidate = candidatePanelState.windowState.isVisible
+            ? inputCandidateSelection(
+                for: candidatePanelState.windowState.selection,
+                in: candidatePanelState.windowState.viewModel
+            )
+            : nil
         MainActor.assumeIsolated {
             candidatePanelController.update(state: candidatePanelState, locale: locale)
         }
@@ -489,13 +503,13 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                     currentRawInput: self.rawBuffer,
                     snapshotCompositionID: compositionID,
                     currentCompositionID: self.compositionID,
-                    isPanelVisible: self.candidatePanelState.windowState.isVisible
+                    hasActiveComposition: !self.rawBuffer.isEmpty
                   ) else {
                 return
             }
             self.updateCandidatePanel(
                 suggestion: self.lastSuggestion,
-                anchorRect: self.candidateAnchorResult(client: client).rect
+                anchorResult: self.candidateAnchorResult(client: client)
             )
         }
     }

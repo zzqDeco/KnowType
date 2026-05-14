@@ -168,14 +168,17 @@ public enum CandidateAnchorCoordinateConverter {
               rect.height.isFinite else {
             return nil
         }
+        guard let globalTop = screens.map(\.frame.maxY).max() else {
+            return nil
+        }
 
+        let converted = CGRect(
+            x: rect.minX,
+            y: globalTop - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
         for screen in screens {
-            let converted = CGRect(
-                x: rect.minX,
-                y: screen.frame.maxY - rect.maxY,
-                width: rect.width,
-                height: rect.height
-            )
             let point = CGPoint(x: converted.minX, y: converted.midY)
             if screen.frame.insetBy(dx: -2, dy: -2).contains(point) {
                 return converted
@@ -343,9 +346,9 @@ public enum CandidateAnchorRefreshPolicy {
         currentRawInput: String,
         snapshotCompositionID: Int,
         currentCompositionID: Int,
-        isPanelVisible: Bool
+        hasActiveComposition: Bool
     ) -> Bool {
-        isPanelVisible
+        hasActiveComposition
             && !snapshotRawInput.isEmpty
             && snapshotRawInput == currentRawInput
             && snapshotCompositionID == currentCompositionID

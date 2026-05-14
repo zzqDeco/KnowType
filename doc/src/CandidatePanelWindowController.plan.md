@@ -6,6 +6,7 @@ Current behavior:
 
 - renders `CandidatePanelState` through `CandidatePanelRenderer`
 - consumes the rect chosen by `CandidateAnchorResolver`; if no usable rect is available, it hides/skips display until a valid anchor arrives
+- treats hidden candidate rows as non-selectable so arrow keys and numeric shortcuts do not act on invisible candidates
 - clamps the panel to the visible frame of the caret's screen
 - hides from composition reset, `hidePalettes`, and input-controller close lifecycle
 - uses a borderless AppKit floating panel with `NSVisualEffectView` popover material, compact row sizing, full-width blue selected rows, and muted continuation styling to stay close to macOS native input method candidate windows

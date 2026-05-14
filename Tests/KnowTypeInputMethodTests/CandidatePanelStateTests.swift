@@ -88,6 +88,23 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertNil(state.windowState.selection)
     }
 
+    func testUndisplayableUpdateHidesPanelButKeepsPendingViewModel() {
+        var state = CandidatePanelState()
+
+        state.update(
+            rawInput: "wo jue de",
+            suggestion: suggestion(),
+            anchorRect: .zero,
+            isDisplayable: false
+        )
+
+        XCTAssertFalse(state.windowState.isVisible)
+        XCTAssertNil(state.windowState.selection)
+        XCTAssertEqual(state.windowState.viewModel.rawInput, "wo jue de")
+        XCTAssertEqual(state.windowState.viewModel.prefixCandidates.count, 2)
+        XCTAssertFalse(state.moveSelection(.down))
+    }
+
     func testDefaultSelectionFallsBackToFirstContinuationWhenSuggestionHasNoPrefixOrRawInput() {
         var state = CandidatePanelState()
 
