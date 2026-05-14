@@ -85,6 +85,7 @@ The factory maps `ProviderKind` to one adapter and keeps provider-specific reque
 Input-method candidate presentation maps `SuggestionResponse` into compact macOS-style candidate rows:
 
 - raw input is shown only before any prefix or continuation suggestion exists
+- panel anchoring consumes `CandidateAnchorResult` from the geometry resolver rather than using pointer location fallback
 - prefix candidates are first-class candidates
 - continuation candidates are selectable candidates but still commit as `locked prefix + continuation`
 - fallback local breadth is six medium candidates for both correction alternatives and continuations where available

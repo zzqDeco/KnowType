@@ -75,7 +75,7 @@ bundle 会输出到 `dist/KnowType.app`。
 
 脚本会把 bundle 复制到 `~/Library/Input Methods/KnowType.app`。安装后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启需要使用输入法的 app。
 
-本地输入时，KnowType 会先把输入中的文本作为 marked text 标记在当前 app 里，然后在客户端提供可用文本位置时把紧凑的 macOS 风格候选窗锚定到光标附近；拿不到可靠位置时回退到鼠标指针附近。按 `Space` 会用最佳纠错前缀替换 marked text，按 `Tab` 会用前缀 + 第一条延续替换 marked text。
+本地输入时，KnowType 会先把输入中的文本作为 marked text 标记在当前 app 里，然后通过独立几何解析层把紧凑的 macOS 风格候选窗锚定到光标附近。解析层优先使用 IMK caret rect、line-height rect、已授权时的 Accessibility focused-range bounds，以及同一组合内的 last usable anchor；不再把鼠标指针作为移动候选窗兜底。按 `Space` 会用最佳纠错前缀替换 marked text，按 `Tab` 会用前缀 + 第一条延续替换 marked text。
 
 本地纠错路径包含一个 clean-room 的 MVP 拼音引擎。它支持文档中的全拼例子、`wojuedezhegefagnan` 这类连续拼音、`fangan` 常见错拼、`方案/方法/方向` 这类多前缀候选，以及中英混输里的技术 token 保护。在 `en-US` 模式下，本地纠错会保留英文拼写纠错路径，不会先把拼音解码成中文。
 

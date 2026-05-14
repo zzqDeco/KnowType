@@ -35,7 +35,8 @@ public struct CandidatePanelState: Sendable, Equatable {
     public mutating func update(
         rawInput: String,
         suggestion: SuggestionResponse?,
-        anchorRect: CGRect = .zero
+        anchorRect: CGRect = .zero,
+        isDisplayable: Bool = true
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
         let continuationCandidates = suggestion?.continuationCandidates ?? []
@@ -44,16 +45,17 @@ public struct CandidatePanelState: Sendable, Equatable {
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates
         )
-        let isVisible = !rawInput.isEmpty || !prefixCandidates.isEmpty || !continuationCandidates.isEmpty
+        let hasRows = !rawInput.isEmpty || !prefixCandidates.isEmpty || !continuationCandidates.isEmpty
+        let isVisible = isDisplayable && hasRows
         windowState = CandidatePanelWindowState(
             isVisible: isVisible,
             anchorRect: anchorRect,
             viewModel: viewModel,
-            selection: defaultSelection(
+            selection: isVisible ? defaultSelection(
                 rawInput: rawInput,
                 prefixCandidates: prefixCandidates,
                 continuationCandidates: continuationCandidates
-            )
+            ) : nil
         )
     }
 
@@ -63,6 +65,9 @@ public struct CandidatePanelState: Sendable, Equatable {
 
     @discardableResult
     public mutating func moveSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        guard windowState.isVisible else {
+            return false
+        }
         let rows = selectableRows()
         guard !rows.isEmpty else {
             return false

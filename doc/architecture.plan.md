@@ -73,6 +73,7 @@ The current package includes:
 - `InputCompositionController` for shortcut behavior
 - `CandidatePanelViewModel` for separated prefix and continuation data
 - `CandidatePanelRenderer` for raw input, locked prefix, and continuation render rows
+- `CandidateAnchorResolver` for IMK, line-height, Accessibility, and scoped last-anchor geometry resolution
 - `KnowTypeIMKServerBootstrap` behind `canImport(InputMethodKit)` for IMK server integration
 - `KnowTypeInputController` as the InputMethodKit session controller
 - `KnowTypeInputMethodApp` as the background app entry point assembled by `scripts/build-inputmethod-bundle.sh`
@@ -81,7 +82,7 @@ The IMK controller uses `IMKTextInput.setMarkedText` for active composition so l
 
 The primary candidate surface is a controlled AppKit `NSPanel` styled as a compact macOS candidate list. We do not rely on `IMKCandidates` for active display because it can silently fail to appear in some host apps. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available.
 
-Candidate positioning recalculates after local and async suggestion publication. Anchor lookup prefers the marked range end, falls back to selected range, then falls back to the client line-height rectangle before using pointer location as the screen fallback.
+Candidate positioning recalculates after local and async suggestion publication. Anchor lookup is centralized in `CandidateAnchorResolver`: it tries marked/selected `firstRect` ranges, the IMK insertion-point range, line-height rectangles with bounded backtracking, optional Accessibility focused-range bounds, then a scoped last usable anchor for the same composition, bundle, and screen. Pointer location is not used as a moving candidate anchor.
 
 When a provider is configured, the immediate local pass publishes correction/prefix rows only. Continuation rows are published after the provider-backed suggestion returns; local fallback continuations are reserved for no-provider and provider-failure paths.
 
