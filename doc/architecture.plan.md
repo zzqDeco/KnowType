@@ -26,9 +26,10 @@ Level 0 contexts include URLs, emails, file paths, command-like input, code-like
 
 Current local coverage:
 
-- clean-room `TraditionalInputEngine` pinyin decoding with compact segmentation, light typo normalization, and multiple prefix candidates
+- clean-room `TraditionalInputEngine` pinyin decoding with full-pinyin syllable tables, compact lattice segmentation, light typo normalization, memoized parsing, and multiple prefix candidates
 - pinyin typo examples such as `fagnan -> fangan -> 方案/方法/方向`
 - MVP full-pinyin examples such as `zhege gongneng bushi hen wending -> 这个功能不是很稳定`
+- baseline Chinese input examples such as `ni -> 你/尼/呢`, `nishishei -> 你是谁`, `xianz -> 现在`, and `wsm -> 为什么`
 - locale-gated traditional decoding: `en-US` keeps English spellcheck available, while `zh-CN` can decode capitalized pinyin composition starts such as `Wo`
 - a small table-driven Xiaohe double-pinyin hook for smoke-test coverage
 - English typo examples such as `thikn -> think`
@@ -80,7 +81,7 @@ The current package includes:
 
 The IMK controller uses `IMKTextInput.setMarkedText` for active composition so local pinyin can become marked Chinese text before commit. Commit calls replace the active marked range with either the locked prefix or the prefix plus selected continuation.
 
-The primary candidate surface is a controlled AppKit `NSPanel` styled as a compact macOS candidate list. We do not rely on `IMKCandidates` for active display because it can silently fail to appear in some host apps. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available.
+The primary candidate surface is a controlled AppKit `NSPanel` styled as a compact macOS candidate list. We do not rely on `IMKCandidates` for active display because it can silently fail to appear in some host apps. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available. Candidate rows are paged in 9-row windows so larger pinyin candidate sets can be navigated without overfilling the panel.
 
 Candidate positioning recalculates after local and async suggestion publication. Anchor lookup is centralized in `CandidateAnchorResolver`: it tries marked/selected `firstRect` ranges, the IMK insertion-point range, line-height rectangles with bounded backtracking, optional Accessibility focused-range bounds, then a scoped last usable anchor for the same composition, bundle, and screen. Pointer location is not used as a moving candidate anchor.
 

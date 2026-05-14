@@ -7,4 +7,10 @@ The renderer does not draw UI and does not assign colors. It emits semantic role
 - `lockedPrefix` for correction/prefix candidates
 - `continuation` for continuation candidates
 - `rawInput` for the original input row
-Prefix rows and continuation rows remain separate semantic rows, but the visible fallback panel is a flat native-style strip without section headers or preview text. Raw input is only exposed while no suggestion is available. Labels keep `1...n` for prefix shortcuts and compact macOS-style continuation labels such as `⇥`, `⌥2`, etc. The renderer shows the same prefix and continuation range that the shortcut handlers can commit, so hidden rows are never shortcutable.
+Prefix rows and continuation rows remain separate semantic rows, but the visible fallback panel is a flat native-style strip without section headers or preview text. Raw input is only exposed while no suggestion is available.
+
+Candidate rows are paged through `CandidatePanelPagingState`, with a default page size of 9 rows to match compact macOS-style candidate panels. `CandidatePanelState` owns the active page and moves PageDown/PageUp to the first row of the target page; arrow navigation advances by one visible row and crosses page boundaries only when the selection moves past a page edge.
+
+The renderer emits only rows from the current visible page. Prefix shortcut labels reset to `1...n` for the visible page. Continuation shortcut labels stay tied to their global commit actions: the first continuation is labeled `⇥`, continuations 2 through 9 are labeled `⌥2...⌥9`, and later continuations have no shortcut label. When a caller does not pass paging explicitly, the renderer infers the page that contains the selected row so existing panel update paths continue to show the selected candidate page.
+
+Candidate selection is preserved across same-raw-input updates only when the candidate text at the selected index is unchanged. If provider-backed suggestions reorder or replace the row at that index, selection resets to the default first candidate so the highlighted row and commit target never drift apart.

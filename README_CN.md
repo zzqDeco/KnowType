@@ -77,7 +77,7 @@ bundle 会输出到 `dist/KnowType.app`。
 
 本地输入时，KnowType 会先把输入中的文本作为 marked text 标记在当前 app 里，然后通过独立几何解析层把紧凑的 macOS 风格候选窗锚定到光标附近。解析层优先使用 IMK caret rect、line-height rect、已授权时的 Accessibility focused-range bounds，以及同一组合内的 last usable anchor；不再把鼠标指针作为移动候选窗兜底。按 `Space` 会用最佳纠错前缀替换 marked text，按 `Tab` 会用前缀 + 第一条延续替换 marked text。
 
-本地纠错路径包含一个 clean-room 的 MVP 拼音引擎。它支持文档中的全拼例子、`wojuedezhegefagnan` 这类连续拼音、`fangan` 常见错拼、`方案/方法/方向` 这类多前缀候选，以及中英混输里的技术 token 保护。在 `en-US` 模式下，本地纠错会保留英文拼写纠错路径，不会先把拼音解码成中文。
+本地纠错路径包含一个 clean-room 的 MVP 拼音引擎。它支持文档中的全拼例子、`wojuedezhegefagnan` 这类连续拼音、`fangan` 常见错拼、`ni -> 你/尼/呢` 这类同音单字候选、`nih`、`niw`、`xianz` 这类尾部半音节输入、`wsm` 这类声母缩写，以及中英混输里的技术 token 保护。在 `en-US` 模式下，本地纠错会保留英文拼写纠错路径，不会先把拼音解码成中文。
 
 移除本地 bundle：
 
@@ -133,10 +133,11 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 - `Space`：只提交当前选中的前缀。
 - `Tab`：提交当前选中的前缀 + 第一条或当前选中的延续。
-- `Option + 数字`：提交候选窗中对应快捷键显示的延续。`Option + 1` 对应第一条延续，候选窗中用 `⇥` 表示，因为 `Tab` 会直接提交第一条延续。
+- `0`：候选可见时提交原始 composition，保留用户不接受纠错的逃生路径。
+- `Option + 数字`：提交全局快捷键对应的延续。`Option + 1` 对应第一条延续，候选窗中用 `⇥` 表示，因为 `Tab` 会直接提交第一条延续；后续分页不会复用延续快捷键标签。
 - `Option + R`：主动润色，这时才允许改写前缀。
 
-候选窗现在采用扁平的 macOS 风格列表：前缀候选在前，延续候选在后；只有还没有纠错候选时才显示原始输入。配置了 provider 时，本地即时阶段只显示前缀候选，延续候选等 provider 返回后再发布。未配置 provider 或 provider 失败时，才使用本地 fallback 延续。
+候选窗现在采用扁平的 macOS 风格列表：前缀候选在前，延续候选在后；只有还没有纠错候选时才显示原始输入。候选按 9 行一页分页，并支持 PageUp/PageDown 翻页。配置了 provider 时，本地即时阶段只显示前缀候选，延续候选等 provider 返回后再发布。未配置 provider 或 provider 失败时，才使用本地 fallback 延续。
 
 ## 隐私基线
 

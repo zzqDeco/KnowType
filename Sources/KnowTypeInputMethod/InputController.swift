@@ -129,12 +129,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private func handle(intent: InputKeyIntent, client sender: Any!) -> Bool {
         switch intent {
         case .append(let text):
-            beginCompositionIfNeeded()
-            rawBuffer.append(text)
-            invalidateSuggestion()
-            publishLocalSuggestion(client: sender)
-            refreshSuggestion(client: sender)
-            return true
+            return appendComposition(text, client: sender)
         case .deleteBackward:
             guard !rawBuffer.isEmpty else {
                 return false
@@ -157,21 +152,35 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             refreshComposition(client: sender)
             return true
         case .selectCandidate(let number):
-            if candidatePanelState.windowState.isVisible,
-               let result = InputSessionCommitPolicy.resultForCandidateNumber(
-                number,
-                rawInput: rawBuffer,
-                suggestion: lastSuggestion,
-                suggestionRawInput: lastSuggestionRawInput
-            ) {
-                return applyCommitResult(result, client: sender)
+            if candidatePanelState.windowState.isVisible {
+                if number == 0,
+                   let result = InputSessionCommitPolicy.resultForCandidateNumber(
+                       number,
+                       rawInput: rawBuffer,
+                       suggestion: lastSuggestion,
+                       suggestionRawInput: lastSuggestionRawInput
+                   ) {
+                    return applyCommitResult(result, client: sender)
+                }
+                if let visibleSelection = candidatePanelState.selectVisiblePrefixCandidate(shortcutNumber: number),
+                   let selectedCandidate = sessionSelection(from: inputCandidateSelection(
+                       for: visibleSelection,
+                       in: candidatePanelState.windowState.viewModel
+                   )) {
+                    let result = InputSessionCommitPolicy.result(
+                        for: .space,
+                        rawInput: rawBuffer,
+                        suggestion: lastSuggestion,
+                        suggestionRawInput: lastSuggestionRawInput,
+                        selectedCandidate: selectedCandidate,
+                        appBundleID: appBundleIdentifier(client: sender),
+                        locale: locale
+                    )
+                    return applyCommitResult(result, client: sender)
+                }
+                return appendComposition(String(number), client: sender)
             }
-            beginCompositionIfNeeded()
-            rawBuffer.append(String(number))
-            invalidateSuggestion()
-            publishLocalSuggestion(client: sender)
-            refreshSuggestion(client: sender)
-            return true
+            return appendComposition(String(number), client: sender)
         case .moveCandidateSelection(let navigation):
             return moveCandidateSelection(navigation)
         case .modifierFlagsChanged:
@@ -179,6 +188,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .ignored:
             return false
         }
+    }
+
+    private func appendComposition(_ text: String, client sender: Any!) -> Bool {
+        beginCompositionIfNeeded()
+        rawBuffer.append(text)
+        invalidateSuggestion()
+        publishLocalSuggestion(client: sender)
+        refreshSuggestion(client: sender)
+        return true
     }
 
     private func refreshSuggestion(client sender: Any!) {

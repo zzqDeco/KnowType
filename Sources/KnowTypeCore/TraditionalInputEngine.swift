@@ -29,36 +29,46 @@ public struct TraditionalInputEngine: Sendable {
         preserveCapitalizedPinyin: Bool = true
     ) -> [TraditionalInputCandidate] {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let tokens = tokenize(trimmed) else {
+        guard !trimmed.isEmpty else {
             return []
         }
 
-        let parsed = parse(
-            tokens: tokens,
-            from: 0,
-            preserveCapitalizedPinyin: preserveCapitalizedPinyin
-        )
-            .filter { $0.translatedCount > 0 }
-            .map { state in
-                TraditionalInputCandidate(
-                    text: joinSegments(state.segments),
-                    confidence: state.confidence,
-                    inputTokens: tokens.map(\.surface)
-                )
-            }
+        let parsed = tokenizations(for: trimmed).flatMap { tokens in
+            var memo: [Int: [ParseState]] = [:]
+            return parse(
+                tokens: tokens,
+                from: 0,
+                preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                memo: &memo
+            )
+                .filter { $0.translatedCount > 0 }
+                .map { state in
+                    TraditionalInputCandidate(
+                        text: joinSegments(state.segments),
+                        confidence: state.confidence * tokenizationConfidence(tokens),
+                        inputTokens: tokens.map(\.surface)
+                    )
+                }
+        }
 
         return uniqueSorted(parsed)
     }
 
-    private func tokenize(_ rawInput: String) -> [InputToken]? {
+    private func tokenizations(for rawInput: String) -> [[InputToken]] {
         let separated = rawInput
             .split(whereSeparator: { $0.isWhitespace })
             .map(String.init)
 
         if separated.count > 1 {
-            return separated.map { token in
-                InputToken(surface: token, normalized: normalize(token), isTypoNormalized: isTypo(token))
+            var paths: [[InputToken]] = [[]]
+            for component in separated {
+                let componentPaths = tokenizations(forComponent: component, allowCompactSegmentation: false)
+                guard !componentPaths.isEmpty else {
+                    return []
+                }
+                paths = combine(paths, with: componentPaths, limit: 16)
             }
+            return paths
         }
 
         guard let token = separated.first else {
@@ -66,18 +76,49 @@ public struct TraditionalInputEngine: Sendable {
         }
 
         if isPassthroughToken(token) {
-            return [InputToken(surface: token, normalized: token, isTypoNormalized: false)]
+            return [[InputToken(
+                surface: token,
+                normalized: token,
+                isTypoNormalized: false,
+                isPartial: false
+            )]]
+        }
+
+        return tokenizations(forComponent: token, allowCompactSegmentation: true)
+    }
+
+    private func tokenizations(
+        forComponent token: String,
+        allowCompactSegmentation: Bool
+    ) -> [[InputToken]] {
+        if isPassthroughToken(token) {
+            return [[InputToken(
+                surface: token,
+                normalized: token,
+                isTypoNormalized: false,
+                isPartial: false
+            )]]
+        }
+
+        if !allowCompactSegmentation {
+            let normalized = normalize(token)
+            return [[InputToken(
+                surface: token,
+                normalized: normalized,
+                isTypoNormalized: isTypo(token),
+                isPartial: isPartialPinyinComponent(normalized)
+            )]]
         }
 
         return segmentCompact(token)
     }
 
-    private func segmentCompact(_ token: String) -> [InputToken]? {
+    private func segmentCompact(_ token: String) -> [[InputToken]] {
         let lower = token.lowercased()
         let end = lower.endIndex
-        var memo: [String.Index: [[String]]] = [:]
+        var memo: [String.Index: [[InputToken]]] = [:]
 
-        func paths(from index: String.Index) -> [[String]] {
+        func paths(from index: String.Index) -> [[InputToken]] {
             if index == end {
                 return [[]]
             }
@@ -86,38 +127,84 @@ public struct TraditionalInputEngine: Sendable {
             }
 
             let suffix = lower[index...]
-            var results: [[String]] = []
+            let remaining = String(suffix)
+            if pinyinSyllables.contains(remaining) {
+                let surface = originalSurface(
+                    in: token,
+                    lowercasedToken: lower,
+                    from: index,
+                    length: remaining.count
+                )
+                let token = InputToken(
+                    surface: surface,
+                    normalized: normalize(remaining),
+                    isTypoNormalized: isTypo(remaining),
+                    isPartial: false
+                )
+                memo[index] = [[token]]
+                return [[token]]
+            }
+
+            var results: [[InputToken]] = []
             for key in compactSegmentKeys where suffix.hasPrefix(key) {
                 let next = lower.index(index, offsetBy: key.count)
+                let surface = originalSurface(
+                    in: token,
+                    lowercasedToken: lower,
+                    from: index,
+                    length: key.count
+                )
+                let token = InputToken(
+                    surface: surface,
+                    normalized: normalize(key),
+                    isTypoNormalized: isTypo(key),
+                    isPartial: pinyinInitialTokens.contains(key)
+                )
                 for path in paths(from: next) {
-                    results.append([key] + path)
-                    if results.count >= 8 {
+                    results.append([token] + path)
+                    if results.count >= 16 {
                         break
                     }
                 }
-                if results.count >= 8 {
+                if results.count >= 16 {
                     break
                 }
+            }
+
+            if isPinyinPrefix(remaining), !isKnownCompleteInputToken(remaining) {
+                let surface = originalSurface(
+                    in: token,
+                    lowercasedToken: lower,
+                    from: index,
+                    length: remaining.count
+                )
+                results.append([
+                    InputToken(
+                        surface: surface,
+                        normalized: remaining,
+                        isTypoNormalized: false,
+                        isPartial: true
+                    )
+                ])
             }
             memo[index] = results
             return results
         }
 
-        guard let firstPath = paths(from: lower.startIndex).first else {
-            return nil
-        }
-        return firstPath.map { key in
-            InputToken(surface: key, normalized: normalize(key), isTypoNormalized: isTypo(key))
-        }
+        return paths(from: lower.startIndex)
     }
 
     private func parse(
         tokens: [InputToken],
         from index: Int,
-        preserveCapitalizedPinyin: Bool
+        preserveCapitalizedPinyin: Bool,
+        memo: inout [Int: [ParseState]]
     ) -> [ParseState] {
         if index >= tokens.count {
             return [ParseState(segments: [], confidence: 1.0, translatedCount: 0)]
+        }
+        if let cached = memo[index] {
+            return cached
         }
 
         var states: [ParseState] = []
@@ -132,30 +219,34 @@ public struct TraditionalInputEngine: Sendable {
                 }
             }
 
-            let normalized = tokenSlice.map(\.normalized)
-            guard let entry = lexicon.first(where: { $0.pinyin == normalized }) else {
-                continue
-            }
+            let entries = matchingEntries(for: tokenSlice)
 
             let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
-            for output in entry.outputs {
-                for tail in parse(
-                    tokens: tokens,
-                    from: index + length,
-                    preserveCapitalizedPinyin: preserveCapitalizedPinyin
-                ) {
-                    states.append(
-                        ParseState(
-                            segments: [output.text] + tail.segments,
-                            confidence: max(0.01, output.confidence - typoPenalty) * tail.confidence,
-                            translatedCount: tail.translatedCount + 1
+            for entry in entries {
+                let matchPenalty = typoPenalty + partialMatchPenalty(entry: entry, tokens: tokenSlice)
+                for output in entry.outputs {
+                    for tail in parse(
+                        tokens: tokens,
+                        from: index + length,
+                        preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                        memo: &memo
+                    ) {
+                        states.append(
+                            ParseState(
+                                segments: [output.text] + tail.segments,
+                                confidence: max(0.01, output.confidence - matchPenalty) * tail.confidence,
+                                translatedCount: tail.translatedCount + 1
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
 
         let token = tokens[index]
+        if token.isPartial && index == tokens.count - 1 {
+            states.append(ParseState(segments: [], confidence: 0.72, translatedCount: 0))
+        }
         if let passthrough = passthroughText(
             for: token,
             preserveCapitalizedPinyin: preserveCapitalizedPinyin
@@ -163,7 +254,8 @@ public struct TraditionalInputEngine: Sendable {
             for tail in parse(
                 tokens: tokens,
                 from: index + 1,
-                preserveCapitalizedPinyin: preserveCapitalizedPinyin
+                preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                memo: &memo
             ) {
                 states.append(
                     ParseState(
@@ -175,10 +267,49 @@ public struct TraditionalInputEngine: Sendable {
             }
         }
 
-        return states
+        let parsed = states
             .sorted { $0.confidence > $1.confidence }
-            .prefix(12)
+            .prefix(120)
             .map { $0 }
+        memo[index] = parsed
+        return parsed
+    }
+
+    private func matchingEntries(for tokens: ArraySlice<InputToken>) -> [LexiconEntry] {
+        let normalized = tokens.map(\.normalized)
+        let key = lexiconKey(normalized)
+        if !tokens.contains(where: \.isPartial),
+           let entry = lexiconByKey[key] {
+            return [entry]
+        }
+
+        return lexicon.filter { entry in
+            guard entry.pinyin.count == tokens.count else {
+                return false
+            }
+            for (entryToken, inputToken) in zip(entry.pinyin, tokens) {
+                if inputToken.isPartial {
+                    guard entryToken.hasPrefix(inputToken.normalized) else {
+                        return false
+                    }
+                } else if entryToken != inputToken.normalized {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    private func partialMatchPenalty(entry: LexiconEntry, tokens: ArraySlice<InputToken>) -> Double {
+        var penalty = 0.0
+        for (entryToken, inputToken) in zip(entry.pinyin, tokens) where inputToken.isPartial {
+            penalty += 0.04
+            penalty += Double(max(0, entryToken.count - inputToken.normalized.count)) * 0.02
+        }
+        if entry.pinyin.count == 1, tokens.contains(where: \.isPartial) {
+            penalty += 0.03
+        }
+        return penalty
     }
 
     private func normalize(_ token: String) -> String {
@@ -206,6 +337,9 @@ public struct TraditionalInputEngine: Sendable {
         for token: InputToken,
         preserveCapitalizedPinyin: Bool
     ) -> String? {
+        if token.isPartial {
+            return nil
+        }
         if let technical = TextProtection.canonicalTechnicalToken(token.surface) {
             return technical
         }
@@ -231,25 +365,28 @@ public struct TraditionalInputEngine: Sendable {
     }
 
     private func uniqueSorted(_ candidates: [TraditionalInputCandidate]) -> [TraditionalInputCandidate] {
-        var seen = Set<String>()
-        return candidates
-            .filter { candidate in
-                if seen.contains(candidate.text) {
-                    return false
-                }
-                seen.insert(candidate.text)
-                return true
+        let bestCandidates = candidates.reduce(into: [String: TraditionalInputCandidate]()) { bestByText, candidate in
+            guard let existing = bestByText[candidate.text] else {
+                bestByText[candidate.text] = candidate
+                return
             }
-            .sorted {
-                if $0.confidence == $1.confidence {
-                    return $0.text < $1.text
-                }
-                return $0.confidence > $1.confidence
+            if candidate.confidence > existing.confidence {
+                bestByText[candidate.text] = candidate
             }
+        }
+        return bestCandidates.values.sorted {
+            if $0.confidence == $1.confidence {
+                return $0.text < $1.text
+            }
+            return $0.confidence > $1.confidence
+        }
     }
 
     private static let fullPinyinCompactSegmentKeys: [String] = {
-        let keys = Set(knownPinyinTokens).union(pinyinTypoCorrections.keys)
+        let keys = pinyinSyllables
+            .union(knownLexiconInputTokens)
+            .union(pinyinTypoCorrections.keys)
+            .union(pinyinInitialTokens)
         return keys.sorted { lhs, rhs in
             if lhs.count == rhs.count {
                 return lhs < rhs
@@ -273,6 +410,7 @@ private struct InputToken: Sendable, Equatable {
     var surface: String
     var normalized: String
     var isTypoNormalized: Bool
+    var isPartial: Bool
 }
 
 private struct ParseState: Sendable, Equatable {
@@ -292,12 +430,16 @@ private struct LexiconOutput: Sendable, Equatable {
 }
 
 private let lexicon: [LexiconEntry] = [
+    entry(["w", "s", "m"], [("为什么", 0.99), ("为啥么", 0.55)]),
     entry(["wo", "jue", "de"], [("我觉得", 0.99)]),
     entry(["wo", "jue"], [("我觉得", 0.94)]),
     entry(["wo", "xiang"], [("我想", 0.99)]),
+    entry(["wo", "men"], [("我们", 0.99)]),
     entry(["jue", "de"], [("觉得", 0.96)]),
     entry(["zhege"], [("这个", 0.99)]),
     entry(["zhe", "ge"], [("这个", 0.98)]),
+    entry(["zhe"], [("这", 0.96), ("着", 0.74), ("者", 0.68)]),
+    entry(["ge"], [("个", 0.98), ("各", 0.76), ("哥", 0.70)]),
     entry(["fangan"], [
         ("方案", 0.99),
         ("方法", 0.84),
@@ -307,33 +449,117 @@ private let lexicon: [LexiconEntry] = [
     ]),
     entry(["fangfa"], [("方法", 0.98)]),
     entry(["fangxiang"], [("方向", 0.98)]),
+    entry(["fang", "an"], [("方案", 0.98)]),
+    entry(["fang", "fa"], [("方法", 0.97)]),
+    entry(["fang", "xiang"], [("方向", 0.97)]),
+    entry(["fang"], [("方", 0.94), ("放", 0.86), ("房", 0.82), ("防", 0.78)]),
     entry(["gongneng"], [
         ("功能", 0.99),
         ("工具", 0.74),
         ("模块", 0.70)
     ]),
+    entry(["gong", "neng"], [("功能", 0.98)]),
     entry(["bushi"], [("不是", 0.99)]),
-    entry(["hen"], [("很", 0.99)]),
+    entry(["bu", "shi"], [("不是", 0.98)]),
     entry(["wending"], [("稳定", 0.99)]),
+    entry(["wen", "ding"], [("稳定", 0.98)]),
     entry(["jiekou"], [("接口", 0.99)]),
+    entry(["jie", "kou"], [("接口", 0.98)]),
     entry(["yan", "chi"], [("延迟", 0.99)]),
     entry(["yanchi"], [("延迟", 0.99)]),
     entry(["youdian"], [("有点", 0.99)]),
+    entry(["you", "dian"], [("有点", 0.98)]),
     entry(["gao"], [("高", 0.99)]),
     entry(["ba"], [("把", 0.99)]),
     entry(["wenti"], [("问题", 0.99)]),
+    entry(["wen", "ti"], [("问题", 0.98)]),
     entry(["xiugai"], [("修改", 0.99)]),
+    entry(["xiu", "gai"], [("修改", 0.98)]),
     entry(["yixia"], [("一下", 0.99)]),
+    entry(["yi", "xia"], [("一下", 0.98)]),
     entry(["xiang"], [("想", 0.96)]),
-    entry(["wo"], [("我", 0.95)]),
+    entry(["ni"], [
+        ("你", 0.99),
+        ("尼", 0.76),
+        ("呢", 0.74),
+        ("泥", 0.70),
+        ("拟", 0.68),
+        ("逆", 0.66),
+        ("腻", 0.64),
+        ("妮", 0.62),
+        ("倪", 0.60),
+        ("霓", 0.58),
+        ("匿", 0.56),
+        ("昵", 0.54)
+    ]),
+    entry(["shi"], [
+        ("是", 0.99),
+        ("时", 0.83),
+        ("事", 0.82),
+        ("使", 0.76),
+        ("式", 0.74),
+        ("试", 0.72),
+        ("十", 0.70),
+        ("实", 0.68),
+        ("师", 0.66),
+        ("市", 0.64),
+        ("识", 0.62),
+        ("史", 0.60)
+    ]),
+    entry(["shei"], [("谁", 0.99)]),
+    entry(["shui"], [("谁", 0.92), ("水", 0.88), ("睡", 0.78)]),
+    entry(["hao"], [
+        ("好", 0.99),
+        ("号", 0.72),
+        ("耗", 0.60),
+        ("浩", 0.58)
+    ]),
+    entry(["hai"], [("还", 0.96), ("海", 0.80), ("嗨", 0.72)]),
+    entry(["hui"], [("会", 0.96), ("回", 0.88), ("灰", 0.70)]),
+    entry(["he"], [("和", 0.96), ("何", 0.72), ("合", 0.70)]),
+    entry(["hen"], [("很", 0.99), ("狠", 0.65), ("恨", 0.60)]),
+    entry(["wo"], [("我", 0.98), ("窝", 0.70), ("握", 0.66), ("沃", 0.62)]),
+    entry(["men"], [("们", 0.94), ("门", 0.76)]),
+    entry(["de"], [("的", 0.99), ("得", 0.82), ("地", 0.80)]),
+    entry(["zai"], [("在", 0.98), ("再", 0.88), ("载", 0.62)]),
+    entry(["xian"], [
+        ("现", 0.94),
+        ("先", 0.90),
+        ("线", 0.72),
+        ("县", 0.68),
+        ("显", 0.66),
+        ("限", 0.64)
+    ]),
+    entry(["xian", "zai"], [("现在", 0.99), ("先在", 0.58)]),
+    entry(["ni", "shi"], [("你是", 0.99), ("尼式", 0.52)]),
+    entry(["ni", "shi", "shei"], [("你是谁", 0.995)]),
     entry(["ni", "hao"], [
-        ("你好", 0.96),
+        ("你好", 0.99),
         ("你号", 0.58)
     ]),
     entry(["nihao"], [
         ("你好", 0.95),
         ("你号", 0.57)
-    ])
+    ]),
+    entry(["ni", "wo"], [("你我", 0.95)]),
+    entry(["ma"], [("吗", 0.98), ("嘛", 0.86), ("马", 0.72)]),
+    entry(["le"], [("了", 0.98), ("乐", 0.74)]),
+    entry(["yi"], [("一", 0.97), ("以", 0.78), ("已", 0.76)]),
+    entry(["you"], [("有", 0.97), ("又", 0.78), ("由", 0.72)]),
+    entry(["jian"], [("见", 0.82), ("件", 0.80), ("间", 0.78), ("建", 0.76)]),
+    entry(["kan"], [("看", 0.96), ("刊", 0.62)]),
+    entry(["dao"], [("到", 0.96), ("道", 0.78), ("导", 0.68)]),
+    entry(["guo"], [("过", 0.96), ("国", 0.84), ("果", 0.78)]),
+    entry(["ke"], [("可", 0.92), ("课", 0.76), ("客", 0.70)]),
+    entry(["yi", "ge"], [("一个", 0.98)]),
+    entry(["mei", "you"], [("没有", 0.98)]),
+    entry(["ke", "yi"], [("可以", 0.98)]),
+    entry(["zhe", "yang"], [("这样", 0.98)]),
+    entry(["na", "ge"], [("那个", 0.96)]),
+    entry(["shi", "jie"], [("世界", 0.94)]),
+    entry(["zhong", "wen"], [("中文", 0.98)]),
+    entry(["shu", "ru"], [("输入", 0.98)]),
+    entry(["shu", "ru", "fa"], [("输入法", 0.99)])
 ]
 
 private let pinyinTypoCorrections: [String: String] = [
@@ -353,7 +579,11 @@ private let xiaoheSyllables: [String: String] = [
 
 private let maxEntryLength = lexicon.map(\.pinyin.count).max() ?? 1
 
-private let knownPinyinTokens: Set<String> = {
+private let lexiconByKey: [String: LexiconEntry] = {
+    Dictionary(uniqueKeysWithValues: lexicon.map { (lexiconKey($0.pinyin), $0) })
+}()
+
+private let knownLexiconInputTokens: Set<String> = {
     var tokens = Set<String>()
     for entry in lexicon {
         for token in entry.pinyin {
@@ -362,6 +592,85 @@ private let knownPinyinTokens: Set<String> = {
     }
     return tokens
 }()
+
+private let knownPinyinTokens: Set<String> = {
+    pinyinSyllables.union(knownLexiconInputTokens)
+}()
+
+private func lexiconKey(_ pinyin: [String]) -> String {
+    pinyin.joined(separator: "\u{1F}")
+}
+
+private func isKnownCompleteInputToken(_ token: String) -> Bool {
+    pinyinSyllables.contains(token)
+        || knownLexiconInputTokens.contains(token)
+        || pinyinTypoCorrections[token] != nil
+}
+
+private func isPinyinPrefix(_ token: String) -> Bool {
+    pinyinPrefixes.contains(token)
+}
+
+private func isPartialPinyinComponent(_ normalizedToken: String) -> Bool {
+    !isKnownCompleteInputToken(normalizedToken)
+        && (pinyinInitialTokens.contains(normalizedToken) || pinyinPrefixes.contains(normalizedToken))
+}
+
+private func originalSurface(
+    in originalToken: String,
+    lowercasedToken: String,
+    from lowerIndex: String.Index,
+    length: Int
+) -> String {
+    let offset = lowercasedToken.distance(from: lowercasedToken.startIndex, to: lowerIndex)
+    guard let originalStart = originalToken.index(
+        originalToken.startIndex,
+        offsetBy: offset,
+        limitedBy: originalToken.endIndex
+    ),
+          let originalEnd = originalToken.index(
+            originalStart,
+            offsetBy: length,
+            limitedBy: originalToken.endIndex
+          ) else {
+        let fallbackEnd = lowercasedToken.index(
+            lowerIndex,
+            offsetBy: length,
+            limitedBy: lowercasedToken.endIndex
+        ) ?? lowercasedToken.endIndex
+        return String(lowercasedToken[lowerIndex..<fallbackEnd])
+    }
+    return String(originalToken[originalStart..<originalEnd])
+}
+
+private func combine(
+    _ prefixPaths: [[InputToken]],
+    with suffixPaths: [[InputToken]],
+    limit: Int
+) -> [[InputToken]] {
+    var results: [[InputToken]] = []
+    for prefix in prefixPaths {
+        for suffix in suffixPaths {
+            results.append(prefix + suffix)
+            if results.count >= limit {
+                return results
+            }
+        }
+    }
+    return results
+}
+
+private func tokenizationConfidence(_ tokens: [InputToken]) -> Double {
+    tokens.reduce(1.0) { score, token in
+        if token.isPartial {
+            return score * 0.93
+        }
+        if pinyinInitialTokens.contains(token.normalized) {
+            return score * 0.88
+        }
+        return score
+    }
+}
 
 private func entry(_ pinyin: [String], _ outputs: [(String, Double)]) -> LexiconEntry {
     LexiconEntry(
