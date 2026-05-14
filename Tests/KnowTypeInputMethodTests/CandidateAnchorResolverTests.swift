@@ -83,6 +83,8 @@ final class CandidateAnchorResolverTests: XCTestCase {
 
         XCTAssertEqual(result.source, .lineHeightRect)
         XCTAssertEqual(result.rect, CGRect(x: 33, y: 44, width: 0, height: 18))
+        XCTAssertFalse(client.requestedLineRects.contains(5))
+        XCTAssertEqual(client.requestedLineRects.prefix(2), [4, 3])
     }
 
     func testResolverUsesZeroLineHeightIndexWhenNoMarkedRangeExists() {
@@ -171,7 +173,7 @@ final class CandidateAnchorResolverTests: XCTestCase {
         )
     }
 
-    func testAccessibilityCoordinateConversionUsesGlobalTopForVerticalDisplays() {
+    func testAccessibilityCoordinateConversionUsesMenuBarScreenTopForVerticalDisplays() {
         let screens = [
             CandidateAnchorScreen(
                 identifier: "main",
@@ -187,7 +189,7 @@ final class CandidateAnchorResolverTests: XCTestCase {
 
         XCTAssertEqual(
             CandidateAnchorCoordinateConverter.appKitRect(
-                fromAccessibilityRect: CGRect(x: 100, y: 380, width: 0, height: 20),
+                fromAccessibilityRect: CGRect(x: 100, y: -220, width: 0, height: 20),
                 screens: screens
             ),
             CGRect(x: 100, y: 1_000, width: 0, height: 20)
@@ -321,6 +323,7 @@ private final class FakeInputClientGeometry: InputClientGeometryProviding {
     var firstRects: [NSRange: CGRect]
     var lineRects: [Int: CGRect]
     var requestedFirstRects: [NSRange] = []
+    var requestedLineRects: [Int] = []
 
     init(
         selectedRange: NSRange,
@@ -340,6 +343,7 @@ private final class FakeInputClientGeometry: InputClientGeometryProviding {
     }
 
     func lineHeightRect(forCharacterIndex index: Int) -> CGRect {
-        lineRects[index] ?? .zero
+        requestedLineRects.append(index)
+        return lineRects[index] ?? .zero
     }
 }

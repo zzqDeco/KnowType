@@ -70,14 +70,25 @@ final class CandidateAnchorPolicyTests: XCTestCase {
         )
     }
 
-    func testLineHeightIndexesUseInlineMarkedTextOffsets() {
+    func testLineHeightIndexesUseInlineMarkedTextOffsetsWithoutProbingPastEnd() {
         XCTAssertEqual(
             CandidateAnchorPolicy.lineHeightCharacterIndexes(
                 selectedRange: NSRange(location: 5, length: 0),
                 markedRange: NSRange(location: 4, length: 2),
                 maximumBacktrack: 2
             ),
-            [2, 1, 0]
+            [1, 0]
+        )
+    }
+
+    func testLineHeightIndexesClampMarkedEndToLastInlineCharacter() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.lineHeightCharacterIndexes(
+                selectedRange: NSRange(location: 9, length: 0),
+                markedRange: NSRange(location: 4, length: 5),
+                maximumBacktrack: 2
+            ),
+            [4, 3, 2, 0]
         )
     }
 

@@ -137,7 +137,7 @@ public enum CandidateAnchorPolicy {
         }
 
         var indexes: [Int] = []
-        appendUnique(max(0, markedRange.length), to: &indexes)
+        appendUnique(lastInlineCharacterIndex(for: markedRange), to: &indexes)
 
         guard isKnown(selectedRange) else {
             return indexes
@@ -165,7 +165,15 @@ public enum CandidateAnchorPolicy {
               documentIndex <= markedEnd else {
             return
         }
-        appendUnique(documentIndex - markedRange.location, to: &indexes)
+        let inlineIndex = min(
+            documentIndex - markedRange.location,
+            lastInlineCharacterIndex(for: markedRange)
+        )
+        appendUnique(inlineIndex, to: &indexes)
+    }
+
+    private static func lastInlineCharacterIndex(for markedRange: NSRange) -> Int {
+        max(0, markedRange.length - 1)
     }
 
     private static func isKnown(_ range: NSRange) -> Bool {

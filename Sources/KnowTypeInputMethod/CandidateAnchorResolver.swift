@@ -168,13 +168,13 @@ public enum CandidateAnchorCoordinateConverter {
               rect.height.isFinite else {
             return nil
         }
-        guard let globalTop = screens.map(\.frame.maxY).max() else {
+        guard let menuBarScreenTop = menuBarScreenTop(in: screens) else {
             return nil
         }
 
         let converted = CGRect(
             x: rect.minX,
-            y: globalTop - rect.maxY,
+            y: menuBarScreenTop - rect.maxY,
             width: rect.width,
             height: rect.height
         )
@@ -185,6 +185,11 @@ public enum CandidateAnchorCoordinateConverter {
             }
         }
         return nil
+    }
+
+    private static func menuBarScreenTop(in screens: [CandidateAnchorScreen]) -> CGFloat? {
+        screens.first(where: { $0.frame.minX == 0 && $0.frame.minY == 0 })?.frame.maxY
+            ?? screens.first?.frame.maxY
     }
 }
 

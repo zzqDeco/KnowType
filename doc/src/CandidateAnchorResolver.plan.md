@@ -9,7 +9,8 @@ Current behavior:
 - normalizes negative-width or negative-height rects before validation
 - rejects zero-height, non-finite, and offscreen rects
 - resolves anchors in this order: marked end, selected end, marked start, selected start, real-location IMK insertion point, IMK-relative line-height backtracking, Accessibility focused range, scoped last usable anchor
-- converts Accessibility bounds with the global screen top before testing the converted rect against all screens
+- converts Accessibility bounds with the menu-bar screen top before testing the converted rect against all screens
+- line-height backtracking uses IMK inline-session character indexes and clamps marked-range end positions to the last valid inline character
 - scopes the last usable anchor to the same composition id, bundle id, screen id, and short age window
 - uses `KNOWTYPE_ANCHOR_DEBUG=1` to trace accepted and rejected anchor sources
 
