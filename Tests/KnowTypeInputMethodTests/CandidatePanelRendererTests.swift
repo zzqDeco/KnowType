@@ -173,7 +173,7 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertTrue(rendered.rows[1].isSelected)
     }
 
-    func testContinuationShortcutLabelsResetForVisiblePage() {
+    func testContinuationShortcutLabelsStayGlobalAcrossPages() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "continue",
             prefixCandidates: [],
@@ -194,7 +194,7 @@ final class CandidatePanelRendererTests: XCTestCase {
         )
 
         XCTAssertEqual(rendered.rows.map(\.text), ["续写10", "续写11"])
-        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["⇥", "⌥2"])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), [nil, nil])
         XCTAssertTrue(rendered.rows[0].isSelected)
     }
 

@@ -174,14 +174,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                     )
                     return applyCommitResult(result, client: sender)
                 }
-                if let result = InputSessionCommitPolicy.resultForCandidateNumber(
-                    number,
-                    rawInput: rawBuffer,
-                    suggestion: lastSuggestion,
-                    suggestionRawInput: lastSuggestionRawInput
-                ) {
-                    return applyCommitResult(result, client: sender)
-                }
+                return InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: !rawBuffer.isEmpty)
             }
             beginCompositionIfNeeded()
             rawBuffer.append(String(number))

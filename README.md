@@ -137,7 +137,7 @@ All provider responses must normalize into `LLMResponse` before reaching core or
 
 - `Space`: commit the selected prefix candidate only.
 - `Tab`: commit the selected prefix plus the first or selected continuation.
-- `Option + number`: commit the selected prefix plus the continuation shown with that shortcut. `Option + 1` matches the first continuation, which is displayed with the `⇥` shortcut because `Tab` commits it directly.
+- `Option + number`: commit the selected prefix plus the continuation mapped to that global shortcut. `Option + 1` matches the first continuation, which is displayed with the `⇥` shortcut because `Tab` commits it directly; later pages do not reuse continuation shortcut labels.
 - `Option + R`: request polish; this is the only default path that may rewrite the prefix.
 
 The candidate panel is intentionally flat: prefix candidates appear first, continuation candidates appear after them, and raw input is shown only when there are no correction candidates yet. Candidate rows are paged in 9-row windows with PageUp/PageDown navigation. When a provider is configured, the immediate local pass shows prefix candidates only; continuation rows are published when the provider result arrives. Local fallback continuations are used when no provider is configured or the provider path fails.

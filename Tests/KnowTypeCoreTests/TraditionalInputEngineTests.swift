@@ -100,6 +100,13 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertFalse(candidateTexts.contains("I thikn 想"))
     }
 
+    func testCapitalizedStandaloneCompactPinyinIsNotTranslatedWhenPreserved() {
+        let engine = TraditionalInputEngine()
+        let candidateTexts = engine.candidates(for: "Xiang").map(\.text)
+
+        XCTAssertFalse(candidateTexts.contains("想"))
+    }
+
     func testCapitalizedPinyinCanDecodeWhenNamePreservationIsDisabled() {
         let engine = TraditionalInputEngine()
         let candidates = engine.candidates(
@@ -108,6 +115,24 @@ final class TraditionalInputEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
+    }
+
+    func testSpacedTrailingPartialSyllableMatchesCompactBehavior() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "ni h").first?.text, "你好")
+        XCTAssertEqual(engine.candidates(for: "xian z").first?.text, "现在")
+    }
+
+    func testDuplicateCandidatesKeepHighestConfidenceAcrossTokenizations() {
+        let engine = TraditionalInputEngine()
+        let compactCandidate = engine.candidates(for: "nihao").first
+        let spacedCandidate = engine.candidates(for: "ni hao").first
+
+        XCTAssertEqual(compactCandidate?.text, "你好")
+        XCTAssertEqual(spacedCandidate?.text, "你好")
+        XCTAssertEqual(compactCandidate?.confidence ?? 0, spacedCandidate?.confidence ?? 0, accuracy: 0.0001)
+        XCTAssertGreaterThan(compactCandidate?.confidence ?? 0, 0.96)
     }
 
     func testXiaoheHookCanMapKnownDoublePinyinSyllables() {

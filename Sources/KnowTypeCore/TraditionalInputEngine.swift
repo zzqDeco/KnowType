@@ -101,11 +101,12 @@ public struct TraditionalInputEngine: Sendable {
         }
 
         if !allowCompactSegmentation {
+            let normalized = normalize(token)
             return [[InputToken(
                 surface: token,
-                normalized: normalize(token),
+                normalized: normalized,
                 isTypoNormalized: isTypo(token),
-                isPartial: false
+                isPartial: isPartialPinyinComponent(normalized)
             )]]
         }
 
@@ -129,8 +130,14 @@ public struct TraditionalInputEngine: Sendable {
             var results: [[InputToken]] = []
             for key in compactSegmentKeys where suffix.hasPrefix(key) {
                 let next = lower.index(index, offsetBy: key.count)
+                let surface = originalSurface(
+                    in: token,
+                    lowercasedToken: lower,
+                    from: index,
+                    length: key.count
+                )
                 let token = InputToken(
-                    surface: key,
+                    surface: surface,
                     normalized: normalize(key),
                     isTypoNormalized: isTypo(key),
                     isPartial: pinyinInitialTokens.contains(key)
@@ -148,9 +155,15 @@ public struct TraditionalInputEngine: Sendable {
 
             let remaining = String(suffix)
             if isPinyinPrefix(remaining), !isKnownCompleteInputToken(remaining) {
+                let surface = originalSurface(
+                    in: token,
+                    lowercasedToken: lower,
+                    from: index,
+                    length: remaining.count
+                )
                 results.append([
                     InputToken(
-                        surface: remaining,
+                        surface: surface,
                         normalized: remaining,
                         isTypoNormalized: false,
                         isPartial: true
@@ -335,21 +348,21 @@ public struct TraditionalInputEngine: Sendable {
     }
 
     private func uniqueSorted(_ candidates: [TraditionalInputCandidate]) -> [TraditionalInputCandidate] {
-        var seen = Set<String>()
-        return candidates
-            .filter { candidate in
-                if seen.contains(candidate.text) {
-                    return false
-                }
-                seen.insert(candidate.text)
-                return true
+        let bestCandidates = candidates.reduce(into: [String: TraditionalInputCandidate]()) { bestByText, candidate in
+            guard let existing = bestByText[candidate.text] else {
+                bestByText[candidate.text] = candidate
+                return
             }
-            .sorted {
-                if $0.confidence == $1.confidence {
-                    return $0.text < $1.text
-                }
-                return $0.confidence > $1.confidence
+            if candidate.confidence > existing.confidence {
+                bestByText[candidate.text] = candidate
             }
+        }
+        return bestCandidates.values.sorted {
+            if $0.confidence == $1.confidence {
+                return $0.text < $1.text
+            }
+            return $0.confidence > $1.confidence
+        }
     }
 
     private static let fullPinyinCompactSegmentKeys: [String] = {
@@ -573,12 +586,43 @@ private func lexiconKey(_ pinyin: [String]) -> String {
 private func isKnownCompleteInputToken(_ token: String) -> Bool {
     pinyinSyllables.contains(token)
         || knownLexiconInputTokens.contains(token)
-        || pinyinInitialTokens.contains(token)
         || pinyinTypoCorrections[token] != nil
 }
 
 private func isPinyinPrefix(_ token: String) -> Bool {
     pinyinPrefixes.contains(token)
+}
+
+private func isPartialPinyinComponent(_ normalizedToken: String) -> Bool {
+    !isKnownCompleteInputToken(normalizedToken)
+        && (pinyinInitialTokens.contains(normalizedToken) || pinyinPrefixes.contains(normalizedToken))
+}
+
+private func originalSurface(
+    in originalToken: String,
+    lowercasedToken: String,
+    from lowerIndex: String.Index,
+    length: Int
+) -> String {
+    let offset = lowercasedToken.distance(from: lowercasedToken.startIndex, to: lowerIndex)
+    guard let originalStart = originalToken.index(
+        originalToken.startIndex,
+        offsetBy: offset,
+        limitedBy: originalToken.endIndex
+    ),
+          let originalEnd = originalToken.index(
+            originalStart,
+            offsetBy: length,
+            limitedBy: originalToken.endIndex
+          ) else {
+        let fallbackEnd = lowercasedToken.index(
+            lowerIndex,
+            offsetBy: length,
+            limitedBy: lowercasedToken.endIndex
+        ) ?? lowercasedToken.endIndex
+        return String(lowercasedToken[lowerIndex..<fallbackEnd])
+    }
+    return String(originalToken[originalStart..<originalEnd])
 }
 
 private func combine(

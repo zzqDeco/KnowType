@@ -21,6 +21,6 @@
 - `handle(action:)` delegates commit assembly to `InputCompositionController` while applying session selection:
   - Space commits the selected prefix only.
   - Tab commits the selected prefix plus selected or first continuation.
-  - Option-number commits the continuation shown with that shortcut; `Option+1` commits continuation index `0`, matching the first continuation also available through `Tab`.
+  - Option-number commits the continuation mapped to that global shortcut; `Option+1` commits continuation index `0`, matching the first continuation also available through `Tab`, and continuation pages do not reset those shortcut mappings.
   - Option-R marks `polishRequested` and returns `.polishRequested(rawInput)`.
 - `InputSessionCommitPolicy` is the shared action policy used by the IMK bridge for native candidate selections, stale-suggestion fallback, and numeric candidate shortcuts. This keeps AppKit-specific code responsible for lifecycle, marked text, commit insertion, palette visibility, and candidate anchoring rather than product commit rules.

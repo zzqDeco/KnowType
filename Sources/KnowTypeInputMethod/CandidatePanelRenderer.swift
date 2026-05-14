@@ -68,7 +68,6 @@ public struct CandidatePanelRenderer: Sendable {
         let allRows = selectableRows(in: viewModel)
         let paging = explicitPaging ?? pagingState(containing: selection, in: allRows)
         let visibleRange = paging.visibleRange(totalRows: allRows.count)
-        var visibleContinuationIndex = 0
         let rows = allRows[visibleRange].enumerated().map { offset, item in
             let shortcutLabel: String?
             switch item.selection {
@@ -76,9 +75,8 @@ public struct CandidatePanelRenderer: Sendable {
                 shortcutLabel = nil
             case .prefixCandidate:
                 shortcutLabel = "\(offset + 1)"
-            case .continuationCandidate:
-                shortcutLabel = continuationShortcutLabel(atVisibleIndex: visibleContinuationIndex)
-                visibleContinuationIndex += 1
+            case .continuationCandidate(let index):
+                shortcutLabel = continuationShortcutLabel(atGlobalIndex: index)
             }
             return CandidatePanelRenderRow(
                 kind: item.kind,
@@ -153,9 +151,12 @@ public struct CandidatePanelRenderer: Sendable {
         )
     }
 
-    private func continuationShortcutLabel(atVisibleIndex index: Int) -> String {
+    private func continuationShortcutLabel(atGlobalIndex index: Int) -> String? {
         guard index > 0 else {
             return "⇥"
+        }
+        guard index < 9 else {
+            return nil
         }
         return "⌥\(index + 1)"
     }

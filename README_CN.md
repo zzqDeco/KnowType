@@ -133,7 +133,7 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 - `Space`：只提交当前选中的前缀。
 - `Tab`：提交当前选中的前缀 + 第一条或当前选中的延续。
-- `Option + 数字`：提交候选窗中对应快捷键显示的延续。`Option + 1` 对应第一条延续，候选窗中用 `⇥` 表示，因为 `Tab` 会直接提交第一条延续。
+- `Option + 数字`：提交全局快捷键对应的延续。`Option + 1` 对应第一条延续，候选窗中用 `⇥` 表示，因为 `Tab` 会直接提交第一条延续；后续分页不会复用延续快捷键标签。
 - `Option + R`：主动润色，这时才允许改写前缀。
 
 候选窗现在采用扁平的 macOS 风格列表：前缀候选在前，延续候选在后；只有还没有纠错候选时才显示原始输入。候选按 9 行一页分页，并支持 PageUp/PageDown 翻页。配置了 provider 时，本地即时阶段只显示前缀候选，延续候选等 provider 返回后再发布。未配置 provider 或 provider 失败时，才使用本地 fallback 延续。
