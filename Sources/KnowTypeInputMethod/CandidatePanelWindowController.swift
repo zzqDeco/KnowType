@@ -25,7 +25,12 @@ final class CandidatePanelWindowController {
         let panel = candidatePanel()
         let contentSize = contentView.fittingSize
         panel.setContentSize(contentSize)
-        panel.setFrameOrigin(origin(for: windowState.anchorRect, contentSize: contentSize))
+        if let origin = origin(for: windowState.anchorRect, contentSize: contentSize) {
+            panel.setFrameOrigin(origin)
+        } else if !panel.isVisible {
+            panel.orderOut(nil)
+            return
+        }
         panel.orderFrontRegardless()
     }
 
@@ -56,11 +61,14 @@ final class CandidatePanelWindowController {
         return panel
     }
 
-    private func origin(for anchorRect: CGRect, contentSize: NSSize) -> NSPoint {
-        let fallbackAnchor = fallbackAnchorRect()
-        let anchor = anchorRect.isNull || anchorRect.isEmpty || anchorRect == .zero
-            ? fallbackAnchor
-            : anchorRect
+    private func origin(for anchorRect: CGRect, contentSize: NSSize) -> NSPoint? {
+        guard CandidateAnchorValidation.isUsable(
+            anchorRect,
+            screenProvider: AppKitScreenGeometryProvider()
+        ) else {
+            return nil
+        }
+        let anchor = anchorRect
         let visibleFrame = screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame
         guard let visibleFrame else {
             return NSPoint(x: max(8, anchor.minX), y: max(8, anchor.minY - contentSize.height - 6))
@@ -93,16 +101,6 @@ final class CandidatePanelWindowController {
         return min(max(value, minimum), maximum)
     }
 
-    private func fallbackAnchorRect() -> CGRect {
-        let mouseLocation = NSEvent.mouseLocation
-        if NSScreen.screens.contains(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
-            return CGRect(x: mouseLocation.x, y: mouseLocation.y, width: 1, height: 18)
-        }
-        if let screen = NSScreen.main {
-            return CGRect(x: screen.visibleFrame.minX + 24, y: screen.visibleFrame.maxY - 80, width: 1, height: 1)
-        }
-        return CGRect(x: 24, y: 600, width: 1, height: 1)
-    }
 }
 
 @MainActor

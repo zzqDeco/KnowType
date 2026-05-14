@@ -79,7 +79,7 @@ To install the local macOS input method bundle:
 
 The script copies the bundle to `~/Library/Input Methods/KnowType.app`. Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. If the input source list does not refresh, log out and back in, or restart the affected app.
 
-During local input, KnowType marks the composing text in the client app first, then shows a compact macOS-style candidate panel anchored to the caret when the client exposes a usable text rect, or near the pointer as a fallback. `Space` replaces the marked text with the best corrected prefix, while `Tab` replaces it with prefix plus the first continuation.
+During local input, KnowType marks the composing text in the client app first, then shows a compact macOS-style candidate panel anchored through a dedicated geometry resolver. The resolver prefers IMK caret rectangles, line-height rectangles, optional Accessibility focused-range bounds, and a same-composition last usable anchor; it does not follow the mouse pointer as a moving fallback. `Space` replaces the marked text with the best corrected prefix, while `Tab` replaces it with prefix plus the first continuation.
 
 The local correction path includes a small clean-room pinyin engine for MVP testing. It supports the documented full-pinyin examples, compact input such as `wojuedezhegefagnan`, common `fangan` typos, multiple prefix candidates like `方案/方法/方向`, and technical-token passthrough for mixed Chinese/English text. In `en-US` mode, local correction stays on English spellcheck instead of decoding pinyin.
 

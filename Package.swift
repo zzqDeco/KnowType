@@ -35,6 +35,7 @@ let package = Package(
             path: "Sources/KnowTypeInputMethod",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
+                .linkedFramework("ApplicationServices", .when(platforms: [.macOS])),
                 .linkedFramework("InputMethodKit", .when(platforms: [.macOS]))
             ]
         ),

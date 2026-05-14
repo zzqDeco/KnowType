@@ -5,7 +5,7 @@
 Current behavior:
 
 - renders `CandidatePanelState` through `CandidatePanelRenderer`
-- anchors near the IMK client's marked-text end using `IMKTextInput.firstRect`, falls back to selected range, then pointer location when the client does not expose a usable rect
+- consumes the rect chosen by `CandidateAnchorResolver`; if no usable rect is available, it keeps the current panel position when already visible and hides/skips first show until a valid anchor arrives
 - clamps the panel to the visible frame of the caret's screen
 - hides from composition reset, `hidePalettes`, and input-controller close lifecycle
 - uses a borderless AppKit floating panel with `NSVisualEffectView` popover material, compact row sizing, full-width blue selected rows, and muted continuation styling to stay close to macOS native input method candidate windows

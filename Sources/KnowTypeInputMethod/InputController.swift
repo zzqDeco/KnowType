@@ -12,7 +12,12 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private let hasProvider: Bool
     private let keyMapper = InputKeyCommandMapper()
     private let candidateListBuilder = InputCandidateListBuilder()
+    private let anchorResolver = CandidateAnchorResolver(
+        screenProvider: AppKitScreenGeometryProvider(),
+        accessibilityProvider: SystemAccessibilityAnchorProvider()
+    )
     private var rawBuffer = ""
+    private var compositionID = 0
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
@@ -107,6 +112,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         hideCandidatePanel()
     }
 
+    public override func deactivateServer(_ sender: Any!) {
+        resetAnchorState()
+        super.deactivateServer(sender)
+    }
+
     public override func inputControllerWillClose() {
         hideCandidatePanel()
         super.inputControllerWillClose()
@@ -119,6 +129,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private func handle(intent: InputKeyIntent, client sender: Any!) -> Bool {
         switch intent {
         case .append(let text):
+            beginCompositionIfNeeded()
             rawBuffer.append(text)
             invalidateSuggestion()
             publishLocalSuggestion(client: sender)
@@ -129,6 +140,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 return false
             }
             rawBuffer.removeLast()
+            if rawBuffer.isEmpty {
+                resetAnchorState()
+            }
             invalidateSuggestion()
             publishLocalSuggestion(client: sender)
             refreshSuggestion(client: sender)
@@ -151,6 +165,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             ) {
                 return applyCommitResult(result, client: sender)
             }
+            beginCompositionIfNeeded()
             rawBuffer.append(String(number))
             invalidateSuggestion()
             publishLocalSuggestion(client: sender)
@@ -276,8 +291,21 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func resetComposition(client sender: Any!) {
         rawBuffer = ""
+        resetAnchorState()
         invalidateSuggestion()
         hideCandidatePanel()
+    }
+
+    private func beginCompositionIfNeeded() {
+        if rawBuffer.isEmpty {
+            compositionID += 1
+            anchorResolver.reset()
+        }
+    }
+
+    private func resetAnchorState() {
+        compositionID += 1
+        anchorResolver.reset()
     }
 
     private func invalidateSuggestion() {
@@ -293,7 +321,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             hideCandidatePanel()
             return
         }
-        updateCandidatePanel(suggestion: suggestion, anchorRect: candidateAnchorRect(client: sender))
+        updateCandidatePanel(suggestion: suggestion, anchorRect: candidateAnchorResult(client: sender).rect)
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorRect: CGRect) {
@@ -310,6 +338,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private func hideCandidatePanel() {
         candidatePanelState.hide()
         selectedNativeCandidate = nil
+        anchorResolver.reset()
         MainActor.assumeIsolated {
             candidatePanelController.hide()
         }
@@ -329,28 +358,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         return true
     }
 
-    private func candidateAnchorRect(client sender: Any!) -> CGRect {
-        guard let client = sender as? IMKTextInput else {
-            return .zero
-        }
-        let characterRanges = CandidateAnchorPolicy.characterRanges(
-            selectedRange: client.selectedRange(),
-            markedRange: client.markedRange()
-        )
-
-        for characterRange in characterRanges {
-            let firstRect = client.firstRect(
-                forCharacterRange: characterRange,
-                actualRange: nil
+    private func candidateAnchorResult(client sender: Any!) -> CandidateAnchorResult {
+        let geometryClient = (sender as? IMKTextInput).map(IMKTextInputGeometryAdapter.init(client:))
+        return anchorResolver.resolve(
+            client: geometryClient,
+            context: CandidateAnchorContext(
+                compositionID: compositionID,
+                appBundleID: appBundleIdentifier(client: sender)
             )
-            if isUsableAnchorRect(firstRect) {
-                return firstRect
-            }
-        }
-
-        var lineRect = NSRect.zero
-        _ = client.attributes(forCharacterIndex: 0, lineHeightRectangle: &lineRect)
-        return isUsableAnchorRect(lineRect) ? lineRect : .zero
+        )
     }
 
     private func selectNativeCandidate(matching text: String?) {
@@ -427,6 +443,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             selectionRange: NSRange(location: (markedText as NSString).length, length: 0),
             replacementRange: replacement
         )
+        scheduleDelayedCandidateReanchor(
+            client: client,
+            rawInput: rawBuffer,
+            compositionID: compositionID
+        )
     }
 
     private func clearMarkedText(_ client: IMKTextInput) {
@@ -454,12 +475,29 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         return markedRange
     }
 
-    private func isUsableAnchorRect(_ rect: CGRect) -> Bool {
-        !rect.isNull
-            && !rect.isInfinite
-            && rect != .zero
-            && rect.minX.isFinite
-            && rect.minY.isFinite
+    private func scheduleDelayedCandidateReanchor(
+        client: IMKTextInput,
+        rawInput: String,
+        compositionID: Int
+    ) {
+        let clientObject = client as AnyObject
+        DispatchQueue.main.async { [weak self, weak clientObject] in
+            guard let self,
+                  let client = clientObject as? IMKTextInput,
+                  CandidateAnchorRefreshPolicy.shouldApplyDelayedAnchor(
+                    snapshotRawInput: rawInput,
+                    currentRawInput: self.rawBuffer,
+                    snapshotCompositionID: compositionID,
+                    currentCompositionID: self.compositionID,
+                    isPanelVisible: self.candidatePanelState.windowState.isVisible
+                  ) else {
+                return
+            }
+            self.updateCandidatePanel(
+                suggestion: self.lastSuggestion,
+                anchorRect: self.candidateAnchorResult(client: client).rect
+            )
+        }
     }
 
     private func modifierSet(from flags: Int) -> Set<InputModifier> {

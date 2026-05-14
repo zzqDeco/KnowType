@@ -6,7 +6,7 @@ final class CandidateAnchorPolicyTests: XCTestCase {
     func testCharacterRangeUsesSelectedRangeLocation() {
         XCTAssertEqual(
             CandidateAnchorPolicy.characterRange(for: NSRange(location: 42, length: 8)),
-            NSRange(location: 42, length: 0)
+            NSRange(location: 50, length: 0)
         )
     }
 
@@ -32,8 +32,40 @@ final class CandidateAnchorPolicyTests: XCTestCase {
             ),
             [
                 NSRange(location: 14, length: 0),
+                NSRange(location: 42, length: 0),
+                NSRange(location: 10, length: 0)
+            ]
+        )
+    }
+
+    func testCharacterRangesIncludeSelectedRangeStartAndEndForFallbacks() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.characterRanges(
+                selectedRange: NSRange(location: 42, length: 8),
+                markedRange: nil
+            ),
+            [
+                NSRange(location: 50, length: 0),
                 NSRange(location: 42, length: 0)
             ]
+        )
+    }
+
+    func testCurrentInsertionPointFallbackUsesIMKUnknownLocation() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.currentInsertionPointFallbackRange,
+            NSRange(location: NSNotFound, length: 0)
+        )
+    }
+
+    func testLineHeightIndexesBacktrackFromCandidateRanges() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.lineHeightCharacterIndexes(
+                selectedRange: NSRange(location: 8, length: 0),
+                markedRange: NSRange(location: 4, length: 2),
+                maximumBacktrack: 2
+            ),
+            [6, 5, 4, 8, 7, 3, 2, 0]
         )
     }
 
