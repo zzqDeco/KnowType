@@ -27,7 +27,7 @@ final class CandidatePanelWindowController {
         panel.setContentSize(contentSize)
         if let origin = origin(for: windowState.anchorRect, contentSize: contentSize) {
             panel.setFrameOrigin(origin)
-        } else if !panel.isVisible {
+        } else {
             panel.orderOut(nil)
             return
         }

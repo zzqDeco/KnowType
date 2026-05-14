@@ -51,21 +51,44 @@ final class CandidateAnchorPolicyTests: XCTestCase {
         )
     }
 
-    func testCurrentInsertionPointFallbackUsesIMKUnknownLocation() {
+    func testInsertionPointFallbackUsesSelectedRangeEnd() {
         XCTAssertEqual(
-            CandidateAnchorPolicy.currentInsertionPointFallbackRange,
-            NSRange(location: NSNotFound, length: 0)
+            CandidateAnchorPolicy.insertionPointFallbackRange(
+                selectedRange: NSRange(location: 42, length: 8),
+                markedRange: nil
+            ),
+            NSRange(location: 50, length: 0)
         )
     }
 
-    func testLineHeightIndexesBacktrackFromCandidateRanges() {
+    func testInsertionPointFallbackSkipsUnknownLocation() {
+        XCTAssertNil(
+            CandidateAnchorPolicy.insertionPointFallbackRange(
+                selectedRange: NSRange(location: NSNotFound, length: NSNotFound),
+                markedRange: nil
+            )
+        )
+    }
+
+    func testLineHeightIndexesUseInlineMarkedTextOffsets() {
         XCTAssertEqual(
             CandidateAnchorPolicy.lineHeightCharacterIndexes(
-                selectedRange: NSRange(location: 8, length: 0),
+                selectedRange: NSRange(location: 5, length: 0),
                 markedRange: NSRange(location: 4, length: 2),
                 maximumBacktrack: 2
             ),
-            [6, 5, 4, 8, 7, 3, 2, 0]
+            [2, 1, 0]
+        )
+    }
+
+    func testLineHeightIndexesUseCurrentSelectionWhenNoMarkedTextExists() {
+        XCTAssertEqual(
+            CandidateAnchorPolicy.lineHeightCharacterIndexes(
+                selectedRange: NSRange(location: 120, length: 0),
+                markedRange: nil,
+                maximumBacktrack: 2
+            ),
+            [0]
         )
     }
 

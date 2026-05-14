@@ -104,13 +104,16 @@ public enum CandidateAnchorRejectionReason: String, Sendable, Equatable {
     case nullRect
     case infiniteRect
     case nonFiniteCoordinate
-    case negativeSize
     case zeroHeight
     case offscreen
 }
 
 public enum CandidateAnchorValidation {
     public static let minimumCaretHeight: CGFloat = 3
+
+    public static func normalized(_ rect: CGRect) -> CGRect {
+        rect.standardized
+    }
 
     public static func rejectionReason(
         for rect: CGRect,
@@ -128,13 +131,17 @@ public enum CandidateAnchorValidation {
               rect.height.isFinite else {
             return .nonFiniteCoordinate
         }
-        if rect.width < 0 || rect.height < 0 {
-            return .negativeSize
+        let normalizedRect = normalized(rect)
+        guard normalizedRect.minX.isFinite,
+              normalizedRect.minY.isFinite,
+              normalizedRect.width.isFinite,
+              normalizedRect.height.isFinite else {
+            return .nonFiniteCoordinate
         }
-        if rect.height <= minimumCaretHeight {
+        if normalizedRect.height <= minimumCaretHeight {
             return .zeroHeight
         }
-        if screenProvider.screen(containing: rect) == nil {
+        if screenProvider.screen(containing: normalizedRect) == nil {
             return .offscreen
         }
         return nil
@@ -228,12 +235,17 @@ public final class CandidateAnchorResolver {
                 }
             }
 
-            if let result = freshResult(
-                rect: client.firstRect(forCharacterRange: CandidateAnchorPolicy.currentInsertionPointFallbackRange),
-                source: .firstRectInsertionPoint,
-                context: context
+            if let insertionPointRange = CandidateAnchorPolicy.insertionPointFallbackRange(
+                selectedRange: client.selectedRange,
+                markedRange: client.markedRange
             ) {
-                return result
+                if let result = freshResult(
+                    rect: client.firstRect(forCharacterRange: insertionPointRange),
+                    source: .firstRectInsertionPoint,
+                    context: context
+                ) {
+                    return result
+                }
             }
 
             for index in CandidateAnchorPolicy.lineHeightCharacterIndexes(
@@ -272,8 +284,9 @@ public final class CandidateAnchorResolver {
         source: CandidateAnchorSource,
         context: CandidateAnchorContext
     ) -> CandidateAnchorResult? {
+        let normalizedRect = CandidateAnchorValidation.normalized(rect)
         guard CandidateAnchorValidation.isUsable(rect, screenProvider: screenProvider),
-              let screen = screenProvider.screen(containing: rect) else {
+              let screen = screenProvider.screen(containing: normalizedRect) else {
             let reason = CandidateAnchorValidation
                 .rejectionReason(for: rect, screenProvider: screenProvider)?
                 .rawValue ?? "unknown"
@@ -281,15 +294,15 @@ public final class CandidateAnchorResolver {
             return nil
         }
         lastUsable = ScopedAnchor(
-            rect: rect,
+            rect: normalizedRect,
             compositionID: context.compositionID,
             appBundleID: context.appBundleID,
             screenID: screen.identifier,
             source: source,
             timestamp: context.now
         )
-        trace(source: source, rect: rect, accepted: true, reason: nil, context: context)
-        return CandidateAnchorResult(rect: rect, source: source, isFresh: true)
+        trace(source: source, rect: normalizedRect, accepted: true, reason: nil, context: context)
+        return CandidateAnchorResult(rect: normalizedRect, source: source, isFresh: true)
     }
 
     private func scopedLastUsableResult(context: CandidateAnchorContext) -> CandidateAnchorResult? {

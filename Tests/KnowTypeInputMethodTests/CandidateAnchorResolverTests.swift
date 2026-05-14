@@ -32,6 +32,21 @@ final class CandidateAnchorResolverTests: XCTestCase {
         )
     }
 
+    func testValidationStandardizesNegativeSizeRects() {
+        let rect = CGRect(x: 100, y: 100, width: -10, height: -18)
+
+        XCTAssertTrue(
+            CandidateAnchorValidation.isUsable(
+                rect,
+                screenProvider: screenProvider()
+            )
+        )
+        XCTAssertEqual(
+            CandidateAnchorValidation.normalized(rect),
+            CGRect(x: 90, y: 82, width: 10, height: 18)
+        )
+    }
+
     func testResolverUsesIMKSourcePrecedence() {
         let client = FakeInputClientGeometry(
             selectedRange: NSRange(location: 30, length: 0),
@@ -52,11 +67,11 @@ final class CandidateAnchorResolverTests: XCTestCase {
 
     func testResolverFallsBackThroughLineHeightIndexesFromCursor() {
         let client = FakeInputClientGeometry(
-            selectedRange: NSRange(location: 5, length: 0),
-            markedRange: nil,
+            selectedRange: NSRange(location: 105, length: 0),
+            markedRange: NSRange(location: 100, length: 5),
             firstRects: [
-                NSRange(location: 5, length: 0): .zero,
-                CandidateAnchorPolicy.currentInsertionPointFallbackRange: .zero
+                NSRange(location: 105, length: 0): .zero,
+                NSRange(location: 100, length: 0): .zero
             ],
             lineRects: [
                 3: CGRect(x: 33, y: 44, width: 0, height: 18)
@@ -70,13 +85,66 @@ final class CandidateAnchorResolverTests: XCTestCase {
         XCTAssertEqual(result.rect, CGRect(x: 33, y: 44, width: 0, height: 18))
     }
 
+    func testResolverUsesZeroLineHeightIndexWhenNoMarkedRangeExists() {
+        let client = FakeInputClientGeometry(
+            selectedRange: NSRange(location: 120, length: 0),
+            markedRange: nil,
+            firstRects: [
+                NSRange(location: 120, length: 0): .zero
+            ],
+            lineRects: [
+                0: CGRect(x: 70, y: 80, width: 0, height: 18)
+            ]
+        )
+        let resolver = CandidateAnchorResolver(screenProvider: screenProvider())
+
+        let result = resolver.resolve(client: client, context: context())
+
+        XCTAssertEqual(result.source, .lineHeightRect)
+        XCTAssertEqual(result.rect, CGRect(x: 70, y: 80, width: 0, height: 18))
+    }
+
+    func testResolverDoesNotCallFirstRectWithUnknownInsertionPoint() {
+        let client = FakeInputClientGeometry(
+            selectedRange: NSRange(location: NSNotFound, length: NSNotFound),
+            markedRange: nil,
+            firstRects: [
+                NSRange(location: 0, length: 0): .zero
+            ],
+            lineRects: [
+                0: CGRect(x: 40, y: 50, width: 0, height: 18)
+            ]
+        )
+        let resolver = CandidateAnchorResolver(screenProvider: screenProvider())
+
+        let result = resolver.resolve(client: client, context: context())
+
+        XCTAssertFalse(client.requestedFirstRects.contains(NSRange(location: NSNotFound, length: 0)))
+        XCTAssertEqual(result.source, .lineHeightRect)
+    }
+
+    func testResolverReturnsStandardizedRectForNegativeSizeFirstRect() {
+        let client = FakeInputClientGeometry(
+            selectedRange: NSRange(location: 10, length: 0),
+            markedRange: nil,
+            firstRects: [
+                NSRange(location: 10, length: 0): CGRect(x: 100, y: 100, width: -10, height: -18)
+            ]
+        )
+        let resolver = CandidateAnchorResolver(screenProvider: screenProvider())
+
+        let result = resolver.resolve(client: client, context: context())
+
+        XCTAssertEqual(result.source, .firstRectSelectedEnd)
+        XCTAssertEqual(result.rect, CGRect(x: 90, y: 82, width: 10, height: 18))
+    }
+
     func testResolverUsesAccessibilityFallbackAfterIMKFailure() {
         let client = FakeInputClientGeometry(
             selectedRange: NSRange(location: 0, length: 0),
             markedRange: nil,
             firstRects: [
-                NSRange(location: 0, length: 0): .zero,
-                CandidateAnchorPolicy.currentInsertionPointFallbackRange: .zero
+                NSRange(location: 0, length: 0): .zero
             ],
             lineRects: [0: .zero]
         )
@@ -121,8 +189,7 @@ final class CandidateAnchorResolverTests: XCTestCase {
             selectedRange: NSRange(location: 0, length: 0),
             markedRange: nil,
             firstRects: [
-                NSRange(location: 0, length: 0): .zero,
-                CandidateAnchorPolicy.currentInsertionPointFallbackRange: .zero
+                NSRange(location: 0, length: 0): .zero
             ],
             lineRects: [0: .zero]
         )
@@ -221,6 +288,7 @@ private final class FakeInputClientGeometry: InputClientGeometryProviding {
     var markedRange: NSRange?
     var firstRects: [NSRange: CGRect]
     var lineRects: [Int: CGRect]
+    var requestedFirstRects: [NSRange] = []
 
     init(
         selectedRange: NSRange,
@@ -235,7 +303,8 @@ private final class FakeInputClientGeometry: InputClientGeometryProviding {
     }
 
     func firstRect(forCharacterRange range: NSRange) -> CGRect {
-        firstRects[range] ?? .zero
+        requestedFirstRects.append(range)
+        return firstRects[range] ?? .zero
     }
 
     func lineHeightRect(forCharacterIndex index: Int) -> CGRect {

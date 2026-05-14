@@ -1,7 +1,6 @@
 import Foundation
 
 public enum CandidateAnchorPolicy {
-    public static let currentInsertionPointFallbackRange = NSRange(location: NSNotFound, length: 0)
     public static let maximumLineHeightBacktrack = 80
 
     public static func characterRange(for selectedRange: NSRange) -> NSRange? {
@@ -56,9 +55,10 @@ public enum CandidateAnchorPolicy {
         maximumBacktrack: Int = maximumLineHeightBacktrack
     ) -> [Int] {
         var indexes: [Int] = []
-        let startIndexes = characterRanges(selectedRange: selectedRange, markedRange: markedRange)
-            .map(\.location)
-            .filter { $0 != NSNotFound }
+        let startIndexes = lineHeightStartIndexes(
+            selectedRange: selectedRange,
+            markedRange: markedRange
+        )
 
         for startIndex in startIndexes {
             let lowerBound = max(0, startIndex - max(0, maximumBacktrack))
@@ -73,6 +73,19 @@ public enum CandidateAnchorPolicy {
         }
         appendUnique(0, to: &indexes)
         return indexes
+    }
+
+    public static func insertionPointFallbackRange(
+        selectedRange: NSRange,
+        markedRange: NSRange?
+    ) -> NSRange? {
+        if isKnown(selectedRange) {
+            return NSRange(location: selectedRange.location + selectedRange.length, length: 0)
+        }
+        if let markedRange, isKnown(markedRange) {
+            return NSRange(location: markedRange.location + markedRange.length, length: 0)
+        }
+        return nil
     }
 
     private static func source(
@@ -113,6 +126,46 @@ public enum CandidateAnchorPolicy {
         if !indexes.contains(index) {
             indexes.append(index)
         }
+    }
+
+    private static func lineHeightStartIndexes(
+        selectedRange: NSRange,
+        markedRange: NSRange?
+    ) -> [Int] {
+        guard let markedRange, isKnown(markedRange) else {
+            return [0]
+        }
+
+        var indexes: [Int] = []
+        appendUnique(max(0, markedRange.length), to: &indexes)
+
+        guard isKnown(selectedRange) else {
+            return indexes
+        }
+        appendInlineIndex(
+            selectedRange.location + selectedRange.length,
+            markedRange: markedRange,
+            to: &indexes
+        )
+        appendInlineIndex(
+            selectedRange.location,
+            markedRange: markedRange,
+            to: &indexes
+        )
+        return indexes
+    }
+
+    private static func appendInlineIndex(
+        _ documentIndex: Int,
+        markedRange: NSRange,
+        to indexes: inout [Int]
+    ) {
+        let markedEnd = markedRange.location + markedRange.length
+        guard documentIndex >= markedRange.location,
+              documentIndex <= markedEnd else {
+            return
+        }
+        appendUnique(documentIndex - markedRange.location, to: &indexes)
     }
 
     private static func isKnown(_ range: NSRange) -> Bool {
