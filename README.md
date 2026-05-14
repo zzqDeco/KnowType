@@ -137,6 +137,7 @@ All provider responses must normalize into `LLMResponse` before reaching core or
 
 - `Space`: commit the selected prefix candidate only.
 - `Tab`: commit the selected prefix plus the first or selected continuation.
+- `0`: commit the raw composition when correction candidates are visible.
 - `Option + number`: commit the selected prefix plus the continuation mapped to that global shortcut. `Option + 1` matches the first continuation, which is displayed with the `⇥` shortcut because `Tab` commits it directly; later pages do not reuse continuation shortcut labels.
 - `Option + R`: request polish; this is the only default path that may rewrite the prefix.
 

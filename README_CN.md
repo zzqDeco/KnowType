@@ -133,6 +133,7 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 - `Space`：只提交当前选中的前缀。
 - `Tab`：提交当前选中的前缀 + 第一条或当前选中的延续。
+- `0`：候选可见时提交原始 composition，保留用户不接受纠错的逃生路径。
 - `Option + 数字`：提交全局快捷键对应的延续。`Option + 1` 对应第一条延续，候选窗中用 `⇥` 表示，因为 `Tab` 会直接提交第一条延续；后续分页不会复用延续快捷键标签。
 - `Option + R`：主动润色，这时才允许改写前缀。
 

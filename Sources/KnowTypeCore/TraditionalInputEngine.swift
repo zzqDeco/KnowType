@@ -127,6 +127,24 @@ public struct TraditionalInputEngine: Sendable {
             }
 
             let suffix = lower[index...]
+            let remaining = String(suffix)
+            if pinyinSyllables.contains(remaining) {
+                let surface = originalSurface(
+                    in: token,
+                    lowercasedToken: lower,
+                    from: index,
+                    length: remaining.count
+                )
+                let token = InputToken(
+                    surface: surface,
+                    normalized: normalize(remaining),
+                    isTypoNormalized: isTypo(remaining),
+                    isPartial: false
+                )
+                memo[index] = [[token]]
+                return [[token]]
+            }
+
             var results: [[InputToken]] = []
             for key in compactSegmentKeys where suffix.hasPrefix(key) {
                 let next = lower.index(index, offsetBy: key.count)
@@ -153,7 +171,6 @@ public struct TraditionalInputEngine: Sendable {
                 }
             }
 
-            let remaining = String(suffix)
             if isPinyinPrefix(remaining), !isKnownCompleteInputToken(remaining) {
                 let surface = originalSurface(
                     in: token,
@@ -435,6 +452,7 @@ private let lexicon: [LexiconEntry] = [
     entry(["fang", "an"], [("方案", 0.98)]),
     entry(["fang", "fa"], [("方法", 0.97)]),
     entry(["fang", "xiang"], [("方向", 0.97)]),
+    entry(["fang"], [("方", 0.94), ("放", 0.86), ("房", 0.82), ("防", 0.78)]),
     entry(["gongneng"], [
         ("功能", 0.99),
         ("工具", 0.74),

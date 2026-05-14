@@ -184,7 +184,7 @@ public struct CandidatePanelState: Sendable, Equatable {
     ) -> CandidatePanelSelection? {
         if windowState.viewModel.rawInput == rawInput,
            let selection = windowState.selection,
-           selectableRows(in: viewModel).contains(selection) {
+           canPreserveSelection(selection, in: viewModel) {
             return selection
         }
         return defaultSelection(
@@ -192,6 +192,32 @@ public struct CandidatePanelState: Sendable, Equatable {
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates
         )
+    }
+
+    private func canPreserveSelection(
+        _ selection: CandidatePanelSelection,
+        in viewModel: CandidatePanelViewModel
+    ) -> Bool {
+        guard selectableRows(in: viewModel).contains(selection) else {
+            return false
+        }
+
+        switch selection {
+        case .rawInput:
+            return windowState.viewModel.rawInput == viewModel.rawInput
+        case .prefixCandidate(let index):
+            guard windowState.viewModel.prefixCandidates.indices.contains(index),
+                  viewModel.prefixCandidates.indices.contains(index) else {
+                return false
+            }
+            return windowState.viewModel.prefixCandidates[index].text == viewModel.prefixCandidates[index].text
+        case .continuationCandidate(let index):
+            guard windowState.viewModel.continuationCandidates.indices.contains(index),
+                  viewModel.continuationCandidates.indices.contains(index) else {
+                return false
+            }
+            return windowState.viewModel.continuationCandidates[index].text == viewModel.continuationCandidates[index].text
+        }
     }
 
     private func selectableRows() -> [CandidatePanelSelection] {

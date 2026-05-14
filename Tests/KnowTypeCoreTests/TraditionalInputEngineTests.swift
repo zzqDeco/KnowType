@@ -51,6 +51,15 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "niw").first?.text, "你我")
     }
 
+    func testCompleteSyllableIsNotSplitIntoInitialPartials() {
+        let engine = TraditionalInputEngine()
+        let candidateTexts = engine.candidates(for: "fang").map(\.text)
+
+        XCTAssertEqual(candidateTexts.first, "方")
+        XCTAssertFalse(candidateTexts.contains("方案个"))
+        XCTAssertFalse(candidateTexts.contains("方案高"))
+    }
+
     func testInitialAbbreviationDecodesCommonExpression() {
         let engine = TraditionalInputEngine()
 
