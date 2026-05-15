@@ -19,6 +19,7 @@ This directory contains short notes for important source files and subsystems. T
 - [Sources-KnowTypeCore](Sources-KnowTypeCore.plan.md)
 - [TraditionalInputEngine](TraditionalInputEngine.plan.md)
 - [TraditionalInputLexiconCatalog](TraditionalInputLexiconCatalog.plan.md)
+- [TraditionalInputLexiconDirectoryResolver](TraditionalInputLexiconDirectoryResolver.plan.md)
 - [TraditionalInputLexiconFileSource](TraditionalInputLexiconFileSource.plan.md)
 - [TraditionalInputLexiconResourceLoader](TraditionalInputLexiconResourceLoader.plan.md)
 - [TraditionalInputSeedLexicon](TraditionalInputSeedLexicon.plan.md)

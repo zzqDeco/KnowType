@@ -94,6 +94,7 @@ Core candidate types:
 - `TraditionalInputLexiconEntry`: authorized local lexicon row with normalized pinyin tokens and one or more outputs.
 - `TraditionalInputLexiconOutput`: local lexicon output text and confidence score.
 - `TraditionalInputLexiconCatalog`: combined authorized local lexicon entries plus load diagnostics.
+- `TraditionalInputLexiconDirectoryResolver`: shared local lexicon directory discovery for runtime and settings.
 - `TraditionalInputLexiconFileSource`: file and directory loader for local lexicon resources.
 - `TraditionalInputLexiconResourceLoader`: JSON/TSV parser for audited local lexicon resources.
 - `TraditionalInputSeedLexicon`: packaged clean-room seed lexicon loaded through the same file/resource path.
@@ -114,9 +115,11 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 
 `TraditionalInputLexiconFileSource` infers `.json` and `.tsv` formats from file extensions, reads explicit file lists or sorted directory contents, skips hidden directory entries, and reports unsupported or unreadable files through catalog diagnostics.
 
-`InputMethodLexiconRuntime` resolves `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and `~/Library/Application Support/KnowType/Lexicons`, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon.
+`TraditionalInputLexiconDirectoryResolver` resolves `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and `~/Library/Application Support/KnowType/Lexicons`, trimming empty paths and de-duplicating standardized file paths while preserving order.
 
-`LexiconSettingsViewModel` reports `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and the default `~/Library/Application Support/KnowType/Lexicons` directory in the settings app. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, but it does not create or mutate lexicon files in the MVP.
+`InputMethodLexiconRuntime` uses the shared resolver, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon.
+
+`LexiconSettingsViewModel` uses the shared resolver for settings status. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, and it can create missing directories on explicit user action, but it does not create or mutate lexicon files in the MVP.
 
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 

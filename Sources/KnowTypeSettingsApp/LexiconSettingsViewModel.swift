@@ -44,8 +44,8 @@ public struct LexiconDirectoryStatus: Sendable, Equatable, Identifiable {
 
 @MainActor
 public final class LexiconSettingsViewModel: ObservableObject {
-    public static let environmentDirectoryKey = "KNOWTYPE_LEXICON_DIR"
-    public static let environmentDirectoriesKey = "KNOWTYPE_LEXICON_DIRS"
+    public static let environmentDirectoryKey = TraditionalInputLexiconDirectoryResolver.environmentDirectoryKey
+    public static let environmentDirectoriesKey = TraditionalInputLexiconDirectoryResolver.environmentDirectoriesKey
 
     @Published public private(set) var directories: [LexiconDirectoryStatus]
     @Published public private(set) var totalLoadedEntryCount: Int
@@ -63,7 +63,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
         fileSource: TraditionalInputLexiconFileSource = TraditionalInputLexiconFileSource(),
         dateProvider: @escaping () -> Date = Date.init
     ) {
-        self.directoryURLs = Self.uniqueDirectories(directoryURLs)
+        self.directoryURLs = TraditionalInputLexiconDirectoryResolver.uniqueDirectories(directoryURLs)
         self.fileManager = fileManager
         self.fileSource = fileSource
         self.dateProvider = dateProvider
@@ -77,15 +77,10 @@ public final class LexiconSettingsViewModel: ObservableObject {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> [URL] {
-        var directories = environmentDirectories(from: environment)
-        directories.append(
-            homeDirectory
-                .appendingPathComponent("Library")
-                .appendingPathComponent("Application Support")
-                .appendingPathComponent("KnowType")
-                .appendingPathComponent("Lexicons")
+        TraditionalInputLexiconDirectoryResolver.defaultDirectories(
+            environment: environment,
+            homeDirectory: homeDirectory
         )
-        return uniqueDirectories(directories)
     }
 
     public func refresh() {
@@ -168,29 +163,4 @@ public final class LexiconSettingsViewModel: ObservableObject {
         }.count
     }
 
-    private static func uniqueDirectories(_ directories: [URL]) -> [URL] {
-        var seen = Set<String>()
-        return directories.filter { directory in
-            let path = directory.standardizedFileURL.path
-            guard !seen.contains(path) else {
-                return false
-            }
-            seen.insert(path)
-            return true
-        }
-    }
-
-    private static func environmentDirectories(from environment: [String: String]) -> [URL] {
-        var paths: [String] = []
-        if let directory = environment[environmentDirectoryKey] {
-            paths.append(directory)
-        }
-        if let directories = environment[environmentDirectoriesKey] {
-            paths.append(contentsOf: directories.split(separator: ":").map(String.init))
-        }
-        return paths
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { URL(fileURLWithPath: $0) }
-    }
 }
