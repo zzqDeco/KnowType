@@ -21,7 +21,7 @@ The connection test uses the current draft profile and may use a typed API key f
 
 ## Debug Install Guidance
 
-The Debug Install tab documents the local developer loop at a high level:
+The Debug Install tab documents the local developer loop through `DebugInstallGuidance`, a small testable settings-side source of truth:
 
 - build and ad-hoc sign the bundle by default, or use `CODESIGN_IDENTITY` for Apple Development signing;
 - copy `KnowType.app` to `~/Library/Input Methods`;

@@ -382,33 +382,15 @@ private struct DebugInstallSettingsView: View {
     var body: some View {
         SettingsForm {
             Section("Local Development Flow") {
-                InstallStepView(
-                    title: "Build and sign",
-                    detail: "Run the input method bundle build script. It uses ad-hoc signing by default, or Apple Development when CODESIGN_IDENTITY is set."
-                )
-                InstallStepView(
-                    title: "Install bundle",
-                    detail: "Copy KnowType.app into ~/Library/Input Methods. The install script performs the copy and registers the input source."
-                )
-                InstallStepView(
-                    title: "Restart registrar",
-                    detail: "If macOS keeps an old registration, restart the input method process or log out and back in before retesting."
-                )
-                InstallStepView(
-                    title: "Enable input source",
-                    detail: "Open System Settings > Keyboard > Text Input > Input Sources and enable KnowType."
-                )
-                InstallStepView(
-                    title: "Inspect logs",
-                    detail: "Use Console.app or the log command to inspect KnowTypeInputMethodApp messages during local smoke tests."
-                )
+                ForEach(DebugInstallGuidance.steps) { step in
+                    InstallStepView(title: step.title, detail: step.detail)
+                }
             }
 
             Section("Commands") {
-                MonospacedText("./scripts/build-inputmethod-bundle.sh")
-                MonospacedText("CODESIGN_IDENTITY=\"Apple Development: Name (TEAMID)\" ./scripts/install-inputmethod.sh")
-                MonospacedText("./scripts/install-inputmethod.sh")
-                MonospacedText("log stream --predicate 'process == \"KnowTypeInputMethodApp\"'")
+                ForEach(DebugInstallGuidance.commands, id: \.self) { command in
+                    MonospacedText(command)
+                }
             }
         }
     }
