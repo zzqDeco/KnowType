@@ -196,7 +196,11 @@ SWIFT
 )"
 
 if [[ -z "$TIS_OUTPUT" ]]; then
-  warn "could not query Text Input Source state"
+  if (( REQUIRE_SELECTED == 1 )); then
+    fail "could not query Text Input Source state"
+  else
+    warn "could not query Text Input Source state"
+  fi
 else
   while IFS='=' read -r key value; do
     case "$key" in
