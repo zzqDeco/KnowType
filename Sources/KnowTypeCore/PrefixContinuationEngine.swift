@@ -32,7 +32,8 @@ public final class PrefixContinuationEngine: Sendable {
                 maxCandidates: maxCandidates,
                 lengthLevel: lengthLevel
             )
-            if let response = try? await provider.complete(request) {
+            do {
+                let response = try await provider.complete(request)
                 let sanitized = response.candidates.compactMap { candidate in
                     PrefixContinuationEngine.sanitizeContinuation(candidate.text, lockedPrefix: lockedPrefix.text).map { text in
                         ContinuationCandidate(
@@ -47,6 +48,9 @@ public final class PrefixContinuationEngine: Sendable {
                 if !sanitized.isEmpty {
                     return Array(unique(sanitized).prefix(maxCandidates))
                 }
+                return []
+            } catch {
+                return []
             }
         }
 

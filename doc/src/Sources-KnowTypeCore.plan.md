@@ -9,6 +9,8 @@
 
 Level 0 detection is pure core policy. It covers URLs, emails, file paths, command-like input, code-like tokens, and protected app bundle IDs for Terminal, iTerm2, and Xcode. Level 0 correction returns local identity protection and Level 0 continuation returns no candidates.
 
+`PrefixContinuationEngine` uses deterministic local fallback continuations only when no provider is configured. Once a provider is present, continuation candidates must come from that provider and pass prefix-lock sanitization; provider failures or unusable provider responses return no continuations so the input method keeps showing traditional prefix candidates rather than mock AI text.
+
 Provider-specific protocol details must not be added here.
 
 `TraditionalInputEngine` is still license-clean in MVP, but it now uses a full-pinyin syllable table, pinyin-prefix recognition, memoized lattice parsing, indexed lexicon lookup, and a bundled TSV smoke-test lexicon loaded through `TraditionalInputSeedLexicon`. It provides multiple same-pinyin single-character candidates for inputs such as `ni`, phrase candidates for inputs such as `nishishei`, partial-syllable handling for inputs such as `nih`, `niw`, and `xianz`, and technical-token passthrough for mixed Chinese/English input.

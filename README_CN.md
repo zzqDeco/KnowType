@@ -189,7 +189,7 @@ AI Provider 设置页可以测试当前 draft profile 的连接。测试时输�
 
 Terminal、iTerm、Xcode、VS Code 和 Codex desktop 默认英文半角标点，但仍保留中文输入管线。
 
-候选窗先显示前缀候选，再显示延续候选。候选按 9 行一页分页。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。
+候选窗先显示前缀候选，再显示延续候选。候选按 9 行一页分页。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。如果 provider 失败或没有返回可用延续，KnowType 会保留传统前缀候选，不再用固定本地 fallback 文本伪装成 AI 输出。
 
 ## 隐私基线
 

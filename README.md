@@ -185,7 +185,7 @@ Local OpenAI-compatible runtimes may leave the model blank so KnowType can disco
 
 Terminal, iTerm, Xcode, VS Code, and Codex desktop start with English half-width punctuation while keeping the Chinese text pipeline available.
 
-The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows are paged in 9-row windows. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives.
+The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows are paged in 9-row windows. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives. If that provider fails or returns no usable continuation, KnowType keeps the traditional prefix candidates and does not substitute fixed local fallback text as AI output.
 
 ## Privacy Baseline
 
