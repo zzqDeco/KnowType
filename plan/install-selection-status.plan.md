@@ -7,8 +7,9 @@ Make the local input-method install script stop implying KnowType is globally se
 ## Behavior
 
 - After registration and enabling, `scripts/install-inputmethod.sh` requests selection of `com.knowtype.inputmethod.KnowType.Mode`.
-- If the installer process observes that mode as current, the script reports the selection request rather than claiming global system selection.
-- If the installer process still observes another input source, the script prints a warning with that input source ID and points the developer to System Settings.
+- If `TISSelectInputSource` returns `noErr`, the script reports that the selection request was made rather than claiming global system selection.
+- If `TISSelectInputSource` returns an error, the script prints the status and points the developer to System Settings.
+- The script does not read the current input source inside the same short-lived Swift process, because that value can be stale until keyboard-selection notifications are processed.
 - The final script output directs developers to `scripts/diagnose-inputmethod.sh` as the read-only system status check.
 
 ## Verification

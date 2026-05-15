@@ -63,13 +63,6 @@ func inputSource(id: String) -> TISInputSource? {
     return sources?.first
 }
 
-func stringProperty(_ source: TISInputSource?, _ key: CFString) -> String? {
-    guard let source, let raw = TISGetInputSourceProperty(source, key) else {
-        return nil
-    }
-    return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
-}
-
 func isEnabled(_ source: TISInputSource) -> Bool {
     guard let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceIsEnabled) else {
         return false
@@ -101,29 +94,14 @@ if let mode = inputSource(id: modeID) {
     if enableStatus != noErr {
         fputs("Warning: TISEnableInputSource(mode) returned \\(enableStatus)\\n", stderr)
     }
+    let selectStatus = TISSelectInputSource(mode)
+    if selectStatus == noErr {
+        print("Requested KnowType input source selection: \(modeID)")
+    } else {
+        fputs("Warning: TISSelectInputSource(mode) returned \\(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\\n", stderr)
+    }
 } else {
     fputs("Warning: KnowType input mode was not found after registration.\\n", stderr)
-}
-
-var currentID = stringProperty(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), kTISPropertyInputSourceID) ?? "<unknown>"
-if let mode = inputSource(id: modeID) {
-    for _ in 0..<10 {
-        let selectStatus = TISSelectInputSource(mode)
-        if selectStatus != noErr {
-            fputs("Warning: TISSelectInputSource(mode) returned \\(selectStatus)\\n", stderr)
-        }
-        Thread.sleep(forTimeInterval: 0.1)
-        currentID = stringProperty(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), kTISPropertyInputSourceID) ?? "<unknown>"
-        if currentID == modeID {
-            break
-        }
-    }
-}
-
-if currentID == modeID {
-    print("Requested KnowType input source selection: \(modeID)")
-} else {
-    fputs("Warning: installer process current input source is \\(currentID), not \\(modeID). Enable or select KnowType from System Settings if macOS did not switch automatically.\\n", stderr)
 }
 SWIFT
 
