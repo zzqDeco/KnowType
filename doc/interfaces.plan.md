@@ -94,6 +94,9 @@ Settings connection tests:
 - reuse an existing saved `secretName` value when the draft key is blank
 - fail before sending a request when a required key is missing
 - do not write provider JSON or mutate `SecretStore`
+- clear stale status when draft fields change
+- ignore in-flight results for superseded draft/profile snapshots
+- keep transient diagnostic failures out of the persistent save/load error slot
 
 ## Candidate Data
 

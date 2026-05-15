@@ -14,6 +14,9 @@ Make AI provider configuration observable from the settings app so users can ver
 - A blank draft API key can reuse an existing saved `secretName` value when available.
 - Remote providers that require a key fail before making a test request when no key is available.
 - The settings UI shows testing, success, and failure status in the AI Provider tab.
+- Draft edits reset stale connection results.
+- In-flight diagnostic results are discarded if the user edits the draft or switches profiles before the request returns.
+- Connection-test failures stay in `connectionStatus` instead of the persistent save/load error slot.
 
 ## Verification
 

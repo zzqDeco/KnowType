@@ -9,7 +9,13 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
     @Published public private(set) var profiles: [ProviderProfile]
     @Published public var selectedProfileID: String?
-    @Published public var draft: ProviderProfileDraft
+    @Published public var draft: ProviderProfileDraft {
+        didSet {
+            if draft != oldValue {
+                resetConnectionStatus()
+            }
+        }
+    }
     @Published public private(set) var validationErrors: [String]
     @Published public private(set) var lastErrorMessage: String?
     @Published public private(set) var isPersistenceBlocked: Bool
@@ -20,6 +26,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
     private let connectionTester: ConnectionTester
     private var file: ProviderProfilesFile
     private var persistenceBlockedError: Error?
+    private var connectionTestGeneration: UInt64 = 0
 
     public init(
         profileStore: any ProviderProfileStore,
@@ -81,7 +88,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         selectedProfileID = id
         draft = ProviderProfileDraft(profile: profile)
         validationErrors = []
-        connectionStatus = .idle
+        resetConnectionStatus()
     }
 
     public func createProfile(kind: ProviderKind) {
@@ -92,7 +99,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         selectedProfileID = profile.id
         draft = ProviderProfileDraft(profile: profile)
         validationErrors = []
-        connectionStatus = .idle
+        resetConnectionStatus()
     }
 
     public func changeDraftKind(_ kind: ProviderKind) {
@@ -116,7 +123,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         draft.customBodyTemplate = template.customBodyTemplate ?? ""
         draft.customResponsePath = template.customResponsePath ?? ""
         validationErrors = []
-        connectionStatus = .idle
+        resetConnectionStatus()
     }
 
     @discardableResult
@@ -196,7 +203,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
             selectedProfileID = profile.id
             draft = ProviderProfileDraft(profile: profile)
             lastErrorMessage = nil
-            connectionStatus = .idle
+            resetConnectionStatus()
             return true
         } catch {
             lastErrorMessage = error.localizedDescription
@@ -243,23 +250,35 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return false
         }
 
-        validationErrors = validate(draft)
+        let snapshot = ConnectionTestSnapshot(
+            selectedProfileID: selectedProfileID,
+            draft: draft
+        )
+
+        validationErrors = validate(snapshot.draft)
         guard validationErrors.isEmpty else {
             connectionStatus = .failure("Fix validation errors before testing.")
             return false
         }
 
+        connectionTestGeneration &+= 1
+        let generation = connectionTestGeneration
         do {
-            let configuration = try connectionTestConfiguration()
+            let configuration = try connectionTestConfiguration(for: snapshot.draft)
             connectionStatus = .testing
             let result = try await connectionTester(configuration)
+            guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
+                return false
+            }
             connectionStatus = .success("Connected to \(result.providerName). Received \(result.candidateCount) candidate(s).")
             lastErrorMessage = nil
             return true
         } catch {
+            guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
+                return false
+            }
             let message = error.localizedDescription
             connectionStatus = .failure(message)
-            lastErrorMessage = message
             return false
         }
     }
@@ -297,7 +316,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         return errors
     }
 
-    private func connectionTestConfiguration() throws -> ProviderConfiguration {
+    private func connectionTestConfiguration(for draft: ProviderProfileDraft) throws -> ProviderConfiguration {
         var profile = try draft.makeProfile()
         let trimmedAPIKey = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let apiKey: String?
@@ -330,6 +349,20 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
         let trimmed = existingSecret.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func resetConnectionStatus() {
+        connectionTestGeneration &+= 1
+        connectionStatus = .idle
+    }
+
+    private func isCurrentConnectionTest(
+        generation: UInt64,
+        snapshot: ConnectionTestSnapshot
+    ) -> Bool {
+        generation == connectionTestGeneration
+            && selectedProfileID == snapshot.selectedProfileID
+            && draft == snapshot.draft
     }
 
     private static func secretName(for profileID: String) -> String {
@@ -514,6 +547,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
         return url
     }
+}
+
+private struct ConnectionTestSnapshot: Equatable {
+    var selectedProfileID: String?
+    var draft: ProviderProfileDraft
 }
 
 public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {

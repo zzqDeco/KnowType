@@ -1172,7 +1172,68 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let didConnect = await viewModel.testDraftConnection()
         XCTAssertFalse(didConnect)
         XCTAssertEqual(viewModel.connectionStatus, .failure("API key is required for this provider."))
-        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+        XCTAssertNil(viewModel.lastErrorMessage)
+    }
+
+    func testConnectionStatusResetsWhenDraftChangesAfterTest() async throws {
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
+            secretStore: RecordingSecretStore(),
+            connectionTester: { _ in
+                ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+
+        let didConnect = await viewModel.testDraftConnection()
+        XCTAssertTrue(didConnect)
+        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_chat. Received 1 candidate(s)."))
+
+        viewModel.draft.baseURL = "http://localhost:8317/v1"
+
+        XCTAssertEqual(viewModel.connectionStatus, .idle)
+    }
+
+    func testConnectionFailureDoesNotUsePersistentLastErrorSlot() async throws {
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
+            secretStore: RecordingSecretStore(),
+            connectionTester: { _ in
+                throw ProviderError.invalidResponse("diagnostic failed")
+            }
+        )
+
+        let didConnect = await viewModel.testDraftConnection()
+
+        XCTAssertFalse(didConnect)
+        XCTAssertEqual(viewModel.connectionStatus, .failure("Invalid provider response: diagnostic failed"))
+        XCTAssertNil(viewModel.lastErrorMessage)
+    }
+
+    func testSupersededConnectionTestDoesNotPublishResult() async throws {
+        let tester = DelayedConnectionTester()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
+            secretStore: RecordingSecretStore(),
+            connectionTester: { configuration in
+                try await tester.test(configuration)
+            }
+        )
+
+        let pendingTest = Task {
+            await viewModel.testDraftConnection()
+        }
+        while await !tester.hasPending {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertEqual(viewModel.connectionStatus, .testing)
+
+        viewModel.createProfile(kind: .ollamaNative)
+        await tester.resume(with: ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1))
+        let didConnect = await pendingTest.value
+
+        XCTAssertFalse(didConnect)
+        XCTAssertEqual(viewModel.connectionStatus, .idle)
+        XCTAssertNil(viewModel.lastErrorMessage)
     }
 }
 
@@ -1181,6 +1242,25 @@ private actor ConfigurationRecorder {
 
     func append(_ configuration: ProviderConfiguration) {
         configurations.append(configuration)
+    }
+}
+
+private actor DelayedConnectionTester {
+    private var continuation: CheckedContinuation<ProviderConnectionDiagnosticResult, Error>?
+
+    var hasPending: Bool {
+        continuation != nil
+    }
+
+    func test(_ configuration: ProviderConfiguration) async throws -> ProviderConnectionDiagnosticResult {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume(with result: ProviderConnectionDiagnosticResult) {
+        continuation?.resume(returning: result)
+        continuation = nil
     }
 }
 
