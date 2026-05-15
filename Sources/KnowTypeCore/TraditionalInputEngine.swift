@@ -12,6 +12,26 @@ public struct TraditionalInputCandidate: Codable, Sendable, Equatable {
     }
 }
 
+public struct TraditionalInputLexiconEntry: Codable, Sendable, Equatable {
+    public var pinyin: [String]
+    public var outputs: [TraditionalInputLexiconOutput]
+
+    public init(pinyin: [String], outputs: [TraditionalInputLexiconOutput]) {
+        self.pinyin = pinyin
+        self.outputs = outputs
+    }
+}
+
+public struct TraditionalInputLexiconOutput: Codable, Sendable, Equatable {
+    public var text: String
+    public var confidence: Double
+
+    public init(text: String, confidence: Double) {
+        self.text = text
+        self.confidence = confidence
+    }
+}
+
 public struct PinyinInputAnalysis: Codable, Sendable, Equatable {
     public var tokenCount: Int
     public var hasPartialToken: Bool
@@ -41,9 +61,28 @@ public struct TraditionalInputEngine: Sendable {
     }
 
     private let scheme: Scheme
+    private let lexiconIndex: LexiconIndex
+    private let compactSegmentKeys: [String]
+    private let knownPinyinTokens: Set<String>
 
-    public init(scheme: Scheme = .fullPinyin) {
+    public init(
+        scheme: Scheme = .fullPinyin,
+        additionalLexiconEntries: [TraditionalInputLexiconEntry] = []
+    ) {
         self.scheme = scheme
+        let lexiconIndex = LexiconIndex(entries: lexicon + additionalLexiconEntries.map(LexiconEntry.init(publicEntry:)))
+        self.lexiconIndex = lexiconIndex
+        self.knownPinyinTokens = pinyinSyllables.union(lexiconIndex.knownInputTokens)
+        let fullPinyinKeys = pinyinSyllables
+            .union(lexiconIndex.knownInputTokens)
+            .union(pinyinTypoCorrections.keys)
+            .union(pinyinInitialTokens)
+        switch scheme {
+        case .fullPinyin:
+            self.compactSegmentKeys = Self.sortedCompactSegmentKeys(fullPinyinKeys)
+        case .xiaohe:
+            self.compactSegmentKeys = Self.sortedCompactSegmentKeys(Set(xiaoheSyllables.keys).union(fullPinyinKeys))
+        }
     }
 
     public func candidates(
@@ -192,6 +231,7 @@ public struct TraditionalInputEngine: Sendable {
 
             let suffix = lower[index...]
             let remaining = String(suffix)
+            var results: [[InputToken]] = []
             if pinyinSyllables.contains(remaining) {
                 let surface = originalSurface(
                     in: token,
@@ -205,12 +245,17 @@ public struct TraditionalInputEngine: Sendable {
                     isTypoNormalized: isTypo(remaining),
                     isPartial: false
                 )
-                memo[index] = [[token]]
-                return [[token]]
+                results.append([token])
             }
 
-            var results: [[InputToken]] = []
             for key in compactSegmentKeys where suffix.hasPrefix(key) {
+                if key == remaining, pinyinSyllables.contains(remaining) {
+                    continue
+                }
+                if pinyinSyllables.contains(remaining),
+                   lexiconIndex.ambiguousCompactSplitPrefixes[remaining]?.contains(key) != true {
+                    continue
+                }
                 let next = lower.index(index, offsetBy: key.count)
                 let surface = originalSurface(
                     in: token,
@@ -388,15 +433,6 @@ public struct TraditionalInputEngine: Sendable {
         pinyinTypoCorrections[token.lowercased()] != nil
     }
 
-    private var compactSegmentKeys: [String] {
-        switch scheme {
-        case .fullPinyin:
-            return Self.fullPinyinCompactSegmentKeys
-        case .xiaohe:
-            return Self.xiaoheCompactSegmentKeys
-        }
-    }
-
     private func passthroughText(
         for token: InputToken,
         preserveCapitalizedPinyin: Bool
@@ -428,6 +464,17 @@ public struct TraditionalInputEngine: Sendable {
         TextProtection.canonicalTechnicalToken(token) != nil || isCodeLikeToken(token)
     }
 
+    private func isKnownCompleteInputToken(_ token: String) -> Bool {
+        knownPinyinTokens.contains(token) || pinyinTypoCorrections[token] != nil
+    }
+
+    private func isPartialPinyinComponent(_ normalizedToken: String) -> Bool {
+        if pinyinInitialTokens.contains(normalizedToken) {
+            return true
+        }
+        return !isKnownCompleteInputToken(normalizedToken) && pinyinPrefixes.contains(normalizedToken)
+    }
+
     private func uniqueSorted(_ candidates: [TraditionalInputCandidate]) -> [TraditionalInputCandidate] {
         let bestCandidates = candidates.reduce(into: [String: TraditionalInputCandidate]()) { bestByText, candidate in
             guard let existing = bestByText[candidate.text] else {
@@ -446,28 +493,14 @@ public struct TraditionalInputEngine: Sendable {
         }
     }
 
-    private static let fullPinyinCompactSegmentKeys: [String] = {
-        let keys = pinyinSyllables
-            .union(lexiconIndex.knownInputTokens)
-            .union(pinyinTypoCorrections.keys)
-            .union(pinyinInitialTokens)
-        return keys.sorted { lhs, rhs in
+    private static func sortedCompactSegmentKeys(_ keys: Set<String>) -> [String] {
+        keys.sorted { lhs, rhs in
             if lhs.count == rhs.count {
                 return lhs < rhs
             }
             return lhs.count > rhs.count
         }
-    }()
-
-    private static let xiaoheCompactSegmentKeys: [String] = {
-        let keys = Set(xiaoheSyllables.keys).union(fullPinyinCompactSegmentKeys)
-        return keys.sorted { lhs, rhs in
-            if lhs.count == rhs.count {
-                return lhs < rhs
-            }
-            return lhs.count > rhs.count
-        }
-    }()
+    }
 }
 
 private struct InputToken: Sendable, Equatable {
@@ -486,11 +519,33 @@ private struct ParseState: Sendable, Equatable {
 private struct LexiconEntry: Sendable, Equatable {
     var pinyin: [String]
     var outputs: [LexiconOutput]
+
+    init(pinyin: [String], outputs: [LexiconOutput]) {
+        self.pinyin = pinyin
+        self.outputs = outputs
+    }
+
+    init(publicEntry: TraditionalInputLexiconEntry) {
+        self.pinyin = publicEntry.pinyin
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        self.outputs = publicEntry.outputs.map(LexiconOutput.init(publicOutput:))
+    }
 }
 
 private struct LexiconOutput: Sendable, Equatable {
     var text: String
     var confidence: Double
+
+    init(text: String, confidence: Double) {
+        self.text = text
+        self.confidence = confidence
+    }
+
+    init(publicOutput: TraditionalInputLexiconOutput) {
+        self.text = publicOutput.text
+        self.confidence = publicOutput.confidence
+    }
 }
 
 private struct LexiconIndex: Sendable {
@@ -498,6 +553,7 @@ private struct LexiconIndex: Sendable {
     var entriesByLength: [Int: [LexiconEntry]]
     var entriesByLengthAndFirstToken: [Int: [String: [LexiconEntry]]]
     var knownInputTokens: Set<String>
+    var ambiguousCompactSplitPrefixes: [String: Set<String>]
     var maxEntryLength: Int
     var partialMatchLimit: Int
 
@@ -507,9 +563,10 @@ private struct LexiconIndex: Sendable {
         var entriesByLength: [Int: [LexiconEntry]] = [:]
         var entriesByLengthAndFirstToken: [Int: [String: [LexiconEntry]]] = [:]
         var knownInputTokens = Set<String>()
+        var ambiguousCompactSplitPrefixes: [String: Set<String>] = [:]
         var maxEntryLength = 1
 
-        for entry in entries {
+        for entry in entries where !entry.pinyin.isEmpty && !entry.outputs.isEmpty {
             let key = lexiconKey(entry.pinyin)
             if let existing = exactByKey[key] {
                 exactByKey[key] = Self.mergedEntry(existing, entry)
@@ -531,12 +588,23 @@ private struct LexiconIndex: Sendable {
             for token in entry.pinyin {
                 knownInputTokens.insert(token)
             }
+            if entry.pinyin.count > 1 {
+                let compact = entry.pinyin.joined()
+                if pinyinSyllables.contains(compact) {
+                    var prefix = ""
+                    for token in entry.pinyin.dropLast() {
+                        prefix += token
+                        ambiguousCompactSplitPrefixes[compact, default: []].insert(prefix)
+                    }
+                }
+            }
         }
 
         self.exactByKey = exactByKey
         self.entriesByLength = entriesByLength
         self.entriesByLengthAndFirstToken = entriesByLengthAndFirstToken
         self.knownInputTokens = knownInputTokens
+        self.ambiguousCompactSplitPrefixes = ambiguousCompactSplitPrefixes
         self.maxEntryLength = maxEntryLength
         self.partialMatchLimit = partialMatchLimit
     }
@@ -762,31 +830,12 @@ private let xiaoheSyllables: [String: String] = [
     "ge": "ge"
 ]
 
-private let lexiconIndex = LexiconIndex(entries: lexicon)
-
-private let knownPinyinTokens: Set<String> = {
-    pinyinSyllables.union(lexiconIndex.knownInputTokens)
-}()
-
 private func lexiconKey(_ pinyin: [String]) -> String {
     pinyin.joined(separator: "\u{1F}")
 }
 
-private func isKnownCompleteInputToken(_ token: String) -> Bool {
-    pinyinSyllables.contains(token)
-        || lexiconIndex.knownInputTokens.contains(token)
-        || pinyinTypoCorrections[token] != nil
-}
-
 private func isPinyinPrefix(_ token: String) -> Bool {
     pinyinPrefixes.contains(token)
-}
-
-private func isPartialPinyinComponent(_ normalizedToken: String) -> Bool {
-    if pinyinInitialTokens.contains(normalizedToken) {
-        return true
-    }
-    return !isKnownCompleteInputToken(normalizedToken) && pinyinPrefixes.contains(normalizedToken)
 }
 
 private func isInitialToken(_ token: InputToken) -> Bool {
