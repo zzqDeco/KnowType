@@ -143,7 +143,7 @@ public enum InputSessionCommitPolicy {
             )
         case .optionR:
             return .polishRequested(rawInput)
-        case .optionNumber:
+        case .optionNumber, .toggleSymbolMode:
             return .noAction
         }
     }
@@ -161,7 +161,7 @@ public enum InputSessionCommitPolicy {
                 return .commit(rawInput)
             case .optionR:
                 return .polishRequested(rawInput)
-            case .optionNumber:
+            case .optionNumber, .toggleSymbolMode:
                 return .noAction
             }
         case .prefixCandidate(let index):
@@ -174,6 +174,8 @@ public enum InputSessionCommitPolicy {
                     return .commit(suggestion.prefixCandidates[index].text)
                 case .optionR:
                     return .polishRequested(rawInput)
+                case .toggleSymbolMode:
+                    return .noAction
                 }
             }
             return InputCompositionController().handle(
@@ -196,6 +198,8 @@ public enum InputSessionCommitPolicy {
                 )
             case .optionR:
                 return .polishRequested(rawInput)
+            case .toggleSymbolMode:
+                return .noAction
             }
         }
     }
@@ -318,7 +322,7 @@ public actor InputSessionController {
 
         let result: InputCommitResult
         switch action {
-        case .space, .tab, .optionR:
+        case .space, .tab, .optionR, .toggleSymbolMode:
             result = compositionController.handle(
                 action: action,
                 prefixCandidates: [prefix],

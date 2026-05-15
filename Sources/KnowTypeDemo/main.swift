@@ -102,6 +102,8 @@ struct KnowTypeDemo {
             return "Option+\(number)"
         case .optionR:
             return "Option+R"
+        case .toggleSymbolMode:
+            return "Option+."
         }
     }
 
