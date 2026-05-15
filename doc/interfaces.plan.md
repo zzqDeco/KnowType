@@ -94,6 +94,7 @@ Core candidate types:
 - `TraditionalInputLexiconEntry`: authorized local lexicon row with normalized pinyin tokens and one or more outputs.
 - `TraditionalInputLexiconOutput`: local lexicon output text and confidence score.
 - `TraditionalInputLexiconCatalog`: combined authorized local lexicon entries plus load diagnostics.
+- `TraditionalInputLexiconFileSource`: file and directory loader for local lexicon resources.
 - `TraditionalInputLexiconResourceLoader`: JSON/TSV parser for audited local lexicon resources.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
@@ -108,6 +109,8 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 `TraditionalInputLexiconResourceLoader` accepts JSON resources shaped as `[TraditionalInputLexiconEntry]` or TSV rows in `pinyin<TAB>text<TAB>confidence` form. TSV confidence is optional and defaults to `0.72`. The loader returns typed errors for invalid UTF-8, malformed rows, empty text, or out-of-range confidence.
 
 `TraditionalInputLexiconCatalogLoader` accepts named resources, loads each one independently, preserves valid entries, and returns diagnostics for failed resources. `TraditionalInputLexiconCatalog.makeEngine()` is the preferred handoff into `TraditionalInputEngine`.
+
+`TraditionalInputLexiconFileSource` infers `.json` and `.tsv` formats from file extensions, reads explicit file lists or sorted directory contents, skips hidden directory entries, and reports unsupported or unreadable files through catalog diagnostics.
 
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 

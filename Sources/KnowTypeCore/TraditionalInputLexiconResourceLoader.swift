@@ -6,6 +6,8 @@ public enum TraditionalInputLexiconResourceFormat: String, Sendable, Equatable {
 }
 
 public enum TraditionalInputLexiconResourceError: Error, Sendable, Equatable, LocalizedError {
+    case unsupportedFormat(String)
+    case unreadableResource(String)
     case invalidUTF8
     case invalidJSON(String)
     case invalidTSVLine(line: Int, reason: String)
@@ -13,6 +15,10 @@ public enum TraditionalInputLexiconResourceError: Error, Sendable, Equatable, Lo
 
     public var errorDescription: String? {
         switch self {
+        case let .unsupportedFormat(format):
+            return "Lexicon resource format is unsupported: \(format)"
+        case let .unreadableResource(reason):
+            return "Lexicon resource could not be read: \(reason)"
         case .invalidUTF8:
             return "Lexicon resource is not valid UTF-8."
         case let .invalidJSON(reason):
