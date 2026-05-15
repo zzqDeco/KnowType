@@ -20,6 +20,7 @@ This directory contains short notes for important source files and subsystems. T
 - [TraditionalInputLexiconCatalog](TraditionalInputLexiconCatalog.plan.md)
 - [TraditionalInputLexiconFileSource](TraditionalInputLexiconFileSource.plan.md)
 - [TraditionalInputLexiconResourceLoader](TraditionalInputLexiconResourceLoader.plan.md)
+- [TraditionalInputSeedLexicon](TraditionalInputSeedLexicon.plan.md)
 - [PinyinTables](PinyinTables.plan.md)
 - [KnowTypeDemo](KnowTypeDemo.plan.md)
 

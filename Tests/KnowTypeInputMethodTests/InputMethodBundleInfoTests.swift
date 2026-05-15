@@ -2,6 +2,18 @@ import Foundation
 import XCTest
 
 final class InputMethodBundleInfoTests: XCTestCase {
+    func testBuildScriptPackagesSwiftPMResourceBundlesInsideAppResources() throws {
+        let scriptURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("scripts/build-inputmethod-bundle.sh")
+        let script = try String(contentsOf: scriptURL, encoding: .utf8)
+
+        XCTAssertTrue(script.contains(#""$BIN_DIR"/KnowType_*.bundle"#))
+        XCTAssertTrue(script.contains(#"cp -R "$resource_bundle" "$CONTENTS_DIR/Resources/""#))
+    }
+
     func testInputMethodInfoDeclaresVisibleInputMode() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

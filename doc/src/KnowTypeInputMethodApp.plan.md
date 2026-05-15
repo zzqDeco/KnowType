@@ -7,5 +7,6 @@ It starts `IMKServer` with the connection name from `Info.plist` and keeps an ac
 Local bundle assembly is intentionally script-based for v1:
 
 - `scripts/build-inputmethod-bundle.sh` builds the executable and writes `dist/KnowType.app`.
+- SwiftPM resource bundles such as `KnowType_KnowTypeCore.bundle` are copied into `Contents/Resources`, where the signed app bundle can contain them.
 - `scripts/install-inputmethod.sh` copies the bundle into `~/Library/Input Methods`.
 - `scripts/uninstall-inputmethod.sh` removes that local bundle.

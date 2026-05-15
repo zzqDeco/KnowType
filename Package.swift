@@ -19,7 +19,10 @@ let package = Package(
     targets: [
         .target(
             name: "KnowTypeCore",
-            path: "Sources/KnowTypeCore"
+            path: "Sources/KnowTypeCore",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .target(
             name: "KnowTypeProviders",
