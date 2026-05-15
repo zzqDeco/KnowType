@@ -116,6 +116,8 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 
 `InputMethodLexiconRuntime` resolves `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and `~/Library/Application Support/KnowType/Lexicons`, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon.
 
+`LexiconSettingsViewModel` reports `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and the default `~/Library/Application Support/KnowType/Lexicons` directory in the settings app. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, but it does not create or mutate lexicon files in the MVP.
+
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 
 - raw input is shown only when no prefix or continuation suggestion exists

@@ -44,7 +44,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "KnowTypeSettingsApp",
-            dependencies: ["KnowTypeProviders"],
+            dependencies: ["KnowTypeCore", "KnowTypeProviders"],
             path: "Sources/KnowTypeSettingsApp",
             linkerSettings: [
                 .linkedFramework("SwiftUI", .when(platforms: [.macOS]))

@@ -44,7 +44,7 @@ KnowType is currently a local MVP for development and manual testing. It include
 - a local InputMethodKit app bundle built into `dist/KnowType.app`
 - a compact custom candidate panel instead of relying on `IMKCandidates` as the main UI
 - a clean-room pinyin engine for MVP Chinese input coverage
-- SwiftUI settings for provider profiles, privacy summary, input/candidate behavior, and debug install notes
+- SwiftUI settings for provider profiles, local lexicon status, privacy summary, input/candidate behavior, and debug install notes
 - Keychain-backed API key storage for provider profiles
 - local candidate-learning history stored separately from provider configuration
 
@@ -137,6 +137,15 @@ Local candidate-learning history is stored at:
 ```text
 ~/Library/Application Support/KnowType/user-selection-history.json
 ```
+
+Local JSON/TSV lexicons are read from:
+
+```text
+~/Library/Application Support/KnowType/Lexicons
+```
+
+The settings app shows whether this directory exists, how many lexicon entries loaded, and any resource diagnostics. Missing directories are allowed; KnowType falls back to the bundled seed lexicon.
+For development, `KNOWTYPE_LEXICON_DIR` and colon-separated `KNOWTYPE_LEXICON_DIRS` are also recognized before the default directory.
 
 Profile fields:
 

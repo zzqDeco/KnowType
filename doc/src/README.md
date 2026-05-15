@@ -27,6 +27,7 @@ This directory contains short notes for important source files and subsystems. T
 
 ## Providers And Settings
 
+- [LexiconSettingsViewModel](LexiconSettingsViewModel.plan.md)
 - [Sources-KnowTypeProviders](Sources-KnowTypeProviders.plan.md)
 - [Provider Runtime Local](provider-runtime-local.plan.md)
 - [ProviderProfilesViewModel](ProviderProfilesViewModel.plan.md)
