@@ -244,12 +244,14 @@ public actor InputSessionController {
     public func update(
         rawInput: String,
         appBundleID: String? = nil,
-        locale: KnowTypeLocale = .mixed
+        locale: KnowTypeLocale = .mixed,
+        userSelectionHistory: [String] = []
     ) async -> SuggestionResponse {
         let context = InputContext(
             rawInput: rawInput,
             appBundleID: appBundleID,
-            locale: locale
+            locale: locale,
+            userSelectionHistory: userSelectionHistory
         )
         let isLevelZero = TextProtection.requiresNoCorrection(rawInput, appBundleID: appBundleID)
         let loader = isLevelZero

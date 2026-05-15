@@ -77,6 +77,19 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertFalse(state.polishRequested)
     }
 
+    func testUpdatePassesUserSelectionHistoryToSuggestionLoader() async {
+        let controller = InputSessionController { context in
+            XCTAssertEqual(context.userSelectionHistory, ["方法", "方向"])
+            return Self.makeSuggestion()
+        }
+
+        _ = await controller.update(
+            rawInput: "fangan",
+            locale: .zhCN,
+            userSelectionHistory: ["方法", "方向"]
+        )
+    }
+
     func testPrefixSelectionUsesSelectedPrefixAndChecksBounds() async {
         let controller = InputSessionController { _ in
             Self.makeSuggestion()

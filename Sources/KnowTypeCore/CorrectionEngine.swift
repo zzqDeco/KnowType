@@ -29,7 +29,10 @@ public final class CorrectionEngine: Sendable {
         }
 
         return uniqueSorted(
-            localCandidates(for: raw, locale: context.locale, protectedRanges: protectedRanges)
+            applySelectionHistory(
+                context.userSelectionHistory,
+                to: localCandidates(for: raw, locale: context.locale, protectedRanges: protectedRanges)
+            )
         )
     }
 
@@ -64,7 +67,7 @@ public final class CorrectionEngine: Sendable {
             }
         }
 
-        return uniqueSorted(candidates)
+        return uniqueSorted(applySelectionHistory(context.userSelectionHistory, to: candidates))
     }
 
     private func shouldAskCloud(
@@ -208,6 +211,42 @@ public final class CorrectionEngine: Sendable {
                 }
                 return $0.confidence > $1.confidence
             }
+    }
+
+    private func applySelectionHistory(
+        _ history: [String],
+        to candidates: [CorrectionCandidate]
+    ) -> [CorrectionCandidate] {
+        let weights = selectionHistoryWeights(history)
+        guard !weights.isEmpty else {
+            return candidates
+        }
+
+        return candidates.map { candidate in
+            guard let weight = weights[candidate.text] else {
+                return candidate
+            }
+            var boosted = candidate
+            boosted.confidence = min(1.0, boosted.confidence + weight)
+            return boosted
+        }
+    }
+
+    private func selectionHistoryWeights(_ history: [String]) -> [String: Double] {
+        let cappedHistory = history
+            .suffix(64)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cappedHistory.isEmpty else {
+            return [:]
+        }
+
+        var weights: [String: Double] = [:]
+        for (offset, text) in cappedHistory.reversed().enumerated() {
+            let recency = max(0.0, 0.12 - Double(offset) * 0.01)
+            weights[text, default: 0] += 0.08 + recency
+        }
+        return weights.mapValues { min($0, 0.28) }
     }
 }
 

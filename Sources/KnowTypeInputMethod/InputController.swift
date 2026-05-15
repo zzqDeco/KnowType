@@ -27,6 +27,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
     private var candidatePanelState = CandidatePanelState()
+    private var userSelectionHistory: [String] = []
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
@@ -177,10 +178,12 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                     return applyCommitResult(result, client: sender)
                 }
                 if let visibleSelection = candidatePanelState.selectVisiblePrefixCandidate(shortcutNumber: number),
-                   let selectedCandidate = sessionSelection(from: inputCandidateSelection(
+                   let inputSelection = inputCandidateSelection(
                        for: visibleSelection,
                        in: candidatePanelState.windowState.viewModel
-                   )) {
+                   ),
+                   let selectedCandidate = sessionSelection(from: inputSelection) {
+                    selectedNativeCandidate = inputSelection
                     let result = InputSessionCommitPolicy.result(
                         for: .space,
                         rawInput: rawBuffer,
@@ -190,6 +193,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                         appBundleID: appBundleIdentifier(client: sender),
                         locale: locale
                     )
+                    learnSelectedPrefix(action: .space, result: result)
                     return applyCommitResult(result, client: sender)
                 }
                 return appendComposition(String(number), client: sender)
@@ -237,6 +241,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return
         }
         let appBundleID = appBundleIdentifier(client: sender)
+        let selectionHistory = userSelectionHistory
         suggestionTask = Task { [weak self] in
             guard let self else {
                 return
@@ -244,7 +249,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             let suggestion = await self.sessionController.update(
                 rawInput: rawInput,
                 appBundleID: appBundleID,
-                locale: self.locale
+                locale: self.locale,
+                userSelectionHistory: selectionHistory
             )
             guard !Task.isCancelled else {
                 return
@@ -282,7 +288,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         let context = InputContext(
             rawInput: rawBuffer,
             appBundleID: appBundleIdentifier(client: sender),
-            locale: locale
+            locale: locale,
+            userSelectionHistory: userSelectionHistory
         )
         let suggestion = InputMethodPipeline.localSuggestions(
             for: context,
@@ -297,6 +304,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     @discardableResult
     private func commit(action: InputAction, client sender: Any!) -> Bool {
         let result = commitResult(for: action, client: sender)
+        learnSelectedPrefix(action: action, result: result)
         return applyCommitResult(result, client: sender)
     }
 
@@ -318,6 +326,51 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return true
         case .noAction:
             return InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: !rawBuffer.isEmpty)
+        }
+    }
+
+    private func learnSelectedPrefix(action: InputAction, result: InputCommitResult) {
+        guard case .commit(let committedText) = result,
+              !committedText.isEmpty,
+              action != .optionR,
+              let prefix = selectedPrefixTextForLearning(),
+              prefix != rawBuffer,
+              committedText.hasPrefix(prefix) else {
+            return
+        }
+        recordUserSelection(prefix)
+    }
+
+    private func selectedPrefixTextForLearning() -> String? {
+        if let selectedNativeCandidate {
+            switch selectedNativeCandidate.kind {
+            case .rawInput:
+                return nil
+            case .prefixCandidate(let index):
+                return lastSuggestion?.prefixCandidates[safe: index]?.text
+            case .continuationCandidate:
+                return lastSuggestion?.prefixCandidates.first?.text
+            }
+        }
+
+        switch candidatePanelState.windowState.selection {
+        case .prefixCandidate(let index):
+            return lastSuggestion?.prefixCandidates[safe: index]?.text
+        case .continuationCandidate:
+            return lastSuggestion?.prefixCandidates.first?.text
+        case .rawInput, .none:
+            return lastSuggestion?.prefixCandidates.first?.text
+        }
+    }
+
+    private func recordUserSelection(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        userSelectionHistory.append(trimmed)
+        if userSelectionHistory.count > Self.maxUserSelectionHistory {
+            userSelectionHistory.removeFirst(userSelectionHistory.count - Self.maxUserSelectionHistory)
         }
     }
 
@@ -592,5 +645,12 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private static let textOnlyKeyCode = -1
+    private static let maxUserSelectionHistory = 64
 }
 #endif
+
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}

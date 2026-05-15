@@ -37,6 +37,25 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(candidates.count, 5)
     }
 
+    func testUserSelectionHistoryBoostsLocalPrefixRanking() async {
+        let engine = CorrectionEngine()
+
+        let defaultCandidates = await engine.correct(
+            InputContext(rawInput: "fangan", locale: .zhCN)
+        )
+        let boostedCandidates = await engine.correct(
+            InputContext(
+                rawInput: "fangan",
+                locale: .zhCN,
+                userSelectionHistory: ["方法"]
+            )
+        )
+
+        XCTAssertEqual(defaultCandidates.first?.text, "方案")
+        XCTAssertEqual(boostedCandidates.first?.text, "方法")
+        XCTAssertTrue(boostedCandidates.map(\.text).contains("方案"))
+    }
+
     func testChinesePinyinCorrectionDecodesCapitalizedInitialToken() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(

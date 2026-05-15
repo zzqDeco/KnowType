@@ -28,6 +28,7 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 
 - `TextProtection` detects Level 0 input such as URLs, emails, paths, commands, code-like snippets, and protected app contexts.
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
+- `CorrectionEngine` can boost generated prefix candidates from local user selection history without adding new dictionary entries or sending selection data to providers.
 - English and mixed-input paths preserve technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`.
 - `CorrectionEngine` may ask a configured provider for unknown pinyin-shaped input only when `TraditionalInputEngine` reports no local candidate and the input is not protected technical or English text.
 - `PrefixContinuationEngine` sanitizes provider output so continuation candidates do not repeat or rewrite the locked prefix.
@@ -73,6 +74,7 @@ Local OpenAI-compatible runtimes may leave the model blank for `/v1/models` disc
 
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
 - `InputSessionController` turns raw input and actions into suggestion and commit decisions.
+- The IMK controller keeps recent prefix selections in memory and passes them into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
 - `CandidatePanelWindowController` owns the AppKit panel.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
