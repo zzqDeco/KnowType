@@ -17,6 +17,7 @@ This directory contains short notes for important source files and subsystems. T
 
 - [Sources-KnowTypeCore](Sources-KnowTypeCore.plan.md)
 - [TraditionalInputEngine](TraditionalInputEngine.plan.md)
+- [TraditionalInputLexiconResourceLoader](TraditionalInputLexiconResourceLoader.plan.md)
 - [PinyinTables](PinyinTables.plan.md)
 - [KnowTypeDemo](KnowTypeDemo.plan.md)
 

@@ -13,6 +13,7 @@
 | [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Local candidate learning persisted across IMK restarts | Active reference |
 | [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | Candidate PageDown/PageUp offset-preserving behavior | Active reference |
 | [traditional-lexicon-extension.plan.md](traditional-lexicon-extension.plan.md) | Authorized local lexicon extension path for the Chinese engine | Active reference |
+| [traditional-lexicon-resource-loader.plan.md](traditional-lexicon-resource-loader.plan.md) | JSON/TSV resource loader for authorized local lexicons | Active reference |
 
 ## Delivered MVP Slices
 
