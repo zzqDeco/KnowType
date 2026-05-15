@@ -40,6 +40,9 @@ rm -rf "$TARGET_PATH"
 cp -R "$BUNDLE_PATH" "$TARGET_PATH"
 rm -rf "$BUNDLE_PATH"
 
+open "$TARGET_PATH" >/dev/null 2>&1 || true
+sleep 0.25
+
 TARGET_PATH="$TARGET_PATH" swift - <<'SWIFT'
 import Carbon
 import Foundation
@@ -92,16 +95,15 @@ if let mode = inputSource(id: modeID) {
         fputs("Warning: TISEnableInputSource(mode) returned \\(enableStatus)\\n", stderr)
     }
     let selectStatus = TISSelectInputSource(mode)
-    if selectStatus != noErr {
-        fputs("Warning: TISSelectInputSource(mode) returned \\(selectStatus)\\n", stderr)
+    if selectStatus == noErr {
+        print("Requested KnowType input source selection: \(modeID)")
+    } else {
+        fputs("Warning: TISSelectInputSource(mode) returned \\(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\\n", stderr)
     }
 } else {
     fputs("Warning: KnowType input mode was not found after registration.\\n", stderr)
 }
 SWIFT
 
-open "$TARGET_PATH" >/dev/null 2>&1 || true
-sleep 0.25
-
 echo "Installed KnowType to: $TARGET_PATH"
-echo "Selected KnowType input source if macOS accepted the registration."
+echo "Run ./scripts/diagnose-inputmethod.sh for the read-only system status check."
