@@ -209,7 +209,7 @@ public struct TraditionalInputEngine: Sendable {
 
         var states: [ParseState] = []
 
-        for length in stride(from: min(maxEntryLength, tokens.count - index), through: 1, by: -1) {
+        for length in stride(from: min(lexiconIndex.maxEntryLength, tokens.count - index), through: 1, by: -1) {
             let tokenSlice = tokens[index..<(index + length)]
             if preserveCapitalizedPinyin {
                 guard !tokenSlice.contains(where: { token in
@@ -219,7 +219,7 @@ public struct TraditionalInputEngine: Sendable {
                 }
             }
 
-            let entries = matchingEntries(for: tokenSlice)
+            let entries = lexiconIndex.matchingEntries(for: tokenSlice)
 
             let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
             for entry in entries {
@@ -273,31 +273,6 @@ public struct TraditionalInputEngine: Sendable {
             .map { $0 }
         memo[index] = parsed
         return parsed
-    }
-
-    private func matchingEntries(for tokens: ArraySlice<InputToken>) -> [LexiconEntry] {
-        let normalized = tokens.map(\.normalized)
-        let key = lexiconKey(normalized)
-        if !tokens.contains(where: \.isPartial),
-           let entry = lexiconByKey[key] {
-            return [entry]
-        }
-
-        return lexicon.filter { entry in
-            guard entry.pinyin.count == tokens.count else {
-                return false
-            }
-            for (entryToken, inputToken) in zip(entry.pinyin, tokens) {
-                if inputToken.isPartial {
-                    guard entryToken.hasPrefix(inputToken.normalized) else {
-                        return false
-                    }
-                } else if entryToken != inputToken.normalized {
-                    return false
-                }
-            }
-            return true
-        }
     }
 
     private func partialMatchPenalty(entry: LexiconEntry, tokens: ArraySlice<InputToken>) -> Double {
@@ -384,7 +359,7 @@ public struct TraditionalInputEngine: Sendable {
 
     private static let fullPinyinCompactSegmentKeys: [String] = {
         let keys = pinyinSyllables
-            .union(knownLexiconInputTokens)
+            .union(lexiconIndex.knownInputTokens)
             .union(pinyinTypoCorrections.keys)
             .union(pinyinInitialTokens)
         return keys.sorted { lhs, rhs in
@@ -427,6 +402,112 @@ private struct LexiconEntry: Sendable, Equatable {
 private struct LexiconOutput: Sendable, Equatable {
     var text: String
     var confidence: Double
+}
+
+private struct LexiconIndex: Sendable {
+    var exactByKey: [String: LexiconEntry]
+    var entriesByLength: [Int: [LexiconEntry]]
+    var entriesByLengthAndFirstToken: [Int: [String: [LexiconEntry]]]
+    var knownInputTokens: Set<String>
+    var maxEntryLength: Int
+    var partialMatchLimit: Int
+
+    init(entries: [LexiconEntry], partialMatchLimit: Int = 64) {
+        var exactByKey: [String: LexiconEntry] = [:]
+        var orderedKeys: [String] = []
+        var entriesByLength: [Int: [LexiconEntry]] = [:]
+        var entriesByLengthAndFirstToken: [Int: [String: [LexiconEntry]]] = [:]
+        var knownInputTokens = Set<String>()
+        var maxEntryLength = 1
+
+        for entry in entries {
+            let key = lexiconKey(entry.pinyin)
+            if let existing = exactByKey[key] {
+                exactByKey[key] = Self.mergedEntry(existing, entry)
+            } else {
+                exactByKey[key] = entry
+                orderedKeys.append(key)
+            }
+        }
+
+        for key in orderedKeys {
+            guard let entry = exactByKey[key] else {
+                continue
+            }
+            entriesByLength[entry.pinyin.count, default: []].append(entry)
+            if let firstToken = entry.pinyin.first {
+                entriesByLengthAndFirstToken[entry.pinyin.count, default: [:]][firstToken, default: []].append(entry)
+            }
+            maxEntryLength = max(maxEntryLength, entry.pinyin.count)
+            for token in entry.pinyin {
+                knownInputTokens.insert(token)
+            }
+        }
+
+        self.exactByKey = exactByKey
+        self.entriesByLength = entriesByLength
+        self.entriesByLengthAndFirstToken = entriesByLengthAndFirstToken
+        self.knownInputTokens = knownInputTokens
+        self.maxEntryLength = maxEntryLength
+        self.partialMatchLimit = partialMatchLimit
+    }
+
+    func matchingEntries(for tokens: ArraySlice<InputToken>) -> [LexiconEntry] {
+        let tokenArray = Array(tokens)
+        let normalized = tokenArray.map(\.normalized)
+        if !tokenArray.contains(where: \.isPartial),
+           let entry = exactByKey[lexiconKey(normalized)] {
+            return [entry]
+        }
+
+        return candidateEntries(for: tokenArray)
+            .lazy
+            .filter { entry in matches(entry, tokens: tokenArray) }
+            .prefix(partialMatchLimit)
+            .map { $0 }
+    }
+
+    private func candidateEntries(for tokens: [InputToken]) -> [LexiconEntry] {
+        guard let firstToken = tokens.first else {
+            return []
+        }
+        if firstToken.isPartial {
+            return entriesByLength[tokens.count] ?? []
+        }
+        return entriesByLengthAndFirstToken[tokens.count]?[firstToken.normalized] ?? []
+    }
+
+    private func matches(_ entry: LexiconEntry, tokens: [InputToken]) -> Bool {
+        guard entry.pinyin.count == tokens.count else {
+            return false
+        }
+        for (entryToken, inputToken) in zip(entry.pinyin, tokens) {
+            if inputToken.isPartial {
+                guard entryToken.hasPrefix(inputToken.normalized) else {
+                    return false
+                }
+            } else if entryToken != inputToken.normalized {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func mergedEntry(_ lhs: LexiconEntry, _ rhs: LexiconEntry) -> LexiconEntry {
+        var outputOrder: [String] = []
+        var outputsByText: [String: LexiconOutput] = [:]
+        for output in lhs.outputs + rhs.outputs {
+            if outputsByText[output.text] == nil {
+                outputOrder.append(output.text)
+                outputsByText[output.text] = output
+            } else if let existing = outputsByText[output.text],
+                      output.confidence > existing.confidence {
+                outputsByText[output.text] = output
+            }
+        }
+        let outputs = outputOrder.compactMap { outputsByText[$0] }
+        return LexiconEntry(pinyin: lhs.pinyin, outputs: outputs)
+    }
 }
 
 private let lexicon: [LexiconEntry] = [
@@ -592,24 +673,10 @@ private let xiaoheSyllables: [String: String] = [
     "ge": "ge"
 ]
 
-private let maxEntryLength = lexicon.map(\.pinyin.count).max() ?? 1
-
-private let lexiconByKey: [String: LexiconEntry] = {
-    Dictionary(uniqueKeysWithValues: lexicon.map { (lexiconKey($0.pinyin), $0) })
-}()
-
-private let knownLexiconInputTokens: Set<String> = {
-    var tokens = Set<String>()
-    for entry in lexicon {
-        for token in entry.pinyin {
-            tokens.insert(token)
-        }
-    }
-    return tokens
-}()
+private let lexiconIndex = LexiconIndex(entries: lexicon)
 
 private let knownPinyinTokens: Set<String> = {
-    pinyinSyllables.union(knownLexiconInputTokens)
+    pinyinSyllables.union(lexiconIndex.knownInputTokens)
 }()
 
 private func lexiconKey(_ pinyin: [String]) -> String {
@@ -618,7 +685,7 @@ private func lexiconKey(_ pinyin: [String]) -> String {
 
 private func isKnownCompleteInputToken(_ token: String) -> Bool {
     pinyinSyllables.contains(token)
-        || knownLexiconInputTokens.contains(token)
+        || lexiconIndex.knownInputTokens.contains(token)
         || pinyinTypoCorrections[token] != nil
 }
 
