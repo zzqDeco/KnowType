@@ -27,7 +27,7 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 `KnowTypeCore` owns model-neutral behavior:
 
 - `TextProtection` detects Level 0 input such as URLs, emails, paths, commands, code-like snippets, and protected app contexts.
-- `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
+- `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
 - English and mixed-input paths preserve technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`.
 - `PrefixContinuationEngine` sanitizes provider output so continuation candidates do not repeat or rewrite the locked prefix.
 

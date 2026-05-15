@@ -11,6 +11,6 @@ Level 0 detection is pure core policy. It covers URLs, emails, file paths, comma
 
 Provider-specific protocol details must not be added here.
 
-`TraditionalInputEngine` is still license-clean in MVP, but it now uses a full-pinyin syllable table, pinyin-prefix recognition, memoized lattice parsing, and a larger built-in smoke-test lexicon. It provides multiple same-pinyin single-character candidates for inputs such as `ni`, phrase candidates for inputs such as `nishishei`, partial-syllable handling for inputs such as `nih`, `niw`, and `xianz`, and technical-token passthrough for mixed Chinese/English input.
+`TraditionalInputEngine` is still license-clean in MVP, but it now uses a full-pinyin syllable table, pinyin-prefix recognition, memoized lattice parsing, indexed lexicon lookup, and a larger built-in smoke-test lexicon. It provides multiple same-pinyin single-character candidates for inputs such as `ni`, phrase candidates for inputs such as `nishishei`, partial-syllable handling for inputs such as `nih`, `niw`, and `xianz`, and technical-token passthrough for mixed Chinese/English input.
 
 `CorrectionEngine` gates local traditional pinyin decoding by locale. `en-US` input stays on the English spellcheck path, while `zh-CN` input can decode capitalized pinyin used at the start of a composition.
