@@ -8,6 +8,7 @@ This directory contains short notes for important source files and subsystems. T
 - [CandidatePanelRenderer](CandidatePanelRenderer.plan.md)
 - [CandidatePanelWindowController](CandidatePanelWindowController.plan.md)
 - [InputSessionController](InputSessionController.plan.md)
+- [InputMethodLexiconRuntime](InputMethodLexiconRuntime.plan.md)
 - [InputSymbolMode](InputSymbolMode.plan.md)
 - [KnowTypeInputMethodApp](KnowTypeInputMethodApp.plan.md)
 - [Sources-KnowTypeInputMethod](Sources-KnowTypeInputMethod.plan.md)

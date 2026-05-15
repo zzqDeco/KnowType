@@ -17,6 +17,7 @@
 | [traditional-lexicon-catalog.plan.md](traditional-lexicon-catalog.plan.md) | Multi-resource catalog and diagnostics for local lexicons | Active reference |
 | [traditional-lexicon-file-source.plan.md](traditional-lexicon-file-source.plan.md) | File and directory loading for authorized local lexicon resources | Active reference |
 | [bundled-seed-lexicon-resource.plan.md](bundled-seed-lexicon-resource.plan.md) | Package-resource seed lexicon loaded through the local resource path | Active reference |
+| [runtime-lexicon-directory.plan.md](runtime-lexicon-directory.plan.md) | Runtime directory loading for user-owned local lexicons | Active reference |
 
 ## Delivered MVP Slices
 

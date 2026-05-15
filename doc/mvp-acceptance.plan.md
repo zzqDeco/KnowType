@@ -22,6 +22,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - Explicit polish only: `Option + R` is the only default path that requests rewriting
 - Candidate panel rendering keeps raw input, locked prefix, and continuation as separate semantic rows while presenting a flat native-style list.
 - Candidate panel shortcuts match commit behavior: `⇥` for the first continuation and `⌥2` for the second continuation.
+- Runtime lexicon directory loading can add user-owned JSON/TSV entries without changing Swift source.
 - Provider profiles round-trip without API key values.
 - Provider resolution pulls secrets through `SecretStore`.
 

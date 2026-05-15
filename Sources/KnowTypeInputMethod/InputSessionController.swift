@@ -215,9 +215,18 @@ public actor InputSessionController {
     private let compositionController: InputCompositionController
     private var updateGeneration: UInt64 = 0
 
-    public init(provider: (any LLMProvider)? = nil) {
-        let pipeline = InputMethodPipeline(provider: provider)
-        let protectedPipeline = InputMethodPipeline(provider: nil)
+    public init(
+        provider: (any LLMProvider)? = nil,
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+    ) {
+        let pipeline = InputMethodPipeline(
+            provider: provider,
+            traditionalInputEngine: traditionalInputEngine
+        )
+        let protectedPipeline = InputMethodPipeline(
+            provider: nil,
+            traditionalInputEngine: traditionalInputEngine
+        )
         self.init(
             suggestionLoader: { context in
                 await pipeline.suggestions(for: context)
