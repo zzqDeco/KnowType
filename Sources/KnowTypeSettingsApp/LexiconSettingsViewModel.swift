@@ -50,6 +50,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
     @Published public private(set) var directories: [LexiconDirectoryStatus]
     @Published public private(set) var totalLoadedEntryCount: Int
     @Published public private(set) var lastRefreshDate: Date?
+    @Published public private(set) var lastActionMessage: String?
 
     private let directoryURLs: [URL]
     private let fileManager: FileManager
@@ -68,6 +69,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
         self.dateProvider = dateProvider
         self.directories = []
         self.totalLoadedEntryCount = 0
+        self.lastActionMessage = nil
         refresh()
     }
 
@@ -93,6 +95,26 @@ public final class LexiconSettingsViewModel: ObservableObject {
             total + snapshot.loadedEntryCount
         }
         lastRefreshDate = dateProvider()
+    }
+
+    @discardableResult
+    public func createMissingDirectories() -> Bool {
+        var createdCount = 0
+        do {
+            for directory in directoryURLs where !isDirectory(directory) {
+                try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+                createdCount += 1
+            }
+            lastActionMessage = createdCount == 0
+                ? "All lexicon directories already exist."
+                : "Created \(createdCount) lexicon director\(createdCount == 1 ? "y" : "ies")."
+            refresh()
+            return true
+        } catch {
+            lastActionMessage = error.localizedDescription
+            refresh()
+            return false
+        }
     }
 
     private func loadDirectoryStatus(_ directory: URL) -> LexiconDirectoryStatus {

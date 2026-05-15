@@ -148,7 +148,7 @@ KnowType 通过 `ProviderProfile` 和 `ProviderFactory` 加载模型 provider。
 ~/Library/Application Support/KnowType/Lexicons
 ```
 
-设置页会显示这个目录是否存在、加载了多少词条，以及资源诊断。目录不存在是允许的；KnowType 会继续使用内置 seed 词库。
+设置页会显示这个目录是否存在、加载了多少词条，以及资源诊断，也可以一键创建缺失目录。目录不存在是允许的；KnowType 会继续使用内置 seed 词库。
 开发时也可以通过 `KNOWTYPE_LEXICON_DIR` 和冒号分隔的 `KNOWTYPE_LEXICON_DIRS` 指定额外目录，这些目录会排在默认目录之前。
 
 Profile 字段：

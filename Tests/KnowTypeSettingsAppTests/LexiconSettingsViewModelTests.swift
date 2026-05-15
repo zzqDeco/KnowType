@@ -59,6 +59,7 @@ final class LexiconSettingsViewModelTests: XCTestCase {
     func testMissingDirectoryIsSilent() {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("KnowTypeMissingLexicon-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
 
         let viewModel = LexiconSettingsViewModel(directoryURLs: [directory])
 
@@ -68,6 +69,31 @@ final class LexiconSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.directories.first?.resourceFileCount, 0)
         XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 0)
         XCTAssertEqual(viewModel.directories.first?.diagnostics, [])
+    }
+
+    func testCreateMissingDirectoriesCreatesAndRefreshesStatus() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KnowTypeCreateLexicon-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let viewModel = LexiconSettingsViewModel(directoryURLs: [directory])
+
+        XCTAssertEqual(viewModel.directories.first?.exists, false)
+
+        XCTAssertTrue(viewModel.createMissingDirectories())
+
+        XCTAssertEqual(viewModel.directories.first?.exists, true)
+        XCTAssertEqual(viewModel.lastActionMessage, "Created 1 lexicon directory.")
+    }
+
+    func testCreateMissingDirectoriesReportsNoopWhenAllExist() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let viewModel = LexiconSettingsViewModel(directoryURLs: [directory])
+
+        XCTAssertTrue(viewModel.createMissingDirectories())
+
+        XCTAssertEqual(viewModel.directories.first?.exists, true)
+        XCTAssertEqual(viewModel.lastActionMessage, "All lexicon directories already exist.")
     }
 
     func testDuplicateDirectoriesAreShownOnce() throws {

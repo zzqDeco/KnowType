@@ -121,6 +121,18 @@ private struct LexiconSettingsView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                if viewModel.directories.contains(where: { !$0.exists }) {
+                    Button {
+                        _ = viewModel.createMissingDirectories()
+                    } label: {
+                        Label("Create Missing Directories", systemImage: "folder.badge.plus")
+                    }
+                }
+                if let lastActionMessage = viewModel.lastActionMessage {
+                    Text(lastActionMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             ForEach(viewModel.directories) { directory in
