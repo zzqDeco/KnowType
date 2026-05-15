@@ -4,7 +4,6 @@ import KnowTypeCore
 public struct InputMethodLexiconRuntime: Sendable, Equatable {
     public static let environmentDirectoryKey = TraditionalInputLexiconDirectoryResolver.environmentDirectoryKey
     public static let environmentDirectoriesKey = TraditionalInputLexiconDirectoryResolver.environmentDirectoriesKey
-    private static let cachedDefaultEngine = defaultRuntime().makeEngine()
 
     public var directories: [URL]
 
@@ -53,7 +52,22 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
     }
 
     public static func defaultEngine() -> TraditionalInputEngine {
-        cachedDefaultEngine
+        defaultEngine(
+            environment: ProcessInfo.processInfo.environment,
+            homeDirectory: FileManager.default.homeDirectoryForCurrentUser
+        )
+    }
+
+    public static func defaultEngine(
+        environment: [String: String],
+        homeDirectory: URL,
+        fileManager: FileManager = .default
+    ) -> TraditionalInputEngine {
+        defaultRuntime(
+            environment: environment,
+            homeDirectory: homeDirectory
+        )
+        .makeEngine(fileManager: fileManager)
     }
 
     private func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {

@@ -117,7 +117,7 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 
 `TraditionalInputLexiconDirectoryResolver` resolves `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and `~/Library/Application Support/KnowType/Lexicons`, trimming empty paths and de-duplicating standardized file paths while preserving order.
 
-`InputMethodLexiconRuntime` uses the shared resolver, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon.
+`InputMethodLexiconRuntime` uses the shared resolver, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon. `defaultEngine()` rebuilds from the currently resolved directories on each request rather than returning a process-wide stale snapshot.
 
 `LexiconSettingsViewModel` uses the shared resolver for settings status. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, and it can create missing directories on explicit user action, but it does not create or mutate lexicon files in the MVP.
 
