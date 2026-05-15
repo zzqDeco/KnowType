@@ -3,10 +3,15 @@ import SwiftUI
 
 public struct ProviderProfilesView: View {
     @ObservedObject private var viewModel: ProviderProfilesViewModel
+    @StateObject private var lexiconViewModel: LexiconSettingsViewModel
     @State private var selectedSection: SettingsSection = .input
 
-    public init(viewModel: ProviderProfilesViewModel) {
+    public init(
+        viewModel: ProviderProfilesViewModel,
+        lexiconViewModel: LexiconSettingsViewModel = LexiconSettingsViewModel()
+    ) {
         self.viewModel = viewModel
+        _lexiconViewModel = StateObject(wrappedValue: lexiconViewModel)
     }
 
     public var body: some View {
@@ -22,6 +27,12 @@ public struct ProviderProfilesView: View {
                     Label("Candidates", systemImage: "list.bullet.rectangle")
                 }
                 .tag(SettingsSection.candidates)
+
+            LexiconSettingsView(viewModel: lexiconViewModel)
+                .tabItem {
+                    Label("Lexicons", systemImage: "books.vertical")
+                }
+                .tag(SettingsSection.lexicons)
 
             AIProviderSettingsView(viewModel: viewModel)
                 .tabItem {
@@ -47,6 +58,7 @@ public struct ProviderProfilesView: View {
 private enum SettingsSection: Hashable {
     case input
     case candidates
+    case lexicons
     case aiProvider
     case privacy
     case debugInstall
@@ -89,6 +101,55 @@ private struct CandidateSettingsView: View {
                 LabeledContent("Tab", value: "First continuation")
                 LabeledContent("Option + number", value: "Matching continuation row")
                 LabeledContent("Option + R", value: "Explicit polish")
+            }
+        }
+    }
+}
+
+private struct LexiconSettingsView: View {
+    @ObservedObject var viewModel: LexiconSettingsViewModel
+
+    var body: some View {
+        SettingsForm {
+            Section("Local Lexicons") {
+                LabeledContent("Loaded entries", value: "\(viewModel.totalLoadedEntryCount)")
+                if let lastRefreshDate = viewModel.lastRefreshDate {
+                    LabeledContent("Last refresh", value: lastRefreshDate.formatted(date: .abbreviated, time: .standard))
+                }
+                Button {
+                    viewModel.refresh()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+            }
+
+            ForEach(viewModel.directories) { directory in
+                Section("Directory") {
+                    LabeledContent("Status", value: directory.exists ? "Available" : "Missing")
+                    LabeledContent("Resource files", value: "\(directory.resourceFileCount)")
+                    LabeledContent("Loaded entries", value: "\(directory.loadedEntryCount)")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Path")
+                            .foregroundStyle(.secondary)
+                        MonospacedText(directory.directory.path)
+                    }
+
+                    if !directory.diagnostics.isEmpty {
+                        ForEach(directory.diagnostics) { diagnostic in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(diagnostic.resourceID)
+                                    .font(.headline)
+                                Text(diagnostic.message)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Format") {
+                LabeledContent("TSV", value: "pinyin<TAB>text<TAB>confidence")
+                LabeledContent("JSON", value: "TraditionalInputLexiconEntry array")
             }
         }
     }

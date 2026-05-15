@@ -5,6 +5,7 @@ KnowType is split into three layers:
 - `KnowTypeCore`: product rules, correction, protected-input detection, prefix locking, and continuation sanitization.
 - `KnowTypeProviders`: provider profile resolution, HTTP adapters, model discovery, and response normalization.
 - `KnowTypeInputMethod`: macOS input-method integration, marked text, key behavior, candidate state, and candidate-window presentation.
+- `KnowTypeSettingsApp`: SwiftUI settings for provider profiles, privacy, local install guidance, and local lexicon status.
 
 The product boundary is strict: correction may refine the prefix, but continuation may only append text after the locked prefix. Explicit polish is the only rewrite path.
 
@@ -72,6 +73,15 @@ Provider runtime loading uses:
 Profile JSON stores metadata and secret names only. It must not store API key values represented by `secretName`. Custom headers are persisted as configured, so the MVP docs warn users not to place bearer tokens directly in headers.
 
 Local OpenAI-compatible runtimes may leave the model blank for `/v1/models` discovery. Remote OpenAI-compatible profiles require an explicit model ID.
+
+## Settings Layer
+
+`KnowTypeSettingsApp` owns user-facing configuration and status surfaces:
+
+- `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
+- `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing the `KnowTypeCore` lexicon file source.
+
+Settings status is read-only for lexicons in the MVP. It does not import the IMK frontend and does not own dictionary licensing.
 
 ## Input Method Layer
 

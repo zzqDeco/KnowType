@@ -48,7 +48,7 @@ KnowType 当前是用于本地开发和手动验收的 MVP。已经包含：
 - 构建到 `dist/KnowType.app` 的本地 InputMethodKit app bundle
 - 自绘紧凑候选窗，不把 `IMKCandidates` 作为主候选 UI
 - clean-room 的 MVP 拼音引擎
-- SwiftUI 设置页，覆盖 provider、隐私、输入/候选行为和调试安装说明
+- SwiftUI 设置页，覆盖 provider、本地词库状态、隐私、输入/候选行为和调试安装说明
 - API key 通过 Keychain 存储
 - 本地候选学习历史与 provider 配置分开存储
 
@@ -141,6 +141,15 @@ KnowType 通过 `ProviderProfile` 和 `ProviderFactory` 加载模型 provider。
 ```text
 ~/Library/Application Support/KnowType/user-selection-history.json
 ```
+
+本地 JSON/TSV 词库目录：
+
+```text
+~/Library/Application Support/KnowType/Lexicons
+```
+
+设置页会显示这个目录是否存在、加载了多少词条，以及资源诊断。目录不存在是允许的；KnowType 会继续使用内置 seed 词库。
+开发时也可以通过 `KNOWTYPE_LEXICON_DIR` 和冒号分隔的 `KNOWTYPE_LEXICON_DIRS` 指定额外目录，这些目录会排在默认目录之前。
 
 Profile 字段：
 
