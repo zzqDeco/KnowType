@@ -160,6 +160,26 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertTrue(candidates.map(\.text).contains("wzm"))
     }
 
+    func testAdditionalLocalLexiconCandidateDoesNotTriggerPinyinProviderFallback() async {
+        let provider = RecordingProvider()
+        let traditionalInputEngine = TraditionalInputEngine(additionalLexiconEntries: [
+            TraditionalInputLexiconEntry(
+                pinyin: ["ce", "shi", "ci"],
+                outputs: [TraditionalInputLexiconOutput(text: "测试词", confidence: 0.995)]
+            )
+        ])
+        let engine = CorrectionEngine(
+            cloudProvider: provider,
+            traditionalInputEngine: traditionalInputEngine
+        )
+
+        let candidates = await engine.correct(InputContext(rawInput: "ceshici", locale: .zhCN))
+        let requests = await provider.requests
+
+        XCTAssertEqual(candidates.first?.text, "测试词")
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testTechnicalTokensAndEnglishWordsDoNotTriggerPinyinProviderFallback() async {
         let examples = [
             "css",

@@ -28,6 +28,7 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 
 - `TextProtection` detects Level 0 input such as URLs, emails, paths, commands, code-like snippets, and protected app contexts.
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
+- `TraditionalInputEngine` can also be initialized with authorized local lexicon entries. Those entries use the same private index as the seed lexicon, so larger dictionaries, future bundled resources, and local user lexicons do not need a separate parser path.
 - `CorrectionEngine` can boost generated prefix candidates from local user selection history without adding new dictionary entries or sending selection data to providers.
 - English and mixed-input paths preserve technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`.
 - `CorrectionEngine` may ask a configured provider for unknown pinyin-shaped input only when `TraditionalInputEngine` reports no local candidate and the input is not protected technical or English text.
@@ -45,7 +46,7 @@ Current Chinese-input coverage includes examples such as:
 - `zhongguoren -> 中国人`
 - `zhege api latnecy youdian gao -> 这个 API latency 有点高`
 
-The local engine is intentionally small but should behave like a normal input method for the MVP cases it claims to support. Broader dictionaries and language-model ranking belong in follow-up engine work, not provider fallback.
+The local engine is intentionally small but should behave like a normal input method for the MVP cases it claims to support. Broader dictionaries should enter through the local lexicon-extension path after license review; unknown pinyin-shaped gaps may use provider fallback only when the local engine has no candidate.
 
 ## Provider Layer
 

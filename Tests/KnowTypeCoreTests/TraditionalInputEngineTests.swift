@@ -204,4 +204,73 @@ final class TraditionalInputEngineTests: XCTestCase {
 
         XCTAssertEqual(candidates.first?.text, "你好")
     }
+
+    func testAdditionalLexiconEntriesAreIndexedForSpacedAndCompactInput() {
+        let engine = TraditionalInputEngine(additionalLexiconEntries: [
+            TraditionalInputLexiconEntry(
+                pinyin: ["ce", "shi", "ci"],
+                outputs: [TraditionalInputLexiconOutput(text: "测试词", confidence: 0.995)]
+            )
+        ])
+
+        XCTAssertEqual(engine.candidates(for: "ce shi ci").first?.text, "测试词")
+        XCTAssertEqual(engine.candidates(for: "ceshici").first?.text, "测试词")
+    }
+
+    func testAdditionalLexiconEntriesPreserveAmbiguousCompactSplits() {
+        let engine = TraditionalInputEngine(additionalLexiconEntries: [
+            TraditionalInputLexiconEntry(
+                pinyin: ["xi", "an"],
+                outputs: [TraditionalInputLexiconOutput(text: "西安", confidence: 0.995)]
+            )
+        ])
+        let candidateTexts = engine.candidates(for: "xian").map(\.text)
+
+        XCTAssertEqual(candidateTexts.first, "西安")
+        XCTAssertTrue(candidateTexts.contains("现"))
+    }
+
+    func testAdditionalLexiconEntriesAreNormalizedAndMergedByHighestConfidence() {
+        let engine = TraditionalInputEngine(additionalLexiconEntries: [
+            TraditionalInputLexiconEntry(
+                pinyin: [" FANG ", " AN "],
+                outputs: [TraditionalInputLexiconOutput(text: "方案", confidence: 0.995)]
+            )
+        ])
+
+        let candidate = engine.candidates(for: "fang an").first
+
+        XCTAssertEqual(candidate?.text, "方案")
+        XCTAssertEqual(candidate?.confidence ?? 0, 0.995, accuracy: 0.0001)
+    }
+
+    func testSyntheticLargeLexiconUsesIndexedPartialLookupCap() {
+        let entries = (0..<120).map { index in
+            TraditionalInputLexiconEntry(
+                pinyin: ["zsynthetic\(index)"],
+                outputs: [TraditionalInputLexiconOutput(text: "扩展\(index)", confidence: 0.6)]
+            )
+        }
+        let engine = TraditionalInputEngine(additionalLexiconEntries: entries)
+        let syntheticCandidates = engine
+            .candidates(for: "z")
+            .filter { $0.text.hasPrefix("扩展") }
+
+        XCTAssertLessThanOrEqual(syntheticCandidates.count, 64)
+    }
+
+    func testEmptyAdditionalLexiconEntriesAreIgnored() {
+        let engine = TraditionalInputEngine(additionalLexiconEntries: [
+            TraditionalInputLexiconEntry(
+                pinyin: ["  "],
+                outputs: [TraditionalInputLexiconOutput(text: "空", confidence: 1.0)]
+            ),
+            TraditionalInputLexiconEntry(
+                pinyin: ["ce"],
+                outputs: []
+            )
+        ])
+
+        XCTAssertFalse(engine.candidates(for: "ce").map(\.text).contains("空"))
+    }
 }
