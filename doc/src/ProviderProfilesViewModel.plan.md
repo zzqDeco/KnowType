@@ -5,6 +5,7 @@
 ## Responsibilities
 
 - Load provider profiles from `ProviderProfileStore`, seeding default profiles when the store is empty.
+- Use `KnowTypeProviders.ProviderProfileTemplates` so settings defaults match IMK runtime defaults.
 - Keep cloud-provider secrets out of JSON by using profile-scoped `SecretStore` names, while leaving unauthenticated custom HTTP profiles without a `secretName`.
 - Validate drafts before persistence, including host-bearing HTTP(S) base URLs, remote OpenAI-compatible real model IDs instead of discovery placeholders, and custom HTTP template fields.
 - Require new or existing cloud-provider API keys before saving profiles that need secrets.

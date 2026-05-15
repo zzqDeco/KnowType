@@ -74,6 +74,8 @@ Default file-backed profile storage writes `providers.json` under the user's App
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys under the `KnowType` service. Tests and non-UI code can use in-memory or read-only dictionary stores.
 
+When `providers.json` is missing or empty, settings and runtime loading share seeded defaults. The default profile is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model` blank for discovery, and does not embed an API key.
+
 Settings validation rules:
 
 - display name cannot be empty

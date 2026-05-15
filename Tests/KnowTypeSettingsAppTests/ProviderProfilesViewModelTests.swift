@@ -14,6 +14,10 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.profiles.map(\.kind), ProviderKind.allCases)
         XCTAssertEqual(viewModel.profiles.filter(\.isDefault).map(\.kind), [.openAIChat])
+        XCTAssertEqual(viewModel.profiles.first(where: { $0.kind == .openAIChat })?.displayName, "Local OpenAI Compatible")
+        XCTAssertEqual(viewModel.profiles.first(where: { $0.kind == .openAIChat })?.baseURL.absoluteString, "http://127.0.0.1:8317/v1")
+        XCTAssertEqual(viewModel.profiles.first(where: { $0.kind == .openAIChat })?.model, "")
+        XCTAssertNil(viewModel.profiles.first(where: { $0.kind == .openAIChat })?.secretName)
         XCTAssertEqual(viewModel.profiles.first(where: { $0.kind == .ollamaNative })?.baseURL.absoluteString, "http://localhost:11434")
         XCTAssertEqual(viewModel.profiles.first(where: { $0.kind == .customHTTP })?.customResponsePath, "candidates")
     }
@@ -523,7 +527,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
             secretStore: secrets
         )
 
-        viewModel.changeDraftKind(.openAIChat)
+        viewModel.changeDraftKind(.openAIResponses)
 
         XCTAssertFalse(viewModel.saveDraft())
         XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")

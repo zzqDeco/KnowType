@@ -162,6 +162,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 自定义 `headers` 会按配置原样写入 provider JSON。MVP 阶段不要把 bearer token、API key 或其他密钥放进自定义 headers；应使用 profile 的 API key 字段，并通过 Keychain-backed secret storage 保存。
 
+当 `providers.json` 不存在或为空时，KnowType 会使用本地 OpenAI-compatible 默认配置：`http://127.0.0.1:8317/v1`。model 可以留空并通过 `/v1/models` 发现。源码和 provider JSON 不内置 API key；如果本地 runtime 需要 key，请在设置页保存到 Keychain。
+
 支持的 provider kind：
 
 - `openai_chat`：`/v1/chat/completions`

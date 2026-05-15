@@ -66,13 +66,14 @@ Provider-specific request and response shapes stay inside `KnowTypeProviders`. C
 Provider runtime loading uses:
 
 - `ProviderProfile`: persisted metadata such as display name, kind, base URL, model, timeout, headers, custom HTTP mapping, and `secretName`.
+- `ProviderProfileTemplates`: shared seeded defaults used by settings and runtime loading.
 - `ProviderProfileResolver`: resolves `secretName` through `SecretStore`.
 - `ProviderFactory`: builds the adapter for `openai_chat`, `openai_responses`, `anthropic_messages`, `gemini_native`, `ollama_native`, or `custom_http`.
 - `KeychainSecretStore`: macOS storage for API keys under the `KnowType` service.
 
 Profile JSON stores metadata and secret names only. It must not store API key values represented by `secretName`. Custom headers are persisted as configured, so the MVP docs warn users not to place bearer tokens directly in headers.
 
-Local OpenAI-compatible runtimes may leave the model blank for `/v1/models` discovery. Remote OpenAI-compatible profiles require an explicit model ID.
+The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
 ## Settings Layer
 
