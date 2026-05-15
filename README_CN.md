@@ -108,6 +108,14 @@ dist/KnowType.app
 ~/Library/Input Methods/KnowType.app
 ```
 
+安装后先运行只读诊断，再开始手动打字测试：
+
+```bash
+./scripts/diagnose-inputmethod.sh
+```
+
+如果希望缺少 bundle 资源、签名失败或 Text Input Source 注册/启用状态失败直接阻断本地 smoke gate，可以使用 `./scripts/diagnose-inputmethod.sh --strict`。
+
 然后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启要测试输入法的 app。
 
 移除本地 bundle：
@@ -213,9 +221,11 @@ Level 0 输入不能调用云端 provider。它会走无 provider 路径，并�
 ```bash
 swift build
 swift test
+./scripts/install-inputmethod.sh
+./scripts/diagnose-inputmethod.sh --strict
 ```
 
-然后构建并安装本地 bundle，手动验证：
+然后手动验证：
 
 - TextEdit：候选窗出现在文本光标附近，`Space` 只提交前缀。
 - Safari 和 Chrome：文本框中 `Tab` 提交前缀 + 第一条延续。

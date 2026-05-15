@@ -33,3 +33,7 @@ This directory contains short notes for important source files and subsystems. T
 - [Provider Runtime Local](provider-runtime-local.plan.md)
 - [ProviderProfilesViewModel](ProviderProfilesViewModel.plan.md)
 - [Settings Install Debug](settings-install-debug.plan.md)
+
+## Scripts And Tooling
+
+- [Input Method Diagnostic Scripts](scripts-inputmethod-diagnostics.plan.md)
