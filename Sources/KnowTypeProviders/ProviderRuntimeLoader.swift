@@ -7,10 +7,12 @@ public struct ProviderRuntimeLoader: Sendable {
     private let profileStore: any ProviderProfileStore
     private let secretStore: any SecretStore
     private let providerBuilder: ProviderBuilder
+    private let loadDefaultsWhenEmpty: Bool
 
     public init(
         profileStore: any ProviderProfileStore,
         secretStore: any SecretStore,
+        loadDefaultsWhenEmpty: Bool = true,
         providerBuilder: @escaping ProviderBuilder = { configuration in
             try ProviderFactory.makeProvider(configuration: configuration)
         }
@@ -18,12 +20,16 @@ public struct ProviderRuntimeLoader: Sendable {
         self.profileStore = profileStore
         self.secretStore = secretStore
         self.providerBuilder = providerBuilder
+        self.loadDefaultsWhenEmpty = loadDefaultsWhenEmpty
     }
 
     public func loadDefaultProvider() -> (any LLMProvider)? {
         do {
             let profilesFile = try profileStore.loadProfiles()
-            guard let defaultProfile = profilesFile.profiles.first(where: \.isDefault) else {
+            let profiles = profilesFile.profiles.isEmpty && loadDefaultsWhenEmpty
+                ? ProviderProfileTemplates.defaultProfiles()
+                : profilesFile.profiles
+            guard let defaultProfile = profiles.first(where: \.isDefault) else {
                 return nil
             }
 

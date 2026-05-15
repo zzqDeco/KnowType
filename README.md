@@ -158,6 +158,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 Custom `headers` are saved in provider JSON exactly as configured. Do not put bearer tokens, API keys, or other secrets in custom headers for the MVP; use the profile API key field and Keychain-backed secret storage instead.
 
+When `providers.json` is missing or empty, KnowType seeds a local OpenAI-compatible default at `http://127.0.0.1:8317/v1`. The model may stay blank for `/v1/models` discovery. No API key is embedded in source or profile JSON; save one in settings if your local runtime requires it.
+
 Supported provider kinds:
 
 - `openai_chat`: `/v1/chat/completions`

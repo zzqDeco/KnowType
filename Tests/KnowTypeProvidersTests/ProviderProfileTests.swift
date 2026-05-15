@@ -137,6 +137,43 @@ final class ProviderProfileTests: XCTestCase {
         ])
     }
 
+    func testRuntimeLoaderBuildsSeededDefaultProviderWhenStoreIsEmpty() throws {
+        let capture = ConfigurationCapture()
+        let loader = ProviderRuntimeLoader(
+            profileStore: StubProfileStore(result: .success(ProviderProfilesFile())),
+            secretStore: DictionarySecretStore(values: [:]),
+            providerBuilder: { configuration in
+                capture.append(configuration)
+                return StubProvider()
+            }
+        )
+
+        let provider = loader.loadDefaultProvider()
+
+        XCTAssertEqual(provider?.providerName, "stub")
+        XCTAssertEqual(capture.configurations, [
+            ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: ""
+            )
+        ])
+    }
+
+    func testRuntimeLoaderCanDisableSeededDefaultsForEmptyStore() throws {
+        let loader = ProviderRuntimeLoader(
+            profileStore: StubProfileStore(result: .success(ProviderProfilesFile())),
+            secretStore: DictionarySecretStore(values: [:]),
+            loadDefaultsWhenEmpty: false,
+            providerBuilder: { _ in
+                XCTFail("Provider builder should not be called when seeded defaults are disabled")
+                return StubProvider()
+            }
+        )
+
+        XCTAssertNil(loader.loadDefaultProvider())
+    }
+
     func testRuntimeLoaderReturnsNilWhenNoDefaultProfileExists() throws {
         let loader = ProviderRuntimeLoader(
             profileStore: StubProfileStore(result: .success(ProviderProfilesFile(profiles: [
