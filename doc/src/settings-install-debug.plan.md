@@ -8,7 +8,7 @@ The view uses top-level native tabs:
 
 - Input: read-only MVP composition and commit behavior.
 - Candidates: candidate ordering and shortcut behavior.
-- Lexicons: local JSON/TSV directory status, entry counts, and diagnostics.
+- Lexicons: local JSON/TSV directory status, entry counts, diagnostics, and missing-directory creation.
 - AI Provider: existing provider profile editor backed by `ProviderProfilesViewModel`.
 - Privacy: Level 0 local-only reminders and technical-token preservation notes.
 - Debug Install: local development install and log-inspection guidance.

@@ -144,7 +144,7 @@ Local JSON/TSV lexicons are read from:
 ~/Library/Application Support/KnowType/Lexicons
 ```
 
-The settings app shows whether this directory exists, how many lexicon entries loaded, and any resource diagnostics. Missing directories are allowed; KnowType falls back to the bundled seed lexicon.
+The settings app shows whether this directory exists, how many lexicon entries loaded, and any resource diagnostics. It can create missing directories for you. Missing directories are allowed; KnowType falls back to the bundled seed lexicon.
 For development, `KNOWTYPE_LEXICON_DIR` and colon-separated `KNOWTYPE_LEXICON_DIRS` are also recognized before the default directory.
 
 Profile fields:

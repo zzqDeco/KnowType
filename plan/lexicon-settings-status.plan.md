@@ -10,6 +10,7 @@ This slice exposes the local lexicon runtime path in the SwiftUI settings app. U
 - Reuse `TraditionalInputLexiconFileSource` and typed diagnostics from `KnowTypeCore`.
 - Add a `Lexicons` settings tab with read-only status and a manual refresh button.
 - Show the same environment-variable and Application Support directories used by the runtime loader.
+- Let users create missing lexicon directories from settings.
 - Keep the input method runtime path unchanged.
 - Do not add external dictionary data or import UI.
 
