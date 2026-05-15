@@ -3,13 +3,20 @@ import XCTest
 
 private actor RecordingProvider: LLMProvider {
     nonisolated let providerName = "recording"
+    private let responseCandidates: [LLMCandidate]
     private var recordedRequests: [LLMRequest] = []
+
+    init(
+        responseCandidates: [LLMCandidate] = [
+            LLMCandidate(text: "cloud should not be used", confidence: 1.0)
+        ]
+    ) {
+        self.responseCandidates = responseCandidates
+    }
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         recordedRequests.append(request)
-        return LLMResponse(candidates: [
-            LLMCandidate(text: "cloud should not be used", confidence: 1.0)
-        ])
+        return LLMResponse(candidates: responseCandidates)
     }
 
     var requests: [LLMRequest] {
@@ -79,6 +86,87 @@ final class CorrectionEngineTests: XCTestCase {
         }
     }
 
+    func testUnknownPinyinInitialCompositionCanAskProvider() async {
+        let provider = RecordingProvider()
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        _ = await engine.correct(InputContext(rawInput: "wzm", locale: .zhCN))
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.first?.task, .correction)
+        XCTAssertEqual(requests.first?.rawInput, "wzm")
+    }
+
+    func testUnknownPinyinInitialCompositionWithYCanAskProvider() async {
+        let examples = ["wym", "wyx"]
+
+        for raw in examples {
+            let provider = RecordingProvider()
+            let engine = CorrectionEngine(cloudProvider: provider)
+
+            _ = await engine.correct(InputContext(rawInput: raw, locale: .zhCN))
+
+            let requests = await provider.requests
+            XCTAssertEqual(requests.first?.task, .correction, "\(raw) should use pinyin cloud fallback")
+            XCTAssertEqual(requests.first?.rawInput, raw)
+        }
+    }
+
+    func testPinyinCompletionProviderCandidateRanksAheadOfRawIdentity() async {
+        let provider = RecordingProvider(responseCandidates: [
+            LLMCandidate(text: "我怎么", confidence: 0.72)
+        ])
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        let candidates = await engine.correct(InputContext(rawInput: "wzm", locale: .zhCN))
+
+        XCTAssertEqual(candidates.first?.text, "我怎么")
+        XCTAssertEqual(candidates.first?.source, "recording")
+        XCTAssertTrue(candidates.map(\.text).contains("wzm"))
+    }
+
+    func testTechnicalTokensAndEnglishWordsDoNotTriggerPinyinProviderFallback() async {
+        let examples = [
+            "css",
+            "CDN",
+            "gpt",
+            "HTTP",
+            "llm",
+            "npm",
+            "PDF",
+            "ssh",
+            "TCP",
+            "by",
+            "cry",
+            "dry",
+            "fly",
+            "gym",
+            "my",
+            "sky",
+            "spy",
+            "sync",
+            "try",
+            "why",
+            "change",
+            "shopping",
+            "testing",
+            "engineering",
+            "going",
+            "sharing",
+            "english"
+        ]
+
+        for raw in examples {
+            let provider = RecordingProvider()
+            let engine = CorrectionEngine(cloudProvider: provider)
+
+            _ = await engine.correct(InputContext(rawInput: raw, locale: .zhCN))
+
+            let requests = await provider.requests
+            XCTAssertTrue(requests.isEmpty, "\(raw) should not use cloud correction")
+        }
+    }
+
     func testEnglishCorrectionPreservesSentenceShape() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
@@ -127,7 +215,7 @@ final class CorrectionEngineTests: XCTestCase {
     }
 
     func testTechnicalTokensArePreserved() async {
-        let raw = "API JSON macOS InputMethodKit snake_case camelCase"
+        let raw = "API JSON CSS GPT LLM npm SDK SSH macOS InputMethodKit snake_case camelCase"
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
             InputContext(rawInput: raw, locale: .enUS)

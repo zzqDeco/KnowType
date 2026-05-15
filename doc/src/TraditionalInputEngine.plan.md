@@ -12,4 +12,5 @@
 - It returns multiple prefix candidates for ambiguous entries such as `fangan`, so the candidate panel can behave like a traditional input method before AI continuation appears.
 - It includes deterministic seed entries for common initial abbreviations such as `sm -> 什么`, `zmb -> 怎么办`, and `wsm -> 为什么`; these remain local engine behavior rather than cloud fallback.
 - It routes lexicon lookup through a private `LexiconIndex` that owns exact phrase lookup, duplicate-key merging, length buckets, first-token buckets, known input tokens, max phrase length, and partial-match caps.
+- It exposes `PinyinInputAnalysis` so correction policy can ask the engine whether an input is pinyin-shaped, already covered locally, or only suitable for provider fallback.
 - Recursive parse results are memoized by token index to keep compact sentence input responsive.

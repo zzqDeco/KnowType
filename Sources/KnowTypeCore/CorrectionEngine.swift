@@ -36,8 +36,12 @@ public final class CorrectionEngine: Sendable {
     public func correct(_ context: InputContext) async -> [CorrectionCandidate] {
         let raw = context.rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         var candidates = localCorrect(context)
+        let usesPinyinCompletionFallback = shouldAskCloudForPinyinCompletion(context: context)
 
-        if shouldAskCloud(context: context), let cloudProvider {
+        if shouldAskCloud(
+            context: context,
+            usesPinyinCompletionFallback: usesPinyinCompletionFallback
+        ), let cloudProvider {
             let request = LLMRequest(
                 task: .correction,
                 rawInput: raw,
@@ -47,11 +51,12 @@ public final class CorrectionEngine: Sendable {
             )
             if let cloud = try? await cloudProvider.complete(request) {
                 let cloudCandidates = cloud.candidates.map {
-                    CorrectionCandidate(
+                    let confidence = $0.confidence ?? 0.62
+                    return CorrectionCandidate(
                         text: $0.text,
                         source: cloudProvider.providerName,
-                        confidence: $0.confidence ?? 0.62,
-                        correctionLevel: .strongAlternative,
+                        confidence: usesPinyinCompletionFallback ? max(confidence, 0.64) : confidence,
+                        correctionLevel: usesPinyinCompletionFallback ? .contextual : .strongAlternative,
                         protectedRanges: TextProtection.detectProtectedRanges(in: $0.text)
                     )
                 }
@@ -62,12 +67,37 @@ public final class CorrectionEngine: Sendable {
         return uniqueSorted(candidates)
     }
 
-    private func shouldAskCloud(context: InputContext) -> Bool {
+    private func shouldAskCloud(
+        context: InputContext,
+        usesPinyinCompletionFallback: Bool
+    ) -> Bool {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
         }
+        if usesPinyinCompletionFallback {
+            return true
+        }
         let tokenCount = correctionTokenCount(context.rawInput, locale: context.locale)
         return tokenCount >= 4 || context.locale == .mixed
+    }
+
+    private func shouldAskCloudForPinyinCompletion(context: InputContext) -> Bool {
+        guard context.locale == .zhCN else {
+            return false
+        }
+        if isStandaloneProtectedToken(context.rawInput) {
+            return false
+        }
+        let analysis = traditionalInputEngine.analyzePinyinInput(
+            context.rawInput,
+            preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: context.locale)
+        )
+        if analysis.hasInitialAbbreviation && isEnglishLikeAllInitialWord(context.rawInput) {
+            return false
+        }
+        return analysis.isLikelyPinyinComposition
+            && !analysis.hasLocalCandidates
+            && analysis.hasInitialAbbreviation
     }
 
     private func correctionTokenCount(_ rawInput: String, locale: KnowTypeLocale) -> Int {
@@ -186,6 +216,44 @@ private let spellingCorrections: [String: String] = [
     "approch": "approach",
     "latnecy": "latency"
 ]
+
+private func isEnglishLikeAllInitialWord(_ rawInput: String) -> Bool {
+    let lower = rawInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard lower.count >= 2,
+          lower.range(of: #"^[a-z]+$"#, options: .regularExpression) != nil else {
+        return false
+    }
+    guard lower.allSatisfy({ character in
+        pinyinInitialTokens.contains(String(character))
+    }) else {
+        return false
+    }
+
+    let finalYConsonants = "bcdfghjklmnpqrstvwxz"
+    if matchesEntire(lower, #"^[\#(finalYConsonants)]{1,3}y$"#) {
+        return true
+    }
+
+    let medialYOnsets = "bcdfghjklmnpqrstvxz"
+    let medialYRimes = "(?:m|n[bcdfghjklmnpqrstvwxz]?|p[st]?|s[st]?|t[hl]?|ck|ll|ph)"
+    return matchesEntire(lower, #"^[\#(medialYOnsets)]{1,2}y\#(medialYRimes)$"#)
+}
+
+private func isStandaloneProtectedToken(_ rawInput: String) -> Bool {
+    let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return false
+    }
+    let fullLength = trimmed.utf16.count
+    let protectedReasons: Set<String> = ["acronym", "camelCase", "snake_case", "technical_term"]
+    return TextProtection.detectProtectedRanges(in: trimmed).contains { range in
+        range.start == 0 && range.length == fullLength && protectedReasons.contains(range.reason)
+    }
+}
+
+private func matchesEntire(_ text: String, _ pattern: String) -> Bool {
+    text.range(of: pattern, options: .regularExpression) != nil
+}
 
 private func usesTraditionalInput(locale: KnowTypeLocale) -> Bool {
     locale != .enUS
