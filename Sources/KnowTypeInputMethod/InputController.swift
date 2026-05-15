@@ -25,7 +25,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
-    private var inputModeState: InputModeState
+    private let inputModePreferenceStore: any InputModePreferenceStore
+    private var inputModeRuntime: InputModePreferenceRuntime
     private var suggestionTask: Task<Void, Never>?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
@@ -38,6 +39,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
         let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
         let traditionalInputEngine = lexiconRuntime.makeEngine()
+        let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
+        let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
         self.provider = provider
@@ -48,7 +51,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             provider: provider,
             traditionalInputEngine: traditionalInputEngine
         )
-        self.inputModeState = InputModeAppPolicy.defaultState(
+        self.inputModePreferenceStore = inputModePreferenceStore
+        self.inputModeRuntime = InputModePreferenceRuntime(
+            preferences: inputModePreferences,
             appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier()
         )
         self.userSelectionHistoryPersistence = historyPersistence
@@ -155,7 +160,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .append(let text):
             return appendComposition(text, client: sender)
         case .symbol(let text):
-            guard let symbol = symbolTransformer.text(for: text, state: inputModeState) else {
+            if rawBuffer.isEmpty {
+                reloadInputModeDefaultsIfNeeded(client: sender)
+            }
+            guard let symbol = symbolTransformer.text(for: text, state: inputModeRuntime.state) else {
                 return appendComposition(text, client: sender)
             }
             return commitSymbol(symbol, client: sender)
@@ -173,7 +181,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return true
         case .action(let action):
             if action == .toggleSymbolMode {
-                inputModeState.togglePunctuationMode()
+                inputModeRuntime.togglePunctuationMode()
                 return true
             }
             return commit(action: action, client: sender)
@@ -227,7 +235,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     private func appendComposition(_ text: String, client sender: Any!) -> Bool {
-        beginCompositionIfNeeded()
+        beginCompositionIfNeeded(client: sender)
         rawBuffer.append(text)
         invalidateSuggestion()
         publishLocalSuggestion(client: sender)
@@ -440,12 +448,20 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         hideCandidatePanel()
     }
 
-    private func beginCompositionIfNeeded() {
+    private func beginCompositionIfNeeded(client sender: Any!) {
         if rawBuffer.isEmpty {
+            reloadInputModeDefaultsIfNeeded(client: sender)
             reloadRuntimeLexiconEngineIfNeeded()
             compositionID += 1
             anchorResolver.reset()
         }
+    }
+
+    private func reloadInputModeDefaultsIfNeeded(client sender: Any!) {
+        inputModeRuntime.reloadIfChanged(
+            preferences: inputModePreferenceStore.loadPreferences(),
+            appBundleID: appBundleIdentifier(client: sender)
+        )
     }
 
     private func reloadRuntimeLexiconEngineIfNeeded() {

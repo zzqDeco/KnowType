@@ -76,7 +76,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KnowTypeSettingsAppTests",
-            dependencies: ["KnowTypeSettingsApp", "KnowTypeProviders"],
+            dependencies: ["KnowTypeCore", "KnowTypeSettingsApp", "KnowTypeProviders"],
             path: "Tests/KnowTypeSettingsAppTests"
         ),
         .testTarget(

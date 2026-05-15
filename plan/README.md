@@ -26,6 +26,7 @@
 | [provider-runtime-seeded-defaults.plan.md](provider-runtime-seeded-defaults.plan.md) | Shared seeded provider defaults for settings and runtime loading | Active reference |
 | [provider-connection-diagnostics.plan.md](provider-connection-diagnostics.plan.md) | Settings-side provider connection testing without persisting draft secrets | Active reference |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Keep provider-backed continuation honest by not replacing failures with local fallback text | Active reference |
+| [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persist punctuation language and symbol width preferences shared by settings and IMK runtime | Active reference |
 
 ## Delivered MVP Slices
 

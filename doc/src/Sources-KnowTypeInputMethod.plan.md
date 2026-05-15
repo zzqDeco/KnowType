@@ -13,7 +13,7 @@ Current package-level implementation covers:
 - candidate panel renderer with raw input, locked prefix, and continuation rows
 - shortcut-to-commit behavior
 - key intent modeling for key down, key up, modifier flag changes, cancel, delete, navigation keys, punctuation, and numeric candidate selection
-- session-local `InputModeState` for text mode, punctuation language, and symbol width, with `Option + .` toggling punctuation language
+- persisted `InputModeState` for text mode, punctuation language, and symbol width, refreshed from saved preferences at new composition/direct symbol boundaries, with `Option + .` toggling punctuation language for the active session
 - runtime loading of user-owned JSON/TSV lexicon directories into the local Chinese engine
 - runtime lexicon snapshot refresh at new-composition boundaries so local dictionary file changes can be picked up without reinterpreting active marked text
 - persisted prefix selection history used as a local-only ranking signal
