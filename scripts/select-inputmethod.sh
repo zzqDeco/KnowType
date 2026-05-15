@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 RUN_DIAGNOSTIC=1
 REQUIRE_SELECTED=0
 
@@ -20,6 +21,7 @@ diagnostic process cannot prove another app will use KnowType.
 Options:
   --require-selected  Fail if KnowType is not selected in this preflight TIS context.
   --no-diagnose       Only send the selection request.
+  --no-diagnostic     Alias for --no-diagnose.
   -h, --help          Show this help.
 EOF
 }
@@ -30,7 +32,7 @@ while (($# > 0)); do
       REQUIRE_SELECTED=1
       shift
       ;;
-    --no-diagnose)
+    --no-diagnose|--no-diagnostic)
       RUN_DIAGNOSTIC=0
       shift
       ;;
@@ -46,72 +48,12 @@ while (($# > 0)); do
   esac
 done
 
-KNOWTYPE_REQUIRE_SELECTED="$REQUIRE_SELECTED" swift - <<'SWIFT'
-import Carbon
-import Foundation
-
-let parentID = "com.knowtype.inputmethod.KnowType"
-let modeID = "com.knowtype.inputmethod.KnowType.Mode"
-let requireSelected = ProcessInfo.processInfo.environment["KNOWTYPE_REQUIRE_SELECTED"] == "1"
-
-func inputSource(id: String) -> TISInputSource? {
-    let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
-    let sources = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource]
-    return sources?.first
-}
-
-func inputSourceID(_ source: TISInputSource?) -> String? {
-    guard let source,
-          let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else {
-        return nil
-    }
-    return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
-}
-
-func enableInputSource(_ source: TISInputSource, label: String) {
-    let status = TISEnableInputSource(source)
-    if status != noErr {
-        fputs("Warning: TISEnableInputSource(\(label)) returned \(status)\n", stderr)
-    }
-}
-
-if let parent = inputSource(id: parentID) {
-    enableInputSource(parent, label: "parent")
-}
-
-guard let mode = inputSource(id: modeID) else {
-    fputs("KnowType input mode was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
-    exit(1)
-}
-
-enableInputSource(mode, label: "mode")
-
-let selectStatus = TISSelectInputSource(mode)
-if selectStatus == noErr {
-    print("Requested KnowType input source selection: \(modeID)")
-} else {
-    fputs("TISSelectInputSource(mode) returned \(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\n", stderr)
-    exit(Int32(selectStatus))
-}
-
-let deadline = Date().addingTimeInterval(2.0)
-var currentID = inputSourceID(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue())
-while currentID != modeID && Date() < deadline {
-    Thread.sleep(forTimeInterval: 0.1)
-    currentID = inputSourceID(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue())
-}
-
-if currentID == modeID {
-    print("Verified KnowType in this preflight TIS context: \(modeID)")
-    print("Type a real probe in the target app before accepting manual typing.")
-} else {
-    let observed = currentID ?? "<unavailable>"
-    fputs("Warning: this preflight TIS context is \(observed), not \(modeID). Activate the target text app, rerun this helper, then type a real probe in that app.\n", stderr)
-    if requireSelected {
-        exit(1)
-    }
-}
-SWIFT
+INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
+select_args=(select)
+if (( REQUIRE_SELECTED == 1 )); then
+  select_args+=(--require-selected)
+fi
+"$INPUTSOURCE_TOOL" "${select_args[@]}"
 
 if (( RUN_DIAGNOSTIC == 1 )); then
   diagnostic_args=(--strict)

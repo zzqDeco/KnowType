@@ -15,10 +15,14 @@ rm -rf "$BUNDLE_DIR"
 mkdir -p "$MACOS_DIR" "$CONTENTS_DIR/Resources"
 cp "$BIN_DIR/KnowTypeInputMethodApp" "$MACOS_DIR/KnowTypeInputMethodApp"
 cp "$ROOT_DIR/Resources/InputMethod/Info.plist" "$CONTENTS_DIR/Info.plist"
-for resource_file in "$ROOT_DIR"/Resources/InputMethod/*; do
-  [[ -f "$resource_file" ]] || continue
-  [[ "$(basename "$resource_file")" == "Info.plist" ]] && continue
-  cp "$resource_file" "$CONTENTS_DIR/Resources/"
+for resource_path in "$ROOT_DIR"/Resources/InputMethod/*; do
+  [[ -e "$resource_path" ]] || continue
+  [[ "$(basename "$resource_path")" == "Info.plist" ]] && continue
+  if [[ -d "$resource_path" ]]; then
+    cp -R "$resource_path" "$CONTENTS_DIR/Resources/"
+  else
+    cp "$resource_path" "$CONTENTS_DIR/Resources/"
+  fi
 done
 for resource_bundle in "$BIN_DIR"/KnowType_*.bundle; do
   [[ -d "$resource_bundle" ]] || continue
@@ -26,7 +30,11 @@ for resource_bundle in "$BIN_DIR"/KnowType_*.bundle; do
 done
 chmod +x "$MACOS_DIR/KnowTypeInputMethodApp"
 
-SIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Apple Development/ { print $2; exit }')"
+fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$BUNDLE_DIR" >/dev/null
 
 echo "$BUNDLE_DIR"

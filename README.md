@@ -81,47 +81,20 @@ swift build
 swift test
 ```
 
-Build the input method app bundle:
+Build and install the local input-method bundle:
 
 ```bash
 ./scripts/build-inputmethod-bundle.sh
-```
-
-The bundle is written to:
-
-```text
-dist/KnowType.app
-```
-
-Install it locally:
-
-```bash
 ./scripts/install-inputmethod.sh
 ```
 
-The install script copies the bundle to:
-
-```text
-~/Library/Input Methods/KnowType.app
-```
-
-After installation, run the read-only diagnostic before manual typing checks:
+Run the installed-bundle diagnostic before manual typing checks:
 
 ```bash
 ./scripts/diagnose-inputmethod.sh
 ```
 
-Use `./scripts/diagnose-inputmethod.sh --strict` when you want missing bundle resources, signing failures, or Text Input Source registration/enabled-state problems to fail the local smoke gate.
-
-To retry input-source selection without reinstalling, run:
-
-```bash
-./scripts/select-inputmethod.sh
-```
-
-Activate the text app you want to test first, then use `./scripts/select-inputmethod.sh --require-selected` as a selection preflight. macOS input-source selection is tied to text input context, so final manual acceptance still requires typing a real probe in that target app.
-
-Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. If macOS does not refresh the input source list, log out and back in, or restart the app where you want to test the input method.
+Detailed install, signing, Text Input Source, and troubleshooting notes live in [doc/src/scripts/inputmethod-diagnostics.plan.md](doc/src/scripts/inputmethod-diagnostics.plan.md).
 
 To remove the local bundle:
 

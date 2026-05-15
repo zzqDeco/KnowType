@@ -11,19 +11,19 @@ enum DebugInstallGuidance {
     static let steps: [DebugInstallStep] = [
         DebugInstallStep(
             title: "Build and sign",
-            detail: "Run the input method bundle build script. It uses ad-hoc signing by default, or Apple Development when CODESIGN_IDENTITY is set."
+            detail: "Run the input method bundle build script. It auto-selects an Apple Development signing identity when one is available, and falls back to ad-hoc signing only when none is found."
         ),
         DebugInstallStep(
             title: "Install bundle",
-            detail: "Copy KnowType.app into ~/Library/Input Methods. The install script performs the copy, registration, and a best-effort selection request."
+            detail: "Copy KnowType.app into ~/Library/Input Methods. The install script launches the installed app with an activation flag so registration, enabling, and selection happen from the app context."
         ),
         DebugInstallStep(
             title: "Diagnose installation",
-            detail: "Run the read-only diagnostic to verify bundle metadata, signing, packaged resources, Text Input Source registration, and local data paths."
+            detail: "Run the read-only diagnostic to verify bundle metadata, signing, packaged resources, Text Input Source registration, local data paths, and optional Gatekeeper or sandbox log hints."
         ),
         DebugInstallStep(
             title: "Request selection",
-            detail: "Activate the text app you want to test, then run the selection helper as a preflight. Final acceptance still requires typing a real probe in that app."
+            detail: "Activate the text app you want to test, then use the selection helper only as a preflight. Final acceptance still requires typing a real probe in that app."
         ),
         DebugInstallStep(
             title: "Enable input source",
@@ -35,7 +35,7 @@ enum DebugInstallGuidance {
         ),
         DebugInstallStep(
             title: "Inspect logs",
-            detail: "Use Console.app or the log command to inspect KnowTypeInputMethodApp messages during local smoke tests."
+            detail: "Use the diagnostic log mode, Console.app, or the log command to inspect KnowTypeInputMethodApp, Gatekeeper, and input-source sandbox messages during local smoke tests."
         )
     ]
 
@@ -44,6 +44,7 @@ enum DebugInstallGuidance {
         "CODESIGN_IDENTITY=\"Apple Development: Name (TEAMID)\" ./scripts/install-inputmethod.sh",
         "./scripts/install-inputmethod.sh",
         "./scripts/diagnose-inputmethod.sh --strict",
+        "./scripts/diagnose-inputmethod.sh --strict --logs",
         "./scripts/select-inputmethod.sh",
         "./scripts/select-inputmethod.sh --require-selected",
         "log stream --predicate 'process == \"KnowTypeInputMethodApp\"'"

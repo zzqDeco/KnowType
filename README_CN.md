@@ -85,28 +85,11 @@ swift build
 swift test
 ```
 
-构建输入法 app bundle：
+构建并安装本地输入法 bundle：
 
 ```bash
 ./scripts/build-inputmethod-bundle.sh
-```
-
-bundle 会输出到：
-
-```text
-dist/KnowType.app
-```
-
-本地安装：
-
-```bash
 ./scripts/install-inputmethod.sh
-```
-
-脚本会把 bundle 复制到：
-
-```text
-~/Library/Input Methods/KnowType.app
 ```
 
 安装后先运行只读诊断，再开始手动打字测试：
@@ -115,17 +98,7 @@ dist/KnowType.app
 ./scripts/diagnose-inputmethod.sh
 ```
 
-如果希望缺少 bundle 资源、签名失败或 Text Input Source 注册/启用状态失败直接阻断本地 smoke gate，可以使用 `./scripts/diagnose-inputmethod.sh --strict`。
-
-如果只是想重新请求 macOS 切换到 KnowType，不需要重新安装，可以运行：
-
-```bash
-./scripts/select-inputmethod.sh
-```
-
-开始手动打字验收前，先激活要测试的文本 app，再运行 `./scripts/select-inputmethod.sh --require-selected` 作为选择预检。macOS 的输入源选择会跟随文本输入上下文，所以最终验收仍必须在目标 app 里实际打字验证。
-
-然后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启要测试输入法的 app。
+详细安装、签名、Text Input Source 和排障说明放在 [doc/src/scripts/inputmethod-diagnostics.plan.md](doc/src/scripts/inputmethod-diagnostics.plan.md)。
 
 移除本地 bundle：
 

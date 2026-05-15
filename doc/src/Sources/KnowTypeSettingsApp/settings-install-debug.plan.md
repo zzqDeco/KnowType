@@ -23,14 +23,14 @@ The connection test uses the current draft profile and may use a typed API key f
 
 The Debug Install tab documents the local developer loop through `DebugInstallGuidance`, a small testable settings-side source of truth:
 
-- build and ad-hoc sign the bundle by default, or use `CODESIGN_IDENTITY` for Apple Development signing;
-- copy `KnowType.app` to `~/Library/Input Methods`;
-- request selection of `com.knowtype.inputmethod.KnowType.Mode` with `scripts/select-inputmethod.sh` after activating the target text app, while directing developers to `scripts/diagnose-inputmethod.sh` for the independent system status check;
+- build and Apple Development-sign the bundle by default when a local identity exists, while still allowing `CODESIGN_IDENTITY=-` for explicit ad-hoc local testing;
+- copy `KnowType.app` to `~/Library/Input Methods` and launch it with the install-activation flag so registration and best-effort selection happen from the installed app context;
+- request selection of `com.knowtype.inputmethod.KnowType.Mode` with `scripts/select-inputmethod.sh` only as a retry/preflight after activating the target text app, while directing developers to `scripts/diagnose-inputmethod.sh` for the independent system status check;
 - remind developers that the selection helper is only a preflight and final acceptance still requires typing a real probe in the target app;
 - run `scripts/diagnose-inputmethod.sh` to verify bundle metadata, signing, packaged resources, Text Input Source registration, and local data paths without changing system state;
 - use `scripts/select-inputmethod.sh --require-selected` as the selection preflight when the active text input context must already be KnowType;
 - refresh the input method process or log out and back in if macOS keeps stale registration state;
 - enable KnowType in System Settings;
-- inspect `KnowTypeInputMethodApp` messages with Console.app or `log stream`.
+- inspect `KnowTypeInputMethodApp`, Gatekeeper, and input-source sandbox messages with `scripts/diagnose-inputmethod.sh --strict --logs`, Console.app, or `log stream`.
 
 This guidance is intentionally not an installer UI and does not store or display API keys.

@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"]),
         .executable(name: "KnowTypeSettingsApp", targets: ["KnowTypeSettingsApp"]),
         .executable(name: "KnowTypeInputMethodApp", targets: ["KnowTypeInputMethodApp"]),
+        .executable(name: "knowtype-inputsource-tool", targets: ["KnowTypeInputSourceTool"]),
         .executable(name: "knowtype-demo", targets: ["KnowTypeDemo"])
     ],
     targets: [
@@ -56,7 +57,15 @@ let package = Package(
             path: "Sources/KnowTypeInputMethodApp",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
+                .linkedFramework("Carbon", .when(platforms: [.macOS])),
                 .linkedFramework("InputMethodKit", .when(platforms: [.macOS]))
+            ]
+        ),
+        .executableTarget(
+            name: "KnowTypeInputSourceTool",
+            path: "Sources/KnowTypeInputSourceTool",
+            linkerSettings: [
+                .linkedFramework("Carbon", .when(platforms: [.macOS]))
             ]
         ),
         .executableTarget(
