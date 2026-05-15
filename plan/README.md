@@ -20,6 +20,7 @@
 | [runtime-lexicon-directory.plan.md](runtime-lexicon-directory.plan.md) | Runtime directory loading for user-owned local lexicons | Active reference |
 | [lexicon-settings-status.plan.md](lexicon-settings-status.plan.md) | Settings status for local lexicon directories and diagnostics | Active reference |
 | [lexicon-directory-resolver.plan.md](lexicon-directory-resolver.plan.md) | Shared directory discovery for runtime and settings local lexicons | Active reference |
+| [runtime-lexicon-default-refresh.plan.md](runtime-lexicon-default-refresh.plan.md) | Avoid stale default-engine caches for local lexicon iteration | Active reference |
 
 ## Delivered MVP Slices
 

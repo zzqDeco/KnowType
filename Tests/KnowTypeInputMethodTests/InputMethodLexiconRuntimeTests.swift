@@ -43,6 +43,31 @@ final class InputMethodLexiconRuntimeTests: XCTestCase {
         XCTAssertTrue(catalog.entries.isEmpty)
     }
 
+    func testDefaultEngineReloadsRuntimeDirectoryContentsBetweenCalls() throws {
+        let home = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let rawInput = "zizaoci"
+        let customText = "自造词"
+
+        let firstEngine = InputMethodLexiconRuntime.defaultEngine(
+            environment: [:],
+            homeDirectory: home
+        )
+        XCTAssertFalse(firstEngine.candidates(for: rawInput).contains { $0.text == customText })
+
+        let lexiconDirectory = TraditionalInputLexiconDirectoryResolver
+            .applicationSupportLexiconDirectory(homeDirectory: home)
+        try FileManager.default.createDirectory(at: lexiconDirectory, withIntermediateDirectories: true)
+        try Data("zi zao ci\t\(customText)\t0.995\n".utf8)
+            .write(to: lexiconDirectory.appendingPathComponent("user.tsv"))
+
+        let reloadedEngine = InputMethodLexiconRuntime.defaultEngine(
+            environment: [:],
+            homeDirectory: home
+        )
+        XCTAssertEqual(reloadedEngine.candidates(for: rawInput).first?.text, customText)
+    }
+
     func testPipelineCanUseRuntimeLexiconEngine() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

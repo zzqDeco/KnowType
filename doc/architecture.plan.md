@@ -90,6 +90,7 @@ Settings status is read-only for lexicons in the MVP. It does not import the IMK
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
 - `InputSessionController` turns raw input and actions into suggestion and commit decisions.
 - `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction, using the shared `TraditionalInputLexiconDirectoryResolver`.
+- Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
 - `CandidatePanelWindowController` owns the AppKit panel.
