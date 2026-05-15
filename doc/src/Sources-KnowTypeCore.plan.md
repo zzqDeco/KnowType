@@ -3,7 +3,7 @@
 `KnowTypeCore` contains the product invariants:
 
 - shared request/response models
-- shared input-mode preference models for punctuation language and symbol width
+- shared input-mode preference models and runtime state for punctuation language and symbol width
 - text protection and Level 0 detection
 - clean-room traditional pinyin decoding, compact segmentation, typo normalization, and local correction ranking
 - prefix-locked continuation sanitization and fallback

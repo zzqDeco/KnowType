@@ -84,6 +84,49 @@ public struct InputModePreferences: Codable, Sendable, Equatable {
     public static let standard = InputModePreferences()
 }
 
+public struct InputModePreferenceRuntime: Sendable, Equatable {
+    public private(set) var preferences: InputModePreferences
+    public private(set) var appBundleID: String?
+    public private(set) var state: InputModeState
+
+    public init(
+        preferences: InputModePreferences = .standard,
+        appBundleID: String? = nil
+    ) {
+        self.preferences = preferences
+        self.appBundleID = appBundleID
+        self.state = InputModeAppPolicy.defaultState(
+            appBundleID: appBundleID,
+            preferences: preferences
+        )
+    }
+
+    @discardableResult
+    public mutating func reloadIfChanged(
+        preferences: InputModePreferences,
+        appBundleID: String?
+    ) -> Bool {
+        guard preferences != self.preferences || appBundleID != self.appBundleID else {
+            return false
+        }
+        self.preferences = preferences
+        self.appBundleID = appBundleID
+        state = InputModeAppPolicy.defaultState(
+            appBundleID: appBundleID,
+            preferences: preferences
+        )
+        return true
+    }
+
+    public mutating func togglePunctuationMode() {
+        state.togglePunctuationMode()
+    }
+
+    public mutating func toggleSymbolWidth() {
+        state.toggleSymbolWidth()
+    }
+}
+
 public enum InputModeAppPolicy {
     public static func defaultState(
         appBundleID: String?,

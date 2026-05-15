@@ -12,9 +12,10 @@ Persist KnowType punctuation preferences so Chinese punctuation, English punctua
   - `InputSymbolWidth`
   - `InputModeState`
   - `InputModePreferences`
+  - `InputModePreferenceRuntime`
   - `InputModeAppPolicy`
 - `UserDefaultsInputModePreferenceStore` stores punctuation preferences in the shared `com.knowtype.preferences` defaults domain.
-- The input-method controller reads preferences at controller startup and applies app policy:
+- The input-method controller reads preferences at controller startup and refreshes them when a new composition or direct symbol input begins:
   - normal apps use `defaultState`
   - code/terminal-style apps use `codeAppState`
 - The SwiftUI Input settings tab can edit:
@@ -22,7 +23,7 @@ Persist KnowType punctuation preferences so Chinese punctuation, English punctua
   - default symbol width
   - code-app punctuation language
   - code-app symbol width
-- `Option + .` remains a session-local toggle for the active controller session.
+- `Option + .` remains a session-local toggle for the active controller session and is not written back to saved preferences.
 
 ## Verification
 

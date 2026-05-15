@@ -44,4 +44,58 @@ final class InputModePreferencesTests: XCTestCase {
 
         XCTAssertEqual(store.loadPreferences(), .standard)
     }
+
+    func testPreferenceRuntimeReloadsWhenPreferencesChange() {
+        var runtime = InputModePreferenceRuntime(
+            preferences: .standard,
+            appBundleID: "com.apple.TextEdit"
+        )
+        let updatedPreferences = InputModePreferences(
+            defaultState: InputModeState(
+                textMode: .chinese,
+                punctuationMode: .english,
+                symbolWidth: .fullWidth
+            )
+        )
+
+        XCTAssertTrue(
+            runtime.reloadIfChanged(
+                preferences: updatedPreferences,
+                appBundleID: "com.apple.TextEdit"
+            )
+        )
+        XCTAssertEqual(runtime.preferences, updatedPreferences)
+        XCTAssertEqual(runtime.state, updatedPreferences.defaultState)
+    }
+
+    func testPreferenceRuntimeDoesNotClobberManualToggleWhenPreferencesAreUnchanged() {
+        var runtime = InputModePreferenceRuntime(
+            preferences: .standard,
+            appBundleID: "com.apple.TextEdit"
+        )
+        runtime.togglePunctuationMode()
+
+        XCTAssertFalse(
+            runtime.reloadIfChanged(
+                preferences: .standard,
+                appBundleID: "com.apple.TextEdit"
+            )
+        )
+        XCTAssertEqual(runtime.state.punctuationMode, .english)
+    }
+
+    func testPreferenceRuntimeReloadsWhenAppContextChanges() {
+        var runtime = InputModePreferenceRuntime(
+            preferences: .standard,
+            appBundleID: "com.apple.TextEdit"
+        )
+
+        XCTAssertTrue(
+            runtime.reloadIfChanged(
+                preferences: .standard,
+                appBundleID: "com.openai.codex"
+            )
+        )
+        XCTAssertEqual(runtime.state, InputModePreferences.standard.codeAppState)
+    }
 }
