@@ -101,6 +101,8 @@ Input-method candidate presentation maps `SuggestionResponse` into compact macOS
 - unmatched digit keys continue composing as literal digits instead of selecting hidden off-page candidates.
 - plain punctuation commits the current composition plus punctuation, or inserts punctuation directly when no composition exists.
 - Chinese punctuation is the default symbol mode; `Option + .` toggles Chinese/English punctuation for the active controller session.
+- input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields so half-width punctuation does not imply ASCII text mode.
+- app policy may default code and terminal contexts to English half-width punctuation while preserving the Chinese text pipeline.
 - `Option + number` -> commit prefix plus the continuation mapped to that global shortcut. `Option + 1` matches the first continuation, which is also available through `Tab` and displayed as `⇥`; `Option + 2...9` map to continuations 2 through 9, and later continuation pages do not reuse those labels.
 - `Option + R` -> request polish for original text.
 

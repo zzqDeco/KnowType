@@ -22,7 +22,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
-    private var symbolMode: InputSymbolMode = .chinese
+    private var inputModeState: InputModeState
     private var suggestionTask: Task<Void, Never>?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
@@ -33,6 +33,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
         self.hasProvider = provider != nil
         self.sessionController = InputSessionController(provider: provider)
+        self.inputModeState = InputModeAppPolicy.defaultState(
+            appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier()
+        )
         super.init(server: server, delegate: delegate, client: inputClient)
     }
 
@@ -133,7 +136,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         case .append(let text):
             return appendComposition(text, client: sender)
         case .symbol(let text):
-            guard let symbol = symbolTransformer.text(for: text, mode: symbolMode) else {
+            guard let symbol = symbolTransformer.text(for: text, state: inputModeState) else {
                 return appendComposition(text, client: sender)
             }
             return commitSymbol(symbol, client: sender)
@@ -151,7 +154,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return true
         case .action(let action):
             if action == .toggleSymbolMode {
-                symbolMode.toggle()
+                inputModeState.togglePunctuationMode()
                 return true
             }
             return commit(action: action, client: sender)
