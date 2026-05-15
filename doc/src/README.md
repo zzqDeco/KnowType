@@ -1,39 +1,50 @@
 # Source Notes
 
-This directory contains short notes for important source files and subsystems. These files are not a replacement for source code; they record the intent, ownership boundary, and testing concerns that are easy to lose during branch work.
+This directory contains short notes for important source files and subsystems. These files are not a replacement for source code; they record intent, ownership boundaries, and testing concerns that are easy to lose during branch work.
 
-## Input Method Front End
+The directory layout mirrors the repository layout. Put notes for Swift package targets under `Sources/<target>/`, and notes for local shell tooling under `scripts/`.
 
-- [CandidateAnchorResolver](CandidateAnchorResolver.plan.md)
-- [CandidatePanelRenderer](CandidatePanelRenderer.plan.md)
-- [CandidatePanelWindowController](CandidatePanelWindowController.plan.md)
-- [InputSessionController](InputSessionController.plan.md)
-- [InputMethodLexiconRuntime](InputMethodLexiconRuntime.plan.md)
-- [InputSymbolMode](InputSymbolMode.plan.md)
-- [KnowTypeInputMethodApp](KnowTypeInputMethodApp.plan.md)
-- [Sources-KnowTypeInputMethod](Sources-KnowTypeInputMethod.plan.md)
-- [UserSelectionHistoryStore](UserSelectionHistoryStore.plan.md)
+## Sources/KnowTypeCore
 
-## Core Input Engine
+- [Overview](Sources/KnowTypeCore/README.plan.md)
+- [TraditionalInputEngine](Sources/KnowTypeCore/TraditionalInputEngine.plan.md)
+- [TraditionalInputLexiconCatalog](Sources/KnowTypeCore/TraditionalInputLexiconCatalog.plan.md)
+- [TraditionalInputLexiconDirectoryResolver](Sources/KnowTypeCore/TraditionalInputLexiconDirectoryResolver.plan.md)
+- [TraditionalInputLexiconFileSource](Sources/KnowTypeCore/TraditionalInputLexiconFileSource.plan.md)
+- [TraditionalInputLexiconResourceLoader](Sources/KnowTypeCore/TraditionalInputLexiconResourceLoader.plan.md)
+- [TraditionalInputSeedLexicon](Sources/KnowTypeCore/TraditionalInputSeedLexicon.plan.md)
+- [PinyinTables](Sources/KnowTypeCore/PinyinTables.plan.md)
 
-- [Sources-KnowTypeCore](Sources-KnowTypeCore.plan.md)
-- [TraditionalInputEngine](TraditionalInputEngine.plan.md)
-- [TraditionalInputLexiconCatalog](TraditionalInputLexiconCatalog.plan.md)
-- [TraditionalInputLexiconDirectoryResolver](TraditionalInputLexiconDirectoryResolver.plan.md)
-- [TraditionalInputLexiconFileSource](TraditionalInputLexiconFileSource.plan.md)
-- [TraditionalInputLexiconResourceLoader](TraditionalInputLexiconResourceLoader.plan.md)
-- [TraditionalInputSeedLexicon](TraditionalInputSeedLexicon.plan.md)
-- [PinyinTables](PinyinTables.plan.md)
-- [KnowTypeDemo](KnowTypeDemo.plan.md)
+## Sources/KnowTypeProviders
 
-## Providers And Settings
+- [Overview](Sources/KnowTypeProviders/README.plan.md)
+- [Local OpenAI-Compatible Provider Runtime](Sources/KnowTypeProviders/provider-runtime-local.plan.md)
 
-- [LexiconSettingsViewModel](LexiconSettingsViewModel.plan.md)
-- [Sources-KnowTypeProviders](Sources-KnowTypeProviders.plan.md)
-- [Provider Runtime Local](provider-runtime-local.plan.md)
-- [ProviderProfilesViewModel](ProviderProfilesViewModel.plan.md)
-- [Settings Install Debug](settings-install-debug.plan.md)
+## Sources/KnowTypeInputMethod
 
-## Scripts And Tooling
+- [Overview](Sources/KnowTypeInputMethod/README.plan.md)
+- [CandidateAnchorResolver](Sources/KnowTypeInputMethod/CandidateAnchorResolver.plan.md)
+- [CandidatePanelRenderer](Sources/KnowTypeInputMethod/CandidatePanelRenderer.plan.md)
+- [CandidatePanelWindowController](Sources/KnowTypeInputMethod/CandidatePanelWindowController.plan.md)
+- [InputMethodLexiconRuntime](Sources/KnowTypeInputMethod/InputMethodLexiconRuntime.plan.md)
+- [InputSessionController](Sources/KnowTypeInputMethod/InputSessionController.plan.md)
+- [InputSymbolMode](Sources/KnowTypeInputMethod/InputSymbolMode.plan.md)
+- [UserSelectionHistoryStore](Sources/KnowTypeInputMethod/UserSelectionHistoryStore.plan.md)
 
-- [Input Method Diagnostic Scripts](scripts-inputmethod-diagnostics.plan.md)
+## Sources/KnowTypeInputMethodApp
+
+- [Overview](Sources/KnowTypeInputMethodApp/README.plan.md)
+
+## Sources/KnowTypeSettingsApp
+
+- [LexiconSettingsViewModel](Sources/KnowTypeSettingsApp/LexiconSettingsViewModel.plan.md)
+- [ProviderProfilesViewModel](Sources/KnowTypeSettingsApp/ProviderProfilesViewModel.plan.md)
+- [Settings Install Debug](Sources/KnowTypeSettingsApp/settings-install-debug.plan.md)
+
+## Sources/KnowTypeDemo
+
+- [Overview](Sources/KnowTypeDemo/README.plan.md)
+
+## scripts
+
+- [Input Method Diagnostic Scripts](scripts/inputmethod-diagnostics.plan.md)
