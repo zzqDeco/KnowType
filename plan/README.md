@@ -1,16 +1,29 @@
 # KnowType Plan Index
 
-This directory stores current, directly implementable plans. Completed historical plans should be traced through Git history rather than accumulated here indefinitely.
+`plan/` stores active or recently delivered implementation plans. It is intentionally smaller than a project wiki: once a plan is obsolete and its behavior is documented in `doc/`, it can be retired through a docs cleanup PR.
 
-## Current Plans
+## Active MVP Work
 
-| Document | Description | Status |
+| Document | Purpose | Status |
 |---|---|---|
-| `multi-api-v1.plan.md` | v1 core, provider adapters, correction, prefix-locked continuation, and project workflow | In Progress |
-| `privacy-app-rules-mvp.plan.md` | Level 0 privacy and protected app bundle rules | In Progress |
+| [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and project workflow | Active reference |
+| [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active reference |
+| [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Mature candidate-window geometry resolver | Active reference |
+| [privacy-app-rules-mvp.plan.md](privacy-app-rules-mvp.plan.md) | Level 0 no-provider routing and protected app rules | Active reference |
+
+## Delivered MVP Slices
+
+| Document | Purpose | Status |
+|---|---|---|
+| [imk-session-architecture.plan.md](imk-session-architecture.plan.md) | Thin IMK controller and session separation | Delivered, keep until architecture docs fully absorb it |
+| [inputmethod-native-candidates-fix.plan.md](inputmethod-native-candidates-fix.plan.md) | Native-style candidate panel behavior | Delivered, keep as UI reference |
+| [native-candidate-panel-style.plan.md](native-candidate-panel-style.plan.md) | Compact macOS candidate panel styling | Delivered, keep as UI reference |
+| [preferences-install-debug.plan.md](preferences-install-debug.plan.md) | Settings and local install/debug workflow | Delivered, keep as settings reference |
+| [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Delivered, pending follow-up input-mode state work |
 
 ## Maintenance Rules
 
-- Keep `plan/` focused on active implementation work.
-- Use `doc/` for current architecture and interface documentation.
-- Update this index when adding or retiring a plan.
+- Keep `plan/` focused on implementable work and recently merged decisions.
+- Move stable behavior summaries into [doc/](../doc/README.md).
+- Update this index whenever adding, merging, or retiring a plan.
+- Do not duplicate long architecture explanations here; link to the relevant doc instead.
