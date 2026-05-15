@@ -9,8 +9,14 @@ public struct InputMethodPipeline: Sendable {
     private let correctionEngine: CorrectionEngine
     private let continuationEngine: PrefixContinuationEngine
 
-    public init(provider: (any LLMProvider)? = nil) {
-        self.correctionEngine = CorrectionEngine(cloudProvider: provider)
+    public init(
+        provider: (any LLMProvider)? = nil,
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+    ) {
+        self.correctionEngine = CorrectionEngine(
+            cloudProvider: provider,
+            traditionalInputEngine: traditionalInputEngine
+        )
         self.continuationEngine = PrefixContinuationEngine(provider: provider)
     }
 
@@ -48,9 +54,10 @@ public struct InputMethodPipeline: Sendable {
 
     public static func localSuggestions(
         for context: InputContext,
-        includeFallbackContinuations: Bool = true
+        includeFallbackContinuations: Bool = true,
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
     ) -> SuggestionResponse {
-        let correctionEngine = CorrectionEngine()
+        let correctionEngine = CorrectionEngine(traditionalInputEngine: traditionalInputEngine)
         let continuationEngine = PrefixContinuationEngine()
         let prefixes = correctionEngine.localCorrect(context)
         let locked = prefixes.first.map {

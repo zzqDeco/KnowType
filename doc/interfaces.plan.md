@@ -97,6 +97,7 @@ Core candidate types:
 - `TraditionalInputLexiconFileSource`: file and directory loader for local lexicon resources.
 - `TraditionalInputLexiconResourceLoader`: JSON/TSV parser for audited local lexicon resources.
 - `TraditionalInputSeedLexicon`: packaged clean-room seed lexicon loaded through the same file/resource path.
+- `InputMethodLexiconRuntime`: input-method runtime loader for user-owned local lexicon directories.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
@@ -112,6 +113,8 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 `TraditionalInputLexiconCatalogLoader` accepts named resources, loads each one independently, preserves valid entries, and returns diagnostics for failed resources. `TraditionalInputLexiconCatalog.makeEngine()` is the preferred handoff into `TraditionalInputEngine`.
 
 `TraditionalInputLexiconFileSource` infers `.json` and `.tsv` formats from file extensions, reads explicit file lists or sorted directory contents, skips hidden directory entries, and reports unsupported or unreadable files through catalog diagnostics.
+
+`InputMethodLexiconRuntime` resolves `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and `~/Library/Application Support/KnowType/Lexicons`, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon.
 
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 
