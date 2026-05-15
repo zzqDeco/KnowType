@@ -80,8 +80,9 @@ Local OpenAI-compatible runtimes may leave the model blank for `/v1/models` disc
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
+- Lexicon settings can create missing directories and a non-overwriting sample TSV file, but broader dictionary import and licensing review remain outside the MVP settings model.
 
-Settings status is read-only for lexicons in the MVP. It does not import the IMK frontend and does not own dictionary licensing.
+Settings status does not import the IMK frontend and does not own dictionary licensing.
 
 ## Input Method Layer
 

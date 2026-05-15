@@ -121,6 +121,11 @@ private struct LexiconSettingsView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                Button {
+                    _ = viewModel.createSampleLexiconResource()
+                } label: {
+                    Label("Create Sample TSV", systemImage: "doc.badge.plus")
+                }
                 if viewModel.directories.contains(where: { !$0.exists }) {
                     Button {
                         _ = viewModel.createMissingDirectories()

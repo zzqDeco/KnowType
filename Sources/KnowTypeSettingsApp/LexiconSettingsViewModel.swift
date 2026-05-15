@@ -46,6 +46,12 @@ public struct LexiconDirectoryStatus: Sendable, Equatable, Identifiable {
 public final class LexiconSettingsViewModel: ObservableObject {
     public static let environmentDirectoryKey = TraditionalInputLexiconDirectoryResolver.environmentDirectoryKey
     public static let environmentDirectoriesKey = TraditionalInputLexiconDirectoryResolver.environmentDirectoriesKey
+    public static let sampleResourceFileName = "knowtype-sample.tsv"
+    public static let sampleResourceContents = """
+    # pinyin<TAB>text<TAB>confidence
+    zi zao ci\t自造词\t0.995
+    ce shi ci\t测试词\t0.990
+    """
 
     @Published public private(set) var directories: [LexiconDirectoryStatus]
     @Published public private(set) var totalLoadedEntryCount: Int
@@ -103,6 +109,37 @@ public final class LexiconSettingsViewModel: ObservableObject {
             lastActionMessage = createdCount == 0
                 ? "All lexicon directories already exist."
                 : "Created \(createdCount) lexicon director\(createdCount == 1 ? "y" : "ies")."
+            refresh()
+            return true
+        } catch {
+            lastActionMessage = error.localizedDescription
+            refresh()
+            return false
+        }
+    }
+
+    @discardableResult
+    public func createSampleLexiconResource() -> Bool {
+        guard let directory = directoryURLs.first else {
+            lastActionMessage = "No lexicon directory is configured."
+            refresh()
+            return false
+        }
+
+        do {
+            if !isDirectory(directory) {
+                try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
+
+            let file = directory.appendingPathComponent(Self.sampleResourceFileName)
+            guard !fileManager.fileExists(atPath: file.path) else {
+                lastActionMessage = "\(Self.sampleResourceFileName) already exists."
+                refresh()
+                return true
+            }
+
+            try Data(Self.sampleResourceContents.utf8).write(to: file, options: [.atomic])
+            lastActionMessage = "Created \(Self.sampleResourceFileName)."
             refresh()
             return true
         } catch {

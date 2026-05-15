@@ -22,6 +22,7 @@
 | [lexicon-directory-resolver.plan.md](lexicon-directory-resolver.plan.md) | Shared directory discovery for runtime and settings local lexicons | Active reference |
 | [runtime-lexicon-default-refresh.plan.md](runtime-lexicon-default-refresh.plan.md) | Avoid stale default-engine caches for local lexicon iteration | Active reference |
 | [runtime-lexicon-session-refresh.plan.md](runtime-lexicon-session-refresh.plan.md) | Refresh running IMK sessions when local lexicon resources change | Active reference |
+| [lexicon-sample-resource-action.plan.md](lexicon-sample-resource-action.plan.md) | Settings action for creating a known-good sample TSV lexicon | Active reference |
 
 ## Delivered MVP Slices
 

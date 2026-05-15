@@ -7,5 +7,6 @@
 - It summarizes loaded entry counts, resource file counts, and typed diagnostics.
 - Missing directories are shown as missing but are not treated as errors.
 - It can create missing lexicon directories and refresh status afterward.
+- It can create a non-overwriting `knowtype-sample.tsv` file in the first configured directory so users can verify local lexicon loading.
 
 The model does not import the input-method frontend. It depends on `KnowTypeCore` so settings status uses the same JSON/TSV parser as the runtime input engine.
