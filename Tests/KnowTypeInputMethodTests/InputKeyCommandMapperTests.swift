@@ -34,9 +34,23 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
     }
 
+    func testMapsOptionPeriodToSymbolModeToggle() {
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option])),
+            .action(.toggleSymbolMode)
+        )
+    }
+
     func testPlainTextAppendsToComposition() {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "w", keyCode: 13)), .append("w"))
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "中", keyCode: -1)), .append("中"))
+    }
+
+    func testPlainSymbolsUseSymbolIntent() {
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: ".", keyCode: 47)), .symbol("."))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "/", keyCode: 44)), .symbol("/"))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "!", keyCode: 18)), .symbol("!"))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "@", keyCode: 19)), .symbol("@"))
     }
 
     func testControlCharactersAreIgnored() {

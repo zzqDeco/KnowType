@@ -99,6 +99,8 @@ Input-method candidate presentation maps `SuggestionResponse` into compact macOS
 - visible numeric prefix shortcuts commit the prefix candidate shown on the current candidate page, not the same global candidate index on every page
 - `0` commits the raw composition when current correction candidates are visible, preserving the native input-method escape hatch.
 - unmatched digit keys continue composing as literal digits instead of selecting hidden off-page candidates.
+- plain punctuation commits the current composition plus punctuation, or inserts punctuation directly when no composition exists.
+- Chinese punctuation is the default symbol mode; `Option + .` toggles Chinese/English punctuation for the active controller session.
 - `Option + number` -> commit prefix plus the continuation mapped to that global shortcut. `Option + 1` matches the first continuation, which is also available through `Tab` and displayed as `⇥`; `Option + 2...9` map to continuations 2 through 9, and later continuation pages do not reuse those labels.
 - `Option + R` -> request polish for original text.
 

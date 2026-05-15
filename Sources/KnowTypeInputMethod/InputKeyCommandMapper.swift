@@ -42,6 +42,7 @@ public enum InputCandidateNavigation: Sendable, Equatable {
 
 public enum InputKeyIntent: Sendable, Equatable {
     case append(String)
+    case symbol(String)
     case deleteBackward
     case action(InputAction)
     case cancelComposition
@@ -69,6 +70,9 @@ public struct InputKeyCommandMapper: Sendable {
         }
 
         if stroke.modifiers.contains(.option) {
+            if stroke.keyCode == Self.periodKeyCode {
+                return .action(.toggleSymbolMode)
+            }
             if let digit = optionDigit(for: stroke.keyCode) {
                 return .action(.optionNumber(digit))
             }
@@ -96,6 +100,9 @@ public struct InputKeyCommandMapper: Sendable {
         if let number = Self.selectionNumberByKeyCode[stroke.keyCode],
            stroke.text == String(number) {
             return .selectCandidate(number)
+        }
+        if InputSymbolTransformer.isSymbolInput(stroke.text) {
+            return .symbol(stroke.text)
         }
         guard Self.isAppendableText(stroke.text) else {
             return .ignored
@@ -125,6 +132,7 @@ public struct InputKeyCommandMapper: Sendable {
     private static let escapeKeyCode = 53
     private static let escapeText = "\u{1B}"
     private static let rKeyCode = 15
+    private static let periodKeyCode = 47
     private static let appKitFunctionKeyScalarRange: ClosedRange<UInt32> = 0xF700...0xF8FF
 
     private static let digitKeyCodes: [Int: Int] = [

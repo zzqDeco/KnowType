@@ -11,6 +11,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private let sessionController: InputSessionController
     private let hasProvider: Bool
     private let keyMapper = InputKeyCommandMapper()
+    private let symbolTransformer = InputSymbolTransformer()
     private let candidateListBuilder = InputCandidateListBuilder()
     private let anchorResolver = CandidateAnchorResolver(
         screenProvider: AppKitScreenGeometryProvider(),
@@ -21,6 +22,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
+    private var symbolMode: InputSymbolMode = .chinese
     private var suggestionTask: Task<Void, Never>?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
@@ -130,6 +132,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         switch intent {
         case .append(let text):
             return appendComposition(text, client: sender)
+        case .symbol(let text):
+            guard let symbol = symbolTransformer.text(for: text, mode: symbolMode) else {
+                return appendComposition(text, client: sender)
+            }
+            return commitSymbol(symbol, client: sender)
         case .deleteBackward:
             guard !rawBuffer.isEmpty else {
                 return false
@@ -143,6 +150,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             refreshSuggestion(client: sender)
             return true
         case .action(let action):
+            if action == .toggleSymbolMode {
+                symbolMode.toggle()
+                return true
+            }
             return commit(action: action, client: sender)
         case .cancelComposition:
             guard !rawBuffer.isEmpty else {
@@ -197,6 +208,23 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         publishLocalSuggestion(client: sender)
         refreshSuggestion(client: sender)
         return true
+    }
+
+    private func commitSymbol(_ symbol: String, client sender: Any!) -> Bool {
+        guard !rawBuffer.isEmpty else {
+            insert(symbol, client: sender)
+            return true
+        }
+
+        let baseResult = commitResult(for: .space, client: sender)
+        return applyCommitResult(
+            InputSymbolCommitPolicy.result(
+                symbol: symbol,
+                rawInput: rawBuffer,
+                baseCommitResult: baseResult
+            ),
+            client: sender
+        )
     }
 
     private func refreshSuggestion(client sender: Any!) {

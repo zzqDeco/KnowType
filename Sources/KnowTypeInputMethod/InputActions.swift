@@ -6,6 +6,7 @@ public enum InputAction: Sendable, Equatable {
     case tab
     case optionNumber(Int)
     case optionR
+    case toggleSymbolMode
 }
 
 public enum InputCommitResult: Sendable, Equatable {
@@ -75,6 +76,8 @@ public struct InputCompositionController: Sendable {
             return .commit(join(prefix: prefix, continuation: continuationCandidates[index].text))
         case .optionR:
             return .polishRequested(originalText)
+        case .toggleSymbolMode:
+            return .noAction
         }
     }
 
