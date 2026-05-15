@@ -23,7 +23,7 @@ enum DebugInstallGuidance {
         ),
         DebugInstallStep(
             title: "Request selection",
-            detail: "Run the selection helper to ask macOS to switch to KnowType without reinstalling. Use the require-selected gate before manual typing acceptance."
+            detail: "Activate the text app you want to test, then run the selection helper as a preflight. Final acceptance still requires typing a real probe in that app."
         ),
         DebugInstallStep(
             title: "Enable input source",

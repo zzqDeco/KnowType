@@ -107,4 +107,4 @@ SWIFT
 
 echo "Installed KnowType to: $TARGET_PATH"
 echo "Run ./scripts/diagnose-inputmethod.sh --strict for the read-only install status check."
-echo "Run ./scripts/select-inputmethod.sh --require-selected before manual typing acceptance."
+echo "Activate the target text app, run ./scripts/select-inputmethod.sh --require-selected, then type a real probe before manual acceptance."
