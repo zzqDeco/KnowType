@@ -45,6 +45,7 @@ KnowType is currently a local MVP for development and manual testing. It include
 - a compact custom candidate panel instead of relying on `IMKCandidates` as the main UI
 - a clean-room pinyin engine for MVP Chinese input coverage
 - SwiftUI settings for provider profiles, local lexicon status, privacy summary, input/candidate behavior, and debug install notes
+- a Debug Install settings tab that mirrors the local build, install, diagnose, selection, and logging commands
 - Keychain-backed API key storage for provider profiles
 - local candidate-learning history stored separately from provider configuration
 
