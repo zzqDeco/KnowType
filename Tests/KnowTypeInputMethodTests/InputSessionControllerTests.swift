@@ -295,6 +295,7 @@ final class InputSessionControllerTests: XCTestCase {
 
         XCTAssertFalse(requests.isEmpty)
         XCTAssertEqual(suggestion.prefixCandidates.first?.text, "我觉得这个方案")
+        XCTAssertTrue(suggestion.continuationCandidates.isEmpty)
         XCTAssertEqual(result, .commit("我觉得这个方案"))
     }
 

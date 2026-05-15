@@ -10,6 +10,14 @@ private struct StubProvider: LLMProvider {
     }
 }
 
+private struct ThrowingProvider: LLMProvider {
+    let providerName = "throwing"
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        throw NSError(domain: "KnowTypeTests", code: 1)
+    }
+}
+
 private actor RecordingContinuationProvider: LLMProvider {
     nonisolated let providerName = "recording-continuation"
     private var recordedRequests: [LLMRequest] = []
@@ -50,6 +58,32 @@ final class PrefixContinuationEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(continuations.first?.text, "still needs more validation")
+    }
+
+    func testProviderFailureDoesNotReturnFallbackContinuations() async {
+        let engine = PrefixContinuationEngine(provider: ThrowingProvider())
+        let continuations = await engine.continuations(
+            for: LockedPrefix(text: "我觉得这个方案", rawInput: "wo jue de zhege fagnan", candidateID: "test"),
+            lengthLevel: .medium
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
+    }
+
+    func testProviderEmptyUsableResponseDoesNotReturnFallbackContinuations() async {
+        let provider = StubProvider(
+            response: LLMResponse(candidates: [
+                LLMCandidate(text: "我觉得这个方案", confidence: 0.9),
+                LLMCandidate(text: "  \n", confidence: 0.4)
+            ])
+        )
+        let engine = PrefixContinuationEngine(provider: provider)
+        let continuations = await engine.continuations(
+            for: LockedPrefix(text: "我觉得这个方案", rawInput: "wo jue de zhege fagnan", candidateID: "test"),
+            lengthLevel: .medium
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
     }
 
     func testFallbackProvidesSixMediumCandidatesForInputMethodPanel() {
