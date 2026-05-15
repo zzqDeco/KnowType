@@ -23,3 +23,5 @@ Use `--strict` only when a failing diagnostic should block a local smoke run. Us
 `scripts/select-inputmethod.sh` sends `TISEnableInputSource`/`TISSelectInputSource` for KnowType and then runs the diagnostic by default. It reports that selection was requested; the follow-up diagnostic is still the source of truth for whether macOS has actually switched the current input source. Passing `--require-selected` forwards that hard gate to the diagnostic.
 
 CI validates the non-mutating parts of this workflow: shell syntax for all local input-method scripts, help output for the diagnostic and selection helpers, and `scripts/build-inputmethod-bundle.sh` packaging of the executable, `Info.plist`, SwiftPM core resource bundle, and input-source icon. CI does not install or select the input method because those actions mutate runner Text Input Source state.
+
+After installation, `scripts/install-inputmethod.sh` prints the same separation explicitly: run the strict diagnostic for installed state, then run the require-selected selection helper before manual typing acceptance.
