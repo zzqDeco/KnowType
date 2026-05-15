@@ -73,7 +73,7 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .continuationCandidate(0))
     }
 
-    func testPageDownAndPageUpSelectFirstRowOnTargetPage() {
+    func testPageDownAndPageUpPreserveVisibleRowOffset() {
         var state = CandidatePanelState()
         state.update(rawInput: "candidate", suggestion: multiPagePrefixSuggestion(count: 12))
 
@@ -90,7 +90,21 @@ final class CandidatePanelStateTests: XCTestCase {
 
         XCTAssertTrue(state.moveSelection(.pageUp))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 0))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
+    }
+
+    func testPageDownClampsPreservedOffsetOnShortLastPage() {
+        var state = CandidatePanelState()
+        state.update(rawInput: "candidate", suggestion: multiPagePrefixSuggestion(count: 12))
+
+        for _ in 0..<8 {
+            XCTAssertTrue(state.moveSelection(.down))
+        }
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(8))
+
+        XCTAssertTrue(state.moveSelection(.pageDown))
+        XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(11))
     }
 
     func testArrowNavigationCrossesPageBoundariesOnlyAtPageEdges() {
@@ -124,11 +138,11 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
 
         XCTAssertTrue(state.moveSelection(.pageDown))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(9))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(10))
 
         XCTAssertTrue(state.moveSelection(.pageDown))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(9))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(10))
     }
 
     func testSelectionAndPagePersistAcrossSameInputUpdateWhenRowStillExists() {
