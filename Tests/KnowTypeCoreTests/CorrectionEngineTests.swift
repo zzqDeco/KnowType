@@ -3,13 +3,20 @@ import XCTest
 
 private actor RecordingProvider: LLMProvider {
     nonisolated let providerName = "recording"
+    private let responseCandidates: [LLMCandidate]
     private var recordedRequests: [LLMRequest] = []
+
+    init(
+        responseCandidates: [LLMCandidate] = [
+            LLMCandidate(text: "cloud should not be used", confidence: 1.0)
+        ]
+    ) {
+        self.responseCandidates = responseCandidates
+    }
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         recordedRequests.append(request)
-        return LLMResponse(candidates: [
-            LLMCandidate(text: "cloud should not be used", confidence: 1.0)
-        ])
+        return LLMResponse(candidates: responseCandidates)
     }
 
     var requests: [LLMRequest] {
@@ -90,6 +97,19 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(requests.first?.rawInput, "wzm")
     }
 
+    func testPinyinCompletionProviderCandidateRanksAheadOfRawIdentity() async {
+        let provider = RecordingProvider(responseCandidates: [
+            LLMCandidate(text: "我怎么", confidence: 0.72)
+        ])
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        let candidates = await engine.correct(InputContext(rawInput: "wzm", locale: .zhCN))
+
+        XCTAssertEqual(candidates.first?.text, "我怎么")
+        XCTAssertEqual(candidates.first?.source, "recording")
+        XCTAssertTrue(candidates.map(\.text).contains("wzm"))
+    }
+
     func testTechnicalTokensAndEnglishWordsDoNotTriggerPinyinProviderFallback() async {
         let examples = [
             "css",
@@ -98,7 +118,13 @@ final class CorrectionEngineTests: XCTestCase {
             "npm",
             "ssh",
             "by",
+            "cry",
+            "dry",
+            "fly",
+            "gym",
             "my",
+            "sky",
+            "spy",
             "sync",
             "try",
             "why",

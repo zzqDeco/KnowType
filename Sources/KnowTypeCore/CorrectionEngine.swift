@@ -36,8 +36,12 @@ public final class CorrectionEngine: Sendable {
     public func correct(_ context: InputContext) async -> [CorrectionCandidate] {
         let raw = context.rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         var candidates = localCorrect(context)
+        let usesPinyinCompletionFallback = shouldAskCloudForPinyinCompletion(context: context)
 
-        if shouldAskCloud(context: context), let cloudProvider {
+        if shouldAskCloud(
+            context: context,
+            usesPinyinCompletionFallback: usesPinyinCompletionFallback
+        ), let cloudProvider {
             let request = LLMRequest(
                 task: .correction,
                 rawInput: raw,
@@ -47,11 +51,12 @@ public final class CorrectionEngine: Sendable {
             )
             if let cloud = try? await cloudProvider.complete(request) {
                 let cloudCandidates = cloud.candidates.map {
-                    CorrectionCandidate(
+                    let confidence = $0.confidence ?? 0.62
+                    return CorrectionCandidate(
                         text: $0.text,
                         source: cloudProvider.providerName,
-                        confidence: $0.confidence ?? 0.62,
-                        correctionLevel: .strongAlternative,
+                        confidence: usesPinyinCompletionFallback ? max(confidence, 0.64) : confidence,
+                        correctionLevel: usesPinyinCompletionFallback ? .contextual : .strongAlternative,
                         protectedRanges: TextProtection.detectProtectedRanges(in: $0.text)
                     )
                 }
@@ -62,11 +67,14 @@ public final class CorrectionEngine: Sendable {
         return uniqueSorted(candidates)
     }
 
-    private func shouldAskCloud(context: InputContext) -> Bool {
+    private func shouldAskCloud(
+        context: InputContext,
+        usesPinyinCompletionFallback: Bool
+    ) -> Bool {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
         }
-        if shouldAskCloudForPinyinCompletion(context: context) {
+        if usesPinyinCompletionFallback {
             return true
         }
         let tokenCount = correctionTokenCount(context.rawInput, locale: context.locale)
@@ -77,13 +85,13 @@ public final class CorrectionEngine: Sendable {
         guard context.locale == .zhCN else {
             return false
         }
-        if isCommonEnglishAllInitialWord(context.rawInput) {
-            return false
-        }
         let analysis = traditionalInputEngine.analyzePinyinInput(
             context.rawInput,
             preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: context.locale)
         )
+        if analysis.hasInitialAbbreviation && isEnglishLikeAllInitialWord(context.rawInput) {
+            return false
+        }
         return analysis.isLikelyPinyinComposition
             && !analysis.hasLocalCandidates
             && analysis.hasInitialAbbreviation
@@ -206,17 +214,18 @@ private let spellingCorrections: [String: String] = [
     "latnecy": "latency"
 ]
 
-private let commonEnglishAllInitialWords: Set<String> = [
-    "by",
-    "my",
-    "sync",
-    "try",
-    "why"
-]
-
-private func isCommonEnglishAllInitialWord(_ rawInput: String) -> Bool {
+private func isEnglishLikeAllInitialWord(_ rawInput: String) -> Bool {
     let lower = rawInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    return commonEnglishAllInitialWords.contains(lower)
+    guard lower.count >= 2,
+          lower.range(of: #"^[a-z]+$"#, options: .regularExpression) != nil else {
+        return false
+    }
+    guard lower.allSatisfy({ character in
+        pinyinInitialTokens.contains(String(character))
+    }) else {
+        return false
+    }
+    return lower.dropFirst().contains("y")
 }
 
 private func usesTraditionalInput(locale: KnowTypeLocale) -> Bool {
