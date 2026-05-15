@@ -43,6 +43,49 @@ final class InputMethodLexiconRuntimeTests: XCTestCase {
         XCTAssertTrue(catalog.entries.isEmpty)
     }
 
+    func testRuntimeSnapshotTracksDirectoryExistenceAndResourceFiles() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let runtime = InputMethodLexiconRuntime(
+            directories: [
+                URL(fileURLWithPath: "/tmp/knowtype-missing-\(UUID().uuidString)"),
+                directory
+            ]
+        )
+        try Data("ignored".utf8).write(to: directory.appendingPathComponent(".hidden.tsv"))
+        try Data("ignored".utf8).write(to: directory.appendingPathComponent("notes.txt"))
+        try Data("ce shi ci\t测试词\t0.995\n".utf8)
+            .write(to: directory.appendingPathComponent("user.tsv"))
+        try Data(#"[{"pinyin":["zi","zao"],"outputs":[{"text":"自造","confidence":0.99}]}]"#.utf8)
+            .write(to: directory.appendingPathComponent("custom.json"))
+
+        let snapshot = runtime.snapshot()
+
+        XCTAssertEqual(snapshot.directories.count, 2)
+        XCTAssertEqual(snapshot.directories[0].exists, false)
+        XCTAssertTrue(snapshot.directories[0].resources.isEmpty)
+        XCTAssertEqual(snapshot.directories[1].exists, true)
+        XCTAssertEqual(snapshot.directories[1].resources.map { $0.file.lastPathComponent }, [
+            "custom.json",
+            "user.tsv"
+        ])
+        XCTAssertTrue(snapshot.directories[1].resources.allSatisfy { $0.fileSize ?? 0 > 0 })
+    }
+
+    func testRuntimeSnapshotChangesWhenAResourceIsAdded() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let runtime = InputMethodLexiconRuntime(directories: [directory])
+        let emptySnapshot = runtime.snapshot()
+
+        try Data("ce shi ci\t测试词\t0.995\n".utf8)
+            .write(to: directory.appendingPathComponent("user.tsv"))
+        let updatedSnapshot = runtime.snapshot()
+
+        XCTAssertNotEqual(emptySnapshot, updatedSnapshot)
+        XCTAssertEqual(updatedSnapshot.directories.first?.resources.first?.file.lastPathComponent, "user.tsv")
+    }
+
     func testDefaultEngineReloadsRuntimeDirectoryContentsBetweenCalls() throws {
         let home = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: home) }

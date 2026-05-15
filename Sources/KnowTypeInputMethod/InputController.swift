@@ -8,9 +8,11 @@ import AppKit
 
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
-    private let sessionController: InputSessionController
+    private let provider: (any LLMProvider)?
+    private var sessionController: InputSessionController
     private let hasProvider: Bool
-    private let traditionalInputEngine: TraditionalInputEngine
+    private var traditionalInputEngine: TraditionalInputEngine
+    private var lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot
     private let keyMapper = InputKeyCommandMapper()
     private let symbolTransformer = InputSymbolTransformer()
     private let candidateListBuilder = InputCandidateListBuilder()
@@ -34,11 +36,14 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
-        let traditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+        let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
+        let traditionalInputEngine = lexiconRuntime.makeEngine()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
+        self.provider = provider
         self.hasProvider = provider != nil
         self.traditionalInputEngine = traditionalInputEngine
+        self.lexiconRuntimeSnapshot = lexiconRuntime.snapshot()
         self.sessionController = InputSessionController(
             provider: provider,
             traditionalInputEngine: traditionalInputEngine
@@ -437,9 +442,26 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     private func beginCompositionIfNeeded() {
         if rawBuffer.isEmpty {
+            reloadRuntimeLexiconEngineIfNeeded()
             compositionID += 1
             anchorResolver.reset()
         }
+    }
+
+    private func reloadRuntimeLexiconEngineIfNeeded() {
+        let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
+        let snapshot = lexiconRuntime.snapshot()
+        guard snapshot != lexiconRuntimeSnapshot else {
+            return
+        }
+
+        traditionalInputEngine = lexiconRuntime.makeEngine()
+        lexiconRuntimeSnapshot = snapshot
+        sessionController = InputSessionController(
+            provider: provider,
+            traditionalInputEngine: traditionalInputEngine
+        )
+        invalidateSuggestion()
     }
 
     private func resetAnchorState() {
