@@ -112,6 +112,14 @@ After installation, run the read-only diagnostic before manual typing checks:
 
 Use `./scripts/diagnose-inputmethod.sh --strict` when you want missing bundle resources, signing failures, or Text Input Source registration/enabled-state problems to fail the local smoke gate.
 
+To retry input-source selection without reinstalling, run:
+
+```bash
+./scripts/select-inputmethod.sh
+```
+
+Use `./scripts/select-inputmethod.sh --require-selected` before manual typing acceptance when the command should fail unless macOS reports KnowType as the current input source.
+
 Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. If macOS does not refresh the input source list, log out and back in, or restart the app where you want to test the input method.
 
 To remove the local bundle:
@@ -219,6 +227,7 @@ swift build
 swift test
 ./scripts/install-inputmethod.sh
 ./scripts/diagnose-inputmethod.sh --strict
+./scripts/select-inputmethod.sh --require-selected
 ```
 
 Then manually verify:
