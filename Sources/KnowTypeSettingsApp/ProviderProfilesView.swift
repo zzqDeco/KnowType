@@ -62,6 +62,12 @@ private struct InputSettingsView: View {
                 LabeledContent("Continuation commit", value: "Tab commits prefix plus continuation")
             }
 
+            Section("Punctuation") {
+                LabeledContent("Default mode", value: "Chinese punctuation")
+                LabeledContent("Toggle", value: "Option + .")
+                LabeledContent("Code apps", value: "English punctuation by default")
+            }
+
             Section("Prefix Lock") {
                 Text("Continuation candidates append after the locked prefix. Prefix rewrites are reserved for explicit polish actions.")
                     .foregroundStyle(.secondary)
