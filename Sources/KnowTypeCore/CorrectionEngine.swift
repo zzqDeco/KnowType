@@ -85,6 +85,9 @@ public final class CorrectionEngine: Sendable {
         guard context.locale == .zhCN else {
             return false
         }
+        if isStandaloneProtectedToken(context.rawInput) {
+            return false
+        }
         let analysis = traditionalInputEngine.analyzePinyinInput(
             context.rawInput,
             preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: context.locale)
@@ -225,7 +228,31 @@ private func isEnglishLikeAllInitialWord(_ rawInput: String) -> Bool {
     }) else {
         return false
     }
-    return lower.dropFirst().contains("y")
+
+    let finalYConsonants = "bcdfghjklmnpqrstvwxz"
+    if matchesEntire(lower, #"^[\#(finalYConsonants)]{1,3}y$"#) {
+        return true
+    }
+
+    let medialYOnsets = "bcdfghjklmnpqrstvxz"
+    let medialYRimes = "(?:m|n[bcdfghjklmnpqrstvwxz]?|p[st]?|s[st]?|t[hl]?|ck|ll|ph)"
+    return matchesEntire(lower, #"^[\#(medialYOnsets)]{1,2}y\#(medialYRimes)$"#)
+}
+
+private func isStandaloneProtectedToken(_ rawInput: String) -> Bool {
+    let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return false
+    }
+    let fullLength = trimmed.utf16.count
+    let protectedReasons: Set<String> = ["acronym", "camelCase", "snake_case", "technical_term"]
+    return TextProtection.detectProtectedRanges(in: trimmed).contains { range in
+        range.start == 0 && range.length == fullLength && protectedReasons.contains(range.reason)
+    }
+}
+
+private func matchesEntire(_ text: String, _ pattern: String) -> Bool {
+    text.range(of: pattern, options: .regularExpression) != nil
 }
 
 private func usesTraditionalInput(locale: KnowTypeLocale) -> Bool {

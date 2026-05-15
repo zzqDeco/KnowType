@@ -97,6 +97,21 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(requests.first?.rawInput, "wzm")
     }
 
+    func testUnknownPinyinInitialCompositionWithYCanAskProvider() async {
+        let examples = ["wym", "wyx"]
+
+        for raw in examples {
+            let provider = RecordingProvider()
+            let engine = CorrectionEngine(cloudProvider: provider)
+
+            _ = await engine.correct(InputContext(rawInput: raw, locale: .zhCN))
+
+            let requests = await provider.requests
+            XCTAssertEqual(requests.first?.task, .correction, "\(raw) should use pinyin cloud fallback")
+            XCTAssertEqual(requests.first?.rawInput, raw)
+        }
+    }
+
     func testPinyinCompletionProviderCandidateRanksAheadOfRawIdentity() async {
         let provider = RecordingProvider(responseCandidates: [
             LLMCandidate(text: "我怎么", confidence: 0.72)
@@ -113,10 +128,14 @@ final class CorrectionEngineTests: XCTestCase {
     func testTechnicalTokensAndEnglishWordsDoNotTriggerPinyinProviderFallback() async {
         let examples = [
             "css",
+            "CDN",
             "gpt",
+            "HTTP",
             "llm",
             "npm",
+            "PDF",
             "ssh",
+            "TCP",
             "by",
             "cry",
             "dry",

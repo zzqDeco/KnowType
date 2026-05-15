@@ -354,7 +354,14 @@ public struct TraditionalInputEngine: Sendable {
               let token = tokens.first else {
             return false
         }
-        return isInitialToken(token) && remainingTokens.allSatisfy(isInitialToken)
+        guard isInitialToken(token), remainingTokens.allSatisfy(isInitialToken) else {
+            return false
+        }
+        if remainingTokens.count >= 3,
+           !lexiconIndex.matchingEntries(for: remainingTokens).isEmpty {
+            return false
+        }
+        return true
     }
 
     private func partialMatchPenalty(entry: LexiconEntry, tokens: ArraySlice<InputToken>) -> Double {

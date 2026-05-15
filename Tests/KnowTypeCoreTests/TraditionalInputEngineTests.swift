@@ -82,6 +82,8 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "wsm").first?.text, "为什么")
         XCTAssertEqual(engine.candidates(for: "sm").first?.text, "什么")
         XCTAssertEqual(engine.candidates(for: "zmb").first?.text, "怎么办")
+        XCTAssertEqual(engine.candidates(for: "wzmb").first?.text, "我怎么办")
+        XCTAssertEqual(engine.candidates(for: "wzmy").first?.text, "我怎么样")
     }
 
     func testSpacedInitialAbbreviationsUseIndexedPartialMatching() {
