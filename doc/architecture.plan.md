@@ -30,6 +30,7 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
 - `TraditionalInputEngine` can also be initialized with authorized local lexicon entries. Those entries use the same private index as the seed lexicon, so larger dictionaries, future bundled resources, and local user lexicons do not need a separate parser path.
 - `TraditionalInputLexiconResourceLoader` parses audited JSON or TSV lexicon resources into the same entry shape before they enter the engine.
+- `TraditionalInputLexiconCatalogLoader` composes multiple local resources, keeps valid entries when one resource fails, and records per-resource diagnostics for settings or debug UI.
 - `CorrectionEngine` can boost generated prefix candidates from local user selection history without adding new dictionary entries or sending selection data to providers.
 - English and mixed-input paths preserve technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`.
 - `CorrectionEngine` may ask a configured provider for unknown pinyin-shaped input only when `TraditionalInputEngine` reports no local candidate and the input is not protected technical or English text.

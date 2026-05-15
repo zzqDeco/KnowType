@@ -93,6 +93,7 @@ Core candidate types:
 - `TraditionalInputCandidate`: local pinyin-engine prefix candidate.
 - `TraditionalInputLexiconEntry`: authorized local lexicon row with normalized pinyin tokens and one or more outputs.
 - `TraditionalInputLexiconOutput`: local lexicon output text and confidence score.
+- `TraditionalInputLexiconCatalog`: combined authorized local lexicon entries plus load diagnostics.
 - `TraditionalInputLexiconResourceLoader`: JSON/TSV parser for audited local lexicon resources.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
@@ -105,6 +106,8 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 `TraditionalInputEngine(additionalLexiconEntries:)` is the public extension point for larger local lexicons. The engine trims and lowercases injected pinyin tokens, ignores empty rows, merges duplicate pinyin keys through its private index, and uses those entries for both spaced and compact pinyin parsing.
 
 `TraditionalInputLexiconResourceLoader` accepts JSON resources shaped as `[TraditionalInputLexiconEntry]` or TSV rows in `pinyin<TAB>text<TAB>confidence` form. TSV confidence is optional and defaults to `0.72`. The loader returns typed errors for invalid UTF-8, malformed rows, empty text, or out-of-range confidence.
+
+`TraditionalInputLexiconCatalogLoader` accepts named resources, loads each one independently, preserves valid entries, and returns diagnostics for failed resources. `TraditionalInputLexiconCatalog.makeEngine()` is the preferred handoff into `TraditionalInputEngine`.
 
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 
