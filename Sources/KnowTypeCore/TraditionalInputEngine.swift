@@ -430,9 +430,15 @@ private struct LexiconOutput: Sendable, Equatable {
 }
 
 private let lexicon: [LexiconEntry] = [
+    entry(["s", "m"], [("什么", 0.99), ("是吗", 0.74)]),
+    entry(["z", "m"], [("怎么", 0.98), ("在吗", 0.70)]),
+    entry(["z", "m", "b"], [("怎么办", 0.99)]),
+    entry(["z", "m", "y"], [("怎么样", 0.98)]),
     entry(["w", "s", "m"], [("为什么", 0.99), ("为啥么", 0.55)]),
     entry(["wo", "jue", "de"], [("我觉得", 0.99)]),
     entry(["wo", "jue"], [("我觉得", 0.94)]),
+    entry(["wo", "xiang", "qu"], [("我想去", 0.98)]),
+    entry(["wo", "xiang", "qu", "kan"], [("我想去看", 0.99)]),
     entry(["wo", "xiang"], [("我想", 0.99)]),
     entry(["wo", "men"], [("我们", 0.99)]),
     entry(["jue", "de"], [("觉得", 0.96)]),
@@ -478,6 +484,8 @@ private let lexicon: [LexiconEntry] = [
     entry(["yixia"], [("一下", 0.99)]),
     entry(["yi", "xia"], [("一下", 0.98)]),
     entry(["xiang"], [("想", 0.96)]),
+    entry(["shen", "me"], [("什么", 0.99)]),
+    entry(["zen", "me"], [("怎么", 0.99)]),
     entry(["ni"], [
         ("你", 0.99),
         ("尼", 0.76),
@@ -531,6 +539,7 @@ private let lexicon: [LexiconEntry] = [
         ("限", 0.64)
     ]),
     entry(["xian", "zai"], [("现在", 0.99), ("先在", 0.58)]),
+    entry(["xian", "shi"], [("显示", 0.98), ("现实", 0.84), ("限时", 0.62)]),
     entry(["ni", "shi"], [("你是", 0.99), ("尼式", 0.52)]),
     entry(["ni", "shi", "shei"], [("你是谁", 0.995)]),
     entry(["ni", "hao"], [
@@ -548,6 +557,9 @@ private let lexicon: [LexiconEntry] = [
     entry(["you"], [("有", 0.97), ("又", 0.78), ("由", 0.72)]),
     entry(["jian"], [("见", 0.82), ("件", 0.80), ("间", 0.78), ("建", 0.76)]),
     entry(["kan"], [("看", 0.96), ("刊", 0.62)]),
+    entry(["qu"], [("去", 0.98), ("区", 0.78), ("取", 0.74)]),
+    entry(["qu", "kan"], [("去看", 0.98)]),
+    entry(["ren"], [("人", 0.98), ("任", 0.76), ("认", 0.74)]),
     entry(["dao"], [("到", 0.96), ("道", 0.78), ("导", 0.68)]),
     entry(["guo"], [("过", 0.96), ("国", 0.84), ("果", 0.78)]),
     entry(["ke"], [("可", 0.92), ("课", 0.76), ("客", 0.70)]),
@@ -557,6 +569,9 @@ private let lexicon: [LexiconEntry] = [
     entry(["zhe", "yang"], [("这样", 0.98)]),
     entry(["na", "ge"], [("那个", 0.96)]),
     entry(["shi", "jie"], [("世界", 0.94)]),
+    entry(["zhong"], [("中", 0.97), ("种", 0.78), ("重", 0.76)]),
+    entry(["zhong", "guo"], [("中国", 0.99)]),
+    entry(["zhong", "guo", "ren"], [("中国人", 0.99)]),
     entry(["zhong", "wen"], [("中文", 0.98)]),
     entry(["shu", "ru"], [("输入", 0.98)]),
     entry(["shu", "ru", "fa"], [("输入法", 0.99)])
@@ -612,8 +627,10 @@ private func isPinyinPrefix(_ token: String) -> Bool {
 }
 
 private func isPartialPinyinComponent(_ normalizedToken: String) -> Bool {
-    !isKnownCompleteInputToken(normalizedToken)
-        && (pinyinInitialTokens.contains(normalizedToken) || pinyinPrefixes.contains(normalizedToken))
+    if pinyinInitialTokens.contains(normalizedToken) {
+        return true
+    }
+    return !isKnownCompleteInputToken(normalizedToken) && pinyinPrefixes.contains(normalizedToken)
 }
 
 private func originalSurface(

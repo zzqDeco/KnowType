@@ -38,6 +38,9 @@ Current Chinese-input coverage includes examples such as:
 - `nishishei -> 你是谁`
 - `xianz -> 现在`
 - `wsm -> 为什么`
+- `sm -> 什么`
+- `zmb -> 怎么办`
+- `zhongguoren -> 中国人`
 - `zhege api latnecy youdian gao -> 这个 API latency 有点高`
 
 The local engine is intentionally small but should behave like a normal input method for the MVP cases it claims to support. Broader dictionaries and language-model ranking belong in follow-up engine work, not provider fallback.

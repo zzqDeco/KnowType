@@ -10,7 +10,7 @@ Chinese name: 知键.
 
 ## What It Does
 
-- **Chinese input first**: pinyin decoding, compact pinyin segmentation, typo normalization, same-pinyin candidates, initial abbreviations, and partial-syllable input.
+- **Chinese input first**: pinyin decoding, compact pinyin segmentation, typo normalization, same-pinyin candidates, common initial abbreviations such as `sm`/`zmb`/`wsm`, and partial-syllable input.
 - **Prefix-locked AI continuation**: continuation candidates append after the locked prefix; explicit polish is the only path that may rewrite existing text.
 - **Native macOS input flow**: marked text, candidate selection, paging, punctuation handling, and an AppKit candidate panel anchored near the text caret.
 - **Provider-compatible by design**: OpenAI-compatible chat, OpenAI Responses, Anthropic Messages, Gemini native, Ollama native, and custom HTTP profiles all normalize into one provider interface.

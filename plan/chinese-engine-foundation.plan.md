@@ -7,7 +7,7 @@ Implementation:
 - expand `TraditionalInputEngine` from seed-example decoding to a pinyin lattice path
 - add a complete full-pinyin syllable table and pinyin-prefix table for compact input splitting
 - keep a license-clean built-in mini lexicon for MVP tests while leaving room for a larger authorized lexicon importer later
-- support common standalone syllables, phrase entries, initial abbreviations, and trailing partial syllables such as `nih`, `niw`, and `xianz`
+- support common standalone syllables, phrase entries, initial abbreviations, and trailing partial syllables such as `nih`, `niw`, `xianz`, `sm`, and `zmb`
 - memoize recursive parse states so compact pinyin such as `nishishei` stays responsive
 - preserve mixed Chinese/English technical-token passthrough
 - page candidate rows through `CandidatePanelPagingState` with 9 visible rows per page
@@ -21,6 +21,11 @@ Validation:
 - `xianz -> 现在`
 - `niw -> 你我`
 - `wsm -> 为什么`
+- `sm -> 什么`
+- `zmb -> 怎么办`
+- `xiansh -> 显示`
+- `zhongguoren -> 中国人`
+- `woxiangqukan -> 我想去看`
 - `wojuedezhegefagnan -> 我觉得这个方案`
 - `swift test --filter TraditionalInputEngineTests`
 - `swift test --filter CandidatePanel`

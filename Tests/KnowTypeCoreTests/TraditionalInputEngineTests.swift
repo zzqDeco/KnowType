@@ -64,6 +64,17 @@ final class TraditionalInputEngineTests: XCTestCase {
         let engine = TraditionalInputEngine()
 
         XCTAssertEqual(engine.candidates(for: "wsm").first?.text, "为什么")
+        XCTAssertEqual(engine.candidates(for: "sm").first?.text, "什么")
+        XCTAssertEqual(engine.candidates(for: "zmb").first?.text, "怎么办")
+    }
+
+    func testCompactPinyinDecodesCommonQuestionAndActionPhrases() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "xiansh").first?.text, "显示")
+        XCTAssertTrue(engine.candidates(for: "xiansh").map(\.text).contains("现实"))
+        XCTAssertEqual(engine.candidates(for: "zhongguoren").first?.text, "中国人")
+        XCTAssertEqual(engine.candidates(for: "woxiangqukan").first?.text, "我想去看")
     }
 
     func testMVPExamplesDecodeThroughSeedLexicon() {
