@@ -66,8 +66,24 @@ public final class CorrectionEngine: Sendable {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
         }
+        if shouldAskCloudForPinyinCompletion(context: context) {
+            return true
+        }
         let tokenCount = correctionTokenCount(context.rawInput, locale: context.locale)
         return tokenCount >= 4 || context.locale == .mixed
+    }
+
+    private func shouldAskCloudForPinyinCompletion(context: InputContext) -> Bool {
+        guard context.locale == .zhCN else {
+            return false
+        }
+        let analysis = traditionalInputEngine.analyzePinyinInput(
+            context.rawInput,
+            preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: context.locale)
+        )
+        return analysis.isLikelyPinyinComposition
+            && !analysis.hasLocalCandidates
+            && analysis.hasInitialAbbreviation
     }
 
     private func correctionTokenCount(_ rawInput: String, locale: KnowTypeLocale) -> Int {

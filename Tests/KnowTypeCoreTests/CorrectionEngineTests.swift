@@ -79,6 +79,44 @@ final class CorrectionEngineTests: XCTestCase {
         }
     }
 
+    func testUnknownPinyinInitialCompositionCanAskProvider() async {
+        let provider = RecordingProvider()
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        _ = await engine.correct(InputContext(rawInput: "wzm", locale: .zhCN))
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.first?.task, .correction)
+        XCTAssertEqual(requests.first?.rawInput, "wzm")
+    }
+
+    func testTechnicalTokensAndEnglishWordsDoNotTriggerPinyinProviderFallback() async {
+        let examples = [
+            "css",
+            "gpt",
+            "llm",
+            "npm",
+            "ssh",
+            "change",
+            "shopping",
+            "testing",
+            "engineering",
+            "going",
+            "sharing",
+            "english"
+        ]
+
+        for raw in examples {
+            let provider = RecordingProvider()
+            let engine = CorrectionEngine(cloudProvider: provider)
+
+            _ = await engine.correct(InputContext(rawInput: raw, locale: .zhCN))
+
+            let requests = await provider.requests
+            XCTAssertTrue(requests.isEmpty, "\(raw) should not use cloud correction")
+        }
+    }
+
     func testEnglishCorrectionPreservesSentenceShape() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
@@ -127,7 +165,7 @@ final class CorrectionEngineTests: XCTestCase {
     }
 
     func testTechnicalTokensArePreserved() async {
-        let raw = "API JSON macOS InputMethodKit snake_case camelCase"
+        let raw = "API JSON CSS GPT LLM npm SDK SSH macOS InputMethodKit snake_case camelCase"
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
             InputContext(rawInput: raw, locale: .enUS)

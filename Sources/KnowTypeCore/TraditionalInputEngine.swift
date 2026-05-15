@@ -12,6 +12,28 @@ public struct TraditionalInputCandidate: Codable, Sendable, Equatable {
     }
 }
 
+public struct PinyinInputAnalysis: Codable, Sendable, Equatable {
+    public var tokenCount: Int
+    public var hasPartialToken: Bool
+    public var hasInitialAbbreviation: Bool
+    public var hasLocalCandidates: Bool
+    public var isLikelyPinyinComposition: Bool
+
+    public init(
+        tokenCount: Int,
+        hasPartialToken: Bool,
+        hasInitialAbbreviation: Bool,
+        hasLocalCandidates: Bool,
+        isLikelyPinyinComposition: Bool
+    ) {
+        self.tokenCount = tokenCount
+        self.hasPartialToken = hasPartialToken
+        self.hasInitialAbbreviation = hasInitialAbbreviation
+        self.hasLocalCandidates = hasLocalCandidates
+        self.isLikelyPinyinComposition = isLikelyPinyinComposition
+    }
+}
+
 public struct TraditionalInputEngine: Sendable {
     public enum Scheme: String, Codable, Sendable, Equatable {
         case fullPinyin
@@ -52,6 +74,48 @@ public struct TraditionalInputEngine: Sendable {
         }
 
         return uniqueSorted(parsed)
+    }
+
+    public func analyzePinyinInput(
+        _ rawInput: String,
+        preserveCapitalizedPinyin: Bool = true
+    ) -> PinyinInputAnalysis {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isPassthroughToken(trimmed) else {
+            return PinyinInputAnalysis(
+                tokenCount: 0,
+                hasPartialToken: false,
+                hasInitialAbbreviation: false,
+                hasLocalCandidates: false,
+                isLikelyPinyinComposition: false
+            )
+        }
+
+        let tokenPaths = tokenizations(for: trimmed)
+        let localCandidates = candidates(
+            for: trimmed,
+            preserveCapitalizedPinyin: preserveCapitalizedPinyin
+        )
+        let tokenCount = max(
+            tokenPaths.map(\.count).max() ?? 0,
+            localCandidates.map(\.inputTokens.count).max() ?? 0
+        )
+        let hasPartialToken = tokenPaths.contains { path in
+            path.contains(where: \.isPartial)
+        }
+        let hasInitialAbbreviation = tokenPaths.contains { path in
+            path.count >= 2 && path.allSatisfy { pinyinInitialTokens.contains($0.normalized) }
+        }
+        let hasLocalCandidates = !localCandidates.isEmpty
+        let hasPinyinShape = tokenCount >= 2 && (hasLocalCandidates || hasInitialAbbreviation)
+
+        return PinyinInputAnalysis(
+            tokenCount: tokenCount,
+            hasPartialToken: hasPartialToken,
+            hasInitialAbbreviation: hasInitialAbbreviation,
+            hasLocalCandidates: hasLocalCandidates,
+            isLikelyPinyinComposition: hasPinyinShape
+        )
     }
 
     private func tokenizations(for rawInput: String) -> [[InputToken]] {
@@ -211,6 +275,9 @@ public struct TraditionalInputEngine: Sendable {
 
         for length in stride(from: min(lexiconIndex.maxEntryLength, tokens.count - index), through: 1, by: -1) {
             let tokenSlice = tokens[index..<(index + length)]
+            if skipsSingleInitialBeforeTail(tokenSlice, hasTail: index + length < tokens.count) {
+                continue
+            }
             if preserveCapitalizedPinyin {
                 guard !tokenSlice.contains(where: { token in
                     isCapitalizedASCIIWord(token.surface) && knownPinyinTokens.contains(token.normalized)
@@ -273,6 +340,15 @@ public struct TraditionalInputEngine: Sendable {
             .map { $0 }
         memo[index] = parsed
         return parsed
+    }
+
+    private func skipsSingleInitialBeforeTail(_ tokens: ArraySlice<InputToken>, hasTail: Bool) -> Bool {
+        guard hasTail,
+              tokens.count == 1,
+              let token = tokens.first else {
+            return false
+        }
+        return token.isPartial && pinyinInitialTokens.contains(token.normalized)
     }
 
     private func partialMatchPenalty(entry: LexiconEntry, tokens: ArraySlice<InputToken>) -> Double {

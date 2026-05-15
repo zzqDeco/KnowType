@@ -40,10 +40,16 @@ public enum TextProtection {
     ]
     private static let protectedTokens: [String: String] = [
         "api": "API",
+        "css": "CSS",
         "json": "JSON",
         "fastapi": "FastAPI",
+        "gpt": "GPT",
+        "llm": "LLM",
         "ios": "iOS",
         "macos": "macOS",
+        "npm": "npm",
+        "sdk": "SDK",
+        "ssh": "SSH",
         "inputmethodkit": "InputMethodKit"
     ]
 

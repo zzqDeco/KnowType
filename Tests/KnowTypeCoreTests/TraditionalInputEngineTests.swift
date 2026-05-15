@@ -60,6 +60,14 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertFalse(candidateTexts.contains("方案高"))
     }
 
+    func testUnseededInitialAbbreviationDoesNotComposeArbitrarySingleCharacters() {
+        let engine = TraditionalInputEngine()
+        let candidateTexts = engine.candidates(for: "qqq").map(\.text)
+
+        XCTAssertFalse(candidateTexts.contains("去去去"))
+        XCTAssertFalse(candidateTexts.contains("区去去"))
+    }
+
     func testInitialAbbreviationDecodesCommonExpression() {
         let engine = TraditionalInputEngine()
 
@@ -74,6 +82,23 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "w s m").first?.text, "为什么")
         XCTAssertEqual(engine.candidates(for: "s m").first?.text, "什么")
         XCTAssertEqual(engine.candidates(for: "z m b").first?.text, "怎么办")
+    }
+
+    func testPinyinInputAnalysisSeparatesLocalAndFallbackCases() {
+        let engine = TraditionalInputEngine()
+        let knownPartial = engine.analyzePinyinInput("xian z")
+        let unknownInitials = engine.analyzePinyinInput("wzm")
+        let technicalToken = engine.analyzePinyinInput("css")
+        let englishWord = engine.analyzePinyinInput("change")
+
+        XCTAssertTrue(knownPartial.isLikelyPinyinComposition)
+        XCTAssertTrue(knownPartial.hasPartialToken)
+        XCTAssertTrue(knownPartial.hasLocalCandidates)
+        XCTAssertTrue(unknownInitials.isLikelyPinyinComposition)
+        XCTAssertTrue(unknownInitials.hasInitialAbbreviation)
+        XCTAssertFalse(unknownInitials.hasLocalCandidates)
+        XCTAssertFalse(technicalToken.isLikelyPinyinComposition)
+        XCTAssertFalse(englishWord.isLikelyPinyinComposition)
     }
 
     func testCompactPinyinDecodesCommonQuestionAndActionPhrases() {
