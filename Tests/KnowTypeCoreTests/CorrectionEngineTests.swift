@@ -61,6 +61,24 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(requests.first?.rawInput, "wojuedezhegefagnan")
     }
 
+    func testShortInitialAbbreviationsStayLocalAndDoNotCallProvider() async {
+        let examples = [
+            ("wsm", "为什么"),
+            ("sm", "什么"),
+            ("zmb", "怎么办")
+        ]
+
+        for (raw, expected) in examples {
+            let provider = RecordingProvider()
+            let engine = CorrectionEngine(cloudProvider: provider)
+            let candidates = await engine.correct(InputContext(rawInput: raw, locale: .zhCN))
+            let requests = await provider.requests
+
+            XCTAssertEqual(candidates.first?.text, expected)
+            XCTAssertTrue(requests.isEmpty, "\(raw) should not use cloud correction")
+        }
+    }
+
     func testEnglishCorrectionPreservesSentenceShape() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(

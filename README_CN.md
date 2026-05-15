@@ -14,7 +14,7 @@ KnowType 是一款面向 macOS 的中英文输入法。它的 AI 能力围绕一
 
 ## 它做什么
 
-- **先做好中文输入**：支持拼音解码、连续拼音切分、轻量错拼纠正、同音候选、声母缩写和尾部半音节输入。
+- **先做好中文输入**：支持拼音解码、连续拼音切分、轻量错拼纠正、同音候选、`sm`/`zmb`/`wsm` 这类常用声母缩写和尾部半音节输入。
 - **前缀锁定的 AI 延续**：AI 只补前缀后面的内容；只有用户主动润色时，才允许改写已输入文本。
 - **macOS 原生输入流程**：使用 marked text、候选选择、翻页、标点处理和跟随文本光标的 AppKit 候选窗。
 - **多协议 provider 兼容**：OpenAI-compatible chat、OpenAI Responses、Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到同一层接口。
