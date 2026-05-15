@@ -6,6 +6,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 
 - `swift build` passes on macOS with Swift 6.2.
 - `swift test` passes before manual acceptance.
+- CI checks local input-method script syntax, read-only help paths, and bundle packaging resources without installing or selecting the input method.
 - `./scripts/build-inputmethod-bundle.sh` creates `dist/KnowType.app`.
 - The built app includes SwiftPM resource bundles such as `KnowType_KnowTypeCore.bundle`, so bundled lexicons load after installation.
 - `./scripts/install-inputmethod.sh` copies the bundle to `~/Library/Input Methods/KnowType.app`.
