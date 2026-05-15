@@ -79,7 +79,7 @@ Local OpenAI-compatible runtimes may leave the model blank for `/v1/models` disc
 `KnowTypeSettingsApp` owns user-facing configuration and status surfaces:
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
-- `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing the `KnowTypeCore` lexicon file source.
+- `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 
 Settings status is read-only for lexicons in the MVP. It does not import the IMK frontend and does not own dictionary licensing.
 
@@ -89,7 +89,7 @@ Settings status is read-only for lexicons in the MVP. It does not import the IMK
 
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
 - `InputSessionController` turns raw input and actions into suggestion and commit decisions.
-- `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction.
+- `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction, using the shared `TraditionalInputLexiconDirectoryResolver`.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
 - `CandidatePanelWindowController` owns the AppKit panel.
