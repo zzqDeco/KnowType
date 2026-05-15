@@ -77,6 +77,9 @@ public final class CorrectionEngine: Sendable {
         guard context.locale == .zhCN else {
             return false
         }
+        if isCommonEnglishAllInitialWord(context.rawInput) {
+            return false
+        }
         let analysis = traditionalInputEngine.analyzePinyinInput(
             context.rawInput,
             preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: context.locale)
@@ -202,6 +205,19 @@ private let spellingCorrections: [String: String] = [
     "approch": "approach",
     "latnecy": "latency"
 ]
+
+private let commonEnglishAllInitialWords: Set<String> = [
+    "by",
+    "my",
+    "sync",
+    "try",
+    "why"
+]
+
+private func isCommonEnglishAllInitialWord(_ rawInput: String) -> Bool {
+    let lower = rawInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return commonEnglishAllInitialWords.contains(lower)
+}
 
 private func usesTraditionalInput(locale: KnowTypeLocale) -> Bool {
     locale != .enUS

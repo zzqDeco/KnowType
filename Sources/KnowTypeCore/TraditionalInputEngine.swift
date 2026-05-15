@@ -275,7 +275,10 @@ public struct TraditionalInputEngine: Sendable {
 
         for length in stride(from: min(lexiconIndex.maxEntryLength, tokens.count - index), through: 1, by: -1) {
             let tokenSlice = tokens[index..<(index + length)]
-            if skipsSingleInitialBeforeTail(tokenSlice, hasTail: index + length < tokens.count) {
+            if skipsSingleInitialBeforeAllInitialTail(
+                tokenSlice,
+                remainingTokens: tokens[(index + length)..<tokens.count]
+            ) {
                 continue
             }
             if preserveCapitalizedPinyin {
@@ -342,13 +345,16 @@ public struct TraditionalInputEngine: Sendable {
         return parsed
     }
 
-    private func skipsSingleInitialBeforeTail(_ tokens: ArraySlice<InputToken>, hasTail: Bool) -> Bool {
-        guard hasTail,
+    private func skipsSingleInitialBeforeAllInitialTail(
+        _ tokens: ArraySlice<InputToken>,
+        remainingTokens: ArraySlice<InputToken>
+    ) -> Bool {
+        guard !remainingTokens.isEmpty,
               tokens.count == 1,
               let token = tokens.first else {
             return false
         }
-        return token.isPartial && pinyinInitialTokens.contains(token.normalized)
+        return isInitialToken(token) && remainingTokens.allSatisfy(isInitialToken)
     }
 
     private func partialMatchPenalty(entry: LexiconEntry, tokens: ArraySlice<InputToken>) -> Double {
@@ -774,6 +780,10 @@ private func isPartialPinyinComponent(_ normalizedToken: String) -> Bool {
         return true
     }
     return !isKnownCompleteInputToken(normalizedToken) && pinyinPrefixes.contains(normalizedToken)
+}
+
+private func isInitialToken(_ token: InputToken) -> Bool {
+    token.isPartial && pinyinInitialTokens.contains(token.normalized)
 }
 
 private func originalSurface(

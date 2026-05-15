@@ -8,8 +8,10 @@ Implementation:
 - report token count, partial-token presence, all-initial-abbreviation shape, local-candidate availability, and likely-pinyin status
 - use that analysis in `CorrectionEngine` instead of duplicating pinyin heuristics there
 - avoid composing arbitrary single-character candidates from unseeded all-initial inputs
+- preserve mixed initial/full-pinyin and initial/technical-token inputs such as `w de fangan` and `w API`
 - keep known local abbreviations such as `wsm`, `sm`, and `zmb` local-only
 - limit short-input provider fallback to unseeded all-initial abbreviations
+- block common English all-initial words such as `why`, `try`, and `sync`
 - protect common technical lowercase tokens such as `css`, `gpt`, `llm`, `npm`, `ssh`, and `sdk`
 - keep ordinary English words from triggering pinyin cloud fallback
 

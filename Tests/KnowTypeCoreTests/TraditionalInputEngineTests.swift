@@ -68,6 +68,14 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertFalse(candidateTexts.contains("区去去"))
     }
 
+    func testSingleInitialCanPrecedePinyinAndTechnicalTail() {
+        let engine = TraditionalInputEngine()
+
+        XCTAssertEqual(engine.candidates(for: "w de").first?.text, "我的")
+        XCTAssertEqual(engine.candidates(for: "w de fangan").first?.text, "我的方案")
+        XCTAssertEqual(engine.candidates(for: "w API").first?.text, "我 API")
+    }
+
     func testInitialAbbreviationDecodesCommonExpression() {
         let engine = TraditionalInputEngine()
 
