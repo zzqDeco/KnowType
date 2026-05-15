@@ -56,6 +56,22 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertTrue(boostedCandidates.map(\.text).contains("方案"))
     }
 
+    func testProviderCorrectionDoesNotApplySelectionHistoryTwice() async {
+        let provider = RecordingProvider(responseCandidates: [])
+        let engine = CorrectionEngine(cloudProvider: provider)
+
+        let candidates = await engine.correct(
+            InputContext(
+                rawInput: "fangan",
+                locale: .zhCN,
+                userSelectionHistory: ["思路"]
+            )
+        )
+
+        XCTAssertEqual(candidates.first?.text, "方案")
+        XCTAssertTrue(candidates.map(\.text).contains("思路"))
+    }
+
     func testChinesePinyinCorrectionDecodesCapitalizedInitialToken() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(

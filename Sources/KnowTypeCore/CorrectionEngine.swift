@@ -67,7 +67,7 @@ public final class CorrectionEngine: Sendable {
             }
         }
 
-        return uniqueSorted(applySelectionHistory(context.userSelectionHistory, to: candidates))
+        return uniqueSorted(candidates)
     }
 
     private func shouldAskCloud(
