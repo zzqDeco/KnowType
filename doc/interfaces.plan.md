@@ -87,6 +87,14 @@ Settings validation rules:
 - custom HTTP profiles require body template and response path, but may omit the API key
 - profile saves publish new settings only after profile metadata and required secret mutations succeed
 
+Settings connection tests:
+
+- build a transient `ProviderConfiguration` from the current draft
+- use a non-blank draft API key for the test request only
+- reuse an existing saved `secretName` value when the draft key is blank
+- fail before sending a request when a required key is missing
+- do not write provider JSON or mutate `SecretStore`
+
 ## Candidate Data
 
 Core candidate types:

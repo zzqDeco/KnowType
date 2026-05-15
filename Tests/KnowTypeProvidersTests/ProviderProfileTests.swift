@@ -11,6 +11,15 @@ private struct StubProvider: LLMProvider {
     }
 }
 
+private struct ResponseProvider: LLMProvider {
+    let providerName: String
+    let response: LLMResponse
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        response
+    }
+}
+
 private struct StubProfileStore: ProviderProfileStore {
     var result: Result<ProviderProfilesFile, Error>
 
@@ -219,5 +228,54 @@ final class ProviderProfileTests: XCTestCase {
             }
         )
         XCTAssertNil(factoryFailure.loadDefaultProvider())
+    }
+
+    func testProviderConnectionDiagnosticReturnsCandidateSummary() async throws {
+        let diagnostic = ProviderConnectionDiagnostic(providerBuilder: { _ in
+            ResponseProvider(
+                providerName: "diagnostic-stub",
+                response: LLMResponse(candidates: [
+                    LLMCandidate(text: "works")
+                ])
+            )
+        })
+
+        let result = try await diagnostic.test(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: ""
+            )
+        )
+
+        XCTAssertEqual(result.providerName, "diagnostic-stub")
+        XCTAssertEqual(result.candidateCount, 1)
+        XCTAssertEqual(result.firstCandidateText, "works")
+    }
+
+    func testProviderConnectionDiagnosticRejectsEmptyCandidates() async throws {
+        let diagnostic = ProviderConnectionDiagnostic(providerBuilder: { _ in
+            ResponseProvider(providerName: "diagnostic-stub", response: LLMResponse(candidates: []))
+        })
+
+        do {
+            _ = try await diagnostic.test(
+                configuration: ProviderConfiguration(
+                    kind: .openAIChat,
+                    baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                    model: ""
+                )
+            )
+            XCTFail("Expected empty diagnostic response to fail")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("diagnostic returned no candidates"))
+        }
+    }
+
+    func testProviderErrorUsesReadableLocalizedDescription() {
+        XCTAssertEqual(
+            ProviderError.invalidResponse("diagnostic returned no candidates").localizedDescription,
+            "Invalid provider response: diagnostic returned no candidates"
+        )
     }
 }

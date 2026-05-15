@@ -69,6 +69,7 @@ Provider runtime loading uses:
 - `ProviderProfileTemplates`: shared seeded defaults used by settings and runtime loading.
 - `ProviderProfileResolver`: resolves `secretName` through `SecretStore`.
 - `ProviderFactory`: builds the adapter for `openai_chat`, `openai_responses`, `anthropic_messages`, `gemini_native`, `ollama_native`, or `custom_http`.
+- `ProviderConnectionDiagnostic`: settings-facing provider verification that sends a small prefix-locked continuation request and reports a normalized success or provider error.
 - `KeychainSecretStore`: macOS storage for API keys under the `KnowType` service.
 
 Profile JSON stores metadata and secret names only. It must not store API key values represented by `secretName`. Custom headers are persisted as configured, so the MVP docs warn users not to place bearer tokens directly in headers.
@@ -80,6 +81,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 `KnowTypeSettingsApp` owns user-facing configuration and status surfaces:
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
+- Provider profile connection tests are transient and do not save profile metadata or draft API keys.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 - Lexicon settings can create missing directories and a non-overwriting sample TSV file, but broader dictionary import and licensing review remain outside the MVP settings model.
 

@@ -52,7 +52,7 @@ public struct ProviderConfiguration: Codable, Sendable, Equatable {
     }
 }
 
-public enum ProviderError: Error, Equatable, CustomStringConvertible {
+public enum ProviderError: Error, Equatable, CustomStringConvertible, LocalizedError {
     case invalidResponse(String)
     case httpStatus(Int, String)
     case missingAPIKey
@@ -72,6 +72,10 @@ public enum ProviderError: Error, Equatable, CustomStringConvertible {
         case .unsupportedKind(let kind):
             return "Unsupported provider kind: \(kind.rawValue)"
         }
+    }
+
+    public var errorDescription: String? {
+        description
     }
 }
 

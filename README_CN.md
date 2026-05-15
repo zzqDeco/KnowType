@@ -164,6 +164,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 当 `providers.json` 不存在或为空时，KnowType 会使用本地 OpenAI-compatible 默认配置：`http://127.0.0.1:8317/v1`。model 可以留空并通过 `/v1/models` 发现。源码和 provider JSON 不内置 API key；如果本地 runtime 需要 key，请在设置页保存到 Keychain。
 
+AI Provider 设置页可以测试当前 draft profile 的连接。测试时输入框里的 API key 只用于本次请求；如果 key 为空，则复用已保存的 Keychain secret。测试不会保存 provider JSON，也不会修改 Keychain。
+
 支持的 provider kind：
 
 - `openai_chat`：`/v1/chat/completions`

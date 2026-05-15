@@ -9,13 +9,15 @@ The view uses top-level native tabs:
 - Input: read-only MVP composition and commit behavior.
 - Candidates: candidate ordering and shortcut behavior.
 - Lexicons: local JSON/TSV directory status, entry counts, diagnostics, and missing-directory creation.
-- AI Provider: existing provider profile editor backed by `ProviderProfilesViewModel`.
+- AI Provider: provider profile editor and connection test backed by `ProviderProfilesViewModel`.
 - Privacy: Level 0 local-only reminders and technical-token preservation notes.
 - Debug Install: local development install and log-inspection guidance.
 
 ## Provider Secrets
 
 The AI Provider tab preserves the existing profile editing flow. The API key field remains a write-only `SecureField`: leaving it blank keeps the existing secret, while entering a new value writes through `SecretStore`. On macOS, the default path uses Keychain. Provider profile JSON stores `secretName` references only.
+
+The connection test uses the current draft profile and may use a typed API key for one request, but it does not save metadata or mutate `SecretStore`.
 
 ## Debug Install Guidance
 

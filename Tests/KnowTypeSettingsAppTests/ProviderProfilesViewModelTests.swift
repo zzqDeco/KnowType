@@ -1062,6 +1062,126 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         XCTAssertEqual(error.localizedDescription, "setup failed")
     }
+
+    func testConnectionTestUsesSeededLocalDefaultWithoutSavingProfile() async throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: RecordingSecretStore(),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+
+        let didConnect = await viewModel.testDraftConnection()
+        XCTAssertTrue(didConnect)
+
+        let configurations = await capture.configurations
+        XCTAssertEqual(configurations, [
+            ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: ""
+            )
+        ])
+        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_chat. Received 1 candidate(s)."))
+        XCTAssertTrue(store.savedFiles.isEmpty)
+    }
+
+    func testConnectionTestUsesTransientDraftAPIKeyWithoutPersistingIt() async throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile())
+        let secrets = RecordingSecretStore()
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false,
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "openai_responses", candidateCount: 2)
+            }
+        )
+
+        viewModel.createProfile(kind: .openAIResponses)
+        viewModel.draft.displayName = "Remote Responses"
+        viewModel.draft.baseURL = "https://api.openai.com"
+        viewModel.draft.model = "gpt-4.1-mini"
+        viewModel.draft.apiKey = " sk-test\n"
+        viewModel.draft.isDefault = true
+
+        let didConnect = await viewModel.testDraftConnection()
+        XCTAssertTrue(didConnect)
+
+        let configurations = await capture.configurations
+        XCTAssertEqual(configurations.first?.apiKey, "sk-test")
+        XCTAssertEqual(configurations.first?.kind, .openAIResponses)
+        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_responses. Received 2 candidate(s)."))
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
+    }
+
+    func testConnectionTestUsesExistingSavedSecretWhenDraftAPIKeyIsBlank() async throws {
+        let existing = [
+            ProviderProfile(
+                id: "remote",
+                displayName: "Remote",
+                kind: .openAIResponses,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.remote.apiKey",
+                isDefault: true
+            )
+        ]
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile(profiles: existing)),
+            secretStore: RecordingSecretStore(values: ["knowtype.provider.remote.apiKey": "sk-existing"]),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "openai_responses", candidateCount: 1)
+            }
+        )
+
+        let didConnect = await viewModel.testDraftConnection()
+        XCTAssertTrue(didConnect)
+
+        let configurations = await capture.configurations
+        XCTAssertEqual(configurations.first?.apiKey, "sk-existing")
+    }
+
+    func testConnectionTestReportsMissingRequiredAPIKey() async throws {
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
+            secretStore: RecordingSecretStore(),
+            loadDefaultsWhenEmpty: false,
+            connectionTester: { _ in
+                XCTFail("Connection tester should not run without a required API key")
+                return ProviderConnectionDiagnosticResult(providerName: "unused", candidateCount: 1)
+            }
+        )
+
+        viewModel.createProfile(kind: .openAIResponses)
+        viewModel.draft.displayName = "Remote Responses"
+        viewModel.draft.baseURL = "https://api.openai.com"
+        viewModel.draft.model = "gpt-4.1-mini"
+        viewModel.draft.apiKey = ""
+        viewModel.draft.isDefault = true
+
+        let didConnect = await viewModel.testDraftConnection()
+        XCTAssertFalse(didConnect)
+        XCTAssertEqual(viewModel.connectionStatus, .failure("API key is required for this provider."))
+        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+    }
+}
+
+private actor ConfigurationRecorder {
+    private(set) var configurations: [ProviderConfiguration] = []
+
+    func append(_ configuration: ProviderConfiguration) {
+        configurations.append(configuration)
+    }
 }
 
 private final class CapturingProfileStore: ProviderProfileStore, @unchecked Sendable {
