@@ -3,6 +3,8 @@ set -u -o pipefail
 
 DEFAULT_BUNDLE_PATH="$HOME/Library/Input Methods/KnowType.app"
 BUNDLE_PATH="${KNOWTYPE_BUNDLE_PATH:-$DEFAULT_BUNDLE_PATH}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 STRICT=0
 REQUIRE_SELECTED=0
 
@@ -155,45 +157,8 @@ echo
 echo "Text Input Source state"
 
 TIS_OUTPUT="$(
-  PARENT_ID="$PARENT_ID" MODE_ID="$MODE_ID" swift - 2>/dev/null <<'SWIFT' || true
-import Carbon
-import Foundation
-
-let parentID = ProcessInfo.processInfo.environment["PARENT_ID"]!
-let modeID = ProcessInfo.processInfo.environment["MODE_ID"]!
-
-func stringProperty(_ source: TISInputSource?, _ key: CFString) -> String? {
-    guard let source, let raw = TISGetInputSourceProperty(source, key) else {
-        return nil
-    }
-    return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
-}
-
-func boolProperty(_ source: TISInputSource?, _ key: CFString) -> Bool {
-    guard let source, let raw = TISGetInputSourceProperty(source, key) else {
-        return false
-    }
-    return CFBooleanGetValue(unsafeBitCast(raw, to: CFBoolean.self))
-}
-
-func source(id: String) -> TISInputSource? {
-    let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
-    let sources = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource]
-    return sources?.first
-}
-
-let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
-let currentID = stringProperty(current, kTISPropertyInputSourceID) ?? ""
-let parent = source(id: parentID)
-let mode = source(id: modeID)
-
-print("current.id=\(currentID)")
-print("parent.found=\(parent != nil)")
-print("parent.enabled=\(boolProperty(parent, kTISPropertyInputSourceIsEnabled))")
-print("mode.found=\(mode != nil)")
-print("mode.enabled=\(boolProperty(mode, kTISPropertyInputSourceIsEnabled))")
-print("mode.selected=\(currentID == modeID)")
-SWIFT
+  INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
+  "$INPUTSOURCE_TOOL" status --parent-id "$PARENT_ID" --mode-id "$MODE_ID"
 )"
 
 if [[ -z "$TIS_OUTPUT" ]]; then
@@ -207,7 +172,7 @@ else
     case "$key" in
       current.id)
         if [[ -n "$value" ]]; then
-          info "current input source: $value"
+          info "current input source in this diagnostic context: $value"
         else
           warn "current input source id is unavailable"
         fi
@@ -226,11 +191,46 @@ else
         ;;
       mode.selected)
         if [[ "$value" == "true" ]]; then
-          ok "KnowType input mode is selected"
+          ok "KnowType input mode is selected in this diagnostic context"
         elif (( REQUIRE_SELECTED == 1 )); then
-          fail "KnowType input mode is not currently selected in this diagnostic context; run ./scripts/select-inputmethod.sh --require-selected as a preflight, then type a real probe in the target app"
+          fail "KnowType input mode is not selected in this diagnostic context; select KnowType from the target app's input menu and type a real probe"
         else
-          warn "KnowType input mode is not currently selected"
+          warn "KnowType input mode is not selected in this diagnostic context"
+        fi
+        ;;
+      mode.name)
+        if [[ -z "$value" ]]; then
+          warn "KnowType input mode localized name is unavailable"
+        elif [[ "$value" == "$MODE_ID" ]]; then
+          warn "KnowType input mode localized name is unresolved; reinstall after packaging InfoPlist.strings"
+        else
+          ok "KnowType input mode localized name = $value"
+        fi
+        ;;
+      mode.count)
+        if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
+          warn "TIS reports $value KnowType input mode registrations; log out or reboot if the input menu shows stale duplicates"
+        fi
+        ;;
+      preference.selected.mode)
+        if [[ -n "$value" ]]; then
+          info "HIToolbox selected input-mode preference: $value"
+        else
+          warn "HIToolbox selected input-mode preference is unavailable"
+        fi
+        ;;
+      preference.selected.knowtype)
+        if [[ "$value" == "true" ]]; then
+          ok "HIToolbox selected preference is KnowType"
+        else
+          warn "HIToolbox selected preference is not KnowType; choose KnowType from the input menu/System Settings before typing"
+        fi
+        ;;
+      preference.enabled.knowtype)
+        if [[ "$value" == "true" ]]; then
+          ok "HIToolbox enabled preferences include KnowType"
+        else
+          fail "HIToolbox enabled preferences do not include KnowType; enable KnowType in System Settings > Keyboard > Input Sources"
         fi
         ;;
     esac

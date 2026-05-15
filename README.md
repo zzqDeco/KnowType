@@ -123,6 +123,18 @@ Activate the text app you want to test first, then use `./scripts/select-inputme
 
 Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. If macOS does not refresh the input source list, log out and back in, or restart the app where you want to test the input method.
 
+If the menu or System Settings does not show `KnowType` / `知键`, run:
+
+```bash
+./scripts/diagnose-inputmethod.sh --strict
+```
+
+The diagnostic reports registration, enabled state, and the localized name macOS resolved for the input mode. If the name is still `com.knowtype.inputmethod.KnowType.Mode`, the bundle is missing or macOS has not refreshed the localized display strings. If duplicate KnowType rows remain after reinstalling, log out or reboot to clear the TIS menu cache.
+
+On first enable, macOS may show a security confirmation for a third-party input method. The scripts route that request through `knowtype-inputsource-tool`; choose Allow for KnowType to become available as an input source. The prompt should not appear as `swift-frontend`.
+
+The diagnostic distinguishes the helper process's TIS context from the persisted HIToolbox input-source preferences. If `AppleEnabledInputSources` includes KnowType but `AppleSelectedInputSources` is still Apple Pinyin, choose KnowType from the active app's input menu before testing; otherwise typing results may come from Apple Pinyin.
+
 To remove the local bundle:
 
 ```bash

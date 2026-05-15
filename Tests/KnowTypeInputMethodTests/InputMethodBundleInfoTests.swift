@@ -12,6 +12,50 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         XCTAssertTrue(script.contains(#""$BIN_DIR"/KnowType_*.bundle"#))
         XCTAssertTrue(script.contains(#"cp -R "$resource_bundle" "$CONTENTS_DIR/Resources/""#))
+        XCTAssertTrue(script.contains(#"cp -R "$resource_path" "$CONTENTS_DIR/Resources/""#))
+    }
+
+    func testInputSourceScriptsUseDedicatedHelperExecutable() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let package = try String(contentsOf: rootURL.appendingPathComponent("Package.swift"), encoding: .utf8)
+        XCTAssertTrue(package.contains(#".executable(name: "knowtype-inputsource-tool""#))
+        XCTAssertTrue(package.contains(#"name: "KnowTypeInputSourceTool""#))
+
+        let scriptPaths = [
+            "scripts/install-inputmethod.sh",
+            "scripts/select-inputmethod.sh",
+            "scripts/diagnose-inputmethod.sh",
+            "scripts/lib/inputsource-tool.sh"
+        ]
+        let scripts = try scriptPaths
+            .map { try String(contentsOf: rootURL.appendingPathComponent($0), encoding: .utf8) }
+            .joined(separator: "\n")
+
+        XCTAssertTrue(scripts.contains("knowtype-inputsource-tool"))
+        XCTAssertTrue(scripts.contains("--no-diagnostic"))
+        XCTAssertFalse(scripts.contains("swift - <<'SWIFT'"))
+        XCTAssertFalse(scripts.contains("swift - <<"))
+    }
+
+    func testInputSourceHelperReportsHIToolboxPreferenceState() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let helperSource = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputSourceTool/main.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(helperSource.contains("AppleSelectedInputSources"))
+        XCTAssertTrue(helperSource.contains("AppleEnabledInputSources"))
+        XCTAssertTrue(helperSource.contains("preference.selected.knowtype"))
+        XCTAssertTrue(helperSource.contains("preference.enabled.knowtype"))
     }
 
     func testInputMethodInfoDeclaresVisibleInputMode() throws {
@@ -51,5 +95,26 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(mode["tsInputModePaletteIconFileKey"] as? String, "KnowTypeInputMethodIcon.tiff")
         XCTAssertEqual(mode["tsInputModePrimaryInScriptKey"] as? Bool, true)
         XCTAssertEqual(mode["tsInputModeScriptKey"] as? String, "smSimpChinese")
+    }
+
+    func testInputMethodProvidesLocalizedDisplayNames() throws {
+        let resourcesURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Resources/InputMethod")
+
+        let englishStrings = try String(
+            contentsOf: resourcesURL.appendingPathComponent("en.lproj/InfoPlist.strings"),
+            encoding: .utf8
+        )
+        let chineseStrings = try String(
+            contentsOf: resourcesURL.appendingPathComponent("zh-Hans.lproj/InfoPlist.strings"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType.Mode" = "KnowType";"#))
+        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType.Mode" = "知键";"#))
+        XCTAssertTrue(chineseStrings.contains(#""CFBundleDisplayName" = "知键";"#))
     }
 }

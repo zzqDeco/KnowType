@@ -127,6 +127,18 @@ dist/KnowType.app
 
 然后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启要测试输入法的 app。
 
+如果菜单或系统设置里没有看到 `KnowType` / `知键`，先运行：
+
+```bash
+./scripts/diagnose-inputmethod.sh --strict
+```
+
+诊断会显示输入源是否已注册、是否启用，以及 macOS 当前解析到的输入法显示名。如果显示名仍是 `com.knowtype.inputmethod.KnowType.Mode`，说明安装包缺少或系统尚未刷新本地化显示名；重新安装后仍有重复项时，退出登录或重启可清掉 TIS 菜单缓存。
+
+首次启用第三方输入法时，macOS 可能会弹出安全确认。当前脚本会通过 `knowtype-inputsource-tool` 发起启用请求；如果系统弹窗询问是否允许启用 KnowType，需要选择「允许」，否则输入法不会出现在可用输入源里。弹窗不应该再显示为 `swift-frontend`。
+
+诊断会区分 helper 进程自己的 TIS 上下文和系统持久化的 HIToolbox 输入源偏好。如果 `AppleEnabledInputSources` 已包含 KnowType，但 `AppleSelectedInputSources` 仍是 Apple 拼音，需要在当前目标 App 的输入法菜单里选中 KnowType 后再测试，否则打字结果仍然可能来自 Apple 拼音。
+
 移除本地 bundle：
 
 ```bash
