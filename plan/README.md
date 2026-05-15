@@ -32,6 +32,7 @@
 | [input-source-selection-helper.plan.md](input-source-selection-helper.plan.md) | Standalone helper for retrying KnowType input-source selection before manual typing acceptance | Active reference |
 | [inputmethod-script-ci-smoke.plan.md](inputmethod-script-ci-smoke.plan.md) | CI coverage for local IMK helper scripts and bundle packaging smoke checks | Active reference |
 | [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual typing gates | Active reference |
+| [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active reference |
 
 ## Delivered MVP Slices
 

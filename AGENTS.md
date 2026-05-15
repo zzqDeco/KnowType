@@ -82,7 +82,7 @@ For feature, fix, or refactor work:
 
 1. Update or add a plan under `plan/` when the work is still being designed or reviewed.
 2. Update `doc/architecture.plan.md` or `doc/interfaces.plan.md` when behavior, data flow, protocols, or shortcuts change.
-3. Add or update `doc/src/...plan.md` for important source-file responsibilities.
+3. Add or update source notes under `doc/src/<repo-path>/...plan.md` for important source-file responsibilities. Mirror the repository layout, for example `doc/src/Sources/KnowTypeCore/...` or `doc/src/scripts/...`.
 4. Update `README.md` and `README_CN.md` for user-visible setup or behavior changes.
 5. Update `doc/README.md` or `plan/README.md` when adding or retiring documentation files.
 

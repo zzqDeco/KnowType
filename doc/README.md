@@ -7,7 +7,7 @@ This directory keeps current project documentation. It should describe how the s
 - [Architecture](architecture.plan.md): package boundaries, input pipeline, provider runtime, privacy rules, and IMK front-end shape.
 - [Interfaces](interfaces.plan.md): provider contracts, profile schema, candidate data, keyboard shortcuts, and Level 0 behavior.
 - [MVP Acceptance](mvp-acceptance.plan.md): manual test matrix for local input method builds.
-- [Source Notes](src/README.md): short file-level notes for important implementation areas.
+- [Source Notes](src/README.md): short file-level notes organized to mirror source and script directories.
 
 ## Documentation Rules
 
