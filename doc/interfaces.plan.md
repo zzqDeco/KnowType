@@ -119,6 +119,8 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 
 `InputMethodLexiconRuntime` uses the shared resolver, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon. `defaultEngine()` rebuilds from the currently resolved directories on each request rather than returning a process-wide stale snapshot.
 
+`InputMethodLexiconRuntime.snapshot()` reports each configured directory's existence and supported JSON/TSV resource files with modification metadata. The IMK frontend uses that snapshot to refresh its runtime engine at the start of a new composition when local lexicon resources changed, without changing active marked text mid-composition.
+
 `LexiconSettingsViewModel` uses the shared resolver for settings status. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, and it can create missing directories on explicit user action, but it does not create or mutate lexicon files in the MVP.
 
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:

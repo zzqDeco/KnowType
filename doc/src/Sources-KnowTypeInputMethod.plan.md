@@ -15,6 +15,7 @@ Current package-level implementation covers:
 - key intent modeling for key down, key up, modifier flag changes, cancel, delete, navigation keys, punctuation, and numeric candidate selection
 - session-local `InputModeState` for text mode, punctuation language, and symbol width, with `Option + .` toggling punctuation language
 - runtime loading of user-owned JSON/TSV lexicon directories into the local Chinese engine
+- runtime lexicon snapshot refresh at new-composition boundaries so local dictionary file changes can be picked up without reinterpreting active marked text
 - persisted prefix selection history used as a local-only ranking signal
 - async suggestion pipeline wiring
 - Level 0 no-provider routing for protected input
