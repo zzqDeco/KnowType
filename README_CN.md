@@ -143,6 +143,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 `secretName` 通过 `SecretStore` 解析。macOS 上，`KeychainSecretStore` 会把 API key 存入 Keychain，service 为 `KnowType`。Provider JSON 只保存 secret name，不保存 key 明文。
 
+自定义 `headers` 会按配置原样写入 provider JSON。MVP 阶段不要把 bearer token、API key 或其他密钥放进自定义 headers；应使用 profile 的 API key 字段，并通过 Keychain-backed secret storage 保存。
+
 支持的 provider kind：
 
 - `openai_chat`：`/v1/chat/completions`

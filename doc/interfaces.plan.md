@@ -93,7 +93,9 @@ Core candidate types:
 - `TraditionalInputCandidate`: local pinyin-engine prefix candidate.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
-- `SuggestionResponse`: UI-facing snapshot combining raw input, prefix candidates, continuation candidates, and protection metadata.
+- `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
+
+Raw input is tracked outside `SuggestionResponse` by the input-method session, for example through stale-result guards such as `latestSuggestionRawInput`. Protection metadata lives on correction candidates, locked prefixes, and protected ranges rather than on the top-level suggestion response.
 
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 

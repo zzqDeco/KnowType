@@ -139,6 +139,8 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys in Keychain under the `KnowType` service. Provider JSON stores the secret name, not the secret value.
 
+Custom `headers` are saved in provider JSON exactly as configured. Do not put bearer tokens, API keys, or other secrets in custom headers for the MVP; use the profile API key field and Keychain-backed secret storage instead.
+
 Supported provider kinds:
 
 - `openai_chat`: `/v1/chat/completions`
