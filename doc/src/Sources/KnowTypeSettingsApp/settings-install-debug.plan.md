@@ -25,9 +25,10 @@ The Debug Install tab documents the local developer loop through `DebugInstallGu
 
 - build and ad-hoc sign the bundle by default, or use `CODESIGN_IDENTITY` for Apple Development signing;
 - copy `KnowType.app` to `~/Library/Input Methods`;
-- request selection of `com.knowtype.inputmethod.KnowType.Mode` with `scripts/select-inputmethod.sh` while directing developers to `scripts/diagnose-inputmethod.sh` for the independent system status check;
+- request selection of `com.knowtype.inputmethod.KnowType.Mode` with `scripts/select-inputmethod.sh` after activating the target text app, while directing developers to `scripts/diagnose-inputmethod.sh` for the independent system status check;
+- remind developers that the selection helper is only a preflight and final acceptance still requires typing a real probe in the target app;
 - run `scripts/diagnose-inputmethod.sh` to verify bundle metadata, signing, packaged resources, Text Input Source registration, and local data paths without changing system state;
-- use `scripts/select-inputmethod.sh --require-selected` as the manual typing gate when the current input source must already be KnowType;
+- use `scripts/select-inputmethod.sh --require-selected` as the selection preflight when the active text input context must already be KnowType;
 - refresh the input method process or log out and back in if macOS keeps stale registration state;
 - enable KnowType in System Settings;
 - inspect `KnowTypeInputMethodApp` messages with Console.app or `log stream`.

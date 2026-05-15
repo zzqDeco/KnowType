@@ -12,8 +12,13 @@ Usage: scripts/select-inputmethod.sh [--require-selected] [--no-diagnose]
 Requests KnowType as the current macOS input source, then optionally runs the
 read-only local input-method diagnostic.
 
+Activate the target text app before running this helper. This is a selection
+preflight only; final acceptance still requires typing a probe in that app.
+macOS input source selection is scoped to text input context, so a helper or
+diagnostic process cannot prove another app will use KnowType.
+
 Options:
-  --require-selected  Make the follow-up diagnostic fail if KnowType is not selected.
+  --require-selected  Fail if KnowType is not selected in this preflight TIS context.
   --no-diagnose       Only send the selection request.
   -h, --help          Show this help.
 EOF
@@ -41,17 +46,26 @@ while (($# > 0)); do
   esac
 done
 
-swift - <<'SWIFT'
+KNOWTYPE_REQUIRE_SELECTED="$REQUIRE_SELECTED" swift - <<'SWIFT'
 import Carbon
 import Foundation
 
 let parentID = "com.knowtype.inputmethod.KnowType"
 let modeID = "com.knowtype.inputmethod.KnowType.Mode"
+let requireSelected = ProcessInfo.processInfo.environment["KNOWTYPE_REQUIRE_SELECTED"] == "1"
 
 func inputSource(id: String) -> TISInputSource? {
     let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
     let sources = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource]
     return sources?.first
+}
+
+func inputSourceID(_ source: TISInputSource?) -> String? {
+    guard let source,
+          let raw = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else {
+        return nil
+    }
+    return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
 }
 
 func enableInputSource(_ source: TISInputSource, label: String) {
@@ -79,12 +93,29 @@ if selectStatus == noErr {
     fputs("TISSelectInputSource(mode) returned \(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\n", stderr)
     exit(Int32(selectStatus))
 }
+
+let deadline = Date().addingTimeInterval(2.0)
+var currentID = inputSourceID(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue())
+while currentID != modeID && Date() < deadline {
+    Thread.sleep(forTimeInterval: 0.1)
+    currentID = inputSourceID(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue())
+}
+
+if currentID == modeID {
+    print("Verified KnowType in this preflight TIS context: \(modeID)")
+    print("Type a real probe in the target app before accepting manual typing.")
+} else {
+    let observed = currentID ?? "<unavailable>"
+    fputs("Warning: this preflight TIS context is \(observed), not \(modeID). Activate the target text app, rerun this helper, then type a real probe in that app.\n", stderr)
+    if requireSelected {
+        exit(1)
+    }
+}
 SWIFT
 
 if (( RUN_DIAGNOSTIC == 1 )); then
   diagnostic_args=(--strict)
-  if (( REQUIRE_SELECTED == 1 )); then
-    diagnostic_args+=(--require-selected)
-  fi
+  echo
+  echo "Running read-only install diagnostics. Input-source state below is the diagnostic process context, not target-app acceptance."
   "$ROOT_DIR/scripts/diagnose-inputmethod.sh" "${diagnostic_args[@]}"
 fi

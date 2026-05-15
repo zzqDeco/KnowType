@@ -119,7 +119,7 @@ To retry input-source selection without reinstalling, run:
 ./scripts/select-inputmethod.sh
 ```
 
-Use `./scripts/select-inputmethod.sh --require-selected` before manual typing acceptance when the command should fail unless macOS reports KnowType as the current input source.
+Activate the text app you want to test first, then use `./scripts/select-inputmethod.sh --require-selected` as a selection preflight. macOS input-source selection is tied to text input context, so final manual acceptance still requires typing a real probe in that target app.
 
 Then enable KnowType in System Settings > Keyboard > Text Input > Input Sources. If macOS does not refresh the input source list, log out and back in, or restart the app where you want to test the input method.
 
@@ -231,7 +231,7 @@ swift test
 ./scripts/select-inputmethod.sh --require-selected
 ```
 
-Then manually verify:
+Then manually type a real probe in each target app:
 
 - TextEdit: candidate window appears near the caret; `Space` commits prefix only.
 - Safari and Chrome: text fields accept `Tab` for prefix plus first continuation.

@@ -123,7 +123,7 @@ dist/KnowType.app
 ./scripts/select-inputmethod.sh
 ```
 
-开始手动打字验收前，如果需要命令在当前输入源不是 KnowType 时直接失败，可以运行 `./scripts/select-inputmethod.sh --require-selected`。
+开始手动打字验收前，先激活要测试的文本 app，再运行 `./scripts/select-inputmethod.sh --require-selected` 作为选择预检。macOS 的输入源选择会跟随文本输入上下文，所以最终验收仍必须在目标 app 里实际打字验证。
 
 然后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启要测试输入法的 app。
 
@@ -235,7 +235,7 @@ swift test
 ./scripts/select-inputmethod.sh --require-selected
 ```
 
-然后手动验证：
+然后在每个目标 app 里实际打字验证：
 
 - TextEdit：候选窗出现在文本光标附近，`Space` 只提交前缀。
 - Safari 和 Chrome：文本框中 `Tab` 提交前缀 + 第一条延续。

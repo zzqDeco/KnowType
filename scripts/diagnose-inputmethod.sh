@@ -14,7 +14,8 @@ Checks the local KnowType input-method installation without changing system stat
 
 Options:
   --strict            Exit non-zero when critical install, signing, registration, or enabled-state checks fail.
-  --require-selected  Treat a non-KnowType current input source as a failure.
+  --require-selected  Treat this diagnostic process's current input source as a failure when it is not KnowType.
+                      Manual acceptance still requires typing a probe in the target app.
   --path              Inspect a specific KnowType.app bundle path.
   -h, --help          Show this help.
 EOF
@@ -227,7 +228,7 @@ else
         if [[ "$value" == "true" ]]; then
           ok "KnowType input mode is selected"
         elif (( REQUIRE_SELECTED == 1 )); then
-          fail "KnowType input mode is not currently selected"
+          fail "KnowType input mode is not currently selected in this diagnostic context; run ./scripts/select-inputmethod.sh --require-selected as a preflight, then type a real probe in the target app"
         else
           warn "KnowType input mode is not currently selected"
         fi
