@@ -27,16 +27,22 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
     private var candidatePanelState = CandidatePanelState()
+    private let userSelectionHistoryStore: (any UserSelectionHistoryStoring)?
     private var userSelectionHistory: [String] = []
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
+        let historyStore = try? FileUserSelectionHistoryStore.defaultStore()
         self.hasProvider = provider != nil
         self.sessionController = InputSessionController(provider: provider)
         self.inputModeState = InputModeAppPolicy.defaultState(
             appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier()
         )
+        self.userSelectionHistoryStore = historyStore
+        if let historyStore {
+            self.userSelectionHistory = (try? historyStore.loadHistory(maxEntries: Self.maxUserSelectionHistory)) ?? []
+        }
         super.init(server: server, delegate: delegate, client: inputClient)
     }
 
@@ -371,6 +377,11 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         userSelectionHistory.append(trimmed)
         if userSelectionHistory.count > Self.maxUserSelectionHistory {
             userSelectionHistory.removeFirst(userSelectionHistory.count - Self.maxUserSelectionHistory)
+        }
+        let history = userSelectionHistory
+        let historyStore = userSelectionHistoryStore
+        Task.detached(priority: .utility) {
+            try? historyStore?.saveHistory(history, maxEntries: Self.maxUserSelectionHistory)
         }
     }
 

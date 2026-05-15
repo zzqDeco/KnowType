@@ -11,6 +11,7 @@ This directory contains short notes for important source files and subsystems. T
 - [InputSymbolMode](InputSymbolMode.plan.md)
 - [KnowTypeInputMethodApp](KnowTypeInputMethodApp.plan.md)
 - [Sources-KnowTypeInputMethod](Sources-KnowTypeInputMethod.plan.md)
+- [UserSelectionHistoryStore](UserSelectionHistoryStore.plan.md)
 
 ## Core Input Engine
 
