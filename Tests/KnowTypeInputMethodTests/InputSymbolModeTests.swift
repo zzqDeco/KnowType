@@ -1,4 +1,5 @@
 import XCTest
+import KnowTypeCore
 @testable import KnowTypeInputMethod
 
 final class InputSymbolModeTests: XCTestCase {
@@ -93,6 +94,30 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.apple.TextEdit"),
             InputModeState()
+        )
+    }
+
+    func testAppPolicyUsesStoredPreferencesForDefaultAndCodeContexts() {
+        let preferences = InputModePreferences(
+            defaultState: InputModeState(
+                textMode: .chinese,
+                punctuationMode: .english,
+                symbolWidth: .fullWidth
+            ),
+            codeAppState: InputModeState(
+                textMode: .chinese,
+                punctuationMode: .chinese,
+                symbolWidth: .fullWidth
+            )
+        )
+
+        XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "com.apple.TextEdit", preferences: preferences),
+            preferences.defaultState
+        )
+        XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex", preferences: preferences),
+            preferences.codeAppState
         )
     }
 

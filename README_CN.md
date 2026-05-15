@@ -187,7 +187,7 @@ AI Provider 设置页可以测试当前 draft profile 的连接。测试时输�
 - `Option + 数字`：提交当前前缀 + 对应延续。`Option + 1` 对应第一条延续，候选窗中用 `⇥` 表示，因为 `Tab` 会直接提交第一条延续。
 - `Option + R`：主动润色，这是默认交互里唯一允许改写前缀的路径。
 
-Terminal、iTerm、Xcode、VS Code 和 Codex desktop 默认英文半角标点，但仍保留中文输入管线。
+Input 设置页会持久化普通 App 和代码类 App 的默认标点语言、符号宽度。Terminal、iTerm、Xcode、VS Code 和 Codex desktop 使用代码类 App 默认值，同时仍保留中文输入管线。
 
 候选窗先显示前缀候选，再显示延续候选。候选按 9 行一页分页。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。如果 provider 失败或没有返回可用延续，KnowType 会保留传统前缀候选，不再用固定本地 fallback 文本伪装成 AI 输出。
 

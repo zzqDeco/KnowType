@@ -1,22 +1,26 @@
+import KnowTypeCore
 import KnowTypeProviders
 import SwiftUI
 
 public struct ProviderProfilesView: View {
     @ObservedObject private var viewModel: ProviderProfilesViewModel
     @StateObject private var lexiconViewModel: LexiconSettingsViewModel
+    @StateObject private var inputModeViewModel: InputModePreferencesViewModel
     @State private var selectedSection: SettingsSection = .input
 
     public init(
         viewModel: ProviderProfilesViewModel,
-        lexiconViewModel: LexiconSettingsViewModel = LexiconSettingsViewModel()
+        lexiconViewModel: LexiconSettingsViewModel = LexiconSettingsViewModel(),
+        inputModeViewModel: InputModePreferencesViewModel = InputModePreferencesViewModel()
     ) {
         self.viewModel = viewModel
         _lexiconViewModel = StateObject(wrappedValue: lexiconViewModel)
+        _inputModeViewModel = StateObject(wrappedValue: inputModeViewModel)
     }
 
     public var body: some View {
         TabView(selection: $selectedSection) {
-            InputSettingsView()
+            InputSettingsView(viewModel: inputModeViewModel)
                 .tabItem {
                     Label("Input", systemImage: "keyboard")
                 }
@@ -65,6 +69,8 @@ private enum SettingsSection: Hashable {
 }
 
 private struct InputSettingsView: View {
+    @ObservedObject var viewModel: InputModePreferencesViewModel
+
     var body: some View {
         SettingsForm {
             Section("Composition") {
@@ -75,9 +81,32 @@ private struct InputSettingsView: View {
             }
 
             Section("Punctuation") {
-                LabeledContent("Default mode", value: "Chinese punctuation")
+                Picker("Default punctuation", selection: defaultPunctuationBinding) {
+                    Text("Chinese").tag(InputSymbolMode.chinese)
+                    Text("English").tag(InputSymbolMode.english)
+                }
+                Picker("Default width", selection: defaultWidthBinding) {
+                    Text("Half width").tag(InputSymbolWidth.halfWidth)
+                    Text("Full width").tag(InputSymbolWidth.fullWidth)
+                }
+                Picker("Code app punctuation", selection: codeAppPunctuationBinding) {
+                    Text("Chinese").tag(InputSymbolMode.chinese)
+                    Text("English").tag(InputSymbolMode.english)
+                }
+                Picker("Code app width", selection: codeAppWidthBinding) {
+                    Text("Half width").tag(InputSymbolWidth.halfWidth)
+                    Text("Full width").tag(InputSymbolWidth.fullWidth)
+                }
                 LabeledContent("Toggle", value: "Option + .")
-                LabeledContent("Code apps", value: "English punctuation by default")
+                Button {
+                    viewModel.resetToDefaults()
+                } label: {
+                    Label("Restore Defaults", systemImage: "arrow.counterclockwise")
+                }
+                if let message = viewModel.lastErrorMessage {
+                    Text(message)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section("Prefix Lock") {
@@ -85,6 +114,34 @@ private struct InputSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var defaultPunctuationBinding: Binding<InputSymbolMode> {
+        Binding(
+            get: { viewModel.preferences.defaultState.punctuationMode },
+            set: { viewModel.setDefaultPunctuationMode($0) }
+        )
+    }
+
+    private var defaultWidthBinding: Binding<InputSymbolWidth> {
+        Binding(
+            get: { viewModel.preferences.defaultState.symbolWidth },
+            set: { viewModel.setDefaultSymbolWidth($0) }
+        )
+    }
+
+    private var codeAppPunctuationBinding: Binding<InputSymbolMode> {
+        Binding(
+            get: { viewModel.preferences.codeAppState.punctuationMode },
+            set: { viewModel.setCodeAppPunctuationMode($0) }
+        )
+    }
+
+    private var codeAppWidthBinding: Binding<InputSymbolWidth> {
+        Binding(
+            get: { viewModel.preferences.codeAppState.symbolWidth },
+            set: { viewModel.setCodeAppSymbolWidth($0) }
+        )
     }
 }
 

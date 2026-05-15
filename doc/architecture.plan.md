@@ -82,6 +82,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
+- `InputModePreferencesViewModel` edits punctuation language and symbol-width defaults stored in the shared `com.knowtype.preferences` defaults domain.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 - Lexicon settings can create missing directories and a non-overwriting sample TSV file, but broader dictionary import and licensing review remain outside the MVP settings model.
 

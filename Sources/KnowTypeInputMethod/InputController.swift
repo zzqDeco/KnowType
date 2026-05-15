@@ -49,7 +49,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             traditionalInputEngine: traditionalInputEngine
         )
         self.inputModeState = InputModeAppPolicy.defaultState(
-            appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier()
+            appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier(),
+            preferences: UserDefaultsInputModePreferenceStore.defaultStore().loadPreferences()
         )
         self.userSelectionHistoryPersistence = historyPersistence
         self.userSelectionHistory = historyPersistence?.loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
