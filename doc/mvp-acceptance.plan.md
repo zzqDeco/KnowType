@@ -7,6 +7,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - `swift build` passes on macOS with Swift 6.2.
 - `swift test` passes before manual acceptance.
 - `./scripts/build-inputmethod-bundle.sh` creates `dist/KnowType.app`.
+- The built app includes SwiftPM resource bundles such as `KnowType_KnowTypeCore.bundle`, so bundled lexicons load after installation.
 - `./scripts/install-inputmethod.sh` copies the bundle to `~/Library/Input Methods/KnowType.app`.
 - KnowType can be enabled from System Settings > Keyboard > Text Input > Input Sources.
 - `./scripts/uninstall-inputmethod.sh` removes the local bundle after verification.

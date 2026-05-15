@@ -1,0 +1,186 @@
+# KnowType clean-room MVP seed lexicon.
+# Format: pinyin<TAB>text<TAB>confidence
+s m	什么	0.99
+s m	是吗	0.74
+z m	怎么	0.98
+z m	在吗	0.70
+z m b	怎么办	0.99
+z m y	怎么样	0.98
+w s m	为什么	0.99
+w s m	为啥么	0.55
+wo jue de	我觉得	0.99
+wo jue	我觉得	0.94
+wo xiang qu	我想去	0.98
+wo xiang qu kan	我想去看	0.99
+wo xiang	我想	0.99
+wo men	我们	0.99
+jue de	觉得	0.96
+zhege	这个	0.99
+zhe ge	这个	0.98
+zhe	这	0.96
+zhe	着	0.74
+zhe	者	0.68
+ge	个	0.98
+ge	各	0.76
+ge	哥	0.70
+fangan	方案	0.99
+fangan	方法	0.84
+fangan	方向	0.80
+fangan	计划	0.68
+fangan	思路	0.64
+fangfa	方法	0.98
+fangxiang	方向	0.98
+fang an	方案	0.98
+fang fa	方法	0.97
+fang xiang	方向	0.97
+fang	方	0.94
+fang	放	0.86
+fang	房	0.82
+fang	防	0.78
+gongneng	功能	0.99
+gongneng	工具	0.74
+gongneng	模块	0.70
+gong neng	功能	0.98
+bushi	不是	0.99
+bu shi	不是	0.98
+wending	稳定	0.99
+wen ding	稳定	0.98
+jiekou	接口	0.99
+jie kou	接口	0.98
+yan chi	延迟	0.99
+yanchi	延迟	0.99
+youdian	有点	0.99
+you dian	有点	0.98
+gao	高	0.99
+ba	把	0.99
+wenti	问题	0.99
+wen ti	问题	0.98
+xiugai	修改	0.99
+xiu gai	修改	0.98
+yixia	一下	0.99
+yi xia	一下	0.98
+xiang	想	0.96
+shen me	什么	0.99
+zen me	怎么	0.99
+ni	你	0.99
+ni	尼	0.76
+ni	呢	0.74
+ni	泥	0.70
+ni	拟	0.68
+ni	逆	0.66
+ni	腻	0.64
+ni	妮	0.62
+ni	倪	0.60
+ni	霓	0.58
+ni	匿	0.56
+ni	昵	0.54
+shi	是	0.99
+shi	时	0.83
+shi	事	0.82
+shi	使	0.76
+shi	式	0.74
+shi	试	0.72
+shi	十	0.70
+shi	实	0.68
+shi	师	0.66
+shi	市	0.64
+shi	识	0.62
+shi	史	0.60
+shei	谁	0.99
+shui	谁	0.92
+shui	水	0.88
+shui	睡	0.78
+hao	好	0.99
+hao	号	0.72
+hao	耗	0.60
+hao	浩	0.58
+hai	还	0.96
+hai	海	0.80
+hai	嗨	0.72
+hui	会	0.96
+hui	回	0.88
+hui	灰	0.70
+he	和	0.96
+he	何	0.72
+he	合	0.70
+hen	很	0.99
+hen	狠	0.65
+hen	恨	0.60
+wo	我	0.98
+wo	窝	0.70
+wo	握	0.66
+wo	沃	0.62
+men	们	0.94
+men	门	0.76
+de	的	0.99
+de	得	0.82
+de	地	0.80
+zai	在	0.98
+zai	再	0.88
+zai	载	0.62
+xian	现	0.94
+xian	先	0.90
+xian	线	0.72
+xian	县	0.68
+xian	显	0.66
+xian	限	0.64
+xian zai	现在	0.99
+xian zai	先在	0.58
+xian shi	显示	0.98
+xian shi	现实	0.84
+xian shi	限时	0.62
+ni shi	你是	0.99
+ni shi	尼式	0.52
+ni shi shei	你是谁	0.995
+ni hao	你好	0.99
+ni hao	你号	0.58
+nihao	你好	0.95
+nihao	你号	0.57
+ni wo	你我	0.95
+ma	吗	0.98
+ma	嘛	0.86
+ma	马	0.72
+le	了	0.98
+le	乐	0.74
+yi	一	0.97
+yi	以	0.78
+yi	已	0.76
+you	有	0.97
+you	又	0.78
+you	由	0.72
+jian	见	0.82
+jian	件	0.80
+jian	间	0.78
+jian	建	0.76
+kan	看	0.96
+kan	刊	0.62
+qu	去	0.98
+qu	区	0.78
+qu	取	0.74
+qu kan	去看	0.98
+ren	人	0.98
+ren	任	0.76
+ren	认	0.74
+dao	到	0.96
+dao	道	0.78
+dao	导	0.68
+guo	过	0.96
+guo	国	0.84
+guo	果	0.78
+ke	可	0.92
+ke	课	0.76
+ke	客	0.70
+yi ge	一个	0.98
+mei you	没有	0.98
+ke yi	可以	0.98
+zhe yang	这样	0.98
+na ge	那个	0.96
+shi jie	世界	0.94
+zhong	中	0.97
+zhong	种	0.78
+zhong	重	0.76
+zhong guo	中国	0.99
+zhong guo ren	中国人	0.99
+zhong wen	中文	0.98
+shu ru	输入	0.98
+shu ru fa	输入法	0.99
