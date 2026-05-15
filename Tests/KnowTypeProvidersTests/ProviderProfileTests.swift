@@ -253,9 +253,11 @@ final class ProviderProfileTests: XCTestCase {
         XCTAssertEqual(result.firstCandidateText, "works")
     }
 
-    func testProviderConnectionDiagnosticRejectsEmptyCandidates() async throws {
+    func testProviderConnectionDiagnosticRejectsEmptyOrBlankCandidates() async throws {
         let diagnostic = ProviderConnectionDiagnostic(providerBuilder: { _ in
-            ResponseProvider(providerName: "diagnostic-stub", response: LLMResponse(candidates: []))
+            ResponseProvider(providerName: "diagnostic-stub", response: LLMResponse(candidates: [
+                LLMCandidate(text: "  \n")
+            ]))
         })
 
         do {
@@ -268,8 +270,31 @@ final class ProviderProfileTests: XCTestCase {
             )
             XCTFail("Expected empty diagnostic response to fail")
         } catch {
-            XCTAssertEqual(error as? ProviderError, .invalidResponse("diagnostic returned no candidates"))
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("diagnostic returned no usable candidates"))
         }
+    }
+
+    func testProviderConnectionDiagnosticCountsOnlyUsableCandidates() async throws {
+        let diagnostic = ProviderConnectionDiagnostic(providerBuilder: { _ in
+            ResponseProvider(
+                providerName: "diagnostic-stub",
+                response: LLMResponse(candidates: [
+                    LLMCandidate(text: " "),
+                    LLMCandidate(text: "usable")
+                ])
+            )
+        })
+
+        let result = try await diagnostic.test(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: ""
+            )
+        )
+
+        XCTAssertEqual(result.candidateCount, 1)
+        XCTAssertEqual(result.firstCandidateText, "usable")
     }
 
     func testProviderErrorUsesReadableLocalizedDescription() {

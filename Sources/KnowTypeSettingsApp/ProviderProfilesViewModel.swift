@@ -255,8 +255,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
             draft: draft
         )
 
-        validationErrors = validate(snapshot.draft)
-        guard validationErrors.isEmpty else {
+        let connectionValidationErrors = validate(snapshot.draft)
+        guard connectionValidationErrors.isEmpty else {
             connectionStatus = .failure("Fix validation errors before testing.")
             return false
         }
@@ -271,7 +271,6 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 return false
             }
             connectionStatus = .success("Connected to \(result.providerName). Received \(result.candidateCount) candidate(s).")
-            lastErrorMessage = nil
             return true
         } catch {
             guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
@@ -318,10 +317,15 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
     private func connectionTestConfiguration(for draft: ProviderProfileDraft) throws -> ProviderConfiguration {
         var profile = try draft.makeProfile()
+        let existingProfile = profiles.first(where: { $0.id == profile.id })
         let trimmedAPIKey = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let apiKey: String?
         if trimmedAPIKey.isEmpty {
-            apiKey = try resolvedExistingSecret(for: profile)
+            if Self.shouldClearBlankOptionalSecret(for: profile, existingProfile: existingProfile) {
+                apiKey = nil
+            } else {
+                apiKey = try resolvedExistingSecret(for: profile)
+            }
             if Self.requiresSecret(profile), apiKey == nil {
                 throw ProviderProfilesViewModelError.missingAPIKey
             }

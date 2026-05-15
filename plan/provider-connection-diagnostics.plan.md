@@ -9,6 +9,7 @@ Make AI provider configuration observable from the settings app so users can ver
 - `KnowTypeProviders` exposes `ProviderConnectionDiagnostic`.
 - The diagnostic builds the configured provider and sends one small prefix-locked continuation request.
 - Empty provider responses fail the diagnostic instead of being treated as success.
+- Blank or whitespace-only diagnostic candidates fail the diagnostic instead of being treated as usable output.
 - `ProviderProfilesViewModel` can test the current draft configuration without saving profile metadata.
 - A non-blank draft API key is used only for the test request and is not persisted.
 - A blank draft API key can reuse an existing saved `secretName` value when available.
@@ -17,6 +18,8 @@ Make AI provider configuration observable from the settings app so users can ver
 - Draft edits reset stale connection results.
 - In-flight diagnostic results are discarded if the user edits the draft or switches profiles before the request returns.
 - Connection-test failures stay in `connectionStatus` instead of the persistent save/load error slot.
+- Connection-test successes preserve existing persistence errors because diagnostics do not repair failed saves or secret writes.
+- Remote-to-local draft endpoint changes do not reuse an existing remote secret when the draft API key is blank.
 
 ## Verification
 

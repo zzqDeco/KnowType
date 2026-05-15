@@ -1151,6 +1151,38 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(configurations.first?.apiKey, "sk-existing")
     }
 
+    func testConnectionTestDoesNotReuseRemoteSecretWhenDraftSwitchesToLocalEndpoint() async throws {
+        let existing = [
+            ProviderProfile(
+                id: "remote",
+                displayName: "Remote",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.remote.apiKey",
+                isDefault: true
+            )
+        ]
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile(profiles: existing)),
+            secretStore: RecordingSecretStore(values: ["knowtype.provider.remote.apiKey": "sk-remote"]),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+        viewModel.draft.baseURL = "http://127.0.0.1:8317/v1"
+        viewModel.draft.model = ""
+        viewModel.draft.apiKey = ""
+
+        let didConnect = await viewModel.testDraftConnection()
+
+        XCTAssertTrue(didConnect)
+        let configurations = await capture.configurations
+        XCTAssertNil(configurations.first?.apiKey)
+    }
+
     func testConnectionTestReportsMissingRequiredAPIKey() async throws {
         let viewModel = ProviderProfilesViewModel(
             profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
@@ -1207,6 +1239,68 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertFalse(didConnect)
         XCTAssertEqual(viewModel.connectionStatus, .failure("Invalid provider response: diagnostic failed"))
         XCTAssertNil(viewModel.lastErrorMessage)
+    }
+
+    func testConnectionSuccessPreservesPreviousPersistentSaveError() async throws {
+        let existing = [
+            ProviderProfile(
+                id: "local",
+                displayName: "Local",
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: "",
+                isDefault: true
+            )
+        ]
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: SavingThrowingProfileStore(
+                file: ProviderProfilesFile(profiles: existing),
+                error: TestProfileStoreError(message: "save failed")
+            ),
+            secretStore: RecordingSecretStore(),
+            connectionTester: { _ in
+                ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+
+        viewModel.draft.displayName = "Updated Local"
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(viewModel.lastErrorMessage, "save failed")
+
+        let didConnect = await viewModel.testDraftConnection()
+
+        XCTAssertTrue(didConnect)
+        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_chat. Received 1 candidate(s)."))
+        XCTAssertEqual(viewModel.lastErrorMessage, "save failed")
+    }
+
+    func testConnectionTestPreservesSaveOnlyValidationErrors() async throws {
+        let existing = [
+            ProviderProfile(
+                id: "local",
+                displayName: "Local",
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: "",
+                isDefault: true
+            )
+        ]
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile(profiles: existing)),
+            secretStore: RecordingSecretStore(),
+            connectionTester: { _ in
+                ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+
+        viewModel.draft.isDefault = false
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertTrue(viewModel.validationErrors.contains("At least one default provider is required."))
+
+        let didConnect = await viewModel.testDraftConnection()
+
+        XCTAssertTrue(didConnect)
+        XCTAssertTrue(viewModel.validationErrors.contains("At least one default provider is required."))
     }
 
     func testSupersededConnectionTestDoesNotPublishResult() async throws {

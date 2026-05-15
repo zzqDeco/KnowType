@@ -29,13 +29,16 @@ public struct ProviderConnectionDiagnostic: Sendable {
     public func test(configuration: ProviderConfiguration) async throws -> ProviderConnectionDiagnosticResult {
         let provider = try providerBuilder(configuration)
         let response = try await provider.complete(Self.diagnosticRequest)
-        guard !response.candidates.isEmpty else {
-            throw ProviderError.invalidResponse("diagnostic returned no candidates")
+        let usableCandidates = response.candidates.filter { candidate in
+            !candidate.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !usableCandidates.isEmpty else {
+            throw ProviderError.invalidResponse("diagnostic returned no usable candidates")
         }
         return ProviderConnectionDiagnosticResult(
             providerName: provider.providerName,
-            candidateCount: response.candidates.count,
-            firstCandidateText: response.candidates.first?.text
+            candidateCount: usableCandidates.count,
+            firstCandidateText: usableCandidates.first?.text
         )
     }
 

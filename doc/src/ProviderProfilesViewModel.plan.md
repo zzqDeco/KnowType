@@ -20,4 +20,6 @@ Load failures block settings persistence until profiles can be loaded successful
 
 Connection tests use a non-blank draft API key only for the test request. Blank draft API keys reuse an existing saved secret when one is available. Missing required keys fail before the diagnostic sends a provider request.
 
-Connection status is scoped to the draft snapshot being tested. Editing draft fields or switching profiles resets stale connection status, and in-flight diagnostic results are ignored if the draft snapshot has changed before the request completes. Diagnostic failures are shown in `connectionStatus`, not in the persistent `lastErrorMessage` save/load slot.
+Connection status is scoped to the draft snapshot being tested. Editing draft fields or switching profiles resets stale connection status, and in-flight diagnostic results are ignored if the draft snapshot has changed before the request completes. Diagnostic failures are shown in `connectionStatus`, not in the persistent `lastErrorMessage` save/load slot. Diagnostic success also preserves existing persistence errors because it does not retry or repair failed profile saves.
+
+When a saved remote OpenAI-compatible profile is edited to a local endpoint, a blank draft API key does not reuse the saved remote secret for the connection test. This mirrors save behavior for remote-to-local optional-secret transitions.

@@ -97,6 +97,8 @@ Settings connection tests:
 - clear stale status when draft fields change
 - ignore in-flight results for superseded draft/profile snapshots
 - keep transient diagnostic failures out of the persistent save/load error slot
+- preserve existing save/load errors after diagnostic success
+- avoid reusing a saved remote secret when a blank-key draft switches to a local endpoint
 
 ## Candidate Data
 
