@@ -16,6 +16,8 @@ private func usage() -> Never {
         """
         Usage:
           knowtype-inputsource-tool status [--parent-id ID] [--mode-id ID]
+          knowtype-inputsource-tool dump [--bundle-id ID]
+          knowtype-inputsource-tool disable [--bundle-id ID]
           knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID]
           knowtype-inputsource-tool register --path PATH [--parent-id ID] [--mode-id ID] [--select]
           knowtype-inputsource-tool select [--parent-id ID] [--mode-id ID] [--require-selected]
@@ -80,6 +82,11 @@ private func inputSources(id: String) -> [TISInputSource] {
     return TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource] ?? []
 }
 
+private func inputSources(bundleID: String) -> [TISInputSource] {
+    let filter = [kTISPropertyBundleID as String: bundleID] as CFDictionary
+    return TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource] ?? []
+}
+
 private func hitoolboxPreferenceArray(_ key: String) -> [[String: Any]] {
     CFPreferencesAppSynchronize("com.apple.HIToolbox" as CFString)
     return CFPreferencesCopyAppValue(key as CFString, "com.apple.HIToolbox" as CFString) as? [[String: Any]] ?? []
@@ -109,6 +116,26 @@ private func enableInputSource(_ source: TISInputSource, label: String) {
     }
 }
 
+private func disableInputSources(bundleID: String) {
+    let sources = inputSources(bundleID: bundleID)
+    var disabledCount = 0
+    for source in sources.sorted(by: { lhs, rhs in
+        let lhsIsMode = stringProperty(lhs, kTISPropertyInputModeID) != nil
+        let rhsIsMode = stringProperty(rhs, kTISPropertyInputModeID) != nil
+        return lhsIsMode && !rhsIsMode
+    }) {
+        let id = stringProperty(source, kTISPropertyInputSourceID) ?? "<unknown>"
+        let status = TISDisableInputSource(source)
+        if status == noErr {
+            disabledCount += 1
+        } else {
+            fputs("Warning: TISDisableInputSource(\(id)) returned \(status)\n", stderr)
+        }
+    }
+    print("disabled.bundle=\(bundleID)")
+    print("disabled.count=\(disabledCount)")
+}
+
 private func currentInputSourceID() -> String? {
     stringProperty(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), kTISPropertyInputSourceID)
 }
@@ -122,14 +149,42 @@ private func printStatus(parentID: String, modeID: String) {
     print("current.id=\(currentID)")
     print("parent.found=\(parent != nil)")
     print("parent.enabled=\(boolProperty(parent, kTISPropertyInputSourceIsEnabled))")
+    print("parent.selectCapable=\(boolProperty(parent, kTISPropertyInputSourceIsSelectCapable))")
+    print("parent.type=\(stringProperty(parent, kTISPropertyInputSourceType) ?? "")")
     print("mode.found=\(mode != nil)")
     print("mode.enabled=\(boolProperty(mode, kTISPropertyInputSourceIsEnabled))")
+    print("mode.selectCapable=\(boolProperty(mode, kTISPropertyInputSourceIsSelectCapable))")
+    print("mode.type=\(stringProperty(mode, kTISPropertyInputSourceType) ?? "")")
     print("mode.selected=\(currentID == modeID)")
     print("mode.name=\(stringProperty(mode, kTISPropertyLocalizedName) ?? "")")
     print("mode.count=\(inputSources(id: modeID).count)")
     print("preference.selected.mode=\(hitoolboxSelectedModeID() ?? "")")
     print("preference.selected.knowtype=\(hitoolboxPreferencesContain(bundleID: parentID, modeID: modeID, key: "AppleSelectedInputSources"))")
     print("preference.enabled.knowtype=\(hitoolboxPreferencesContain(bundleID: parentID, modeID: modeID, key: "AppleEnabledInputSources"))")
+}
+
+private func printDump(bundleID: String) {
+    let sources = inputSources(bundleID: bundleID)
+    print("bundle.id=\(bundleID)")
+    print("bundle.count=\(sources.count)")
+
+    for (index, source) in sources.enumerated() {
+        let id = stringProperty(source, kTISPropertyInputSourceID) ?? ""
+        let modeID = stringProperty(source, kTISPropertyInputModeID) ?? ""
+        let name = stringProperty(source, kTISPropertyLocalizedName) ?? ""
+        let category = stringProperty(source, kTISPropertyInputSourceCategory) ?? ""
+        let type = stringProperty(source, kTISPropertyInputSourceType) ?? ""
+
+        print("source.\(index).id=\(id)")
+        print("source.\(index).mode=\(modeID)")
+        print("source.\(index).name=\(name)")
+        print("source.\(index).category=\(category)")
+        print("source.\(index).type=\(type)")
+        print("source.\(index).enabled=\(boolProperty(source, kTISPropertyInputSourceIsEnabled))")
+        print("source.\(index).enableCapable=\(boolProperty(source, kTISPropertyInputSourceIsEnableCapable))")
+        print("source.\(index).selectCapable=\(boolProperty(source, kTISPropertyInputSourceIsSelectCapable))")
+        print("source.\(index).asciiCapable=\(boolProperty(source, kTISPropertyInputSourceIsASCIICapable))")
+    }
 }
 
 private func switchAway(prefix: String, fallbackID: String) {
@@ -225,6 +280,14 @@ case "status":
     let modeID = arguments.option("--mode-id", default: defaultModeID) ?? defaultModeID
     arguments.ensureConsumed()
     printStatus(parentID: parentID, modeID: modeID)
+case "dump":
+    let bundleID = arguments.option("--bundle-id", default: defaultParentID) ?? defaultParentID
+    arguments.ensureConsumed()
+    printDump(bundleID: bundleID)
+case "disable":
+    let bundleID = arguments.option("--bundle-id", default: defaultParentID) ?? defaultParentID
+    arguments.ensureConsumed()
+    disableInputSources(bundleID: bundleID)
 case "switch-away":
     let prefix = arguments.option("--prefix", default: defaultParentID) ?? defaultParentID
     let fallbackID = arguments.option("--fallback-id", default: defaultFallbackID) ?? defaultFallbackID

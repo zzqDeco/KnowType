@@ -85,28 +85,11 @@ swift build
 swift test
 ```
 
-构建输入法 app bundle：
+构建并安装本地输入法 bundle：
 
 ```bash
 ./scripts/build-inputmethod-bundle.sh
-```
-
-bundle 会输出到：
-
-```text
-dist/KnowType.app
-```
-
-本地安装：
-
-```bash
 ./scripts/install-inputmethod.sh
-```
-
-脚本会把 bundle 复制到：
-
-```text
-~/Library/Input Methods/KnowType.app
 ```
 
 安装后先运行只读诊断，再开始手动打字测试：
@@ -115,29 +98,7 @@ dist/KnowType.app
 ./scripts/diagnose-inputmethod.sh
 ```
 
-如果希望缺少 bundle 资源、签名失败或 Text Input Source 注册/启用状态失败直接阻断本地 smoke gate，可以使用 `./scripts/diagnose-inputmethod.sh --strict`。
-
-如果只是想重新请求 macOS 切换到 KnowType，不需要重新安装，可以运行：
-
-```bash
-./scripts/select-inputmethod.sh
-```
-
-开始手动打字验收前，先激活要测试的文本 app，再运行 `./scripts/select-inputmethod.sh --require-selected` 作为选择预检。macOS 的输入源选择会跟随文本输入上下文，所以最终验收仍必须在目标 app 里实际打字验证。
-
-然后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启要测试输入法的 app。
-
-如果菜单或系统设置里没有看到 `KnowType` / `知键`，先运行：
-
-```bash
-./scripts/diagnose-inputmethod.sh --strict
-```
-
-诊断会显示输入源是否已注册、是否启用，以及 macOS 当前解析到的输入法显示名。如果显示名仍是 `com.knowtype.inputmethod.KnowType.Mode`，说明安装包缺少或系统尚未刷新本地化显示名；重新安装后仍有重复项时，退出登录或重启可清掉 TIS 菜单缓存。
-
-首次启用第三方输入法时，macOS 可能会弹出安全确认。当前脚本会通过 `knowtype-inputsource-tool` 发起启用请求；如果系统弹窗询问是否允许启用 KnowType，需要选择「允许」，否则输入法不会出现在可用输入源里。弹窗不应该再显示为 `swift-frontend`。
-
-诊断会区分 helper 进程自己的 TIS 上下文和系统持久化的 HIToolbox 输入源偏好。如果 `AppleEnabledInputSources` 已包含 KnowType，但 `AppleSelectedInputSources` 仍是 Apple 拼音，需要在当前目标 App 的输入法菜单里选中 KnowType 后再测试，否则打字结果仍然可能来自 Apple 拼音。
+详细安装、签名、Text Input Source 和排障说明放在 [doc/src/scripts/inputmethod-diagnostics.plan.md](doc/src/scripts/inputmethod-diagnostics.plan.md)。
 
 移除本地 bundle：
 

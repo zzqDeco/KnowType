@@ -11,7 +11,8 @@ Make the installed KnowType input source appear in macOS UI as `KnowType` / `知
 - Keep the menu icon label as `知`; the full menu/settings name comes from `InfoPlist.strings`.
 - Warn in diagnostics when `kTISPropertyLocalizedName` still resolves to the raw mode id.
 - Warn when TIS reports multiple registrations for the same mode id, because repeated local installs can leave stale menu/cache entries until logout or reboot.
-- Route TIS registration, enabling, selection, and status checks through the dedicated `knowtype-inputsource-tool` executable instead of inline `swift -` snippets, so macOS permission prompts identify a KnowType helper rather than `swift-frontend`.
+- Keep the dedicated `knowtype-inputsource-tool` executable for status, dump, and manual selection retries instead of inline `swift -` snippets, so diagnostics identify a KnowType-specific helper rather than `swift-frontend`.
+- Let the default install path launch the installed signed app with its activation flag so registration/enabling is attributed to the input-method bundle context.
 - Report persisted HIToolbox selected/enabled input-source preferences separately from the helper process's current TIS context, so Apple Pinyin is not mistaken for a successful KnowType typing test.
 
 ## Verification

@@ -6,22 +6,22 @@ Make the local input-method install script stop implying KnowType is globally se
 
 ## Behavior
 
-- After registration and enabling, `scripts/install-inputmethod.sh` requests selection of `com.knowtype.inputmethod.KnowType.Mode`.
-- TIS registration, enabling, selection, and status checks run through `knowtype-inputsource-tool`, not inline `swift -`, so local macOS permission prompts are attributable to the KnowType helper instead of `swift-frontend`.
-- If `TISSelectInputSource` returns `noErr`, the script reports that the selection request was made rather than claiming global system selection.
+- `scripts/install-inputmethod.sh` copies the signed bundle into `~/Library/Input Methods` and launches `KnowType.app --knowtype-install-activate`.
+- The installed app registers missing sources, enables existing sources from its own signed bundle context, and logs the app-local `TISSelectInputSource` result.
+- The command-line helper remains available for status, dump, manual register, and manual selection retries, but the default install path no longer routes registration or selection through a sandboxed helper.
+- If app-local `TISSelectInputSource` returns `noErr`, that still proves only the app context; diagnostics remain the source of truth for persisted system selected input source.
 - Diagnostics report both helper-local TIS state and persisted HIToolbox preferences; `AppleEnabledInputSources` can contain KnowType while `AppleSelectedInputSources` still points at Apple Pinyin.
-- If `TISSelectInputSource` returns an error, the script prints the status and points the developer to System Settings.
-- The script does not read the current input source inside the same short-lived Swift process, because that value can be stale until keyboard-selection notifications are processed.
 - The final script output directs developers to `scripts/diagnose-inputmethod.sh --strict` as the read-only install status check.
 - The final script output also tells developers to activate the target text app, run `scripts/select-inputmethod.sh --require-selected` as a preflight, then type a real probe for manual typing acceptance.
 - The diagnostic reports the localized input-mode name so developers can distinguish a packaging/display-name issue from a missing registration issue.
+- The diagnostic can include unified-log hints for Gatekeeper and input-source sandbox denials with `--logs`.
 
 ## Verification
 
 ```bash
 bash -n scripts/install-inputmethod.sh
 ./scripts/install-inputmethod.sh
-./scripts/diagnose-inputmethod.sh --strict
+./scripts/diagnose-inputmethod.sh --strict --logs
 git diff --check
 ```
 

@@ -7,6 +7,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 STRICT=0
 REQUIRE_SELECTED=0
+SHOW_LOGS=0
+LOG_LOOKBACK="${KNOWTYPE_LOG_LOOKBACK:-30m}"
 
 usage() {
   cat <<'EOF'
@@ -18,6 +20,8 @@ Options:
   --strict            Exit non-zero when critical install, signing, registration, or enabled-state checks fail.
   --require-selected  Treat this diagnostic process's current input source as a failure when it is not KnowType.
                       Manual acceptance still requires typing a probe in the target app.
+  --logs              Include recent KnowType, Gatekeeper, and input-source sandbox log hints.
+  --log-lookback      Time window for --logs, such as 10m, 1h, or 2h. Defaults to 30m.
   --path              Inspect a specific KnowType.app bundle path.
   -h, --help          Show this help.
 EOF
@@ -32,6 +36,18 @@ while (($# > 0)); do
     --require-selected)
       REQUIRE_SELECTED=1
       shift
+      ;;
+    --logs)
+      SHOW_LOGS=1
+      shift
+      ;;
+    --log-lookback)
+      if (($# < 2)); then
+        echo "error: --log-lookback requires a value" >&2
+        exit 2
+      fi
+      LOG_LOOKBACK="$2"
+      shift 2
       ;;
     --path)
       if (($# < 2)); then
@@ -55,6 +71,9 @@ done
 
 failures=0
 warnings=0
+gatekeeper_rejected=0
+hitoolbox_enabled_knowtype=""
+hitoolbox_selected_knowtype=""
 
 ok() {
   printf '[ok] %s\n' "$1"
@@ -77,7 +96,10 @@ info() {
 plist_value() {
   local key="$1"
   local plist="$2"
-  /usr/bin/plutil -extract "$key" raw -o - "$plist" 2>/dev/null || true
+  local output
+  if output="$(/usr/bin/plutil -extract "$key" raw -o - "$plist" 2>/dev/null)"; then
+    printf '%s' "$output"
+  fi
 }
 
 expect_plist_value() {
@@ -115,8 +137,14 @@ if [[ -f "$INFO_PLIST" ]]; then
   expect_plist_value "CFBundleIdentifier" "$PARENT_ID" "$INFO_PLIST"
   expect_plist_value "CFBundleExecutable" "KnowTypeInputMethodApp" "$INFO_PLIST"
   expect_plist_value "TISInputSourceID" "$PARENT_ID" "$INFO_PLIST"
+  expect_plist_value "InputMethodConnectionName" "com.knowtype.inputmethod.KnowType_Connection" "$INFO_PLIST"
   expect_plist_value "InputMethodServerControllerClass" "KnowTypeInputController" "$INFO_PLIST"
   expect_plist_value "InputMethodServerDelegateClass" "KnowTypeInputController" "$INFO_PLIST"
+  expect_plist_value "LSBackgroundOnly" "false" "$INFO_PLIST"
+  expect_plist_value "LSHasLocalizedDisplayName" "true" "$INFO_PLIST"
+  if [[ -n "$(plist_value "TISIconIsTemplate" "$INFO_PLIST")" ]]; then
+    warn "Info.plist contains private/undocumented TISIconIsTemplate; rebuild from current sources"
+  fi
 else
   fail "Info.plist is missing"
 fi
@@ -153,6 +181,20 @@ else
   warn "codesign command is unavailable"
 fi
 
+if command -v spctl >/dev/null 2>&1; then
+  SPCTL_OUTPUT="$(spctl --assess --type execute --verbose=4 "$BUNDLE_PATH" 2>&1)"
+  SPCTL_STATUS=$?
+  if (( SPCTL_STATUS == 0 )); then
+    ok "Gatekeeper assessment accepts the installed bundle"
+  else
+    gatekeeper_rejected=1
+    warn "Gatekeeper assessment rejects this local build: $SPCTL_OUTPUT"
+    info "Run this diagnostic with --logs to check for syspolicy GatekeeperPolicyScanError details"
+  fi
+else
+  warn "spctl command is unavailable"
+fi
+
 echo
 echo "Text Input Source state"
 
@@ -183,11 +225,25 @@ else
       parent.enabled)
         [[ "$value" == "true" ]] && ok "KnowType parent input source is enabled" || fail "KnowType parent input source is not enabled"
         ;;
+      parent.selectCapable)
+        if [[ "$value" != "true" ]]; then
+          info "KnowType parent record is not directly selectable; macOS should select the visible input mode instead"
+        fi
+        ;;
+      parent.type)
+        [[ -n "$value" ]] && info "KnowType parent TIS type: $value"
+        ;;
       mode.found)
         [[ "$value" == "true" ]] && ok "KnowType input mode is registered" || fail "KnowType input mode is not registered"
         ;;
       mode.enabled)
         [[ "$value" == "true" ]] && ok "KnowType input mode is enabled" || fail "KnowType input mode is not enabled"
+        ;;
+      mode.selectCapable)
+        [[ "$value" == "true" ]] && ok "KnowType input mode is select-capable" || fail "KnowType input mode is not select-capable"
+        ;;
+      mode.type)
+        [[ -n "$value" ]] && info "KnowType mode TIS type: $value"
         ;;
       mode.selected)
         if [[ "$value" == "true" ]]; then
@@ -220,6 +276,7 @@ else
         fi
         ;;
       preference.selected.knowtype)
+        hitoolbox_selected_knowtype="$value"
         if [[ "$value" == "true" ]]; then
           ok "HIToolbox selected preference is KnowType"
         else
@@ -227,6 +284,7 @@ else
         fi
         ;;
       preference.enabled.knowtype)
+        hitoolbox_enabled_knowtype="$value"
         if [[ "$value" == "true" ]]; then
           ok "HIToolbox enabled preferences include KnowType"
         else
@@ -235,6 +293,12 @@ else
         ;;
     esac
   done <<<"$TIS_OUTPUT"
+fi
+
+if (( gatekeeper_rejected == 1 )) &&
+   [[ "$hitoolbox_enabled_knowtype" == "true" ]] &&
+   [[ "$hitoolbox_selected_knowtype" != "true" ]]; then
+  warn "KnowType is enabled but not selected while Gatekeeper rejects the bundle; local Apple Development builds may need explicit user allowance or a Developer ID build before the input menu can select them reliably"
 fi
 
 if pgrep -x KnowTypeInputMethodApp >/dev/null 2>&1; then
@@ -268,6 +332,25 @@ if [[ -d "$LEXICON_DIR" ]]; then
   ok "local lexicon directory exists with $LEXICON_COUNT JSON/TSV resource(s)"
 else
   warn "local lexicon directory is missing; bundled seed lexicon will be used"
+fi
+
+if (( SHOW_LOGS == 1 )); then
+  echo
+  echo "Recent system log hints"
+  if command -v /usr/bin/log >/dev/null 2>&1; then
+    LOG_PREDICATE='subsystem == "com.knowtype.inputmethod.KnowType" OR eventMessage CONTAINS[c] "GatekeeperPolicyScanError" OR eventMessage CONTAINS[c] "user-preference-write com.apple.inputsources"'
+    if LOG_OUTPUT="$(/usr/bin/log show --style compact --last "$LOG_LOOKBACK" --predicate "$LOG_PREDICATE" 2>/dev/null | tail -80)"; then
+      if [[ -n "$LOG_OUTPUT" ]]; then
+        printf '%s\n' "$LOG_OUTPUT"
+      else
+        info "No recent KnowType, Gatekeeper, or input-source sandbox log hints found in the last $LOG_LOOKBACK"
+      fi
+    else
+      warn "could not read unified logs for the last $LOG_LOOKBACK"
+    fi
+  else
+    warn "log command is unavailable"
+  fi
 fi
 
 echo
