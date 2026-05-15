@@ -116,6 +116,14 @@ dist/KnowType.app
 
 如果希望缺少 bundle 资源、签名失败或 Text Input Source 注册/启用状态失败直接阻断本地 smoke gate，可以使用 `./scripts/diagnose-inputmethod.sh --strict`。
 
+如果只是想重新请求 macOS 切换到 KnowType，不需要重新安装，可以运行：
+
+```bash
+./scripts/select-inputmethod.sh
+```
+
+开始手动打字验收前，如果需要命令在当前输入源不是 KnowType 时直接失败，可以运行 `./scripts/select-inputmethod.sh --require-selected`。
+
 然后到「系统设置 > 键盘 > 文本输入 > 输入源」启用 KnowType。如果输入源列表没有刷新，可以重新登录，或重启要测试输入法的 app。
 
 移除本地 bundle：
@@ -223,6 +231,7 @@ swift build
 swift test
 ./scripts/install-inputmethod.sh
 ./scripts/diagnose-inputmethod.sh --strict
+./scripts/select-inputmethod.sh --require-selected
 ```
 
 然后手动验证：

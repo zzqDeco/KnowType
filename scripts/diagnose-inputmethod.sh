@@ -4,17 +4,19 @@ set -u -o pipefail
 DEFAULT_BUNDLE_PATH="$HOME/Library/Input Methods/KnowType.app"
 BUNDLE_PATH="${KNOWTYPE_BUNDLE_PATH:-$DEFAULT_BUNDLE_PATH}"
 STRICT=0
+REQUIRE_SELECTED=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/diagnose-inputmethod.sh [--strict] [--path /path/to/KnowType.app]
+Usage: scripts/diagnose-inputmethod.sh [--strict] [--require-selected] [--path /path/to/KnowType.app]
 
 Checks the local KnowType input-method installation without changing system state.
 
 Options:
-  --strict    Exit non-zero when critical install, signing, registration, or enabled-state checks fail.
-  --path      Inspect a specific KnowType.app bundle path.
-  -h, --help  Show this help.
+  --strict            Exit non-zero when critical install, signing, registration, or enabled-state checks fail.
+  --require-selected  Treat a non-KnowType current input source as a failure.
+  --path              Inspect a specific KnowType.app bundle path.
+  -h, --help          Show this help.
 EOF
 }
 
@@ -22,6 +24,10 @@ while (($# > 0)); do
   case "$1" in
     --strict)
       STRICT=1
+      shift
+      ;;
+    --require-selected)
+      REQUIRE_SELECTED=1
       shift
       ;;
     --path)
@@ -214,7 +220,13 @@ else
         [[ "$value" == "true" ]] && ok "KnowType input mode is enabled" || fail "KnowType input mode is not enabled"
         ;;
       mode.selected)
-        [[ "$value" == "true" ]] && ok "KnowType input mode is selected" || warn "KnowType input mode is not currently selected"
+        if [[ "$value" == "true" ]]; then
+          ok "KnowType input mode is selected"
+        elif (( REQUIRE_SELECTED == 1 )); then
+          fail "KnowType input mode is not currently selected"
+        else
+          warn "KnowType input mode is not currently selected"
+        fi
         ;;
     esac
   done <<<"$TIS_OUTPUT"
@@ -256,6 +268,6 @@ fi
 echo
 echo "Summary: $failures failure(s), $warnings warning(s)"
 
-if (( STRICT == 1 && failures > 0 )); then
+if (( failures > 0 && (STRICT == 1 || REQUIRE_SELECTED == 1) )); then
   exit 1
 fi

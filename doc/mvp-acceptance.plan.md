@@ -10,6 +10,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - The built app includes SwiftPM resource bundles such as `KnowType_KnowTypeCore.bundle`, so bundled lexicons load after installation.
 - `./scripts/install-inputmethod.sh` copies the bundle to `~/Library/Input Methods/KnowType.app`.
 - `./scripts/diagnose-inputmethod.sh --strict` passes after install, confirming bundle metadata, signing, Text Input Source registration, and packaged resources.
+- `./scripts/select-inputmethod.sh --require-selected` is used before manual typing checks when the smoke run requires KnowType to be the current input source.
 - KnowType can be enabled from System Settings > Keyboard > Text Input > Input Sources.
 - `./scripts/uninstall-inputmethod.sh` removes the local bundle after verification.
 - This gate covers local MVP packaging only; signed installer, notarization, update flow, and App Store packaging are follow-up work.

@@ -29,6 +29,7 @@
 | [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persist punctuation language and symbol width preferences shared by settings and IMK runtime | Active reference |
 | [macos-ime-smoke-diagnostics.plan.md](macos-ime-smoke-diagnostics.plan.md) | Local installed-bundle and Text Input Source diagnostics before manual IMK acceptance | Active reference |
 | [install-selection-status.plan.md](install-selection-status.plan.md) | Report local install selection requests and defer system status to diagnostics | Active reference |
+| [input-source-selection-helper.plan.md](input-source-selection-helper.plan.md) | Standalone helper for retrying KnowType input-source selection before manual typing acceptance | Active reference |
 
 ## Delivered MVP Slices
 
