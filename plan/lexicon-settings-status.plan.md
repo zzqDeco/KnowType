@@ -11,6 +11,7 @@ This slice exposes the local lexicon runtime path in the SwiftUI settings app. U
 - Add a `Lexicons` settings tab with read-only status and a manual refresh button.
 - Show the same environment-variable and Application Support directories used by the runtime loader.
 - Let users create missing lexicon directories from settings.
+- Let users create a known-good sample TSV resource without overwriting an existing file.
 - Keep the input method runtime path unchanged.
 - Do not add external dictionary data or import UI.
 

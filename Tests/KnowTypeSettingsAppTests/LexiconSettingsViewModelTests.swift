@@ -96,6 +96,38 @@ final class LexiconSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.lastActionMessage, "All lexicon directories already exist.")
     }
 
+    func testCreateSampleLexiconResourceCreatesDirectoryAndRefreshesStatus() {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KnowTypeSampleLexicon-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let viewModel = LexiconSettingsViewModel(directoryURLs: [directory])
+
+        XCTAssertTrue(viewModel.createSampleLexiconResource())
+
+        let file = directory.appendingPathComponent(LexiconSettingsViewModel.sampleResourceFileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(viewModel.directories.first?.exists, true)
+        XCTAssertEqual(viewModel.directories.first?.resourceFileCount, 1)
+        XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 2)
+        XCTAssertEqual(viewModel.lastActionMessage, "Created knowtype-sample.tsv.")
+    }
+
+    func testCreateSampleLexiconResourceDoesNotOverwriteExistingFile() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent(LexiconSettingsViewModel.sampleResourceFileName)
+        try Data("zi zao ci\t已有词\t0.5\n".utf8).write(to: file)
+        let viewModel = LexiconSettingsViewModel(directoryURLs: [directory])
+
+        XCTAssertTrue(viewModel.createSampleLexiconResource())
+
+        XCTAssertEqual(
+            String(decoding: try Data(contentsOf: file), as: UTF8.self),
+            "zi zao ci\t已有词\t0.5\n"
+        )
+        XCTAssertEqual(viewModel.lastActionMessage, "knowtype-sample.tsv already exists.")
+    }
+
     func testDuplicateDirectoriesAreShownOnce() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
