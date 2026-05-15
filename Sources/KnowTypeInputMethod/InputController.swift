@@ -10,6 +10,7 @@ import AppKit
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
     private let sessionController: InputSessionController
     private let hasProvider: Bool
+    private let traditionalInputEngine: TraditionalInputEngine
     private let keyMapper = InputKeyCommandMapper()
     private let symbolTransformer = InputSymbolTransformer()
     private let candidateListBuilder = InputCandidateListBuilder()
@@ -33,10 +34,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
+        let traditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
         self.hasProvider = provider != nil
-        self.sessionController = InputSessionController(provider: provider)
+        self.traditionalInputEngine = traditionalInputEngine
+        self.sessionController = InputSessionController(
+            provider: provider,
+            traditionalInputEngine: traditionalInputEngine
+        )
         self.inputModeState = InputModeAppPolicy.defaultState(
             appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier()
         )
@@ -300,7 +306,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         )
         let suggestion = InputMethodPipeline.localSuggestions(
             for: context,
-            includeFallbackContinuations: !hasProvider
+            includeFallbackContinuations: !hasProvider,
+            traditionalInputEngine: traditionalInputEngine
         )
         lastSuggestion = suggestion
         lastSuggestionRawInput = rawBuffer
@@ -410,7 +417,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             suggestionRawInput: lastSuggestionRawInput,
             selectedCandidate: sessionSelection(from: selectedNativeCandidate),
             appBundleID: appBundleIdentifier(client: sender),
-            locale: locale
+            locale: locale,
+            traditionalInputEngine: traditionalInputEngine
         )
     }
 

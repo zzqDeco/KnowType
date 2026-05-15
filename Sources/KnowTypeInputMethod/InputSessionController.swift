@@ -52,7 +52,8 @@ public enum InputSessionCommitPolicy {
         suggestionRawInput: String?,
         selectedCandidate: InputSessionCandidateSelection? = nil,
         appBundleID: String? = nil,
-        locale: KnowTypeLocale = .mixed
+        locale: KnowTypeLocale = .mixed,
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
     ) -> InputCommitResult {
         guard let suggestion,
               SuggestionPublicationGuard.hasCurrentSuggestion(
@@ -63,7 +64,8 @@ public enum InputSessionCommitPolicy {
                 for: action,
                 rawInput: rawInput,
                 appBundleID: appBundleID,
-                locale: locale
+                locale: locale,
+                traditionalInputEngine: traditionalInputEngine
             )
         }
 
@@ -118,7 +120,8 @@ public enum InputSessionCommitPolicy {
         for action: InputAction,
         rawInput: String,
         appBundleID: String?,
-        locale: KnowTypeLocale
+        locale: KnowTypeLocale,
+        traditionalInputEngine: TraditionalInputEngine
     ) -> InputCommitResult {
         guard !rawInput.isEmpty else {
             return .noAction
@@ -133,7 +136,8 @@ public enum InputSessionCommitPolicy {
             )
             let suggestion = InputMethodPipeline.localSuggestions(
                 for: context,
-                includeFallbackContinuations: true
+                includeFallbackContinuations: true,
+                traditionalInputEngine: traditionalInputEngine
             )
             return InputCompositionController().handle(
                 action: action,
