@@ -69,17 +69,18 @@ public struct FileUserSelectionHistoryStore: UserSelectionHistoryStoring {
 }
 
 public final class UserSelectionHistoryPersistence: @unchecked Sendable {
+    private static let queue = DispatchQueue(label: "KnowType.UserSelectionHistoryPersistence")
+
     private let store: any UserSelectionHistoryStoring
-    private let lock = NSLock()
 
     public init(store: any UserSelectionHistoryStoring) {
         self.store = store
     }
 
     public func loadHistory(maxEntries: Int) -> [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return (try? store.loadHistory(maxEntries: maxEntries)) ?? []
+        Self.queue.sync {
+            (try? store.loadHistory(maxEntries: maxEntries)) ?? []
+        }
     }
 
     public func recordSelection(
@@ -91,62 +92,26 @@ public final class UserSelectionHistoryPersistence: @unchecked Sendable {
         guard !trimmed.isEmpty else {
             return sanitized(currentHistory, maxEntries: maxEntries)
         }
-
-        lock.lock()
-        defer { lock.unlock() }
-
-        let diskHistory = (try? store.loadHistory(maxEntries: maxEntries)) ?? []
-        let merged = Self.mergedHistory(
-            diskHistory: diskHistory,
-            currentHistory: currentHistory,
-            appendedSelection: trimmed,
-            maxEntries: maxEntries
-        )
-        try? store.saveHistory(merged, maxEntries: maxEntries)
-        return merged
+        let nextHistory = sanitized(currentHistory + [trimmed], maxEntries: maxEntries)
+        let store = store
+        Self.queue.async {
+            Self.persist(selection: trimmed, store: store, maxEntries: maxEntries)
+        }
+        return nextHistory
     }
 
     public func flushHistory(_ currentHistory: [String], maxEntries: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let diskHistory = (try? store.loadHistory(maxEntries: maxEntries)) ?? []
-        let merged = Self.mergedHistory(
-            diskHistory: diskHistory,
-            currentHistory: currentHistory,
-            appendedSelection: nil,
-            maxEntries: maxEntries
-        )
-        try? store.saveHistory(merged, maxEntries: maxEntries)
+        Self.queue.sync {}
     }
 
-    private static func mergedHistory(
-        diskHistory: [String],
-        currentHistory: [String],
-        appendedSelection: String?,
+    private static func persist(
+        selection: String,
+        store: any UserSelectionHistoryStoring,
         maxEntries: Int
-    ) -> [String] {
-        var merged = sanitized(diskHistory, maxEntries: maxEntries)
-        var diskCounts = countsByText(merged)
-
-        for item in sanitized(currentHistory, maxEntries: maxEntries) {
-            if let count = diskCounts[item], count > 0 {
-                diskCounts[item] = count - 1
-            } else {
-                merged.append(item)
-            }
-        }
-
-        if let appendedSelection {
-            merged.append(appendedSelection)
-        }
-        return sanitized(merged, maxEntries: maxEntries)
-    }
-
-    private static func countsByText(_ history: [String]) -> [String: Int] {
-        history.reduce(into: [String: Int]()) { counts, item in
-            counts[item, default: 0] += 1
-        }
+    ) {
+        let diskHistory = (try? store.loadHistory(maxEntries: maxEntries)) ?? []
+        let merged = sanitized(diskHistory + [selection], maxEntries: maxEntries)
+        try? store.saveHistory(merged, maxEntries: maxEntries)
     }
 }
 

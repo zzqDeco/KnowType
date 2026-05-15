@@ -14,4 +14,4 @@ The store is intentionally in `KnowTypeInputMethod` instead of `KnowTypeCore`: c
 
 Persistence failure is non-fatal. The IMK controller keeps the in-memory history for the active process and silently degrades when the file cannot be read or written.
 
-`UserSelectionHistoryPersistence` serializes read-merge-write operations with a lock. Each record or flush operation reloads the latest on-disk history, merges entries that exist only in the live controller snapshot, then writes the capped result. This avoids stale async writes and reduces loss when multiple input controllers are active in different host apps.
+`UserSelectionHistoryPersistence` serializes writes through a shared process-wide queue. Each record operation keeps the active controller's in-memory history responsive, then appends only the newly selected prefix to the latest on-disk history on the persistence queue. Flush waits for queued writes instead of re-saving a stale controller snapshot, so a long-lived controller cannot push newer selections from another host app out of the capped history.

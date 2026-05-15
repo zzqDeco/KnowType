@@ -8,8 +8,8 @@ Goal: make local candidate learning survive input-method restarts without sendin
 - Keep `InputContext.userSelectionHistory` as the only ranking signal consumed by `CorrectionEngine`.
 - Load history when the IMK controller starts and pass snapshots into immediate local suggestions and async provider-backed suggestions.
 - Save history after prefix commits from Space, Tab, native candidate selection, and visible numeric candidate shortcuts.
-- Serialize persistence writes and merge with the latest on-disk history before saving so live input controllers do not overwrite each other's selections.
-- Flush the current in-memory history when the IMK controller deactivates or closes.
+- Serialize persistence writes on a shared queue and append only newly selected prefixes to the latest on-disk history so live input controllers do not overwrite each other's selections.
+- Wait for pending writes when the IMK controller deactivates or closes.
 - Keep failures non-blocking: missing, unreadable, or unwritable history must not break typing.
 
 ## Non-Goals

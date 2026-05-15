@@ -45,7 +45,7 @@ final class UserSelectionHistoryStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadHistory(maxEntries: 64), [])
     }
 
-    func testPersistenceRecordMergesLatestDiskHistoryBeforeSaving() throws {
+    func testPersistenceRecordAppendsToLatestDiskHistoryBeforeSaving() throws {
         let fileURL = temporaryHistoryURL()
         let store = FileUserSelectionHistoryStore(fileURL: fileURL)
         let persistence = UserSelectionHistoryPersistence(store: store)
@@ -54,35 +54,51 @@ final class UserSelectionHistoryStoreTests: XCTestCase {
         try store.saveHistory(["方案", "方向"], maxEntries: 64)
 
         let merged = persistence.recordSelection("思路", currentHistory: currentHistory, maxEntries: 64)
+        persistence.flushHistory(merged, maxEntries: 64)
 
-        XCTAssertEqual(merged, ["方案", "方向", "方法", "思路"])
-        XCTAssertEqual(try store.loadHistory(maxEntries: 64), ["方案", "方向", "方法", "思路"])
+        XCTAssertEqual(merged, ["方案", "方法", "思路"])
+        XCTAssertEqual(try store.loadHistory(maxEntries: 64), ["方案", "方向", "思路"])
     }
 
-    func testPersistenceFlushMergesCurrentHistoryWithDiskHistory() throws {
+    func testPersistenceFlushWaitsForPendingSelectionWrites() throws {
         let fileURL = temporaryHistoryURL()
         let store = FileUserSelectionHistoryStore(fileURL: fileURL)
         let persistence = UserSelectionHistoryPersistence(store: store)
         try store.saveHistory(["方案", "方向"], maxEntries: 64)
 
-        persistence.flushHistory(["方案", "方法"], maxEntries: 64)
+        let merged = persistence.recordSelection("方法", currentHistory: ["方案"], maxEntries: 64)
+        persistence.flushHistory(merged, maxEntries: 64)
 
         XCTAssertEqual(try store.loadHistory(maxEntries: 64), ["方案", "方向", "方法"])
     }
 
-    func testPersistenceMergeRespectsDuplicateSelectionCounts() throws {
+    func testPersistenceRecordsDuplicateSelectionsInOrder() throws {
         let fileURL = temporaryHistoryURL()
         let store = FileUserSelectionHistoryStore(fileURL: fileURL)
         let persistence = UserSelectionHistoryPersistence(store: store)
         try store.saveHistory(["方案", "方法"], maxEntries: 64)
 
-        let merged = persistence.recordSelection(
-            "方案",
-            currentHistory: ["方案", "方法", "方法"],
-            maxEntries: 64
-        )
+        let first = persistence.recordSelection("方法", currentHistory: ["方案", "方法"], maxEntries: 64)
+        let second = persistence.recordSelection("方案", currentHistory: first, maxEntries: 64)
+        persistence.flushHistory(second, maxEntries: 64)
 
-        XCTAssertEqual(merged, ["方案", "方法", "方法", "方案"])
+        XCTAssertEqual(try store.loadHistory(maxEntries: 64), ["方案", "方法", "方法", "方案"])
+    }
+
+    func testPersistencePreservesDiskRecencyOverStaleControllerSnapshot() throws {
+        let fileURL = temporaryHistoryURL()
+        let store = FileUserSelectionHistoryStore(fileURL: fileURL)
+        let persistence = UserSelectionHistoryPersistence(store: store)
+        let staleCurrentHistory = (0..<64).map { "stale-\($0)" }
+        try store.saveHistory((0..<64).map { "new-\($0)" }, maxEntries: 64)
+
+        let merged = persistence.recordSelection("current", currentHistory: staleCurrentHistory, maxEntries: 64)
+        persistence.flushHistory(merged, maxEntries: 64)
+        let diskHistory = try store.loadHistory(maxEntries: 64)
+
+        XCTAssertFalse(diskHistory.contains("stale-63"))
+        XCTAssertTrue(diskHistory.contains("new-1"))
+        XCTAssertEqual(diskHistory.last, "current")
     }
 
     private func temporaryHistoryURL() -> URL {
