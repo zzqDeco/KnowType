@@ -11,6 +11,7 @@ Chinese name: 知键.
 ## What It Does
 
 - **Chinese input first**: pinyin decoding, compact pinyin segmentation, typo normalization, same-pinyin candidates, common initial abbreviations such as `sm`/`zmb`/`wsm`, and partial-syllable input.
+- **Local candidate learning**: recent prefix choices can boost candidate ranking in the current input-method session without being sent to providers.
 - **Prefix-locked AI continuation**: continuation candidates append after the locked prefix; explicit polish is the only path that may rewrite existing text.
 - **Native macOS input flow**: marked text, candidate selection, paging, punctuation handling, and an AppKit candidate panel anchored near the text caret.
 - **Provider-compatible by design**: OpenAI-compatible chat, OpenAI Responses, Anthropic Messages, Gemini native, Ollama native, and custom HTTP profiles all normalize into one provider interface.
@@ -164,7 +165,7 @@ Local OpenAI-compatible runtimes may leave the model blank so KnowType can disco
 
 Terminal, iTerm, Xcode, VS Code, and Codex desktop start with English half-width punctuation while keeping the Chinese text pipeline available.
 
-The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows are paged in 9-row windows. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives.
+The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows are paged in 9-row windows. Recent prefix selections can influence local candidate order during the current session. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives.
 
 ## Privacy Baseline
 
