@@ -10,6 +10,7 @@
 | [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active reference |
 | [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Mature candidate-window geometry resolver | Active reference |
 | [privacy-app-rules-mvp.plan.md](privacy-app-rules-mvp.plan.md) | Level 0 no-provider routing and protected app rules | Active reference |
+| [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Local candidate learning persisted across IMK restarts | Active reference |
 
 ## Delivered MVP Slices
 

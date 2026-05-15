@@ -14,7 +14,7 @@ Current package-level implementation covers:
 - shortcut-to-commit behavior
 - key intent modeling for key down, key up, modifier flag changes, cancel, delete, navigation keys, punctuation, and numeric candidate selection
 - session-local `InputModeState` for text mode, punctuation language, and symbol width, with `Option + .` toggling punctuation language
-- session-local prefix selection history used as a local-only ranking signal
+- persisted prefix selection history used as a local-only ranking signal
 - async suggestion pipeline wiring
 - Level 0 no-provider routing for protected input
 - minimal InputMethodKit server bootstrap guarded by `canImport(InputMethodKit)`
@@ -26,6 +26,6 @@ The IMK controller directly marks composing text with `IMKTextInput.setMarkedTex
 
 Product commit decisions are shared through the session commit policy: `Space` commits the best prefix, `Tab` commits prefix plus first continuation, `Option+number` commits a continuation, numeric candidate shortcuts commit raw/prefix rows, punctuation commits the current composition plus mapped punctuation, and `Option+R` requests explicit polish only. The IMK controller remains responsible for host integration details such as client lookup, marked text, insertion, palette visibility, input mode state ownership, and window anchoring.
 
-The IMK controller records recently committed prefix candidates in memory and passes a snapshot through `InputContext.userSelectionHistory` to both immediate local suggestions and async provider-backed suggestion loading. The ranking signal stays local; providers still receive only the normalized request fields defined by `LLMRequest`.
+The IMK controller records recently committed prefix candidates in memory, persists them through `UserSelectionHistoryPersistence`, and passes a snapshot through `InputContext.userSelectionHistory` to both immediate local suggestions and async provider-backed suggestion loading. Persistence appends newly selected prefixes on a shared serial queue and controller shutdown waits for pending writes, so stale snapshots do not overwrite newer selections from another host app. The ranking signal stays local; providers still receive only the normalized request fields defined by `LLMRequest`.
 
 MVP manual acceptance still must verify candidate window behavior in host apps because IMK text input behavior varies across AppKit, browser, Electron, and terminal contexts.

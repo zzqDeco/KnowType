@@ -11,7 +11,7 @@ Chinese name: 知键.
 ## What It Does
 
 - **Chinese input first**: pinyin decoding, compact pinyin segmentation, typo normalization, same-pinyin candidates, common initial abbreviations such as `sm`/`zmb`/`wsm`, and partial-syllable input.
-- **Local candidate learning**: recent prefix choices can boost candidate ranking in the current input-method session without being sent to providers.
+- **Local candidate learning**: recent prefix choices can boost candidate ranking across input-method restarts without being sent to providers.
 - **Prefix-locked AI continuation**: continuation candidates append after the locked prefix; explicit polish is the only path that may rewrite existing text.
 - **Native macOS input flow**: marked text, candidate selection, paging, punctuation handling, and an AppKit candidate panel anchored near the text caret.
 - **Provider-compatible by design**: OpenAI-compatible chat, OpenAI Responses, Anthropic Messages, Gemini native, Ollama native, and custom HTTP profiles all normalize into one provider interface.
@@ -46,6 +46,7 @@ KnowType is currently a local MVP for development and manual testing. It include
 - a clean-room pinyin engine for MVP Chinese input coverage
 - SwiftUI settings for provider profiles, privacy summary, input/candidate behavior, and debug install notes
 - Keychain-backed API key storage for provider profiles
+- local candidate-learning history stored separately from provider configuration
 
 It is not yet a signed installer, notarized release, or App Store package.
 
@@ -131,6 +132,12 @@ Default profile file:
 ~/Library/Application Support/KnowType/providers.json
 ```
 
+Local candidate-learning history is stored at:
+
+```text
+~/Library/Application Support/KnowType/user-selection-history.json
+```
+
 Profile fields:
 
 ```text
@@ -165,7 +172,7 @@ Local OpenAI-compatible runtimes may leave the model blank so KnowType can disco
 
 Terminal, iTerm, Xcode, VS Code, and Codex desktop start with English half-width punctuation while keeping the Chinese text pipeline available.
 
-The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows are paged in 9-row windows. Recent prefix selections can influence local candidate order during the current session. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives.
+The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows are paged in 9-row windows. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives.
 
 ## Privacy Baseline
 

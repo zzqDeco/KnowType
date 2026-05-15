@@ -15,7 +15,7 @@ KnowType 是一款面向 macOS 的中英文输入法。它的 AI 能力围绕一
 ## 它做什么
 
 - **先做好中文输入**：支持拼音解码、连续拼音切分、轻量错拼纠正、同音候选、`sm`/`zmb`/`wsm` 这类常用声母缩写和尾部半音节输入。
-- **本地候选学习**：最近选择过的前缀候选会影响当前输入法会话里的排序，不发送给 provider。
+- **本地候选学习**：最近选择过的前缀候选会在输入法重启后继续影响排序，不发送给 provider。
 - **前缀锁定的 AI 延续**：AI 只补前缀后面的内容；只有用户主动润色时，才允许改写已输入文本。
 - **macOS 原生输入流程**：使用 marked text、候选选择、翻页、标点处理和跟随文本光标的 AppKit 候选窗。
 - **多协议 provider 兼容**：OpenAI-compatible chat、OpenAI Responses、Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到同一层接口。
@@ -50,6 +50,7 @@ KnowType 当前是用于本地开发和手动验收的 MVP。已经包含：
 - clean-room 的 MVP 拼音引擎
 - SwiftUI 设置页，覆盖 provider、隐私、输入/候选行为和调试安装说明
 - API key 通过 Keychain 存储
+- 本地候选学习历史与 provider 配置分开存储
 
 它还不是签名安装器、公证发行包或 App Store 包。
 
@@ -135,6 +136,12 @@ KnowType 通过 `ProviderProfile` 和 `ProviderFactory` 加载模型 provider。
 ~/Library/Application Support/KnowType/providers.json
 ```
 
+本地候选学习历史文件：
+
+```text
+~/Library/Application Support/KnowType/user-selection-history.json
+```
+
 Profile 字段：
 
 ```text
@@ -169,7 +176,7 @@ secretName, customBodyTemplate, customResponsePath, isDefault
 
 Terminal、iTerm、Xcode、VS Code 和 Codex desktop 默认英文半角标点，但仍保留中文输入管线。
 
-候选窗先显示前缀候选，再显示延续候选。候选按 9 行一页分页。最近选择过的前缀候选会影响当前会话中的本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。
+候选窗先显示前缀候选，再显示延续候选。候选按 9 行一页分页。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。
 
 ## 隐私基线
 
