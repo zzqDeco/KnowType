@@ -25,12 +25,17 @@ jobs:
         run: swift test
       - name: Input method script smoke
         run: |
-          bash -n \
-            scripts/build-inputmethod-bundle.sh \
-            scripts/diagnose-inputmethod.sh \
-            scripts/install-inputmethod.sh \
-            scripts/select-inputmethod.sh \
+          scripts=(
+            scripts/build-inputmethod-bundle.sh
+            scripts/diagnose-inputmethod.sh
+            scripts/install-inputmethod.sh
+            scripts/select-inputmethod.sh
             scripts/uninstall-inputmethod.sh
+          )
+
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
 
           ./scripts/diagnose-inputmethod.sh --help
           ./scripts/select-inputmethod.sh --help
