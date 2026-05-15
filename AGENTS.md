@@ -4,12 +4,13 @@ Guidance for coding agents working in KnowType.
 
 ## Project Overview
 
-KnowType is a macOS Chinese/English AI input method.
+KnowType is a macOS Chinese/English input method with AI-assisted continuation.
 
 - Language: Swift 6.2
 - Core package: Swift Package Manager
 - Input method host: AppKit + InputMethodKit
-- Settings app: SwiftUI, to be added after the package-level core is stable
+- Candidate UI: custom AppKit panel
+- Settings app: SwiftUI
 
 The product rule is strict: correction may refine the prefix, but continuation must never rewrite the locked prefix. Rewriting is allowed only through explicit polish actions.
 
@@ -20,20 +21,28 @@ swift build
 swift test
 ```
 
+For documentation-only changes, run at least:
+
+```bash
+git diff --check
+```
+
 ## Architecture
 
-- `Sources/KnowTypeCore/`: data models, local correction, text protection, prefix-locked continuation.
+- `Sources/KnowTypeCore/`: product models, local correction, text protection, prefix-locked continuation.
 - `Sources/KnowTypeProviders/`: provider configuration, HTTP client abstraction, response normalization, and protocol adapters.
-- `Sources/KnowTypeInputMethod/`: input action handling, candidate panel view model, and InputMethodKit bootstrap.
-- `Tests/`: unit tests for product behavior and protocol adapters.
-- `plan/`: current active implementation plans.
-- `doc/`: architecture and interface documentation.
+- `Sources/KnowTypeInputMethod/`: IMK controller, input actions, candidate state, candidate panel, and key behavior.
+- `Sources/KnowTypeInputMethodApp/`: local input method app entry point.
+- `Sources/KnowTypeSettingsApp/`: SwiftUI settings and provider profile editing.
+- `Tests/`: unit tests for product behavior, providers, and input-method logic.
+- `doc/`: current architecture, interface, source notes, and acceptance docs.
+- `plan/`: active or recently delivered implementation plans.
 
 ## Provider Rules
 
 Every provider adapter must normalize into `LLMResponse`.
 
-Do not leak provider-specific response shapes into `KnowTypeCore`.
+Do not leak provider-specific response shapes into `KnowTypeCore` or `KnowTypeInputMethod`.
 
 Continuation prompts must ask for continuation text only. The client must still sanitize responses because providers may return full sentences.
 
@@ -62,6 +71,7 @@ Common scopes:
 - `core`
 - `providers`
 - `input-method`
+- `settings`
 - `docs`
 - `build`
 - `tests`
@@ -70,15 +80,20 @@ Common scopes:
 
 For feature, fix, or refactor work:
 
-1. Update or add a plan under `plan/`.
+1. Update or add a plan under `plan/` when the work is still being designed or reviewed.
 2. Update `doc/architecture.plan.md` or `doc/interfaces.plan.md` when behavior, data flow, protocols, or shortcuts change.
-3. Add or update `doc/src/...plan.md` for important source files.
-4. Update `README.md` and `README_CN.md` for user-visible behavior or setup changes.
+3. Add or update `doc/src/...plan.md` for important source-file responsibilities.
+4. Update `README.md` and `README_CN.md` for user-visible setup or behavior changes.
+5. Update `doc/README.md` or `plan/README.md` when adding or retiring documentation files.
+
+For docs-only cleanup, keep prose concise and current-state focused. Do not turn `README.md` into a full design history.
 
 ## Review Checklist
 
 - Prefix candidates and continuation candidates remain separate.
+- Continuation candidates do not repeat or rewrite the locked prefix.
 - Level 0 inputs do not call cloud providers.
-- Technical tokens such as API, JSON, macOS, InputMethodKit, snake_case, and camelCase are preserved.
-- Adapter tests cover request mapping and response parsing.
-- `swift test` passes before finalizing.
+- Technical tokens such as `API`, `JSON`, `macOS`, `InputMethodKit`, `snake_case`, and `camelCase` are preserved.
+- Adapter tests cover request mapping and response parsing when provider behavior changes.
+- Input-method behavior tests cover shortcut, candidate, paging, or punctuation changes.
+- `swift test` passes before finalizing code changes.

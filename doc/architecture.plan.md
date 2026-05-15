@@ -1,6 +1,14 @@
 # KnowType Architecture
 
-## Pipeline
+KnowType is split into three layers:
+
+- `KnowTypeCore`: product rules, correction, protected-input detection, prefix locking, and continuation sanitization.
+- `KnowTypeProviders`: provider profile resolution, HTTP adapters, model discovery, and response normalization.
+- `KnowTypeInputMethod`: macOS input-method integration, marked text, key behavior, candidate state, and candidate-window presentation.
+
+The product boundary is strict: correction may refine the prefix, but continuation may only append text after the locked prefix. Explicit polish is the only rewrite path.
+
+## Input Pipeline
 
 ```text
 raw input
@@ -8,96 +16,98 @@ raw input
   -> CorrectionEngine
   -> LockedPrefix
   -> PrefixContinuationEngine
-  -> InputCompositionController
-  -> commit text
+  -> InputSessionController
+  -> IMK marked text / commit
 ```
 
-## Core Boundaries
+Level 0 protected input exits through the no-provider path. It must not call cloud providers and must not publish cloud continuation candidates.
 
-- `KnowTypeCore` owns product rules and model-neutral behavior.
-- `KnowTypeProviders` owns protocol-specific HTTP mapping and response parsing.
-- `KnowTypeInputMethod` owns macOS input actions and future InputMethodKit integration.
+## Core Layer
 
-## Correction Engine
+`KnowTypeCore` owns model-neutral behavior:
 
-Local correction always runs before cloud correction. Level 0 inputs return immediately and must not call cloud providers.
+- `TextProtection` detects Level 0 input such as URLs, emails, paths, commands, code-like snippets, and protected app contexts.
+- `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
+- English and mixed-input paths preserve technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`.
+- `PrefixContinuationEngine` sanitizes provider output so continuation candidates do not repeat or rewrite the locked prefix.
 
-Level 0 contexts include URLs, emails, file paths, command-like input, code-like tokens, and protected app bundle IDs for Terminal, iTerm2, and Xcode.
+Current Chinese-input coverage includes examples such as:
 
-Current local coverage:
+- `wo jue de zhege fagnan -> 我觉得这个方案`
+- `wojuedezhegefagnan -> 我觉得这个方案`
+- `nishishei -> 你是谁`
+- `xianz -> 现在`
+- `wsm -> 为什么`
+- `zhege api latnecy youdian gao -> 这个 API latency 有点高`
 
-- clean-room `TraditionalInputEngine` pinyin decoding with full-pinyin syllable tables, compact lattice segmentation, light typo normalization, memoized parsing, and multiple prefix candidates
-- pinyin typo examples such as `fagnan -> fangan -> 方案/方法/方向`
-- MVP full-pinyin examples such as `zhege gongneng bushi hen wending -> 这个功能不是很稳定`
-- baseline Chinese input examples such as `ni -> 你/尼/呢`, `nishishei -> 你是谁`, `xianz -> 现在`, and `wsm -> 为什么`
-- locale-gated traditional decoding: `en-US` keeps English spellcheck available, while `zh-CN` can decode capitalized pinyin composition starts such as `Wo`
-- a small table-driven Xiaohe double-pinyin hook for smoke-test coverage
-- English typo examples such as `thikn -> think`
-- mixed technical input such as `zhege api latnecy youdian gao`
-- technical token canonicalization for `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`
+The local engine is intentionally small but should behave like a normal input method for the MVP cases it claims to support. Broader dictionaries and language-model ranking belong in follow-up engine work, not provider fallback.
 
-Cloud correction may add Level 2/3 alternatives, but strong correction is treated as an alternative, not an automatic replacement.
+## Provider Layer
 
-## Continuation Engine
-
-Continuation requests include `locked_prefix`. Provider output is sanitized locally:
-
-- if output repeats the locked prefix, strip the prefix and keep only the continuation
-- if the remaining continuation is empty, reject it
-- fallback local continuations are available when the provider fails
-
-Level 0 contexts return no continuation candidates.
-
-## Provider Architecture
-
-Every provider implements `LLMProvider`:
+Every provider implements:
 
 ```text
 func complete(_ request: LLMRequest) async throws -> LLMResponse
 ```
 
-Adapters must not leak native response shapes into the core. All provider responses normalize into `LLMResponse`.
+Provider-specific request and response shapes stay inside `KnowTypeProviders`. Core and input-method code only consume normalized `LLMResponse`.
 
-Provider runtime loading uses `ProviderProfile` plus `ProviderFactory`:
+Provider runtime loading uses:
 
-- `ProviderProfile` stores display name, provider kind, base URL, model, timeout, headers, custom HTTP mapping fields, and `secretName`.
-- `ProviderProfileResolver` resolves `secretName` through `SecretStore` and returns `ProviderConfiguration`.
-- `ProviderFactory` selects the adapter for `openai_chat`, `openai_responses`, `anthropic_messages`, `gemini_native`, `ollama_native`, or `custom_http`.
-- Profile JSON must not contain API key values represented by `secretName`. Custom headers are stored in JSON as configured and should not contain secrets in the MVP. The macOS secret-store implementation uses Keychain.
+- `ProviderProfile`: persisted metadata such as display name, kind, base URL, model, timeout, headers, custom HTTP mapping, and `secretName`.
+- `ProviderProfileResolver`: resolves `secretName` through `SecretStore`.
+- `ProviderFactory`: builds the adapter for `openai_chat`, `openai_responses`, `anthropic_messages`, `gemini_native`, `ollama_native`, or `custom_http`.
+- `KeychainSecretStore`: macOS storage for API keys under the `KnowType` service.
 
-Provider profiles are edited by the settings app and stored as JSON metadata plus profile-scoped `SecretStore` entries. API keys are never written to the profile file. Cloud profiles require either a newly entered key or an existing reusable secret. Remote OpenAI-compatible profiles require an explicit model ID; blank model discovery is reserved for local OpenAI-compatible runtimes. Custom HTTP profiles accept a blank API key for unauthenticated endpoints, while still storing an optional profile-scoped secret when a key is entered. When a profile switches to a local/no-secret provider such as Ollama, or when a local OpenAI-compatible profile is saved with a blank API key, the settings model clears the stale secret reference and deletes the old secret only if no remaining saved profile references it. Profile saves publish the updated profile list only after both the metadata save and required secret mutation succeed; if a post-save secret mutation fails, the metadata file is restored to the previous state.
+Profile JSON stores metadata and secret names only. It must not store API key values represented by `secretName`. Custom headers are persisted as configured, so the MVP docs warn users not to place bearer tokens directly in headers.
+
+Local OpenAI-compatible runtimes may leave the model blank for `/v1/models` discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
 ## Input Method Layer
 
-The current package includes:
+`KnowTypeInputMethod` is the macOS front end:
 
-- `InputCompositionController` for shortcut behavior
-- `CandidatePanelViewModel` for separated prefix and continuation data
-- `CandidatePanelRenderer` for raw input, locked prefix, and continuation render rows
-- `CandidateAnchorResolver` for IMK, line-height, Accessibility, and scoped last-anchor geometry resolution
-- `KnowTypeIMKServerBootstrap` behind `canImport(InputMethodKit)` for IMK server integration
-- `KnowTypeInputController` as the InputMethodKit session controller
-- `KnowTypeInputMethodApp` as the background app entry point assembled by `scripts/build-inputmethod-bundle.sh`
+- `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
+- `InputSessionController` turns raw input and actions into suggestion and commit decisions.
+- `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
+- `CandidatePanelWindowController` owns the AppKit panel.
+- `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
 
-The IMK controller uses `IMKTextInput.setMarkedText` for active composition so local pinyin can become marked Chinese text before commit. Commit calls replace the active marked range with either the locked prefix or the prefix plus selected continuation.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Commit replaces the active marked range with either the selected prefix or prefix plus continuation.
 
-The primary candidate surface is a controlled AppKit `NSPanel` styled as a compact macOS candidate list. We do not rely on `IMKCandidates` for active display because it can silently fail to appear in some host apps. Candidate data includes prefix candidates first and continuation candidates after them; raw input is shown only when no suggestion is available. Candidate rows are paged in 9-row windows so larger pinyin candidate sets can be navigated without overfilling the panel.
+## Candidate Window
 
-Candidate positioning recalculates after local and async suggestion publication. Anchor lookup is centralized in `CandidateAnchorResolver`: it tries marked/selected `firstRect` ranges, the IMK insertion-point range, line-height rectangles with bounded backtracking, optional Accessibility focused-range bounds, then a scoped last usable anchor for the same composition, bundle, and screen. Pointer location is not used as a moving candidate anchor.
+KnowType uses a custom AppKit `NSPanel` as the primary candidate surface. It does not rely on `IMKCandidates` for active display because host-app behavior is inconsistent.
 
-When a provider is configured, the immediate local pass publishes correction/prefix rows only. Continuation rows are published after the provider-backed suggestion returns; local fallback continuations are reserved for no-provider and provider-failure paths.
+Candidate rows are flat and compact:
 
-## Privacy and App Rules
+- prefix candidates appear first
+- continuation candidates appear after prefix candidates
+- raw input appears only when no suggestion is available
+- rows are paged in 9-row windows
+
+Candidate positioning is centralized in `CandidateAnchorResolver`. The resolver tries fresh text geometry first, then progressively falls back:
+
+1. marked and selected `firstRect` ranges
+2. insertion-point range
+3. line-height rectangles with bounded backtracking
+4. Accessibility focused-range bounds when permission is already granted
+5. same-composition last usable anchor scoped by composition, bundle, and screen
+
+Pointer location is not used as a moving candidate anchor.
+
+## Provider Timing
+
+When a provider is configured, KnowType publishes local prefix candidates immediately. Continuation rows are published after the provider-backed suggestion returns. If the provider fails, local correction still works and commit remains available.
+
+No-provider and provider-failure paths may use local fallback continuations. Level 0 paths clear continuation candidates.
+
+## Privacy And App Rules
 
 Level 0 protected input takes the no-provider path:
 
-- URL, email, path, command-like, and code-like text is committed unchanged by default.
-- Terminal, iTerm, and Xcode contexts are Level 0 by app bundle identifier.
-- Level 0 responses clear continuation candidates so cloud continuation is not offered.
-- Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit` are preserved or canonicalized, but they are not by themselves a no-cloud Level 0 trigger.
+- URL, email, path, command-like, and code-like text commits unchanged by default.
+- Terminal, iTerm, and Xcode contexts are protected by bundle identifier.
+- Technical-token preservation does not automatically make an input Level 0; the surrounding text still determines provider eligibility.
 
-Manual MVP acceptance must cover TextEdit, Safari, Chrome, Xcode, Terminal, WeChat, and Feishu because IMK behavior depends on host-app text systems.
-
-## Release Readiness
-
-MVP release docs should be finalized after the runtime provider branch is integrated on `dev`. Rebase the docs branch on that combined state, keep documentation-only commits separate from runtime code, and validate with `swift build`, `swift test`, candidate panel manual checks, provider profile/Keychain checks, Level 0 no-cloud checks, and `git diff --check`.
+Manual MVP acceptance must cover TextEdit, Safari, Chrome, Xcode, Terminal, WeChat, and Feishu because IMK behavior varies by host text system.

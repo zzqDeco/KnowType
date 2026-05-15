@@ -1,23 +1,29 @@
 # KnowType Interfaces
 
-## LLMRequest
+This document records current cross-layer contracts. Provider-specific shapes, UI render details, and host-app quirks should not leak across these boundaries.
+
+## Provider Request
+
+Internal request shape:
 
 ```text
 LLMRequest {
   task: correction | continuation | polish
-  locked_prefix?: string
-  raw_input?: string
+  lockedPrefix?: string
+  rawInput?: string
   locale: zh-CN | en-US | mixed
-  app_context?: string
-  max_candidates: number
-  length_level?: short | medium | long
-  output_schema: json
+  appContext?: string
+  maxCandidates: number
+  lengthLevel?: short | medium | long
+  outputSchema: json
 }
 ```
 
-Swift uses camelCase property names while provider payloads may serialize them through adapter-specific bodies.
+Swift uses camelCase property names. Adapters may serialize to provider-specific payloads, but they must preserve the same semantic fields.
 
-## LLMResponse
+## Provider Response
+
+All providers normalize to:
 
 ```text
 LLMResponse {
@@ -26,6 +32,8 @@ LLMResponse {
   ]
 }
 ```
+
+Provider adapters must not expose native OpenAI, Anthropic, Gemini, Ollama, or custom HTTP response shapes outside `KnowTypeProviders`.
 
 ## Provider Kinds
 
@@ -36,9 +44,15 @@ LLMResponse {
 - `ollama_native`
 - `custom_http`
 
+Runtime creation goes through:
+
+```text
+ProviderFactory.makeProvider(configuration:httpClient:) -> LLMProvider
+```
+
 ## Provider Profiles
 
-Provider profiles are stored separately from API keys:
+Provider metadata is stored separately from API keys:
 
 ```text
 ProviderProfile {
@@ -56,58 +70,80 @@ ProviderProfile {
 }
 ```
 
-`secretName` resolves through `SecretStore`. The macOS implementation uses Keychain under the `KnowType` service; tests and non-UI code can use in-memory or read-only dictionary-backed stores.
+Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory.
 
-Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory. This file stores provider metadata, configured headers, and secret names. API key values represented by `secretName` must move through `SecretStore`; custom header values are persisted as configured and should not contain secrets in the MVP.
+`secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys under the `KnowType` service. Tests and non-UI code can use in-memory or read-only dictionary stores.
 
-Settings UI code should treat `ProviderProfile` as the persistence boundary for provider profiles. It may create profiles, edit profiles, and select defaults, but API key values must move through `SecretStore` instead of the profile file.
+Settings validation rules:
 
-## Provider Factory
+- display name cannot be empty
+- base URL must be HTTP(S) with a host
+- timeout must be positive
+- remote OpenAI-compatible profiles require an explicit model ID
+- local OpenAI-compatible profiles may leave model blank for `/v1/models` discovery
+- cloud profiles require a new key or an existing non-empty secret
+- custom HTTP profiles require body template and response path, but may omit the API key
+- profile saves publish new settings only after profile metadata and required secret mutations succeed
 
-Runtime provider loading uses:
+## Candidate Data
 
-```text
-ProviderFactory.makeProvider(configuration:httpClient:) -> LLMProvider
-```
+Core candidate types:
 
-The factory maps `ProviderKind` to one adapter and keeps provider-specific request and response shapes inside `KnowTypeProviders`.
-
-`ProviderProfilesViewModel` owns settings-app draft validation and persistence. It rejects empty names, invalid non-HTTP(S) or hostless base URLs, missing models for non-custom providers except local OpenAI-compatible runtimes, non-positive timeouts, incomplete custom HTTP templates, and blank cloud-provider API keys when no existing non-empty `SecretStore` entry can be reused. Remote OpenAI-compatible profiles must include an explicit model ID; local OpenAI-compatible profiles may leave the model blank so runtime discovery can query the local `/v1/models` endpoint. Custom HTTP profiles can be saved without an API key, but a non-blank entered key is stored as a profile-scoped secret. Draft saves stage the updated profile list, persist the staged profile file, apply any required secret write or delete, roll the profile file back if the secret mutation fails, and publish the new `profiles` value only after both stores succeed. Local OpenAI-compatible profiles saved with blank API keys clear stale secret references. Secret deletion is skipped while another saved profile still references the same `secretName`.
-
-## Candidate Types
-
-- `CorrectionCandidate`: prefix candidate with correction level and protected ranges.
-- `TraditionalInputCandidate`: local traditional-input prefix candidate emitted by the clean-room pinyin engine.
+- `CorrectionCandidate`: corrected prefix candidate with level and protected ranges.
+- `TraditionalInputCandidate`: local pinyin-engine prefix candidate.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
-- `SuggestionResponse`: complete UI-facing suggestion state.
+- `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 
-Input-method candidate presentation maps `SuggestionResponse` into compact macOS-style candidate rows:
+Raw input is tracked outside `SuggestionResponse` by the input-method session, for example through stale-result guards such as `latestSuggestionRawInput`. Protection metadata lives on correction candidates, locked prefixes, and protected ranges rather than on the top-level suggestion response.
 
-- raw input is shown only before any prefix or continuation suggestion exists
-- panel anchoring consumes `CandidateAnchorResult` from the geometry resolver rather than using pointer location fallback
-- prefix candidates are first-class candidates
-- continuation candidates are selectable candidates but still commit as `locked prefix + continuation`
-- rows are paged through `CandidatePanelPagingState` with a default page size of 9 visible rows
-- fallback local breadth is six medium candidates for both correction alternatives and continuations where available
-- when a provider is configured, the immediate local pass may omit fallback continuations until the provider-backed suggestion publishes
+Input-method presentation maps `SuggestionResponse` into compact candidate rows:
+
+- raw input is shown only when no prefix or continuation suggestion exists
+- prefix candidates are first-class selectable rows
+- continuation candidates commit as `locked prefix + continuation`
+- rows are paged through `CandidatePanelPagingState`, currently 9 visible rows per page
+- when a provider is configured, immediate local output may omit fallback continuation rows until provider output arrives
+
+## Candidate Geometry
+
+Candidate panel movement consumes `CandidateAnchorResult`. UI code should not use pointer location as a moving fallback.
+
+Resolver source priority:
+
+1. marked and selected `firstRect` ranges
+2. insertion-point `firstRect`
+3. line-height rectangles
+4. Accessibility focused-range bounds when available
+5. same-composition scoped last usable anchor
+
+The resolver accepts zero-width caret rects with valid height and rejects zero-height, non-finite, offscreen, or stale cross-composition anchors.
 
 ## Shortcut Contract
 
-- `Space` -> commit prefix.
-- `Tab` -> commit prefix plus first continuation.
-- visible numeric prefix shortcuts commit the prefix candidate shown on the current candidate page, not the same global candidate index on every page
-- `0` commits the raw composition when current correction candidates are visible, preserving the native input-method escape hatch.
-- unmatched digit keys continue composing as literal digits instead of selecting hidden off-page candidates.
-- plain punctuation commits the current composition plus punctuation, or inserts punctuation directly when no composition exists.
-- Chinese punctuation is the default symbol mode; `Option + .` toggles Chinese/English punctuation for the active controller session.
-- input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields so half-width punctuation does not imply ASCII text mode.
-- app policy may default code and terminal contexts to English half-width punctuation while preserving the Chinese text pipeline.
-- `Option + number` -> commit prefix plus the continuation mapped to that global shortcut. `Option + 1` matches the first continuation, which is also available through `Tab` and displayed as `⇥`; `Option + 2...9` map to continuations 2 through 9, and later continuation pages do not reuse those labels.
-- `Option + R` -> request polish for original text.
+- `Space` commits the selected prefix.
+- `Tab` commits selected prefix plus first or selected continuation.
+- `0` commits raw composition when correction candidates are visible.
+- visible numeric prefix shortcuts commit rows on the current candidate page only.
+- unmatched digit keys continue composing as literal digits.
+- plain punctuation commits composition plus punctuation, or inserts punctuation directly with no composition.
+- `Option + .` toggles Chinese/English punctuation for the active controller session.
+- `Option + number` commits prefix plus the globally mapped continuation.
+- `Option + R` requests polish and may rewrite the prefix.
+
+Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. App policy may default code and terminal contexts to English half-width punctuation while preserving the Chinese text pipeline.
 
 ## Level 0 Contract
 
-Level 0 input must not call cloud providers. The session controller routes protected input through a no-provider pipeline, clears continuation candidates, and preserves the protected text for commit.
+Level 0 input must not call cloud providers. The session controller routes protected input through a no-provider pipeline, clears continuation candidates, and preserves protected text for commit.
 
-Level 0 includes URL-like input, email-like input, file paths, command-like input, code-like snippets, and protected Terminal, iTerm, and Xcode contexts.
+Level 0 includes:
+
+- URL-like input
+- email-like input
+- file paths
+- command-like input
+- code-like snippets
+- protected Terminal, iTerm, and Xcode contexts
+
+Technical-token preservation is separate from Level 0 routing. A mixed prose input can preserve `API` or `macOS` while still being eligible for provider continuation if it does not match a protected context.
