@@ -208,7 +208,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.draft.customResponsePath, "")
     }
 
-    func testChangingCloudKindWithBlankAPIKeyPreservesMigratedSecretName() throws {
+    func testChangingCloudKindWithBlankAPIKeyRequiresNewSecret() throws {
         let existing = [
             ProviderProfile(
                 id: "work",
@@ -229,10 +229,9 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         viewModel.changeDraftKind(.anthropicMessages)
 
-        XCTAssertTrue(viewModel.saveDraft())
-        let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
-        XCTAssertEqual(saved.kind, .anthropicMessages)
-        XCTAssertEqual(saved.secretName, "knowtype.openai_chat.apiKey")
+        XCTAssertFalse(viewModel.saveDraft())
+        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+        XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
     }
@@ -1183,6 +1182,38 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertNil(configurations.first?.apiKey)
     }
 
+    func testConnectionTestDoesNotReuseSecretWhenDraftProviderKindChanges() async throws {
+        let existing = [
+            ProviderProfile(
+                id: "remote",
+                displayName: "Remote",
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.openai.com")!,
+                model: "gpt-4.1-mini",
+                secretName: "knowtype.provider.remote.apiKey",
+                isDefault: true
+            )
+        ]
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile(profiles: existing)),
+            secretStore: RecordingSecretStore(values: ["knowtype.provider.remote.apiKey": "sk-openai"]),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "anthropic_messages", candidateCount: 1)
+            }
+        )
+        viewModel.changeDraftKind(.anthropicMessages)
+        viewModel.draft.apiKey = ""
+
+        let didConnect = await viewModel.testDraftConnection()
+
+        XCTAssertFalse(didConnect)
+        XCTAssertEqual(viewModel.connectionStatus, .failure("API key is required for this provider."))
+        let configurations = await capture.configurations
+        XCTAssertTrue(configurations.isEmpty)
+    }
+
     func testConnectionTestReportsMissingRequiredAPIKey() async throws {
         let viewModel = ProviderProfilesViewModel(
             profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
@@ -1204,6 +1235,25 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let didConnect = await viewModel.testDraftConnection()
         XCTAssertFalse(didConnect)
         XCTAssertEqual(viewModel.connectionStatus, .failure("API key is required for this provider."))
+        XCTAssertNil(viewModel.lastErrorMessage)
+    }
+
+    func testConnectionTestSurfacesCurrentValidationErrorsBeforeReturning() async throws {
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
+            secretStore: RecordingSecretStore(),
+            connectionTester: { _ in
+                XCTFail("Connection tester should not run for invalid draft")
+                return ProviderConnectionDiagnosticResult(providerName: "unused", candidateCount: 1)
+            }
+        )
+        viewModel.draft.displayName = " \n "
+
+        let didConnect = await viewModel.testDraftConnection()
+
+        XCTAssertFalse(didConnect)
+        XCTAssertEqual(viewModel.connectionStatus, .failure("Fix validation errors before testing."))
+        XCTAssertTrue(viewModel.validationErrors.contains("Display name is required."))
         XCTAssertNil(viewModel.lastErrorMessage)
     }
 

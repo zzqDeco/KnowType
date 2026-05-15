@@ -135,7 +135,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
         validationErrors = validate(draft)
         if !draft.isDefault && !profiles.contains(where: { $0.id != draft.id && $0.isDefault }) {
-            validationErrors.append("At least one default provider is required.")
+            validationErrors.append(Self.defaultProviderValidationError)
         }
         guard validationErrors.isEmpty else {
             return false
@@ -149,7 +149,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 existingProfile: existingProfile,
                 draftAPIKey: draft.apiKey
             )
-            try validateSecretAvailability(for: profile, mutation: secretMutation)
+            try validateSecretAvailability(for: profile, existingProfile: existingProfile, mutation: secretMutation)
 
             switch secretMutation {
             case .set(_, let secretName, _):
@@ -159,7 +159,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
             case .none:
                 if Self.requiresSecret(profile) {
                     profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
-                } else if Self.acceptsOptionalSecret(profile) {
+                } else if Self.acceptsOptionalSecret(profile),
+                          Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) {
                     profile.secretName = try retainedOptionalSecretName(from: existingProfile)
                 } else {
                     profile.secretName = nil
@@ -257,9 +258,14 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
         let connectionValidationErrors = validate(snapshot.draft)
         guard connectionValidationErrors.isEmpty else {
+            validationErrors = Self.mergedValidationErrors(
+                connectionValidationErrors,
+                Self.saveOnlyValidationErrors(from: validationErrors)
+            )
             connectionStatus = .failure("Fix validation errors before testing.")
             return false
         }
+        validationErrors = Self.saveOnlyValidationErrors(from: validationErrors)
 
         connectionTestGeneration &+= 1
         let generation = connectionTestGeneration
@@ -323,8 +329,10 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if trimmedAPIKey.isEmpty {
             if Self.shouldClearBlankOptionalSecret(for: profile, existingProfile: existingProfile) {
                 apiKey = nil
-            } else {
+            } else if Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) {
                 apiKey = try resolvedExistingSecret(for: profile)
+            } else {
+                apiKey = nil
             }
             if Self.requiresSecret(profile), apiKey == nil {
                 throw ProviderProfilesViewModelError.missingAPIKey
@@ -446,9 +454,16 @@ public final class ProviderProfilesViewModel: ObservableObject {
             || host.hasSuffix(".local")
     }
 
-    private func validateSecretAvailability(for profile: ProviderProfile, mutation: SecretMutation) throws {
+    private func validateSecretAvailability(
+        for profile: ProviderProfile,
+        existingProfile: ProviderProfile?,
+        mutation: SecretMutation
+    ) throws {
         guard Self.requiresSecret(profile), case .none = mutation else {
             return
+        }
+        guard Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) else {
+            throw ProviderProfilesViewModelError.missingAPIKey
         }
         guard let secretName = profile.secretName,
               let existingSecret = try secretStore.secret(named: secretName),
@@ -487,6 +502,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
                    let oldSecretName = existingProfile?.secretName {
                     return .delete(secretName: oldSecretName)
                 }
+                if acceptsOptionalSecret(profile),
+                   !canReuseExistingSecret(for: profile, existingProfile: existingProfile),
+                   let oldSecretName = existingProfile?.secretName {
+                    return .delete(secretName: oldSecretName)
+                }
                 return .none
             }
             let secretName = secretName(for: profile.id)
@@ -512,6 +532,52 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 && (profile.kind != existingProfile.kind || !isLocalBaseURL(existingProfile.baseURL))
         case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
             return false
+        }
+    }
+
+    private static let defaultProviderValidationError = "At least one default provider is required."
+
+    private static func saveOnlyValidationErrors(from errors: [String]) -> [String] {
+        errors.filter { $0 == defaultProviderValidationError }
+    }
+
+    private static func mergedValidationErrors(_ groups: [String]...) -> [String] {
+        var seen = Set<String>()
+        var merged: [String] = []
+        for error in groups.flatMap({ $0 }) where seen.insert(error).inserted {
+            merged.append(error)
+        }
+        return merged
+    }
+
+    private static func canReuseExistingSecret(
+        for profile: ProviderProfile,
+        existingProfile: ProviderProfile?
+    ) -> Bool {
+        guard let existingProfile,
+              profile.secretName == existingProfile.secretName else {
+            return false
+        }
+        return profile.kind == existingProfile.kind
+            && credentialEndpointScope(profile.baseURL) == credentialEndpointScope(existingProfile.baseURL)
+    }
+
+    private static func credentialEndpointScope(_ url: URL) -> String {
+        let scheme = url.scheme?.lowercased() ?? ""
+        let host = url.host(percentEncoded: false)?.lowercased() ?? ""
+        let port = url.port ?? defaultPort(for: scheme)
+        let portValue = port.map(String.init) ?? ""
+        return "\(scheme)://\(host):\(portValue)"
+    }
+
+    private static func defaultPort(for scheme: String) -> Int? {
+        switch scheme {
+        case "http":
+            return 80
+        case "https":
+            return 443
+        default:
+            return nil
         }
     }
 
