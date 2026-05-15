@@ -87,6 +87,20 @@ Settings validation rules:
 - custom HTTP profiles require body template and response path, but may omit the API key
 - profile saves publish new settings only after profile metadata and required secret mutations succeed
 
+Settings connection tests:
+
+- build a transient `ProviderConfiguration` from the current draft
+- use a non-blank draft API key for the test request only
+- reuse an existing saved `secretName` value only when the draft key is blank and the saved secret still belongs to the same provider kind and endpoint credential scope
+- fail before sending a request when a required key is missing
+- publish current field validation errors before failing an invalid test request while preserving save-only validation errors
+- do not write provider JSON or mutate `SecretStore`
+- clear stale status when draft fields change
+- ignore in-flight results for superseded draft/profile snapshots
+- keep transient diagnostic failures out of the persistent save/load error slot
+- preserve existing save/load errors after diagnostic success
+- avoid reusing a saved remote secret when a blank-key draft switches to a local endpoint, another remote endpoint, or another provider protocol
+
 ## Candidate Data
 
 Core candidate types:

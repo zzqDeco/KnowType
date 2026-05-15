@@ -160,6 +160,8 @@ Custom `headers` are saved in provider JSON exactly as configured. Do not put be
 
 When `providers.json` is missing or empty, KnowType seeds a local OpenAI-compatible default at `http://127.0.0.1:8317/v1`. The model may stay blank for `/v1/models` discovery. No API key is embedded in source or profile JSON; save one in settings if your local runtime requires it.
 
+The AI Provider tab includes a connection test for the current draft profile. It uses a typed draft API key only for that test request, or reuses an existing Keychain secret when the key field is blank. It does not save profile JSON or mutate Keychain.
+
 Supported provider kinds:
 
 - `openai_chat`: `/v1/chat/completions`

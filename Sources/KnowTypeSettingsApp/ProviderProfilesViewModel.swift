@@ -1,29 +1,46 @@
 import Combine
 import Foundation
+import KnowTypeCore
 import KnowTypeProviders
 
 @MainActor
 public final class ProviderProfilesViewModel: ObservableObject {
+    public typealias ConnectionTester = @Sendable (ProviderConfiguration) async throws -> ProviderConnectionDiagnosticResult
+
     @Published public private(set) var profiles: [ProviderProfile]
     @Published public var selectedProfileID: String?
-    @Published public var draft: ProviderProfileDraft
+    @Published public var draft: ProviderProfileDraft {
+        didSet {
+            if draft != oldValue {
+                resetConnectionStatus()
+            }
+        }
+    }
     @Published public private(set) var validationErrors: [String]
     @Published public private(set) var lastErrorMessage: String?
     @Published public private(set) var isPersistenceBlocked: Bool
+    @Published public private(set) var connectionStatus: ProviderConnectionStatus
 
     private let profileStore: any ProviderProfileStore
     private let secretStore: any SecretStore
+    private let connectionTester: ConnectionTester
     private var file: ProviderProfilesFile
     private var persistenceBlockedError: Error?
+    private var connectionTestGeneration: UInt64 = 0
 
     public init(
         profileStore: any ProviderProfileStore,
         secretStore: any SecretStore,
-        loadDefaultsWhenEmpty: Bool = true
+        loadDefaultsWhenEmpty: Bool = true,
+        connectionTester: @escaping ConnectionTester = { configuration in
+            try await ProviderConnectionDiagnostic().test(configuration: configuration)
+        }
     ) {
         self.profileStore = profileStore
         self.secretStore = secretStore
+        self.connectionTester = connectionTester
         self.validationErrors = []
+        self.connectionStatus = .idle
 
         let resolvedFile: ProviderProfilesFile
         let resolvedProfiles: [ProviderProfile]
@@ -71,6 +88,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         selectedProfileID = id
         draft = ProviderProfileDraft(profile: profile)
         validationErrors = []
+        resetConnectionStatus()
     }
 
     public func createProfile(kind: ProviderKind) {
@@ -81,6 +99,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         selectedProfileID = profile.id
         draft = ProviderProfileDraft(profile: profile)
         validationErrors = []
+        resetConnectionStatus()
     }
 
     public func changeDraftKind(_ kind: ProviderKind) {
@@ -104,6 +123,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         draft.customBodyTemplate = template.customBodyTemplate ?? ""
         draft.customResponsePath = template.customResponsePath ?? ""
         validationErrors = []
+        resetConnectionStatus()
     }
 
     @discardableResult
@@ -115,7 +135,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
         validationErrors = validate(draft)
         if !draft.isDefault && !profiles.contains(where: { $0.id != draft.id && $0.isDefault }) {
-            validationErrors.append("At least one default provider is required.")
+            validationErrors.append(Self.defaultProviderValidationError)
         }
         guard validationErrors.isEmpty else {
             return false
@@ -129,7 +149,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 existingProfile: existingProfile,
                 draftAPIKey: draft.apiKey
             )
-            try validateSecretAvailability(for: profile, mutation: secretMutation)
+            try validateSecretAvailability(for: profile, existingProfile: existingProfile, mutation: secretMutation)
 
             switch secretMutation {
             case .set(_, let secretName, _):
@@ -139,7 +159,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
             case .none:
                 if Self.requiresSecret(profile) {
                     profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
-                } else if Self.acceptsOptionalSecret(profile) {
+                } else if Self.acceptsOptionalSecret(profile),
+                          Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) {
                     profile.secretName = try retainedOptionalSecretName(from: existingProfile)
                 } else {
                     profile.secretName = nil
@@ -183,6 +204,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
             selectedProfileID = profile.id
             draft = ProviderProfileDraft(profile: profile)
             lastErrorMessage = nil
+            resetConnectionStatus()
             return true
         } catch {
             lastErrorMessage = error.localizedDescription
@@ -220,6 +242,52 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    public func testDraftConnection() async -> Bool {
+        if let persistenceBlockedError {
+            let message = persistenceBlockedError.localizedDescription
+            lastErrorMessage = message
+            connectionStatus = .failure(message)
+            return false
+        }
+
+        let snapshot = ConnectionTestSnapshot(
+            selectedProfileID: selectedProfileID,
+            draft: draft
+        )
+
+        let connectionValidationErrors = validate(snapshot.draft)
+        guard connectionValidationErrors.isEmpty else {
+            validationErrors = Self.mergedValidationErrors(
+                connectionValidationErrors,
+                Self.saveOnlyValidationErrors(from: validationErrors)
+            )
+            connectionStatus = .failure("Fix validation errors before testing.")
+            return false
+        }
+        validationErrors = Self.saveOnlyValidationErrors(from: validationErrors)
+
+        connectionTestGeneration &+= 1
+        let generation = connectionTestGeneration
+        do {
+            let configuration = try connectionTestConfiguration(for: snapshot.draft)
+            connectionStatus = .testing
+            let result = try await connectionTester(configuration)
+            guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
+                return false
+            }
+            connectionStatus = .success("Connected to \(result.providerName). Received \(result.candidateCount) candidate(s).")
+            return true
+        } catch {
+            guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
+                return false
+            }
+            let message = error.localizedDescription
+            connectionStatus = .failure(message)
+            return false
+        }
+    }
+
     public func validate(_ draft: ProviderProfileDraft) -> [String] {
         var errors: [String] = []
         if draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -251,6 +319,62 @@ public final class ProviderProfilesViewModel: ObservableObject {
             }
         }
         return errors
+    }
+
+    private func connectionTestConfiguration(for draft: ProviderProfileDraft) throws -> ProviderConfiguration {
+        var profile = try draft.makeProfile()
+        let existingProfile = profiles.first(where: { $0.id == profile.id })
+        let trimmedAPIKey = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey: String?
+        if trimmedAPIKey.isEmpty {
+            if Self.shouldClearBlankOptionalSecret(for: profile, existingProfile: existingProfile) {
+                apiKey = nil
+            } else if Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) {
+                apiKey = try resolvedExistingSecret(for: profile)
+            } else {
+                apiKey = nil
+            }
+            if Self.requiresSecret(profile), apiKey == nil {
+                throw ProviderProfilesViewModelError.missingAPIKey
+            }
+        } else {
+            apiKey = trimmedAPIKey
+        }
+
+        profile.secretName = apiKey == nil ? nil : profile.secretName
+        return ProviderConfiguration(
+            kind: profile.kind,
+            baseURL: profile.baseURL,
+            apiKey: apiKey,
+            model: profile.model,
+            timeoutSeconds: profile.timeoutSeconds,
+            headers: profile.headers,
+            customBodyTemplate: profile.customBodyTemplate,
+            customResponsePath: profile.customResponsePath
+        )
+    }
+
+    private func resolvedExistingSecret(for profile: ProviderProfile) throws -> String? {
+        guard let secretName = profile.secretName,
+              let existingSecret = try secretStore.secret(named: secretName) else {
+            return nil
+        }
+        let trimmed = existingSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func resetConnectionStatus() {
+        connectionTestGeneration &+= 1
+        connectionStatus = .idle
+    }
+
+    private func isCurrentConnectionTest(
+        generation: UInt64,
+        snapshot: ConnectionTestSnapshot
+    ) -> Bool {
+        generation == connectionTestGeneration
+            && selectedProfileID == snapshot.selectedProfileID
+            && draft == snapshot.draft
     }
 
     private static func secretName(for profileID: String) -> String {
@@ -330,9 +454,16 @@ public final class ProviderProfilesViewModel: ObservableObject {
             || host.hasSuffix(".local")
     }
 
-    private func validateSecretAvailability(for profile: ProviderProfile, mutation: SecretMutation) throws {
+    private func validateSecretAvailability(
+        for profile: ProviderProfile,
+        existingProfile: ProviderProfile?,
+        mutation: SecretMutation
+    ) throws {
         guard Self.requiresSecret(profile), case .none = mutation else {
             return
+        }
+        guard Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) else {
+            throw ProviderProfilesViewModelError.missingAPIKey
         }
         guard let secretName = profile.secretName,
               let existingSecret = try secretStore.secret(named: secretName),
@@ -371,6 +502,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
                    let oldSecretName = existingProfile?.secretName {
                     return .delete(secretName: oldSecretName)
                 }
+                if acceptsOptionalSecret(profile),
+                   !canReuseExistingSecret(for: profile, existingProfile: existingProfile),
+                   let oldSecretName = existingProfile?.secretName {
+                    return .delete(secretName: oldSecretName)
+                }
                 return .none
             }
             let secretName = secretName(for: profile.id)
@@ -396,6 +532,52 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 && (profile.kind != existingProfile.kind || !isLocalBaseURL(existingProfile.baseURL))
         case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
             return false
+        }
+    }
+
+    private static let defaultProviderValidationError = "At least one default provider is required."
+
+    private static func saveOnlyValidationErrors(from errors: [String]) -> [String] {
+        errors.filter { $0 == defaultProviderValidationError }
+    }
+
+    private static func mergedValidationErrors(_ groups: [String]...) -> [String] {
+        var seen = Set<String>()
+        var merged: [String] = []
+        for error in groups.flatMap({ $0 }) where seen.insert(error).inserted {
+            merged.append(error)
+        }
+        return merged
+    }
+
+    private static func canReuseExistingSecret(
+        for profile: ProviderProfile,
+        existingProfile: ProviderProfile?
+    ) -> Bool {
+        guard let existingProfile,
+              profile.secretName == existingProfile.secretName else {
+            return false
+        }
+        return profile.kind == existingProfile.kind
+            && credentialEndpointScope(profile.baseURL) == credentialEndpointScope(existingProfile.baseURL)
+    }
+
+    private static func credentialEndpointScope(_ url: URL) -> String {
+        let scheme = url.scheme?.lowercased() ?? ""
+        let host = url.host(percentEncoded: false)?.lowercased() ?? ""
+        let port = url.port ?? defaultPort(for: scheme)
+        let portValue = port.map(String.init) ?? ""
+        return "\(scheme)://\(host):\(portValue)"
+    }
+
+    private static func defaultPort(for scheme: String) -> Int? {
+        switch scheme {
+        case "http":
+            return 80
+        case "https":
+            return 443
+        default:
+            return nil
         }
     }
 
@@ -437,6 +619,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 }
 
+private struct ConnectionTestSnapshot: Equatable {
+    var selectedProfileID: String?
+    var draft: ProviderProfileDraft
+}
+
 public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
     case loadFailed(String)
     case missingAPIKey
@@ -451,6 +638,29 @@ public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
         case .rollbackFailed(let secretMutation, let rollback):
             return "Failed to update provider secret: \(secretMutation). Also failed to restore providers.json: \(rollback). Provider metadata may be staged on disk."
         }
+    }
+}
+
+public enum ProviderConnectionStatus: Equatable, Sendable {
+    case idle
+    case testing
+    case success(String)
+    case failure(String)
+
+    public var message: String? {
+        switch self {
+        case .idle, .testing:
+            return nil
+        case .success(let message), .failure(let message):
+            return message
+        }
+    }
+
+    public var isTesting: Bool {
+        if case .testing = self {
+            return true
+        }
+        return false
     }
 }
 

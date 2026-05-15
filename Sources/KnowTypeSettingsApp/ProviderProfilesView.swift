@@ -248,6 +248,30 @@ private struct AIProviderSettingsView: View {
                     }
                 }
 
+                Section("Connection") {
+                    Button {
+                        Task {
+                            await viewModel.testDraftConnection()
+                        }
+                    } label: {
+                        Label("Test Connection", systemImage: "network")
+                    }
+                    .disabled(viewModel.isPersistenceBlocked || viewModel.connectionStatus.isTesting)
+
+                    switch viewModel.connectionStatus {
+                    case .idle:
+                        EmptyView()
+                    case .testing:
+                        ProgressView()
+                    case .success(let message):
+                        Text(message)
+                            .foregroundStyle(.secondary)
+                    case .failure(let message):
+                        Text(message)
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 if !viewModel.validationErrors.isEmpty {
                     Section("Validation") {
                         ForEach(viewModel.validationErrors, id: \.self) { error in
