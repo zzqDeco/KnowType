@@ -23,3 +23,21 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      - name: Input method script smoke
+        run: |
+          bash -n \
+            scripts/build-inputmethod-bundle.sh \
+            scripts/diagnose-inputmethod.sh \
+            scripts/install-inputmethod.sh \
+            scripts/select-inputmethod.sh \
+            scripts/uninstall-inputmethod.sh
+
+          ./scripts/diagnose-inputmethod.sh --help
+          ./scripts/select-inputmethod.sh --help
+
+          bundle_path="$(./scripts/build-inputmethod-bundle.sh)"
+          test "$bundle_path" = "$PWD/dist/KnowType.app"
+          test -x "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp"
+          test -f "$bundle_path/Contents/Info.plist"
+          test -d "$bundle_path/Contents/Resources/KnowType_KnowTypeCore.bundle"
+          test -f "$bundle_path/Contents/Resources/KnowTypeInputMethodIcon.tiff"
