@@ -11,6 +11,7 @@
 | [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Mature candidate-window geometry resolver | Active reference |
 | [privacy-app-rules-mvp.plan.md](privacy-app-rules-mvp.plan.md) | Level 0 no-provider routing and protected app rules | Active reference |
 | [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Local candidate learning persisted across IMK restarts | Active reference |
+| [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | Candidate PageDown/PageUp offset-preserving behavior | Active reference |
 
 ## Delivered MVP Slices
 

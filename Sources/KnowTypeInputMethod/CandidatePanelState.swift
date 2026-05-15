@@ -253,7 +253,10 @@ public struct CandidatePanelState: Sendable, Equatable {
         guard targetPage != windowState.paging.currentPage else {
             return currentIndex
         }
-        return min(targetPage * windowState.paging.pageSize, max(totalRows - 1, 0))
+        let currentPageStart = windowState.paging.currentPage * windowState.paging.pageSize
+        let currentOffset = max(0, currentIndex - currentPageStart)
+        let targetPageStart = targetPage * windowState.paging.pageSize
+        return min(targetPageStart + currentOffset, max(totalRows - 1, 0))
     }
 
     private func pagingState(
