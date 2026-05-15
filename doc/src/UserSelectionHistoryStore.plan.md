@@ -13,3 +13,5 @@ Responsibilities:
 The store is intentionally in `KnowTypeInputMethod` instead of `KnowTypeCore`: core ranking consumes a plain `InputContext.userSelectionHistory` snapshot, while host storage remains an input-method concern.
 
 Persistence failure is non-fatal. The IMK controller keeps the in-memory history for the active process and silently degrades when the file cannot be read or written.
+
+`UserSelectionHistoryPersistence` serializes read-merge-write operations with a lock. Each record or flush operation reloads the latest on-disk history, merges entries that exist only in the live controller snapshot, then writes the capped result. This avoids stale async writes and reduces loss when multiple input controllers are active in different host apps.

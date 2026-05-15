@@ -27,22 +27,21 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
     private var candidatePanelState = CandidatePanelState()
-    private let userSelectionHistoryStore: (any UserSelectionHistoryStoring)?
+    private let userSelectionHistoryPersistence: UserSelectionHistoryPersistence?
     private var userSelectionHistory: [String] = []
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
-        let historyStore = try? FileUserSelectionHistoryStore.defaultStore()
+        let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
+            .map(UserSelectionHistoryPersistence.init(store:))
         self.hasProvider = provider != nil
         self.sessionController = InputSessionController(provider: provider)
         self.inputModeState = InputModeAppPolicy.defaultState(
             appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier()
         )
-        self.userSelectionHistoryStore = historyStore
-        if let historyStore {
-            self.userSelectionHistory = (try? historyStore.loadHistory(maxEntries: Self.maxUserSelectionHistory)) ?? []
-        }
+        self.userSelectionHistoryPersistence = historyPersistence
+        self.userSelectionHistory = historyPersistence?.loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
         super.init(server: server, delegate: delegate, client: inputClient)
     }
 
@@ -125,11 +124,13 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func deactivateServer(_ sender: Any!) {
+        flushUserSelectionHistory()
         resetAnchorState()
         super.deactivateServer(sender)
     }
 
     public override func inputControllerWillClose() {
+        flushUserSelectionHistory()
         hideCandidatePanel()
         super.inputControllerWillClose()
     }
@@ -374,15 +375,26 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         guard !trimmed.isEmpty else {
             return
         }
+        if let userSelectionHistoryPersistence {
+            userSelectionHistory = userSelectionHistoryPersistence.recordSelection(
+                trimmed,
+                currentHistory: userSelectionHistory,
+                maxEntries: Self.maxUserSelectionHistory
+            )
+            return
+        }
+
         userSelectionHistory.append(trimmed)
         if userSelectionHistory.count > Self.maxUserSelectionHistory {
             userSelectionHistory.removeFirst(userSelectionHistory.count - Self.maxUserSelectionHistory)
         }
-        let history = userSelectionHistory
-        let historyStore = userSelectionHistoryStore
-        Task.detached(priority: .utility) {
-            try? historyStore?.saveHistory(history, maxEntries: Self.maxUserSelectionHistory)
-        }
+    }
+
+    private func flushUserSelectionHistory() {
+        userSelectionHistoryPersistence?.flushHistory(
+            userSelectionHistory,
+            maxEntries: Self.maxUserSelectionHistory
+        )
     }
 
     private func commitResult(for action: InputAction, client sender: Any!) -> InputCommitResult {

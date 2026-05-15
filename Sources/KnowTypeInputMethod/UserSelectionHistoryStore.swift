@@ -67,3 +67,95 @@ public struct FileUserSelectionHistoryStore: UserSelectionHistoryStoring {
         return Array(clean.suffix(maxEntries))
     }
 }
+
+public final class UserSelectionHistoryPersistence: @unchecked Sendable {
+    private let store: any UserSelectionHistoryStoring
+    private let lock = NSLock()
+
+    public init(store: any UserSelectionHistoryStoring) {
+        self.store = store
+    }
+
+    public func loadHistory(maxEntries: Int) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return (try? store.loadHistory(maxEntries: maxEntries)) ?? []
+    }
+
+    public func recordSelection(
+        _ text: String,
+        currentHistory: [String],
+        maxEntries: Int
+    ) -> [String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return sanitized(currentHistory, maxEntries: maxEntries)
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        let diskHistory = (try? store.loadHistory(maxEntries: maxEntries)) ?? []
+        let merged = Self.mergedHistory(
+            diskHistory: diskHistory,
+            currentHistory: currentHistory,
+            appendedSelection: trimmed,
+            maxEntries: maxEntries
+        )
+        try? store.saveHistory(merged, maxEntries: maxEntries)
+        return merged
+    }
+
+    public func flushHistory(_ currentHistory: [String], maxEntries: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let diskHistory = (try? store.loadHistory(maxEntries: maxEntries)) ?? []
+        let merged = Self.mergedHistory(
+            diskHistory: diskHistory,
+            currentHistory: currentHistory,
+            appendedSelection: nil,
+            maxEntries: maxEntries
+        )
+        try? store.saveHistory(merged, maxEntries: maxEntries)
+    }
+
+    private static func mergedHistory(
+        diskHistory: [String],
+        currentHistory: [String],
+        appendedSelection: String?,
+        maxEntries: Int
+    ) -> [String] {
+        var merged = sanitized(diskHistory, maxEntries: maxEntries)
+        var diskCounts = countsByText(merged)
+
+        for item in sanitized(currentHistory, maxEntries: maxEntries) {
+            if let count = diskCounts[item], count > 0 {
+                diskCounts[item] = count - 1
+            } else {
+                merged.append(item)
+            }
+        }
+
+        if let appendedSelection {
+            merged.append(appendedSelection)
+        }
+        return sanitized(merged, maxEntries: maxEntries)
+    }
+
+    private static func countsByText(_ history: [String]) -> [String: Int] {
+        history.reduce(into: [String: Int]()) { counts, item in
+            counts[item, default: 0] += 1
+        }
+    }
+}
+
+private func sanitized(_ history: [String], maxEntries: Int) -> [String] {
+    let clean = history
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+    guard maxEntries > 0 else {
+        return []
+    }
+    return Array(clean.suffix(maxEntries))
+}
