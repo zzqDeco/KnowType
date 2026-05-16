@@ -164,7 +164,7 @@ final class ProviderAdapterTests: XCTestCase {
     func testOpenAIChatDiscoverySkipsClearlyNonCompletionModels() async throws {
         let content = #"{"candidates":[{"text":"completion model response"}]}"#
         let client = SequencedMockHTTPClient(responses: [
-            (json: #"{"data":[{"id":"gpt-image-2"},{"id":"text-embedding-3-small"},{"id":"local-chat-model"}]}"#, statusCode: 200),
+            (json: #"{"data":[{"id":"gpt-image-2"},{"id":"text-embedding-3-small"},{"id":"nomic-embed-text"},{"id":"mxbai-embed-large"},{"id":"local-chat-model"}]}"#, statusCode: 200),
             (json: #"{"choices":[{"message":{"content":"\#(content.replacingOccurrences(of: "\"", with: "\\\""))"}}]}"#, statusCode: 200)
         ])
         let provider = OpenAIChatProvider(
@@ -183,6 +183,23 @@ final class ProviderAdapterTests: XCTestCase {
 
         XCTAssertEqual(response.candidates.first?.text, "completion model response")
         XCTAssertEqual(bodyObject["model"] as? String, "local-chat-model")
+    }
+
+    func testOpenAIModelDiscoveryAllowsEmbedSubstringInCompletionModelName() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":[{"id":"embedded-chat-model"},{"id":"local-chat-model"}]}"#, statusCode: 200)
+        ])
+        let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
+
+        let model = try await discovery.resolvedModel(
+            for: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://localhost:8000")!,
+                model: ""
+            )
+        )
+
+        XCTAssertEqual(model, "embedded-chat-model")
     }
 
     func testOpenAIChatDiscoveryNormalizesTrailingV1BaseURL() async throws {
@@ -314,7 +331,7 @@ final class ProviderAdapterTests: XCTestCase {
 
     func testOpenAIModelDiscoveryThrowsWhenOnlyNonCompletionModelsExist() async throws {
         let client = SequencedMockHTTPClient(responses: [
-            (json: #"{"data":[{"id":"gpt-image-2"},{"id":"text-embedding-3-small"}]}"#, statusCode: 200)
+            (json: #"{"data":[{"id":"gpt-image-2"},{"id":"text-embedding-3-small"},{"id":"nomic-embed-text"},{"id":"mxbai-embed-large"}]}"#, statusCode: 200)
         ])
         let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
 

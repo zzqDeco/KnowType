@@ -110,7 +110,14 @@ public actor OpenAICompatibleModelDiscovery: ProviderModelDiscovering {
             "tts",
             "whisper"
         ]
-        return unsupportedFragments.allSatisfy { !lowercased.contains($0) }
+        guard unsupportedFragments.allSatisfy({ !lowercased.contains($0) }) else {
+            return false
+        }
+
+        let tokens = lowercased.split { character in
+            !character.isLetter && !character.isNumber
+        }
+        return !tokens.contains("embed")
     }
 
     private func cacheKey(for configuration: ProviderConfiguration) -> String {
