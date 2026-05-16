@@ -11,6 +11,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - The built app includes SwiftPM resource bundles such as `KnowType_KnowTypeCore.bundle`, so bundled lexicons load after installation.
 - `./scripts/install-inputmethod.sh` copies the bundle to `~/Library/Input Methods/KnowType.app`.
 - `./scripts/diagnose-inputmethod.sh --strict` passes after install, confirming bundle metadata, signing, Text Input Source registration, and packaged resources.
+- On macOS 15+, if Gatekeeper rejects an Apple Development build, generate and manually install the local SystemPolicyRule profile with `./scripts/create-local-system-policy-profile.sh --open`, then rerun diagnostics before judging selection behavior.
 - Activate the target text app, then use `./scripts/select-inputmethod.sh --require-selected` as a selection preflight. Acceptance still requires typing a real probe in that target app.
 - KnowType can be enabled from System Settings > Keyboard > Text Input > Input Sources.
 - `./scripts/uninstall-inputmethod.sh` removes the local bundle after verification.

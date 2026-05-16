@@ -33,6 +33,7 @@
 | [input-source-selection-persistence.plan.md](input-source-selection-persistence.plan.md) | Context-aware local Text Input Source selection verification | Active reference |
 | [input-source-display-name.plan.md](input-source-display-name.plan.md) | Localized macOS input-source display name and stale TIS cache diagnostics | Active reference |
 | [input-source-selection-activation.plan.md](input-source-selection-activation.plan.md) | Installed-app activation path and local selection-chain diagnostics | Active reference |
+| [local-input-source-system-policy.plan.md](local-input-source-system-policy.plan.md) | macOS 15 local SystemPolicyRule generation for Apple Development input-method testing | Active reference |
 | [inputmethod-script-ci-smoke.plan.md](inputmethod-script-ci-smoke.plan.md) | CI coverage for local IMK helper scripts and bundle packaging smoke checks | Active reference |
 | [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual typing gates | Active reference |
 | [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active reference |
