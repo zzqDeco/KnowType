@@ -49,8 +49,8 @@ it, verify:
 
 ```bash
 spctl --assess --type execute --verbose=4 "$HOME/Library/Input Methods/KnowType.app"
-./scripts/select-inputmethod.sh --require-selected
 ./scripts/diagnose-inputmethod.sh --strict --logs --log-lookback 10m
+./scripts/select-inputmethod.sh --require-selected --no-diagnose
 ```
 
 For a repeatable acceptance pass, run the harness after installing the bundle

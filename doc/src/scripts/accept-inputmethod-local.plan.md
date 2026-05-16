@@ -12,7 +12,8 @@ Responsibilities:
 - run installed-bundle diagnostics with recent log hints;
 - write a Markdown report template with the manual typing probes required for
   TextEdit, Safari, Chrome, Electron/Codex-style fields, Terminal, Xcode,
-  WeChat, Feishu, and provider failure behavior.
+  WeChat, Feishu, no-provider fallback, and configured-provider failure
+  behavior.
 
 The script does not drive GUI typing itself. A generated report is acceptance
 evidence only after a human or Computer Use run fills in the target-app probe

@@ -86,9 +86,13 @@ Feishu chat field
 - Type normal chat text and use Space, Tab, Option+1, and Option+R.
 - Verify: candidate window remains visible and shortcuts do not conflict with the tested field.
 
-Provider failure
-- Disable or misconfigure the provider temporarily.
-- Verify: traditional prefix candidates still appear, local fallback continuation is used when available, and typing is not blocked.
+No-provider fallback
+- Disable provider configuration temporarily.
+- Verify: traditional prefix candidates still appear and local fallback continuation is used when available.
+
+Configured provider failure
+- Misconfigure the provider endpoint temporarily.
+- Verify: traditional prefix candidates still appear, continuation rows may be absent, and typing is not blocked.
 EOF
 }
 
@@ -112,7 +116,7 @@ write_report() {
 - [ ] \`./scripts/diagnose-inputmethod.sh --strict --logs --log-lookback $LOG_LOOKBACK\` passed after install/profile setup.
 - [ ] Gatekeeper accepts the installed bundle.
 - [ ] Input menu visibly shows KnowType / 知键 in the target app.
-- [ ] \`./scripts/select-inputmethod.sh --require-selected\` was run while the target text app was active.
+- [ ] \`./scripts/select-inputmethod.sh --require-selected --no-diagnose\` was run while the target text app was active.
 
 ## Manual Typing Results
 
@@ -128,7 +132,8 @@ write_report() {
 | Xcode | \`API JSON macOS InputMethodKit snake_case camelCase\` | technical tokens preserved | pending | |
 | WeChat chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
 | Feishu chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
-| Provider failure | provider disabled or invalid endpoint | traditional candidates still usable; local fallback continuation is used when available | pending | |
+| No-provider fallback | provider configuration disabled | traditional candidates still usable; local fallback continuation is used when available | pending | |
+| Configured provider failure | invalid endpoint or provider error | traditional candidates still usable; continuation rows may be absent; typing is not blocked | pending | |
 
 ## Screenshots Or Logs
 
@@ -232,7 +237,7 @@ fi
 if (( RUN_SELECT == 1 )); then
   echo
   echo "Activate the target text app before using --select. This is a preflight only; manual typing remains required."
-  run_step "$ROOT_DIR/scripts/select-inputmethod.sh" --require-selected
+  run_step "$ROOT_DIR/scripts/select-inputmethod.sh" --require-selected --no-diagnose
 fi
 
 if (( WRITE_REPORT == 1 )); then

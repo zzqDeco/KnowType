@@ -129,9 +129,9 @@ Pointer location is not used as a moving candidate anchor.
 
 ## Provider Timing
 
-When a provider is configured, KnowType publishes local prefix candidates immediately. Continuation rows are published after the provider-backed suggestion returns. If the provider fails, local correction still works and commit remains available.
+When a provider is configured, KnowType publishes local prefix candidates immediately. Continuation rows are published after the provider-backed suggestion returns. If the provider fails, local correction still works and commit remains available, but KnowType does not show local mock continuation text as configured-provider output.
 
-No-provider and provider-failure paths may use local fallback continuations. Level 0 paths clear continuation candidates.
+No-provider paths may use local fallback continuations. Configured-provider failure paths return no continuation candidates until provider output becomes usable again. Level 0 paths clear continuation candidates.
 
 ## Privacy And App Rules
 
