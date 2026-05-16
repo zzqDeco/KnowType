@@ -5,9 +5,119 @@ import AppKit
 import KnowTypeCore
 
 @MainActor
+protocol CandidatePanelWindowOperating: AnyObject {
+    func setContentSize(_ size: NSSize)
+    func setFrameOrigin(_ point: NSPoint)
+    func orderFrontRegardless()
+    func orderOut(_ sender: Any?)
+}
+
+extension NSPanel: CandidatePanelWindowOperating {}
+
+@MainActor
+protocol CandidatePanelContentRendering: AnyObject {
+    var appKitView: NSView { get }
+    var fittingSize: NSSize { get }
+
+    func update(model: CandidatePanelRenderModel)
+}
+
+enum CandidatePanelWindowSizing {
+    static let minimumSize = NSSize(width: 180, height: 30)
+    static let maximumSize = NSSize(width: 560, height: 44)
+
+    static func constrained(_ size: NSSize) -> NSSize {
+        NSSize(
+            width: clamp(size.width, minimum: minimumSize.width, maximum: maximumSize.width),
+            height: clamp(size.height, minimum: minimumSize.height, maximum: maximumSize.height)
+        )
+    }
+
+    private static func clamp(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+        guard maximum >= minimum else {
+            return minimum
+        }
+        return min(max(value, minimum), maximum)
+    }
+}
+
+enum CandidatePanelWindowPlacement {
+    private static let visibleFrameInset: CGFloat = 8
+    private static let verticalAnchorSpacing: CGFloat = 6
+
+    static func origin(
+        for anchorRect: CGRect,
+        contentSize: NSSize,
+        screenProvider: ScreenGeometryProviding
+    ) -> NSPoint? {
+        guard CandidateAnchorValidation.isUsable(anchorRect, screenProvider: screenProvider) else {
+            return nil
+        }
+
+        let anchor = CandidateAnchorValidation.normalized(anchorRect)
+        guard let visibleFrame = visibleFrame(containing: anchor, screenProvider: screenProvider) else {
+            return NSPoint(
+                x: max(visibleFrameInset, anchor.minX),
+                y: max(visibleFrameInset, anchor.minY - contentSize.height - verticalAnchorSpacing)
+            )
+        }
+
+        let minX = visibleFrame.minX + visibleFrameInset
+        let maxX = visibleFrame.maxX - contentSize.width - visibleFrameInset
+        let minY = visibleFrame.minY + visibleFrameInset
+        let maxY = visibleFrame.maxY - contentSize.height - visibleFrameInset
+        let preferredY = anchor.minY - contentSize.height - verticalAnchorSpacing
+        let fallbackY = anchor.maxY + verticalAnchorSpacing
+
+        return NSPoint(
+            x: clamp(anchor.minX, minimum: minX, maximum: maxX),
+            y: clamp(preferredY < minY ? fallbackY : preferredY, minimum: minY, maximum: maxY)
+        )
+    }
+
+    private static func visibleFrame(
+        containing rect: CGRect,
+        screenProvider: ScreenGeometryProviding
+    ) -> CGRect? {
+        let screens = screenProvider.screens
+        let point = CGPoint(x: rect.midX, y: rect.midY)
+        return screens.first { $0.frame.contains(point) }?.visibleFrame
+            ?? screens.first { $0.frame.intersects(rect) }?.visibleFrame
+            ?? screens.first?.visibleFrame
+    }
+
+    private static func clamp(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+        guard maximum >= minimum else {
+            return minimum
+        }
+        return min(max(value, minimum), maximum)
+    }
+}
+
+@MainActor
 final class CandidatePanelWindowController {
-    private var panel: NSPanel?
-    private let contentView = CandidatePanelContentView()
+    private var panel: CandidatePanelWindowOperating?
+    private let contentView: CandidatePanelContentRendering
+    private let screenProvider: ScreenGeometryProviding
+    private let makePanel: @MainActor (NSView) -> CandidatePanelWindowOperating
+
+    convenience init() {
+        self.init(
+            screenProvider: AppKitScreenGeometryProvider(),
+            contentView: CandidatePanelContentView(),
+            makePanel: Self.makeAppKitPanel
+        )
+    }
+
+    init(
+        screenProvider: ScreenGeometryProviding,
+        contentView: CandidatePanelContentRendering,
+        makePanel: @escaping @MainActor (NSView) -> CandidatePanelWindowOperating
+    ) {
+        self.screenProvider = screenProvider
+        self.contentView = contentView
+        self.makePanel = makePanel
+    }
 
     func update(state: CandidatePanelState, locale: KnowTypeLocale) {
         let windowState = state.windowState
@@ -24,9 +134,13 @@ final class CandidatePanelWindowController {
         contentView.update(model: renderModel)
 
         let panel = candidatePanel()
-        let contentSize = contentView.fittingSize
+        let contentSize = CandidatePanelWindowSizing.constrained(contentView.fittingSize)
         panel.setContentSize(contentSize)
-        if let origin = origin(for: windowState.anchorRect, contentSize: contentSize) {
+        if let origin = CandidatePanelWindowPlacement.origin(
+            for: windowState.anchorRect,
+            contentSize: contentSize,
+            screenProvider: screenProvider
+        ) {
             panel.setFrameOrigin(origin)
         } else {
             panel.orderOut(nil)
@@ -39,11 +153,17 @@ final class CandidatePanelWindowController {
         panel?.orderOut(nil)
     }
 
-    private func candidatePanel() -> NSPanel {
+    private func candidatePanel() -> CandidatePanelWindowOperating {
         if let panel {
             return panel
         }
 
+        let panel = makePanel(contentView.appKitView)
+        self.panel = panel
+        return panel
+    }
+
+    private static func makeAppKitPanel(contentView: NSView) -> CandidatePanelWindowOperating {
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 220, height: 32),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -58,56 +178,19 @@ final class CandidatePanelWindowController {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.contentView = contentView
-        self.panel = panel
         return panel
-    }
-
-    private func origin(for anchorRect: CGRect, contentSize: NSSize) -> NSPoint? {
-        guard CandidateAnchorValidation.isUsable(
-            anchorRect,
-            screenProvider: AppKitScreenGeometryProvider()
-        ) else {
-            return nil
-        }
-        let anchor = anchorRect
-        let visibleFrame = screen(containing: anchor)?.visibleFrame ?? NSScreen.main?.visibleFrame
-        guard let visibleFrame else {
-            return NSPoint(x: max(8, anchor.minX), y: max(8, anchor.minY - contentSize.height - 6))
-        }
-
-        let inset: CGFloat = 8
-        let minX = visibleFrame.minX + inset
-        let maxX = visibleFrame.maxX - contentSize.width - inset
-        let minY = visibleFrame.minY + inset
-        let maxY = visibleFrame.maxY - contentSize.height - inset
-        let preferredY = anchor.minY - contentSize.height - 6
-        let fallbackY = anchor.maxY + 6
-
-        return NSPoint(
-            x: clamp(anchor.minX, minimum: minX, maximum: maxX),
-            y: clamp(preferredY < minY ? fallbackY : preferredY, minimum: minY, maximum: maxY)
-        )
-    }
-
-    private func screen(containing rect: CGRect) -> NSScreen? {
-        let point = NSPoint(x: rect.midX, y: rect.midY)
-        return NSScreen.screens.first { $0.frame.contains(point) }
-            ?? NSScreen.screens.first { $0.frame.intersects(rect) }
-    }
-
-    private func clamp(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
-        guard maximum >= minimum else {
-            return minimum
-        }
-        return min(max(value, minimum), maximum)
     }
 
 }
 
 @MainActor
-private final class CandidatePanelContentView: NSView {
+private final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
     private let effectView = NSVisualEffectView()
     private let stackView = NSStackView()
+
+    var appKitView: NSView {
+        self
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -172,10 +255,10 @@ private final class CandidatePanelContentView: NSView {
             stackView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
             stackView.topAnchor.constraint(equalTo: effectView.topAnchor),
             stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
-            widthAnchor.constraint(lessThanOrEqualToConstant: 560),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
-            heightAnchor.constraint(lessThanOrEqualToConstant: 44)
+            widthAnchor.constraint(greaterThanOrEqualToConstant: CandidatePanelWindowSizing.minimumSize.width),
+            widthAnchor.constraint(lessThanOrEqualToConstant: CandidatePanelWindowSizing.maximumSize.width),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: CandidatePanelWindowSizing.minimumSize.height),
+            heightAnchor.constraint(lessThanOrEqualToConstant: CandidatePanelWindowSizing.maximumSize.height)
         ])
     }
 
