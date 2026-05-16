@@ -58,9 +58,13 @@ TextEdit
 - Type: wo jue de zhege fagnan
 - Verify: candidate panel follows the caret, Space commits 我觉得这个方案, Tab commits prefix + first continuation.
 
-Safari or Chrome
-- Type in a normal input and textarea: zhege api latnecy youdian gao
-- Verify: candidate panel follows the caret after scrolling, API stays uppercase, latency remains protected.
+Safari
+- Type in a search field or textarea: zhege api latnecy youdian gao
+- Verify: candidate panel follows the caret, Tab commits prefix + continuation, API stays uppercase, latency remains protected.
+
+Chrome
+- Type in a normal web text field and a scrolled textarea: zhege api latnecy youdian gao
+- Verify: candidate panel follows the caret after scrolling and shortcuts remain usable.
 
 Electron or Codex-style text field
 - Type: nishishei and ni
@@ -74,13 +78,17 @@ Xcode
 - Type identifiers containing API, JSON, macOS, InputMethodKit, snake_case, and camelCase.
 - Verify: technical tokens and code-like snippets are preserved.
 
-WeChat or Feishu chat field
+WeChat chat field
+- Type normal chat text and use Space, Tab, Option+1, and Option+R.
+- Verify: candidate window remains visible and shortcuts do not conflict with the tested field.
+
+Feishu chat field
 - Type normal chat text and use Space, Tab, Option+1, and Option+R.
 - Verify: candidate window remains visible and shortcuts do not conflict with the tested field.
 
 Provider failure
 - Disable or misconfigure the provider temporarily.
-- Verify: traditional prefix candidates still appear and typing is not blocked.
+- Verify: traditional prefix candidates still appear, local fallback continuation is used when available, and typing is not blocked.
 EOF
 }
 
@@ -111,14 +119,16 @@ write_report() {
 | Target | Probe | Expected | Result | Notes |
 |---|---|---|---|---|
 | TextEdit | \`wo jue de zhege fagnan\` | caret-following panel; Space commits \`我觉得这个方案\`; Tab commits prefix + continuation | pending | |
-| Safari/Chrome input | \`zhege api latnecy youdian gao\` | mixed Chinese/English correction; \`API\` and \`latency\` preserved | pending | |
-| Safari/Chrome textarea | same probe after scrolling | panel follows caret after scroll | pending | |
+| Safari search field | \`zhege api latnecy youdian gao\` | mixed Chinese/English correction; \`API\` and \`latency\` preserved; Tab commits prefix + continuation | pending | |
+| Safari textarea | same probe in textarea | panel follows caret and shortcuts remain usable | pending | |
+| Chrome web text field | \`zhege api latnecy youdian gao\` | mixed Chinese/English correction; \`API\` and \`latency\` preserved | pending | |
+| Chrome scrolled textarea | same probe after scrolling | panel follows caret after scroll and shortcuts remain usable | pending | |
 | Electron/Codex-style field | \`nishishei\`, \`ni\` | marked text and candidate paging remain usable | pending | |
 | Terminal | \`/Users/zq/project/KnowType\`, \`swift test\` | Level 0 unchanged, no provider dependency | pending | |
 | Xcode | \`API JSON macOS InputMethodKit snake_case camelCase\` | technical tokens preserved | pending | |
 | WeChat chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
 | Feishu chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
-| Provider failure | provider disabled or invalid endpoint | traditional candidates still usable | pending | |
+| Provider failure | provider disabled or invalid endpoint | traditional candidates still usable; local fallback continuation is used when available | pending | |
 
 ## Screenshots Or Logs
 
