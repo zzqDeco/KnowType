@@ -113,7 +113,7 @@ write_report() {
 
 - [ ] \`swift test\` result recorded separately if run for this acceptance pass.
 - [ ] \`./scripts/smoke-inputmethod-install.sh\` passed.
-- [ ] \`./scripts/diagnose-inputmethod.sh --strict --logs --log-lookback $LOG_LOOKBACK\` passed after install/profile setup.
+- [ ] \`./scripts/diagnose-inputmethod.sh --strict --logs --log-lookback $LOG_LOOKBACK --path "$BUNDLE_PATH"\` passed after install/profile setup.
 - [ ] Gatekeeper accepts the installed bundle.
 - [ ] Input menu visibly shows KnowType / 知键 in the target app.
 - [ ] \`./scripts/select-inputmethod.sh --require-selected --no-diagnose\` was run while the target text app was active.
@@ -230,8 +230,10 @@ if (( RUN_DIAGNOSE == 1 )); then
   diagnose_args=(--logs --log-lookback "$LOG_LOOKBACK" --path "$BUNDLE_PATH")
   if (( STRICT_DIAGNOSE == 1 )); then
     diagnose_args=(--strict "${diagnose_args[@]}")
+    run_step "$ROOT_DIR/scripts/diagnose-inputmethod.sh" "${diagnose_args[@]}"
+  elif ! run_step "$ROOT_DIR/scripts/diagnose-inputmethod.sh" "${diagnose_args[@]}"; then
+    echo "[warn] non-strict diagnostics failed; continuing so the acceptance report can capture local setup evidence"
   fi
-  run_step "$ROOT_DIR/scripts/diagnose-inputmethod.sh" "${diagnose_args[@]}"
 fi
 
 if (( RUN_SELECT == 1 )); then
