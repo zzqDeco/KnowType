@@ -13,6 +13,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - `./scripts/diagnose-inputmethod.sh --strict` passes after install, confirming bundle metadata, signing, Text Input Source registration, and packaged resources.
 - On macOS 15+, if Gatekeeper rejects an Apple Development build, generate and manually install the local SystemPolicyRule profile with `./scripts/create-local-system-policy-profile.sh --open`, then rerun diagnostics before judging selection behavior.
 - Activate the target text app, then use `./scripts/select-inputmethod.sh --require-selected` as a selection preflight. Acceptance still requires typing a real probe in that target app.
+- `./scripts/accept-inputmethod-local.sh` runs the repeatable local acceptance harness. By default it performs script/profile smoke, diagnostics, and report-template generation without selecting an input source; pass `--install` or `--select` only when intentionally mutating the local macOS session.
 - KnowType can be enabled from System Settings > Keyboard > Text Input > Input Sources.
 - `./scripts/uninstall-inputmethod.sh` removes the local bundle after verification.
 - This gate covers local MVP packaging only; signed installer, notarization, update flow, and App Store packaging are follow-up work.
@@ -32,6 +33,10 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - Provider resolution pulls secrets through `SecretStore`.
 
 ## Manual macOS Scenarios
+
+The harness writes `dist/KnowTypeLocalIMEAcceptance.md` with these probes and
+evidence fields. Fill that report during local acceptance instead of treating a
+successful script run as proof of target-app typing behavior.
 
 - TextEdit:
   - Type `wo jue de zhege fagnan`.
