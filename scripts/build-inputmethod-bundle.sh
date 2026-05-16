@@ -8,6 +8,41 @@ BUNDLE_DIR="$DIST_DIR/KnowType.app"
 CONTENTS_DIR="$BUNDLE_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 
+usage() {
+  cat <<'EOF'
+Usage: scripts/build-inputmethod-bundle.sh [--configuration debug|release]
+
+Builds the KnowType input-method executable and packages it into
+dist/KnowType.app without installing it.
+
+Options:
+  --configuration  SwiftPM build configuration. Defaults to CONFIGURATION or debug.
+  -h, --help       Show this help.
+EOF
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --configuration)
+      if (($# < 2)); then
+        echo "error: --configuration requires a value" >&2
+        exit 2
+      fi
+      CONFIGURATION="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
 swift build --package-path "$ROOT_DIR" --configuration "$CONFIGURATION" --product KnowTypeInputMethodApp >&2
 BIN_DIR="$(swift build --package-path "$ROOT_DIR" --configuration "$CONFIGURATION" --show-bin-path 2>/dev/null)"
 

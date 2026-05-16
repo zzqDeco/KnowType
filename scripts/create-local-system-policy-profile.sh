@@ -83,8 +83,43 @@ if [[ -z "$DESIGNATED_REQUIREMENT" ]]; then
   exit 1
 fi
 
+CODESIGN_DETAILS="$(codesign -dv "$BUNDLE_PATH" 2>&1 || true)"
+
+codesign_value() {
+  local key="$1"
+  printf '%s\n' "$CODESIGN_DETAILS" |
+    awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }'
+}
+
+SIGNING_IDENTIFIER="$(codesign_value "Identifier")"
+TEAM_IDENTIFIER="$(codesign_value "TeamIdentifier")"
+SIGNATURE_KIND="$(codesign_value "Signature")"
+AUTHORITY_SUMMARY="$(
+  printf '%s\n' "$CODESIGN_DETAILS" |
+    awk -F= '$1 == "Authority" {
+      value = substr($0, index($0, "=") + 1)
+      if (out != "") {
+        out = out ", "
+      }
+      out = out value
+    } END {
+      print out
+    }'
+)"
+
+SIGNING_IDENTIFIER="${SIGNING_IDENTIFIER:-unknown}"
+TEAM_IDENTIFIER="${TEAM_IDENTIFIER:-not set}"
+SIGNATURE_KIND="${SIGNATURE_KIND:-unknown}"
+AUTHORITY_SUMMARY="${AUTHORITY_SUMMARY:-none}"
+SIGNING_SUMMARY="identifier=$SIGNING_IDENTIFIER; team=$TEAM_IDENTIFIER; signature=$SIGNATURE_KIND"
+if [[ "$AUTHORITY_SUMMARY" != "none" ]]; then
+  SIGNING_SUMMARY="$SIGNING_SUMMARY; authority=$AUTHORITY_SUMMARY"
+fi
+
 PROFILE_UUID="$(uuidgen)"
 PAYLOAD_UUID="$(uuidgen)"
+RULE_COMMENT="Allow local KnowType input method build at $BUNDLE_PATH ($SIGNING_SUMMARY)"
+ESCAPED_RULE_COMMENT="$(printf '%s' "$RULE_COMMENT" | xml_escape)"
 ESCAPED_REQUIREMENT="$(printf '%s' "$DESIGNATED_REQUIREMENT" | xml_escape)"
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 
@@ -97,7 +132,7 @@ cat > "$OUTPUT_PATH" <<EOF
   <array>
     <dict>
       <key>Comment</key>
-      <string>Allow local KnowType Apple Development input method build</string>
+      <string>$ESCAPED_RULE_COMMENT</string>
       <key>OperationType</key>
       <string>operation:execute</string>
       <key>PayloadDescription</key>
@@ -146,6 +181,13 @@ cat <<EOF
 Created: $OUTPUT_PATH
 Bundle: $BUNDLE_PATH
 Requirement: $DESIGNATED_REQUIREMENT
+PayloadIdentifier: com.knowtype.local.systempolicy
+Rule PayloadIdentifier: com.knowtype.local.systempolicy.rule
+Rule PayloadType: com.apple.systempolicy.rule
+Signing Identifier: $SIGNING_IDENTIFIER
+Team Identifier: $TEAM_IDENTIFIER
+Signature: $SIGNATURE_KIND
+Authority: $AUTHORITY_SUMMARY
 
 macOS 11+ does not allow installing configuration profiles from the profiles
 CLI. Install this profile through System Settings, then run:
