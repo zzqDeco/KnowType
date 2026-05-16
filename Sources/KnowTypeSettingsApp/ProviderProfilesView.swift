@@ -167,51 +167,53 @@ private struct LexiconSettingsView: View {
     @ObservedObject var viewModel: LexiconSettingsViewModel
 
     var body: some View {
+        let presentation = LexiconSettingsPresentation(viewModel: viewModel)
+
         SettingsForm {
             Section("Local Lexicons") {
-                LabeledContent("Loaded entries", value: "\(viewModel.totalLoadedEntryCount)")
-                if let lastRefreshDate = viewModel.lastRefreshDate {
-                    LabeledContent("Last refresh", value: lastRefreshDate.formatted(date: .abbreviated, time: .standard))
+                LabeledContent(presentation.loadedEntries.label, value: presentation.loadedEntries.value)
+                if let lastRefreshDate = presentation.lastRefreshDate {
+                    LabeledContent(presentation.lastRefreshLabel, value: lastRefreshDate.formatted(date: .abbreviated, time: .standard))
                 }
                 Button {
                     viewModel.refresh()
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    Label(presentation.refreshActionLabel, systemImage: "arrow.clockwise")
                 }
                 Button {
                     _ = viewModel.createSampleLexiconResource()
                 } label: {
-                    Label("Create Sample TSV", systemImage: "doc.badge.plus")
+                    Label(presentation.createSampleActionLabel, systemImage: "doc.badge.plus")
                 }
-                if viewModel.directories.contains(where: { !$0.exists }) {
+                if presentation.showsCreateMissingDirectoriesAction {
                     Button {
                         _ = viewModel.createMissingDirectories()
                     } label: {
-                        Label("Create Missing Directories", systemImage: "folder.badge.plus")
+                        Label(presentation.createMissingDirectoriesActionLabel, systemImage: "folder.badge.plus")
                     }
                 }
-                if let lastActionMessage = viewModel.lastActionMessage {
+                if let lastActionMessage = presentation.lastActionMessage {
                     Text(lastActionMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            ForEach(viewModel.directories) { directory in
-                Section("Directory") {
-                    LabeledContent("Status", value: directory.exists ? "Available" : "Missing")
-                    LabeledContent("Resource files", value: "\(directory.resourceFileCount)")
-                    LabeledContent("Loaded entries", value: "\(directory.loadedEntryCount)")
+            ForEach(presentation.directories) { directory in
+                Section(directory.sectionTitle) {
+                    LabeledContent(directory.status.label, value: directory.status.value)
+                    LabeledContent(directory.resourceFiles.label, value: directory.resourceFiles.value)
+                    LabeledContent(directory.loadedEntries.label, value: directory.loadedEntries.value)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Path")
+                        Text(directory.pathLabel)
                             .foregroundStyle(.secondary)
-                        MonospacedText(directory.directory.path)
+                        MonospacedText(directory.path)
                     }
 
                     if !directory.diagnostics.isEmpty {
                         ForEach(directory.diagnostics) { diagnostic in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(diagnostic.resourceID)
+                                Text(diagnostic.title)
                                     .font(.headline)
                                 Text(diagnostic.message)
                                     .foregroundStyle(.red)
@@ -222,8 +224,9 @@ private struct LexiconSettingsView: View {
             }
 
             Section("Format") {
-                LabeledContent("TSV", value: "pinyin<TAB>text<TAB>confidence")
-                LabeledContent("JSON", value: "TraditionalInputLexiconEntry array")
+                ForEach(presentation.formatRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
             }
         }
     }
@@ -233,17 +236,24 @@ private struct AIProviderSettingsView: View {
     @ObservedObject var viewModel: ProviderProfilesViewModel
 
     var body: some View {
+        let draftPresentation = ProviderProfileDraftPresentation(draft: viewModel.draft)
+        let connectionPresentation = ProviderConnectionStatusPresentation(status: viewModel.connectionStatus)
+        let validationPresentation = ProviderValidationPresentation(errors: viewModel.validationErrors)
+        let lastErrorPresentation = ProviderLastErrorPresentation(message: viewModel.lastErrorMessage)
+
         NavigationSplitView {
             List(selection: $viewModel.selectedProfileID) {
                 ForEach(viewModel.profiles) { profile in
+                    let item = ProviderProfileListItemPresentation(profile: profile)
+
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(profile.displayName)
+                        Text(item.title)
                             .font(.headline)
-                        Text(profile.kind.rawValue)
+                        Text(item.subtitle)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    .tag(profile.id)
+                    .tag(item.id)
                 }
             }
             .onChange(of: viewModel.selectedProfileID) { id in
@@ -265,9 +275,9 @@ private struct AIProviderSettingsView: View {
         } detail: {
             Form {
                 Section("Provider") {
-                    TextField("Display Name", text: $viewModel.draft.displayName)
+                    TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
                     Picker(
-                        "Kind",
+                        draftPresentation.kindPickerLabel,
                         selection: Binding(
                             get: { viewModel.draft.kind },
                             set: { viewModel.changeDraftKind($0) }
@@ -277,69 +287,62 @@ private struct AIProviderSettingsView: View {
                             Text(kind.rawValue).tag(kind)
                         }
                     }
-                    TextField("Base URL", text: $viewModel.draft.baseURL)
-                    TextField("Model", text: $viewModel.draft.model)
+                    TextField(draftPresentation.baseURLFieldLabel, text: $viewModel.draft.baseURL)
+                    TextField(draftPresentation.modelFieldLabel, text: $viewModel.draft.model)
                     Stepper(value: $viewModel.draft.timeoutSeconds, in: 1...120, step: 1) {
-                        Text("Timeout: \(Int(viewModel.draft.timeoutSeconds)) seconds")
+                        Text(draftPresentation.timeoutLabel)
                     }
-                    Toggle("Default provider", isOn: $viewModel.draft.isDefault)
+                    Toggle(draftPresentation.defaultProviderLabel, isOn: $viewModel.draft.isDefault)
                 }
 
-                Section("API Key") {
-                    SecureField("Leave blank to keep existing key", text: $viewModel.draft.apiKey)
-                    if let secretName = viewModel.draft.secretName {
-                        LabeledContent("Secret reference", value: secretName)
+                Section(draftPresentation.secret.sectionTitle) {
+                    SecureField(draftPresentation.secret.apiKeyFieldPrompt, text: $viewModel.draft.apiKey)
+                    if let reference = draftPresentation.secret.reference {
+                        LabeledContent(reference.label, value: reference.value)
                             .font(.caption)
                     }
-                    Text("API keys are written through the secret store. On macOS this uses Keychain; provider JSON stores secret references only.")
+                    Text(draftPresentation.secret.helpText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                if viewModel.draft.kind == .customHTTP {
-                    Section("Custom HTTP") {
+                if draftPresentation.showsCustomHTTPFields {
+                    Section(draftPresentation.customBodyTemplateLabel) {
                         TextEditor(text: $viewModel.draft.customBodyTemplate)
                             .font(.system(.body, design: .monospaced))
                             .frame(minHeight: 120)
-                        TextField("Response Path", text: $viewModel.draft.customResponsePath)
+                        TextField(draftPresentation.customResponsePathLabel, text: $viewModel.draft.customResponsePath)
                     }
                 }
 
-                Section("Connection") {
+                Section(connectionPresentation.sectionTitle) {
                     Button {
                         Task {
                             await viewModel.testDraftConnection()
                         }
                     } label: {
-                        Label("Test Connection", systemImage: "network")
+                        Label(connectionPresentation.testButtonLabel, systemImage: "network")
                     }
-                    .disabled(viewModel.isPersistenceBlocked || viewModel.connectionStatus.isTesting)
+                    .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
 
-                    switch viewModel.connectionStatus {
-                    case .idle:
-                        EmptyView()
-                    case .testing:
+                    if connectionPresentation.showsProgress {
                         ProgressView()
-                    case .success(let message):
-                        Text(message)
-                            .foregroundStyle(.secondary)
-                    case .failure(let message):
-                        Text(message)
-                            .foregroundStyle(.red)
+                    } else if let message = connectionPresentation.message {
+                        connectionStatusMessage(message)
                     }
                 }
 
-                if !viewModel.validationErrors.isEmpty {
-                    Section("Validation") {
-                        ForEach(viewModel.validationErrors, id: \.self) { error in
+                if validationPresentation.isVisible {
+                    Section(validationPresentation.title) {
+                        ForEach(validationPresentation.messages, id: \.self) { error in
                             Text(error)
                                 .foregroundStyle(.red)
                         }
                     }
                 }
 
-                if let lastErrorMessage = viewModel.lastErrorMessage {
-                    Section("Last Error") {
+                if let lastErrorMessage = lastErrorPresentation.message {
+                    Section(lastErrorPresentation.title) {
                         Text(lastErrorMessage)
                             .foregroundStyle(.red)
                     }
@@ -356,6 +359,18 @@ private struct AIProviderSettingsView: View {
                 .keyboardShortcut("s", modifiers: [.command])
             }
             .padding()
+        }
+    }
+
+    @ViewBuilder
+    private func connectionStatusMessage(_ message: ProviderStatusMessagePresentation) -> some View {
+        switch message.tone {
+        case .secondary:
+            Text(message.text)
+                .foregroundStyle(.secondary)
+        case .error:
+            Text(message.text)
+                .foregroundStyle(.red)
         }
     }
 }
