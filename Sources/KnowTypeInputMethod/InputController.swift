@@ -8,57 +8,35 @@ import AppKit
 
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
-    private let provider: (any LLMProvider)?
-    private var sessionController: InputSessionController
-    private let hasProvider: Bool
-    private var traditionalInputEngine: TraditionalInputEngine
-    private var lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot
-    private let keyMapper = InputKeyCommandMapper()
-    private let symbolTransformer = InputSymbolTransformer()
-    private let candidateListBuilder = InputCandidateListBuilder()
-    private let anchorResolver = CandidateAnchorResolver(
-        screenProvider: AppKitScreenGeometryProvider(),
-        accessibilityProvider: SystemAccessibilityAnchorProvider()
-    )
-    private var rawBuffer = ""
-    private var compositionID = 0
-    private var lastSuggestion: SuggestionResponse?
-    private var lastSuggestionRawInput: String?
-    private var locale: KnowTypeLocale = .mixed
-    private let inputModePreferenceStore: any InputModePreferenceStore
-    private var inputModeRuntime: InputModePreferenceRuntime
-    private var suggestionTask: Task<Void, Never>?
-    private var displayedNativeCandidates: [InputCandidateSelection] = []
-    private var selectedNativeCandidate: InputCandidateSelection?
-    private var candidatePanelState = CandidatePanelState()
-    private let userSelectionHistoryPersistence: UserSelectionHistoryPersistence?
-    private var userSelectionHistory: [String] = []
+    private let coordinator: InputControllerCoordinator
+    private let hostAdapter: IMKInputControllerHostAdapter
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
         let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
-        let traditionalInputEngine = lexiconRuntime.makeEngine()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
-        let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
-        self.provider = provider
-        self.hasProvider = provider != nil
-        self.traditionalInputEngine = traditionalInputEngine
-        self.lexiconRuntimeSnapshot = lexiconRuntime.snapshot()
-        self.sessionController = InputSessionController(
+        let hostAdapter = IMKInputControllerHostAdapter()
+        let initialClient = Self.inputControllerClient(from: inputClient)
+
+        self.hostAdapter = hostAdapter
+        self.coordinator = InputControllerCoordinator(
             provider: provider,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: lexiconRuntime.makeEngine(),
+            lexiconRuntimeSnapshot: lexiconRuntime.snapshot(),
+            inputModePreferenceStore: inputModePreferenceStore,
+            initialAppBundleID: initialClient?.bundleIdentifier,
+            userSelectionHistoryPersistence: historyPersistence,
+            host: hostAdapter,
+            anchorResolver: CandidateAnchorResolver(
+                screenProvider: AppKitScreenGeometryProvider(),
+                accessibilityProvider: SystemAccessibilityAnchorProvider()
+            )
         )
-        self.inputModePreferenceStore = inputModePreferenceStore
-        self.inputModeRuntime = InputModePreferenceRuntime(
-            preferences: inputModePreferences,
-            appBundleID: (inputClient as? IMKTextInput)?.bundleIdentifier()
-        )
-        self.userSelectionHistoryPersistence = historyPersistence
-        self.userSelectionHistory = historyPersistence?.loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
         super.init(server: server, delegate: delegate, client: inputClient)
+        hostAdapter.controller = self
     }
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
@@ -68,41 +46,34 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: flags)
         )
 
-        return handle(stroke: stroke, client: sender)
+        return coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
-        let stroke = InputKeyStroke(
-            text: string ?? "",
-            keyCode: Self.textOnlyKeyCode
-        )
-        return handle(intent: keyMapper.intent(for: stroke), client: sender)
+        coordinator.handleText(string, client: Self.inputControllerClient(from: sender))
     }
 
     public override func composedString(_ sender: Any!) -> Any! {
-        guard let prefix = lastSuggestion?.prefixCandidates.first?.text else {
-            return rawBuffer
-        }
-        return prefix
+        coordinator.composedString()
     }
 
     public override func originalString(_ sender: Any!) -> NSAttributedString! {
-        NSAttributedString(string: rawBuffer)
+        coordinator.originalString()
     }
 
     public override func candidates(_ sender: Any!) -> [Any]! {
-        let selections = candidateListBuilder.candidateSelections(rawInput: rawBuffer, suggestion: lastSuggestion)
-        displayedNativeCandidates = selections
-        return selections.map(\.text)
+        coordinator.candidates()
     }
 
     public override func candidateSelectionChanged(_ candidateString: NSAttributedString!) {
-        selectNativeCandidate(matching: candidateString?.string)
+        coordinator.candidateSelectionChanged(candidateString?.string)
     }
 
     public override func candidateSelected(_ candidateString: NSAttributedString!) {
-        selectNativeCandidate(matching: candidateString?.string)
-        commit(action: .space, client: client())
+        coordinator.candidateSelected(
+            candidateString?.string,
+            client: Self.inputControllerClient(from: client())
+        )
     }
 
     public override func recognizedEvents(_ sender: Any!) -> Int {
@@ -127,562 +98,53 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue)),
             eventKind: eventKind
         )
-        return handle(stroke: stroke, client: sender)
+        return coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
     }
 
     public override func commitComposition(_ sender: Any!) {
-        commit(action: .space, client: sender)
+        coordinator.commitComposition(client: Self.inputControllerClient(from: sender))
     }
 
     public override func hidePalettes() {
         super.hidePalettes()
-        hideCandidatePanel()
+        coordinator.hidePalettes()
     }
 
     public override func deactivateServer(_ sender: Any!) {
-        flushUserSelectionHistory()
-        resetAnchorState()
+        coordinator.deactivateServer()
         super.deactivateServer(sender)
     }
 
     public override func inputControllerWillClose() {
-        flushUserSelectionHistory()
-        hideCandidatePanel()
+        coordinator.inputControllerWillClose()
         super.inputControllerWillClose()
     }
 
-    private func handle(stroke: InputKeyStroke, client sender: Any!) -> Bool {
-        return handle(intent: keyMapper.intent(for: stroke), client: sender)
+    fileprivate var currentInputControllerClient: InputControllerClient? {
+        Self.inputControllerClient(from: client())
     }
 
-    private func handle(intent: InputKeyIntent, client sender: Any!) -> Bool {
-        switch intent {
-        case .append(let text):
-            return appendComposition(text, client: sender)
-        case .symbol(let text):
-            if rawBuffer.isEmpty {
-                reloadInputModeDefaultsIfNeeded(client: sender)
-            }
-            guard let symbol = symbolTransformer.text(for: text, state: inputModeRuntime.state) else {
-                return appendComposition(text, client: sender)
-            }
-            return commitSymbol(symbol, client: sender)
-        case .deleteBackward:
-            guard !rawBuffer.isEmpty else {
-                return false
-            }
-            rawBuffer.removeLast()
-            if rawBuffer.isEmpty {
-                resetAnchorState()
-            }
-            invalidateSuggestion()
-            publishLocalSuggestion(client: sender)
-            refreshSuggestion(client: sender)
-            return true
-        case .action(let action):
-            if action == .toggleSymbolMode {
-                inputModeRuntime.togglePunctuationMode()
-                return true
-            }
-            return commit(action: action, client: sender)
-        case .cancelComposition:
-            guard !rawBuffer.isEmpty else {
-                return false
-            }
-            resetComposition(client: sender)
-            refreshComposition(client: sender)
-            return true
-        case .selectCandidate(let number):
-            if candidatePanelState.windowState.isVisible {
-                if number == 0,
-                   let result = InputSessionCommitPolicy.resultForCandidateNumber(
-                       number,
-                       rawInput: rawBuffer,
-                       suggestion: lastSuggestion,
-                       suggestionRawInput: lastSuggestionRawInput
-                   ) {
-                    return applyCommitResult(result, client: sender)
-                }
-                if let visibleSelection = candidatePanelState.selectVisiblePrefixCandidate(shortcutNumber: number),
-                   let inputSelection = inputCandidateSelection(
-                       for: visibleSelection,
-                       in: candidatePanelState.windowState.viewModel
-                   ),
-                   let selectedCandidate = sessionSelection(from: inputSelection) {
-                    selectedNativeCandidate = inputSelection
-                    let result = InputSessionCommitPolicy.result(
-                        for: .space,
-                        rawInput: rawBuffer,
-                        suggestion: lastSuggestion,
-                        suggestionRawInput: lastSuggestionRawInput,
-                        selectedCandidate: selectedCandidate,
-                        appBundleID: appBundleIdentifier(client: sender),
-                        locale: locale
-                    )
-                    learnSelectedPrefix(action: .space, result: result)
-                    return applyCommitResult(result, client: sender)
-                }
-                return appendComposition(String(number), client: sender)
-            }
-            return appendComposition(String(number), client: sender)
-        case .moveCandidateSelection(let navigation):
-            return moveCandidateSelection(navigation)
-        case .modifierFlagsChanged:
-            return false
-        case .ignored:
-            return false
-        }
+    fileprivate func performSuperUpdateComposition() {
+        super.updateComposition()
     }
 
-    private func appendComposition(_ text: String, client sender: Any!) -> Bool {
-        beginCompositionIfNeeded(client: sender)
-        rawBuffer.append(text)
-        invalidateSuggestion()
-        publishLocalSuggestion(client: sender)
-        refreshSuggestion(client: sender)
-        return true
-    }
-
-    private func commitSymbol(_ symbol: String, client sender: Any!) -> Bool {
-        guard !rawBuffer.isEmpty else {
-            insert(symbol, client: sender)
-            return true
-        }
-
-        let baseResult = commitResult(for: .space, client: sender)
-        return applyCommitResult(
-            InputSymbolCommitPolicy.result(
-                symbol: symbol,
-                rawInput: rawBuffer,
-                baseCommitResult: baseResult
-            ),
-            client: sender
-        )
-    }
-
-    private func refreshSuggestion(client sender: Any!) {
-        suggestionTask?.cancel()
-        let rawInput = rawBuffer
-        guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawInput) else {
-            return
-        }
-        let appBundleID = appBundleIdentifier(client: sender)
-        let selectionHistory = userSelectionHistory
-        suggestionTask = Task { [weak self] in
-            guard let self else {
-                return
-            }
-            let suggestion = await self.sessionController.update(
-                rawInput: rawInput,
-                appBundleID: appBundleID,
-                locale: self.locale,
-                userSelectionHistory: selectionHistory
-            )
-            guard !Task.isCancelled else {
-                return
-            }
-            await MainActor.run {
-                let currentClient = self.client()
-                guard SuggestionPublicationGuard.shouldPublish(
-                    requestedRawInput: rawInput,
-                    currentRawInput: self.rawBuffer,
-                    isCancelled: Task.isCancelled
-                ) else {
-                    return
-                }
-                self.lastSuggestion = suggestion
-                self.lastSuggestionRawInput = rawInput
-                self.refreshComposition(client: currentClient)
-                self.updateCandidatePanel(suggestion: suggestion, client: currentClient)
-            }
-        }
-    }
-
-    private func appBundleIdentifier(client sender: Any!) -> String? {
-        (sender as? IMKTextInput)?.bundleIdentifier()
-    }
-
-    private func publishLocalSuggestion(client sender: Any!) {
-        guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
-            lastSuggestion = nil
-            lastSuggestionRawInput = nil
-            refreshComposition(client: sender)
-            updateCandidatePanel(suggestion: nil, client: sender)
-            return
-        }
-
-        let context = InputContext(
-            rawInput: rawBuffer,
-            appBundleID: appBundleIdentifier(client: sender),
-            locale: locale,
-            userSelectionHistory: userSelectionHistory
-        )
-        let suggestion = InputMethodPipeline.localSuggestions(
-            for: context,
-            includeFallbackContinuations: !hasProvider,
-            traditionalInputEngine: traditionalInputEngine
-        )
-        lastSuggestion = suggestion
-        lastSuggestionRawInput = rawBuffer
-        refreshComposition(client: sender)
-        updateCandidatePanel(suggestion: suggestion, client: sender)
-    }
-
-    @discardableResult
-    private func commit(action: InputAction, client sender: Any!) -> Bool {
-        let result = commitResult(for: action, client: sender)
-        learnSelectedPrefix(action: action, result: result)
-        return applyCommitResult(result, client: sender)
-    }
-
-    @discardableResult
-    private func applyCommitResult(_ result: InputCommitResult, client sender: Any!) -> Bool {
-        switch InputCommitResultPolicy.directive(for: result) {
-        case .insertAndReset(let text):
-            insert(text, client: sender)
-            resetComposition(client: sender)
-            return true
-        case .requestPolishAndKeepComposition(let text):
-            Task { [sessionController] in
-                await sessionController.requestPolish(rawInput: text)
-            }
-            refreshComposition(client: sender)
-            return true
-        case .keepComposition:
-            refreshComposition(client: sender)
-            return true
-        case .noAction:
-            return InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: !rawBuffer.isEmpty)
-        }
-    }
-
-    private func learnSelectedPrefix(action: InputAction, result: InputCommitResult) {
-        guard case .commit(let committedText) = result,
-              !committedText.isEmpty,
-              action != .optionR,
-              let prefix = selectedPrefixTextForLearning(),
-              prefix != rawBuffer,
-              committedText.hasPrefix(prefix) else {
-            return
-        }
-        recordUserSelection(prefix)
-    }
-
-    private func selectedPrefixTextForLearning() -> String? {
-        if let selectedNativeCandidate {
-            switch selectedNativeCandidate.kind {
-            case .rawInput:
-                return nil
-            case .prefixCandidate(let index):
-                return lastSuggestion?.prefixCandidates[safe: index]?.text
-            case .continuationCandidate:
-                return lastSuggestion?.prefixCandidates.first?.text
-            }
-        }
-
-        switch candidatePanelState.windowState.selection {
-        case .prefixCandidate(let index):
-            return lastSuggestion?.prefixCandidates[safe: index]?.text
-        case .continuationCandidate:
-            return lastSuggestion?.prefixCandidates.first?.text
-        case .rawInput, .none:
-            return lastSuggestion?.prefixCandidates.first?.text
-        }
-    }
-
-    private func recordUserSelection(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return
-        }
-        if let userSelectionHistoryPersistence {
-            userSelectionHistory = userSelectionHistoryPersistence.recordSelection(
-                trimmed,
-                currentHistory: userSelectionHistory,
-                maxEntries: Self.maxUserSelectionHistory
-            )
-            return
-        }
-
-        userSelectionHistory.append(trimmed)
-        if userSelectionHistory.count > Self.maxUserSelectionHistory {
-            userSelectionHistory.removeFirst(userSelectionHistory.count - Self.maxUserSelectionHistory)
-        }
-    }
-
-    private func flushUserSelectionHistory() {
-        userSelectionHistoryPersistence?.flushHistory(
-            userSelectionHistory,
-            maxEntries: Self.maxUserSelectionHistory
-        )
-    }
-
-    private func commitResult(for action: InputAction, client sender: Any!) -> InputCommitResult {
-        if case .optionNumber = action,
-           !candidatePanelState.windowState.isVisible {
-            return .noAction
-        }
-
-        return InputSessionCommitPolicy.result(
-            for: action,
-            rawInput: rawBuffer,
-            suggestion: lastSuggestion,
-            suggestionRawInput: lastSuggestionRawInput,
-            selectedCandidate: sessionSelection(from: selectedNativeCandidate),
-            appBundleID: appBundleIdentifier(client: sender),
-            locale: locale,
-            traditionalInputEngine: traditionalInputEngine
-        )
-    }
-
-    private func insert(_ text: String, client sender: Any!) {
-        if let client = sender as? IMKTextInput {
-            client.insertText(text, replacementRange: replacementRangeForCommit(client))
-        }
-    }
-
-    private func resetComposition(client sender: Any!) {
-        rawBuffer = ""
-        resetAnchorState()
-        invalidateSuggestion()
-        hideCandidatePanel()
-    }
-
-    private func beginCompositionIfNeeded(client sender: Any!) {
-        if rawBuffer.isEmpty {
-            reloadInputModeDefaultsIfNeeded(client: sender)
-            reloadRuntimeLexiconEngineIfNeeded()
-            compositionID += 1
-            anchorResolver.reset()
-        }
-    }
-
-    private func reloadInputModeDefaultsIfNeeded(client sender: Any!) {
-        inputModeRuntime.reloadIfChanged(
-            preferences: inputModePreferenceStore.loadPreferences(),
-            appBundleID: appBundleIdentifier(client: sender)
-        )
-    }
-
-    private func reloadRuntimeLexiconEngineIfNeeded() {
-        let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
-        let snapshot = lexiconRuntime.snapshot()
-        guard snapshot != lexiconRuntimeSnapshot else {
-            return
-        }
-
-        traditionalInputEngine = lexiconRuntime.makeEngine()
-        lexiconRuntimeSnapshot = snapshot
-        sessionController = InputSessionController(
-            provider: provider,
-            traditionalInputEngine: traditionalInputEngine
-        )
-        invalidateSuggestion()
-    }
-
-    private func resetAnchorState() {
-        compositionID += 1
-        anchorResolver.reset()
-    }
-
-    private func invalidateSuggestion() {
-        lastSuggestion = nil
-        lastSuggestionRawInput = nil
-        selectedNativeCandidate = nil
-        suggestionTask?.cancel()
-        suggestionTask = nil
-    }
-
-    private func updateCandidatePanel(suggestion: SuggestionResponse?, client sender: Any!) {
-        guard !rawBuffer.isEmpty || suggestion != nil else {
-            hideCandidatePanel()
-            return
-        }
-        updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: sender))
-    }
-
-    private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
-        let isDisplayable = anchorResult.source != .none
-        candidatePanelState.update(
-            rawInput: rawBuffer,
-            suggestion: suggestion,
-            anchorRect: anchorResult.rect,
-            isDisplayable: isDisplayable
-        )
-        selectedNativeCandidate = candidatePanelState.windowState.isVisible
-            ? inputCandidateSelection(
-                for: candidatePanelState.windowState.selection,
-                in: candidatePanelState.windowState.viewModel
-            )
-            : nil
+    fileprivate func updateCandidatePanelWindow(state: CandidatePanelState, locale: KnowTypeLocale) {
         MainActor.assumeIsolated {
-            candidatePanelController.update(state: candidatePanelState, locale: locale)
+            candidatePanelController.update(state: state, locale: locale)
         }
     }
 
-    private func hideCandidatePanel() {
-        candidatePanelState.hide()
-        selectedNativeCandidate = nil
-        anchorResolver.reset()
+    fileprivate func hideCandidatePanelWindow() {
         MainActor.assumeIsolated {
             candidatePanelController.hide()
         }
     }
 
-    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
-        guard candidatePanelState.moveSelection(navigation) else {
-            return false
-        }
-        selectedNativeCandidate = inputCandidateSelection(
-            for: candidatePanelState.windowState.selection,
-            in: candidatePanelState.windowState.viewModel
-        )
-        MainActor.assumeIsolated {
-            candidatePanelController.update(state: candidatePanelState, locale: locale)
-        }
-        return true
-    }
-
-    private func candidateAnchorResult(client sender: Any!) -> CandidateAnchorResult {
-        let geometryClient = (sender as? IMKTextInput).map(IMKTextInputGeometryAdapter.init(client:))
-        return anchorResolver.resolve(
-            client: geometryClient,
-            context: CandidateAnchorContext(
-                compositionID: compositionID,
-                appBundleID: appBundleIdentifier(client: sender)
-            )
-        )
-    }
-
-    private func selectNativeCandidate(matching text: String?) {
-        guard let text,
-              let selection = displayedNativeCandidates.first(where: { $0.text == text }) else {
-            selectedNativeCandidate = nil
-            return
-        }
-        selectedNativeCandidate = selection
-    }
-
-    private func inputCandidateSelection(
-        for selection: CandidatePanelSelection?,
-        in viewModel: CandidatePanelViewModel
-    ) -> InputCandidateSelection? {
-        guard let selection else {
-            return nil
-        }
-
-        switch selection {
-        case .rawInput:
-            guard !viewModel.rawInput.isEmpty else {
-                return nil
-            }
-            return InputCandidateSelection(text: viewModel.rawInput, kind: .rawInput)
-        case .prefixCandidate(let index):
-            guard viewModel.prefixCandidates.indices.contains(index) else {
-                return nil
-            }
-            return InputCandidateSelection(
-                text: viewModel.prefixCandidates[index].text,
-                kind: .prefixCandidate(index: index)
-            )
-        case .continuationCandidate(let index):
-            guard viewModel.continuationCandidates.indices.contains(index) else {
-                return nil
-            }
-            return InputCandidateSelection(
-                text: viewModel.continuationCandidates[index].text,
-                kind: .continuationCandidate(index: index)
-            )
-        }
-    }
-
-    private func sessionSelection(from selection: InputCandidateSelection?) -> InputSessionCandidateSelection? {
-        guard let selection else {
-            return nil
-        }
-        switch selection.kind {
-        case .rawInput:
-            return .rawInput
-        case .prefixCandidate(let index):
-            return .prefixCandidate(index: index)
-        case .continuationCandidate(let index):
-            return .continuationCandidate(index: index)
-        }
-    }
-
-    private func refreshComposition(client sender: Any!) {
+    static func inputControllerClient(from sender: Any!) -> InputControllerClient? {
         guard let client = sender as? IMKTextInput else {
-            super.updateComposition()
-            return
-        }
-
-        let markedText = (lastSuggestion?.prefixCandidates.first?.text).flatMap { $0.isEmpty ? nil : $0 } ?? rawBuffer
-        guard !markedText.isEmpty else {
-            clearMarkedText(client)
-            return
-        }
-
-        let replacement = activeMarkedRange(for: client) ?? NSRange(location: NSNotFound, length: NSNotFound)
-        client.setMarkedText(
-            markedText,
-            selectionRange: NSRange(location: (markedText as NSString).length, length: 0),
-            replacementRange: replacement
-        )
-        scheduleDelayedCandidateReanchor(
-            client: client,
-            rawInput: rawBuffer,
-            compositionID: compositionID
-        )
-    }
-
-    private func clearMarkedText(_ client: IMKTextInput) {
-        guard let markedRange = activeMarkedRange(for: client) else {
-            super.updateComposition()
-            return
-        }
-        client.setMarkedText(
-            "",
-            selectionRange: NSRange(location: 0, length: 0),
-            replacementRange: markedRange
-        )
-    }
-
-    private func replacementRangeForCommit(_ client: IMKTextInput) -> NSRange {
-        activeMarkedRange(for: client) ?? NSRange(location: NSNotFound, length: NSNotFound)
-    }
-
-    private func activeMarkedRange(for client: IMKTextInput) -> NSRange? {
-        let markedRange = client.markedRange()
-        guard markedRange.location != NSNotFound,
-              markedRange.length != NSNotFound else {
             return nil
         }
-        return markedRange
-    }
-
-    private func scheduleDelayedCandidateReanchor(
-        client: IMKTextInput,
-        rawInput: String,
-        compositionID: Int
-    ) {
-        let clientObject = client as AnyObject
-        DispatchQueue.main.async { [weak self, weak clientObject] in
-            guard let self,
-                  let client = clientObject as? IMKTextInput,
-                  CandidateAnchorRefreshPolicy.shouldApplyDelayedAnchor(
-                    snapshotRawInput: rawInput,
-                    currentRawInput: self.rawBuffer,
-                    snapshotCompositionID: compositionID,
-                    currentCompositionID: self.compositionID,
-                    hasActiveComposition: !self.rawBuffer.isEmpty
-                  ) else {
-                return
-            }
-            self.updateCandidatePanel(
-                suggestion: self.lastSuggestion,
-                anchorResult: self.candidateAnchorResult(client: client)
-            )
-        }
+        return IMKInputControllerClientAdapter(client: client)
     }
 
     private func modifierSet(from flags: Int) -> Set<InputModifier> {
@@ -712,14 +174,31 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             return nil
         }
     }
-
-    private static let textOnlyKeyCode = -1
-    private static let maxUserSelectionHistory = 64
 }
-#endif
 
-private extension Collection {
-    subscript(safe index: Index) -> Element? {
-        indices.contains(index) ? self[index] : nil
+private final class IMKInputControllerHostAdapter: InputControllerHost, @unchecked Sendable {
+    fileprivate weak var controller: KnowTypeInputController?
+
+    var currentClient: InputControllerClient? {
+        controller?.currentInputControllerClient
+    }
+
+    func updateComposition() {
+        controller?.performSuperUpdateComposition()
+    }
+
+    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale) {
+        controller?.updateCandidatePanelWindow(state: state, locale: locale)
+    }
+
+    func hideCandidatePanel() {
+        controller?.hideCandidatePanelWindow()
+    }
+
+    func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
+        DispatchQueue.main.async {
+            operation()
+        }
     }
 }
+#endif
