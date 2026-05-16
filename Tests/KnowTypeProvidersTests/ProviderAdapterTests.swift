@@ -161,6 +161,47 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(bodyObject["model"] as? String, "local-model-a")
     }
 
+    func testOpenAIChatDiscoverySkipsClearlyNonCompletionModels() async throws {
+        let content = #"{"candidates":[{"text":"completion model response"}]}"#
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":[{"id":"gpt-image-2"},{"id":"text-embedding-3-small"},{"id":"nomic-embed-text"},{"id":"mxbai-embed-large"},{"id":"local-chat-model"}]}"#, statusCode: 200),
+            (json: #"{"choices":[{"message":{"content":"\#(content.replacingOccurrences(of: "\"", with: "\\\""))"}}]}"#, statusCode: 200)
+        ])
+        let provider = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://localhost:8000/v1")!,
+                model: ""
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let requests = await client.capturedRequests()
+        let body = try XCTUnwrap(requests.last?.httpBody)
+        let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertEqual(response.candidates.first?.text, "completion model response")
+        XCTAssertEqual(bodyObject["model"] as? String, "local-chat-model")
+    }
+
+    func testOpenAIModelDiscoveryAllowsEmbedSubstringInCompletionModelName() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":[{"id":"embedded-chat-model"},{"id":"local-chat-model"}]}"#, statusCode: 200)
+        ])
+        let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
+
+        let model = try await discovery.resolvedModel(
+            for: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://localhost:8000")!,
+                model: ""
+            )
+        )
+
+        XCTAssertEqual(model, "embedded-chat-model")
+    }
+
     func testOpenAIChatDiscoveryNormalizesTrailingV1BaseURL() async throws {
         let content = #"{"candidates":[{"text":"local continuation"}]}"#
         let client = SequencedMockHTTPClient(responses: [
@@ -285,6 +326,26 @@ final class ProviderAdapterTests: XCTestCase {
             XCTFail("Expected empty model discovery to throw")
         } catch {
             XCTAssertEqual(error as? ProviderError, .invalidResponse("empty models data"))
+        }
+    }
+
+    func testOpenAIModelDiscoveryThrowsWhenOnlyNonCompletionModelsExist() async throws {
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"data":[{"id":"gpt-image-2"},{"id":"text-embedding-3-small"},{"id":"nomic-embed-text"},{"id":"mxbai-embed-large"}]}"#, statusCode: 200)
+        ])
+        let discovery = OpenAICompatibleModelDiscovery(httpClient: client)
+
+        do {
+            _ = try await discovery.resolvedModel(
+                for: ProviderConfiguration(
+                    kind: .openAIChat,
+                    baseURL: URL(string: "http://localhost:8000")!,
+                    model: ""
+                )
+            )
+            XCTFail("Expected non-completion model discovery to throw")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("no completion-capable models data"))
         }
     }
 
