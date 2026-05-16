@@ -74,22 +74,43 @@ if ! command -v codesign >/dev/null 2>&1; then
   exit 1
 fi
 
-DESIGNATED_REQUIREMENT="$(
-  codesign -dr - "$BUNDLE_PATH" 2>&1 | sed -n 's/^designated => //p'
-)"
-
-if [[ -z "$DESIGNATED_REQUIREMENT" ]]; then
-  echo "error: could not read the bundle designated requirement" >&2
-  exit 1
-fi
-
-CODESIGN_DETAILS="$(codesign -dv "$BUNDLE_PATH" 2>&1 || true)"
+CODESIGN_DETAILS="$(codesign -dvvv "$BUNDLE_PATH" 2>&1 || true)"
 
 codesign_value() {
   local key="$1"
   printf '%s\n' "$CODESIGN_DETAILS" |
     awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }'
 }
+
+DESIGNATED_REQUIREMENT_OUTPUT="$(codesign -dr - "$BUNDLE_PATH" 2>&1 || true)"
+DESIGNATED_REQUIREMENT="$(
+  printf '%s\n' "$DESIGNATED_REQUIREMENT_OUTPUT" |
+    sed -n 's/^designated => //p' |
+    head -n 1
+)"
+REQUIREMENT_SOURCE="codesign designated requirement"
+
+if [[ -z "$DESIGNATED_REQUIREMENT" ]]; then
+  DESIGNATED_REQUIREMENT="$(
+    printf '%s\n' "$DESIGNATED_REQUIREMENT_OUTPUT" |
+      sed -n 's/^# designated => //p' |
+      head -n 1
+  )"
+  REQUIREMENT_SOURCE="codesign implied designated requirement"
+fi
+
+if [[ -z "$DESIGNATED_REQUIREMENT" ]]; then
+  CD_HASH="$(codesign_value "CDHash")"
+  if [[ -n "$CD_HASH" ]]; then
+    DESIGNATED_REQUIREMENT="cdhash H\"$CD_HASH\""
+    REQUIREMENT_SOURCE="codesign CDHash fallback"
+  fi
+fi
+
+if [[ -z "$DESIGNATED_REQUIREMENT" ]]; then
+  echo "error: could not read or derive the bundle designated requirement" >&2
+  exit 1
+fi
 
 SIGNING_IDENTIFIER="$(codesign_value "Identifier")"
 TEAM_IDENTIFIER="$(codesign_value "TeamIdentifier")"
@@ -181,6 +202,7 @@ cat <<EOF
 Created: $OUTPUT_PATH
 Bundle: $BUNDLE_PATH
 Requirement: $DESIGNATED_REQUIREMENT
+Requirement Source: $REQUIREMENT_SOURCE
 PayloadIdentifier: com.knowtype.local.systempolicy
 Rule PayloadIdentifier: com.knowtype.local.systempolicy.rule
 Rule PayloadType: com.apple.systempolicy.rule

@@ -76,6 +76,35 @@ codesign_value() {
     awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }'
 }
 
+codesign_requirement() {
+  local bundle_path="$1"
+  local output
+  local requirement
+  output="$(codesign -dr - "$bundle_path" 2>&1 || true)"
+  requirement="$(
+    printf '%s\n' "$output" |
+      sed -n 's/^designated => //p' |
+      head -n 1
+  )"
+  if [[ -z "$requirement" ]]; then
+    requirement="$(
+      printf '%s\n' "$output" |
+        sed -n 's/^# designated => //p' |
+        head -n 1
+    )"
+  fi
+  if [[ -z "$requirement" ]]; then
+    local details
+    local cd_hash
+    details="$(codesign -dvvv "$bundle_path" 2>&1 || true)"
+    cd_hash="$(codesign_value "CDHash" "$details")"
+    if [[ -n "$cd_hash" ]]; then
+      requirement="cdhash H\"$cd_hash\""
+    fi
+  fi
+  printf '%s' "$requirement"
+}
+
 if [[ ! -x "$PLIST_BUDDY" ]]; then
   die "PlistBuddy is unavailable at $PLIST_BUDDY"
 fi
@@ -102,7 +131,7 @@ source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 declare -F knowtype_inputsource_tool >/dev/null ||
   die "scripts/lib/inputsource-tool.sh did not load knowtype_inputsource_tool"
 
-bundle_path="$("$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
+bundle_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"
 assert_dir "$bundle_path"
 assert_file "$bundle_path/Contents/Info.plist"
@@ -126,10 +155,11 @@ profile_output="$("$ROOT_DIR/scripts/create-local-system-policy-profile.sh" --pa
 assert_file "$profile_path"
 plutil -lint "$profile_path" >/dev/null
 
-expected_requirement="$(codesign -dr - "$bundle_path" 2>&1 | sed -n 's/^designated => //p')"
-[[ -n "$expected_requirement" ]] || die "codesign did not return a designated requirement"
+expected_requirement="$(codesign_requirement "$bundle_path")"
+[[ -n "$expected_requirement" ]] || die "codesign did not return or allow deriving a requirement"
 actual_requirement="$(plist_read ":PayloadContent:0:Requirement" "$profile_path")"
 assert_equals "$expected_requirement" "$actual_requirement" "SystemPolicyRule requirement"
+codesign -R "=$actual_requirement" -v "$bundle_path"
 
 assert_equals "com.knowtype.local.systempolicy" \
   "$(plist_read ":PayloadIdentifier" "$profile_path")" \
@@ -156,14 +186,14 @@ assert_contains "$profile_output" "Bundle: $bundle_path" "profile script output"
 assert_contains "$profile_output" "PayloadIdentifier: com.knowtype.local.systempolicy" "profile script output"
 assert_contains "$profile_output" "Rule PayloadType: com.apple.systempolicy.rule" "profile script output"
 assert_contains "$profile_output" "Requirement: $expected_requirement" "profile script output"
+assert_contains "$profile_output" "Requirement Source:" "profile script output"
 
-codesign_details="$(codesign -dv "$bundle_path" 2>&1)"
+codesign_details="$(codesign -dvvv "$bundle_path" 2>&1)"
 signing_identifier="$(codesign_value "Identifier" "$codesign_details")"
 team_identifier="$(codesign_value "TeamIdentifier" "$codesign_details")"
 signature_kind="$(codesign_value "Signature" "$codesign_details")"
 
 if [[ -n "$signing_identifier" ]]; then
-  assert_contains "$actual_requirement" "$signing_identifier" "designated requirement"
   assert_contains "$rule_comment" "identifier=$signing_identifier" "rule Comment"
   assert_contains "$profile_output" "Signing Identifier: $signing_identifier" "profile script output"
 fi
