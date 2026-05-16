@@ -74,6 +74,10 @@ Xcode
 - Type identifiers containing API, JSON, macOS, InputMethodKit, snake_case, and camelCase.
 - Verify: technical tokens and code-like snippets are preserved.
 
+WeChat or Feishu chat field
+- Type normal chat text and use Space, Tab, Option+1, and Option+R.
+- Verify: candidate window remains visible and shortcuts do not conflict with the tested field.
+
 Provider failure
 - Disable or misconfigure the provider temporarily.
 - Verify: traditional prefix candidates still appear and typing is not blocked.
@@ -112,6 +116,8 @@ write_report() {
 | Electron/Codex-style field | \`nishishei\`, \`ni\` | marked text and candidate paging remain usable | pending | |
 | Terminal | \`/Users/zq/project/KnowType\`, \`swift test\` | Level 0 unchanged, no provider dependency | pending | |
 | Xcode | \`API JSON macOS InputMethodKit snake_case camelCase\` | technical tokens preserved | pending | |
+| WeChat chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
+| Feishu chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
 | Provider failure | provider disabled or invalid endpoint | traditional candidates still usable | pending | |
 
 ## Screenshots Or Logs
