@@ -20,7 +20,7 @@ Runtime provider loading is profile-based:
 - `ProviderFactory` maps `ProviderKind` to the concrete adapter.
 - `ProviderConnectionDiagnostic` builds a provider and sends a small prefix-locked continuation request to verify the configured endpoint.
 - `ProviderConfiguration.endpoint(path:)` normalizes OpenAI-compatible `/v1` base URLs with or without a trailing slash before appending adapter paths.
-- `OpenAICompatibleModelDiscovery` may resolve blank or placeholder model IDs only for local OpenAI-compatible runtimes.
+- `OpenAICompatibleModelDiscovery` may resolve blank or placeholder model IDs only for local OpenAI-compatible runtimes, and skips model IDs that are clearly not completion-capable.
 
 Profile JSON must not store API key values represented by `secretName`. Custom headers are written to JSON as configured and should not contain secrets in the MVP.
 

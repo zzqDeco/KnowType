@@ -26,7 +26,7 @@ public actor OpenAICompatibleModelDiscovery: ProviderModelDiscovering {
             return cached
         }
 
-        let discovered = try await discoverFirstModelID(configuration: configuration)
+        let discovered = try await discoverPreferredModelID(configuration: configuration)
         cache[key] = discovered
         return discovered
     }
@@ -60,7 +60,7 @@ public actor OpenAICompatibleModelDiscovery: ProviderModelDiscovering {
             || host.hasSuffix(".local")
     }
 
-    private func discoverFirstModelID(configuration: ProviderConfiguration) async throws -> String {
+    private func discoverPreferredModelID(configuration: ProviderConfiguration) async throws -> String {
         var request = URLRequest(url: configuration.endpoint(path: "/v1/models"))
         request.timeoutInterval = configuration.timeoutSeconds
         request.httpMethod = "GET"
@@ -81,17 +81,36 @@ public actor OpenAICompatibleModelDiscovery: ProviderModelDiscovering {
             throw ProviderError.invalidResponse("missing models data")
         }
 
-        guard let modelID = models.compactMap({ model -> String? in
+        let modelIDs = models.compactMap { model -> String? in
             guard let id = model["id"] as? String else {
                 return nil
             }
             let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
-        }).first else {
+        }
+
+        guard !modelIDs.isEmpty else {
             throw ProviderError.invalidResponse("empty models data")
         }
 
+        guard let modelID = modelIDs.first(where: Self.isLikelyCompletionModel) else {
+            throw ProviderError.invalidResponse("no completion-capable models data")
+        }
         return modelID
+    }
+
+    private static func isLikelyCompletionModel(_ modelID: String) -> Bool {
+        let lowercased = modelID.lowercased()
+        let unsupportedFragments = [
+            "dall-e",
+            "embedding",
+            "gpt-image",
+            "image",
+            "moderation",
+            "tts",
+            "whisper"
+        ]
+        return unsupportedFragments.allSatisfy { !lowercased.contains($0) }
     }
 
     private func cacheKey(for configuration: ProviderConfiguration) -> String {
