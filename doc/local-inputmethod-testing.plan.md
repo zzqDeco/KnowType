@@ -49,9 +49,20 @@ it, verify:
 
 ```bash
 spctl --assess --type execute --verbose=4 "$HOME/Library/Input Methods/KnowType.app"
-./scripts/select-inputmethod.sh --require-selected
 ./scripts/diagnose-inputmethod.sh --strict --logs --log-lookback 10m
+./scripts/select-inputmethod.sh --require-selected --no-diagnose
 ```
+
+For a repeatable acceptance pass, run the harness after installing the bundle
+and any required local policy profile:
+
+```bash
+./scripts/accept-inputmethod-local.sh --strict --print-checklist
+```
+
+Use `--install` only when the harness should rebuild and copy the bundle. Use
+`--select` only after the target text app is active, because selection is scoped
+to the active text input context.
 
 Remove the profile after local testing unless this specific Apple Development
 build should remain allowed on the machine.

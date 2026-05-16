@@ -114,6 +114,7 @@ while IFS= read -r script_path; do
 done < <(find "$ROOT_DIR/scripts" -type f -name '*.sh' | sort)
 
 help_scripts=(
+  "$ROOT_DIR/scripts/accept-inputmethod-local.sh"
   "$ROOT_DIR/scripts/build-inputmethod-bundle.sh"
   "$ROOT_DIR/scripts/create-local-system-policy-profile.sh"
   "$ROOT_DIR/scripts/diagnose-inputmethod.sh"

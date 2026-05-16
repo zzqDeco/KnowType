@@ -12,7 +12,8 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - `./scripts/install-inputmethod.sh` copies the bundle to `~/Library/Input Methods/KnowType.app`.
 - `./scripts/diagnose-inputmethod.sh --strict` passes after install, confirming bundle metadata, signing, Text Input Source registration, and packaged resources.
 - On macOS 15+, if Gatekeeper rejects an Apple Development build, generate and manually install the local SystemPolicyRule profile with `./scripts/create-local-system-policy-profile.sh --open`, then rerun diagnostics before judging selection behavior.
-- Activate the target text app, then use `./scripts/select-inputmethod.sh --require-selected` as a selection preflight. Acceptance still requires typing a real probe in that target app.
+- Activate the target text app, then use `./scripts/select-inputmethod.sh --require-selected --no-diagnose` as a selection preflight after diagnostics have already run. Acceptance still requires typing a real probe in that target app.
+- `./scripts/accept-inputmethod-local.sh` runs the repeatable local acceptance harness. By default it performs script/profile smoke, diagnostics, and report-template generation without selecting an input source; pass `--install` or `--select` only when intentionally mutating the local macOS session.
 - KnowType can be enabled from System Settings > Keyboard > Text Input > Input Sources.
 - `./scripts/uninstall-inputmethod.sh` removes the local bundle after verification.
 - This gate covers local MVP packaging only; signed installer, notarization, update flow, and App Store packaging are follow-up work.
@@ -32,6 +33,10 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - Provider resolution pulls secrets through `SecretStore`.
 
 ## Manual macOS Scenarios
+
+The harness writes `dist/KnowTypeLocalIMEAcceptance.md` with these probes and
+evidence fields. Fill that report during local acceptance instead of treating a
+successful script run as proof of target-app typing behavior.
 
 - TextEdit:
   - Type `wo jue de zhege fagnan`.
@@ -71,11 +76,16 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - Provider profile JSON stores `secretName` for API keys, never the API key value itself. Custom headers are persisted as configured and should not contain secrets in the MVP.
 - API keys are created, read, and deleted through Keychain-backed `SecretStore` on macOS.
 - Provider runtime loading selects the adapter from `ProviderKind` and normalizes all responses into `LLMResponse`.
-- Cloud failure fallback:
-  - Simulate a provider error, timeout, or invalid response.
+- No-provider fallback:
+  - Disable provider configuration.
   - Local correction still returns a prefix candidate.
   - Local fallback continuation is used when available.
-  - Level 0 protected input still produces no continuation candidates.
+- Configured provider failure:
+  - Simulate a provider error, timeout, invalid endpoint, or invalid response.
+  - Local correction still returns a prefix candidate.
+  - Continuation rows may be absent; KnowType must not show mock AI continuation text as if it came from the configured provider.
+  - Typing and prefix commit remain available.
+- Level 0 protected input still produces no continuation candidates.
 - Level 0 no-cloud:
   - URLs, emails, paths, command-like input, code-like snippets, Terminal, iTerm, and Xcode contexts must use the no-provider pipeline.
   - No HTTP request is made for Level 0 input.
