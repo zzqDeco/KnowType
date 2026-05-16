@@ -55,11 +55,8 @@ enum CandidatePanelWindowPlacement {
         }
 
         let anchor = CandidateAnchorValidation.normalized(anchorRect)
-        guard let visibleFrame = visibleFrame(containing: anchor, screenProvider: screenProvider) else {
-            return NSPoint(
-                x: max(visibleFrameInset, anchor.minX),
-                y: max(visibleFrameInset, anchor.minY - contentSize.height - verticalAnchorSpacing)
-            )
+        guard let visibleFrame = screenProvider.screen(containing: anchor)?.visibleFrame else {
+            return nil
         }
 
         let minX = visibleFrame.minX + visibleFrameInset
@@ -73,17 +70,6 @@ enum CandidatePanelWindowPlacement {
             x: clamp(anchor.minX, minimum: minX, maximum: maxX),
             y: clamp(preferredY < minY ? fallbackY : preferredY, minimum: minY, maximum: maxY)
         )
-    }
-
-    private static func visibleFrame(
-        containing rect: CGRect,
-        screenProvider: ScreenGeometryProviding
-    ) -> CGRect? {
-        let screens = screenProvider.screens
-        let point = CGPoint(x: rect.midX, y: rect.midY)
-        return screens.first { $0.frame.contains(point) }?.visibleFrame
-            ?? screens.first { $0.frame.intersects(rect) }?.visibleFrame
-            ?? screens.first?.visibleFrame
     }
 
     private static func clamp(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {

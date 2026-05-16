@@ -81,6 +81,32 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         )
     }
 
+    func testPlacementUsesValidatedScreenForCaretJustOutsideSecondaryDisplayFrame() {
+        let screenProvider = FakeCandidatePanelScreenProvider(
+            screens: [
+                CandidateAnchorScreen(
+                    identifier: "main",
+                    frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+                    visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 600)
+                ),
+                CandidateAnchorScreen(
+                    identifier: "secondary",
+                    frame: CGRect(x: 1_000, y: 0, width: 800, height: 600),
+                    visibleFrame: CGRect(x: 1_000, y: 0, width: 800, height: 600)
+                )
+            ]
+        )
+
+        XCTAssertEqual(
+            CandidatePanelWindowPlacement.origin(
+                for: CGRect(x: 999, y: 300, width: 0, height: 18),
+                contentSize: NSSize(width: 240, height: 36),
+                screenProvider: screenProvider
+            ),
+            NSPoint(x: 1_008, y: 258)
+        )
+    }
+
     @MainActor
     func testUpdateOrdersOutForVisibleStateWithNoUsableAnchor() {
         let contentView = FakeCandidatePanelContentRenderer(fittingSize: NSSize(width: 220, height: 36))
