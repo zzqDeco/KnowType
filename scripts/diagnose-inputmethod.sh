@@ -140,7 +140,7 @@ if [[ -f "$INFO_PLIST" ]]; then
   expect_plist_value "InputMethodConnectionName" "com.knowtype.inputmethod.KnowType_Connection" "$INFO_PLIST"
   expect_plist_value "InputMethodServerControllerClass" "KnowTypeInputController" "$INFO_PLIST"
   expect_plist_value "InputMethodServerDelegateClass" "KnowTypeInputController" "$INFO_PLIST"
-  expect_plist_value "LSBackgroundOnly" "false" "$INFO_PLIST"
+  expect_plist_value "LSBackgroundOnly" "true" "$INFO_PLIST"
   expect_plist_value "LSHasLocalizedDisplayName" "true" "$INFO_PLIST"
   if [[ -n "$(plist_value "TISIconIsTemplate" "$INFO_PLIST")" ]]; then
     warn "Info.plist contains private/undocumented TISIconIsTemplate; rebuild from current sources"
@@ -189,6 +189,7 @@ if command -v spctl >/dev/null 2>&1; then
   else
     gatekeeper_rejected=1
     warn "Gatekeeper assessment rejects this local build: $SPCTL_OUTPUT"
+    info "macOS 15 no longer supports spctl --add; for local Apple Development testing, generate a SystemPolicyRule profile with ./scripts/create-local-system-policy-profile.sh --open"
     info "Run this diagnostic with --logs to check for syspolicy GatekeeperPolicyScanError details"
   fi
 else

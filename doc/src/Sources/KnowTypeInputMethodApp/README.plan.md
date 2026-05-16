@@ -2,7 +2,7 @@
 
 `KnowTypeInputMethodApp` is the macOS background process entry point for the installable MVP bundle.
 
-It starts `IMKServer` with the connection name from `Info.plist` and keeps an accessory `NSApplication` run loop alive. On launch it registers the installed input source only when TIS has no existing KnowType sources, enables the parent/mode records from the signed app bundle context, then emits unified logs under `com.knowtype.inputmethod.KnowType/input-method-app`. When launched by the install script with `--knowtype-install-activate`, it also requests selection of the visible KnowType input mode and logs the app-local `TISSelectInputSource` status plus current input source. The actual per-client composition behavior lives in `KnowTypeInputController` inside `KnowTypeInputMethod`.
+It starts `IMKServer` with the connection name from `Info.plist` and keeps a background `NSApplication` run loop alive. On launch it registers the installed input source only when TIS has no existing KnowType sources, enables the parent/mode records from the signed app bundle context, then emits unified logs under `com.knowtype.inputmethod.KnowType/input-method-app`. When launched by the install script with `--knowtype-install-activate`, it also requests selection of the visible KnowType input mode and logs the app-local `TISSelectInputSource` status plus current input source. The actual per-client composition behavior lives in `KnowTypeInputController` inside `KnowTypeInputMethod`.
 
 Local bundle assembly is intentionally script-based for v1:
 

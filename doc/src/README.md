@@ -47,4 +47,5 @@ The directory layout mirrors the repository layout. Put notes for Swift package 
 
 ## scripts
 
+- [Local System Policy Profile Generator](scripts/create-local-system-policy-profile.plan.md)
 - [Input Method Diagnostic Scripts](scripts/inputmethod-diagnostics.plan.md)

@@ -32,6 +32,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
             "scripts/install-inputmethod.sh",
             "scripts/select-inputmethod.sh",
             "scripts/diagnose-inputmethod.sh",
+            "scripts/create-local-system-policy-profile.sh",
             "scripts/lib/inputsource-tool.sh"
         ]
         let scripts = try scriptPaths
@@ -42,6 +43,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("--no-diagnostic"))
         XCTAssertTrue(scripts.contains("--logs"))
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
+        XCTAssertTrue(scripts.contains("com.apple.systempolicy.rule"))
+        XCTAssertTrue(scripts.contains("codesign -dr -"))
         XCTAssertTrue(scripts.contains("user-preference-write com.apple.inputsources"))
         XCTAssertFalse(scripts.contains("swift - <<'SWIFT'"))
         XCTAssertFalse(scripts.contains("swift - <<"))
@@ -110,15 +113,15 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["InputMethodConnectionName"] as? String, "com.knowtype.inputmethod.KnowType_Connection")
         XCTAssertEqual(plist["InputMethodServerControllerClass"] as? String, "KnowTypeInputController")
         XCTAssertEqual(plist["InputMethodServerDelegateClass"] as? String, "KnowTypeInputController")
-        XCTAssertEqual(plist["LSBackgroundOnly"] as? Bool, false)
+        XCTAssertEqual(plist["LSBackgroundOnly"] as? Bool, true)
         XCTAssertEqual(plist["LSHasLocalizedDisplayName"] as? Bool, true)
-        XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
+        XCTAssertNil(plist["LSUIElement"])
         XCTAssertEqual(plist["NSPrincipalClass"] as? String, "NSApplication")
         XCTAssertNil(plist["TISIconIsTemplate"])
         XCTAssertEqual(plist["TISIntendedLanguage"] as? String, "zh-Hans")
         XCTAssertEqual(plist["TISInputSourceID"] as? String, "com.knowtype.inputmethod.KnowType")
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "KnowTypeInputMethodIcon.icns")
-        XCTAssertEqual(plist["tsInputMethodCharacterRepertoireKey"] as? [String], ["Hans", "Latn"])
+        XCTAssertEqual(plist["tsInputMethodCharacterRepertoireKey"] as? [String], ["zh-Hans", "Latn"])
 
         let componentDict = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
         let modeList = try XCTUnwrap(componentDict["tsInputModeListKey"] as? [String: Any])
@@ -129,7 +132,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertNil(mode["TISIconLabels"])
         XCTAssertEqual(mode["TISInputSourceID"] as? String, "com.knowtype.inputmethod.KnowType.Mode")
         XCTAssertEqual(mode["TISIntendedLanguage"] as? String, "zh-Hans")
-        XCTAssertEqual(mode["tsInputModeCharacterRepertoireKey"] as? [String], ["Hans", "Latn"])
+        XCTAssertEqual(mode["tsInputModeCharacterRepertoireKey"] as? [String], ["zh-Hans", "Latn"])
         XCTAssertEqual(mode["tsInputModeDefaultStateKey"] as? Bool, true)
         XCTAssertEqual(mode["tsInputModeIsVisibleKey"] as? Bool, true)
         XCTAssertEqual(mode["tsInputModeMenuIconFileKey"] as? String, "KnowTypeInputMethodIcon.tiff")
