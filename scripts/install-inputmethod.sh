@@ -3,6 +3,33 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/install-inputmethod.sh
+
+Builds and installs KnowType.app into ~/Library/Input Methods, then asks the
+installed app to register and enable the input source.
+
+Options:
+  -h, --help  Show this help.
+EOF
+}
+
+while (($# > 0)); do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
 BUNDLE_PATH="$("$ROOT_DIR/scripts/build-inputmethod-bundle.sh" | tail -n 1)"
 TARGET_DIR="$HOME/Library/Input Methods"
 TARGET_PATH="$TARGET_DIR/KnowType.app"

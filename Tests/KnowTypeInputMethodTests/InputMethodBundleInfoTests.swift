@@ -33,6 +33,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
             "scripts/select-inputmethod.sh",
             "scripts/diagnose-inputmethod.sh",
             "scripts/create-local-system-policy-profile.sh",
+            "scripts/smoke-inputmethod-install.sh",
             "scripts/lib/inputsource-tool.sh"
         ]
         let scripts = try scriptPaths
@@ -45,9 +46,45 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
         XCTAssertTrue(scripts.contains("com.apple.systempolicy.rule"))
         XCTAssertTrue(scripts.contains("codesign -dr -"))
+        XCTAssertTrue(scripts.contains("PayloadIdentifier: com.knowtype.local.systempolicy"))
+        XCTAssertTrue(scripts.contains("Rule PayloadType: com.apple.systempolicy.rule"))
+        XCTAssertTrue(scripts.contains("Requirement Source:"))
+        XCTAssertTrue(scripts.contains("codesign CDHash fallback"))
+        XCTAssertTrue(scripts.contains("Signing Identifier:"))
+        XCTAssertTrue(scripts.contains("Team Identifier:"))
         XCTAssertTrue(scripts.contains("user-preference-write com.apple.inputsources"))
         XCTAssertFalse(scripts.contains("swift - <<'SWIFT'"))
         XCTAssertFalse(scripts.contains("swift - <<"))
+    }
+
+    func testInstallProfileSmokeValidatesMobileconfigWithoutSystemInstall() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let smokeScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/smoke-inputmethod-install.sh"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(smokeScript.contains("create-local-system-policy-profile.sh"))
+        XCTAssertTrue(smokeScript.contains(":PayloadIdentifier"))
+        XCTAssertTrue(smokeScript.contains(":PayloadContent:0:PayloadIdentifier"))
+        XCTAssertTrue(smokeScript.contains(":PayloadContent:0:PayloadType"))
+        XCTAssertTrue(smokeScript.contains(":PayloadContent:0:OperationType"))
+        XCTAssertTrue(smokeScript.contains(":PayloadContent:0:Requirement"))
+        XCTAssertTrue(smokeScript.contains(":PayloadContent:0:Comment"))
+        XCTAssertTrue(smokeScript.contains("codesign -dv"))
+        XCTAssertTrue(smokeScript.contains("CODESIGN_IDENTITY=-"))
+        XCTAssertTrue(smokeScript.contains(#"sed -n 's/^# designated => //p'"#))
+        XCTAssertTrue(smokeScript.contains(#"codesign -R "=$actual_requirement" -v "$bundle_path""#))
+        XCTAssertTrue(smokeScript.contains("TeamIdentifier"))
+        XCTAssertTrue(smokeScript.contains("Signature"))
+        XCTAssertFalse(smokeScript.contains("profiles install"))
+        XCTAssertFalse(smokeScript.contains("profiles -I"))
+        XCTAssertFalse(smokeScript.contains("spctl --add"))
+        XCTAssertFalse(smokeScript.contains("sudo "))
     }
 
     func testInputSourceHelperReportsHIToolboxPreferenceState() throws {
