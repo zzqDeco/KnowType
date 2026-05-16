@@ -19,6 +19,11 @@ The AI Provider tab preserves the existing profile editing flow. The API key fie
 
 The connection test uses the current draft profile and may use a typed API key for one request, but it does not save metadata or mutate `SecretStore`.
 
+Provider and lexicon display decisions that are easy to regress now live in testable presenter structs:
+
+- `ProviderProfilesPresentation.swift` owns provider row labels, draft editor labels, secret-reference copy, connection status display state, validation visibility, and last-error visibility.
+- `LexiconSettingsPresentation.swift` owns local lexicon count rows, missing-directory action visibility, directory status rows, diagnostics, and format guidance copy.
+
 ## Debug Install Guidance
 
 The Debug Install tab documents the local developer loop through `DebugInstallGuidance`, a small testable settings-side source of truth:
