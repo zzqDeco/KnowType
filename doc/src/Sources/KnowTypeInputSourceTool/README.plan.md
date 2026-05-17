@@ -6,6 +6,7 @@ The helper owns macOS TIS calls for:
 
 - `status`: emit read-only key/value TIS status and persisted HIToolbox selected/enabled preference status for diagnostics.
 - `switch-away`: move the active input source away from KnowType before replacing the bundle.
+- `dedupe-preferences`: remove duplicate KnowType rows from local Text Input Source preference arrays without changing unrelated input sources.
 - `register --path ... [--select]`: manually register the installed input method bundle, enable parent and mode sources, and optionally request selection. The default install script avoids this mutating helper path and lets the installed app perform activation from its signed bundle context.
 - `select [--require-selected]`: request KnowType mode selection and verify the current helper TIS context.
 

@@ -7,12 +7,30 @@ final class DebugInstallGuidanceTests: XCTestCase {
         XCTAssertTrue(DebugInstallGuidance.steps.contains { $0.title == "Request selection" })
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/diagnose-inputmethod.sh --strict"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/diagnose-inputmethod.sh --strict --logs"))
+        XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/repair-inputmethod-selection.sh"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/select-inputmethod.sh"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/select-inputmethod.sh --require-selected"))
         XCTAssertTrue(DebugInstallGuidance.steps.contains {
             $0.title == "Request selection"
                 && $0.detail.contains("Activate the text app")
                 && $0.detail.contains("typing a real probe")
+        })
+    }
+
+    func testGuidanceExplainsSelectionRepair() {
+        XCTAssertTrue(DebugInstallGuidance.steps.contains {
+            $0.title == "Refresh registrar"
+                && $0.detail.contains("LaunchServices")
+                && $0.detail.contains("deduplicate")
+        })
+    }
+
+    func testGuidanceExplainsInputMethodAuthorizationPrompt() {
+        XCTAssertTrue(DebugInstallGuidance.steps.contains {
+            $0.title == "Enable input source"
+                && $0.detail.contains("allow")
+                && $0.detail.contains("知键")
+                && $0.detail.contains("KnowType")
         })
     }
 

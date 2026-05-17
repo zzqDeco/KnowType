@@ -34,6 +34,7 @@
 | [input-source-display-name.plan.md](input-source-display-name.plan.md) | Localized macOS input-source display name and stale TIS cache diagnostics | Active reference |
 | [input-source-selection-activation.plan.md](input-source-selection-activation.plan.md) | Installed-app activation path and local selection-chain diagnostics | Active reference |
 | [local-input-source-system-policy.plan.md](local-input-source-system-policy.plan.md) | macOS 15 local SystemPolicyRule generation for Apple Development input-method testing | Active reference |
+| [local-input-source-switching-repair.plan.md](local-input-source-switching-repair.plan.md) | Repair stale local TIS/LaunchServices state and input-method authorization guidance | Active reference |
 | [inputmethod-script-ci-smoke.plan.md](inputmethod-script-ci-smoke.plan.md) | CI coverage for local IMK helper scripts and bundle packaging smoke checks | Active reference |
 | [macos-ime-acceptance-harness.plan.md](macos-ime-acceptance-harness.plan.md) | Repeatable local IME acceptance harness and report template | Active reference |
 | [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual typing gates | Active reference |

@@ -18,6 +18,7 @@ private func usage() -> Never {
           knowtype-inputsource-tool status [--parent-id ID] [--mode-id ID]
           knowtype-inputsource-tool dump [--bundle-id ID]
           knowtype-inputsource-tool disable [--bundle-id ID]
+          knowtype-inputsource-tool dedupe-preferences [--bundle-id ID] [--mode-id ID]
           knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID]
           knowtype-inputsource-tool register --path PATH [--parent-id ID] [--mode-id ID] [--select]
           knowtype-inputsource-tool select [--parent-id ID] [--mode-id ID] [--require-selected]
@@ -92,6 +93,11 @@ private func hitoolboxPreferenceArray(_ key: String) -> [[String: Any]] {
     return CFPreferencesCopyAppValue(key as CFString, "com.apple.HIToolbox" as CFString) as? [[String: Any]] ?? []
 }
 
+private func preferenceArray(_ key: String, domain: String) -> [[String: Any]] {
+    CFPreferencesAppSynchronize(domain as CFString)
+    return CFPreferencesCopyAppValue(key as CFString, domain as CFString) as? [[String: Any]] ?? []
+}
+
 private func hitoolboxPreferencesContain(bundleID: String, modeID: String, key: String) -> Bool {
     hitoolboxPreferenceArray(key).contains { entry in
         entry["Bundle ID"] as? String == bundleID &&
@@ -103,6 +109,56 @@ private func hitoolboxPreferencesContain(bundleID: String, modeID: String, key: 
 private func hitoolboxSelectedModeID() -> String? {
     hitoolboxPreferenceArray("AppleSelectedInputSources")
         .first { $0["InputSourceKind"] as? String == "Input Mode" }?["Input Mode"] as? String
+}
+
+private func inputSourcePreferenceSignature(_ entry: [String: Any]) -> String {
+    [
+        entry["InputSourceKind"] as? String ?? "",
+        entry["Bundle ID"] as? String ?? "",
+        entry["Input Mode"] as? String ?? "",
+        String(describing: entry["KeyboardLayout ID"] ?? ""),
+        entry["KeyboardLayout Name"] as? String ?? ""
+    ].joined(separator: "|")
+}
+
+private func isKnowTypePreferenceEntry(_ entry: [String: Any], bundleID: String, modeID: String) -> Bool {
+    guard entry["Bundle ID"] as? String == bundleID else {
+        return false
+    }
+    let kind = entry["InputSourceKind"] as? String
+    return kind == "Keyboard Input Method" || (kind == "Input Mode" && entry["Input Mode"] as? String == modeID)
+}
+
+private func deduplicatedPreferences(
+    _ entries: [[String: Any]],
+    bundleID: String,
+    modeID: String
+) -> (entries: [[String: Any]], removed: Int) {
+    var seen = Set<String>()
+    var result: [[String: Any]] = []
+    var removed = 0
+
+    for entry in entries {
+        guard isKnowTypePreferenceEntry(entry, bundleID: bundleID, modeID: modeID) else {
+            result.append(entry)
+            continue
+        }
+        let signature = inputSourcePreferenceSignature(entry)
+        if seen.insert(signature).inserted {
+            result.append(entry)
+        } else {
+            removed += 1
+        }
+    }
+
+    return (result, removed)
+}
+
+private func writePreferenceArray(_ entries: [[String: Any]], key: String, domain: String) {
+    CFPreferencesSetAppValue(key as CFString, entries as CFArray, domain as CFString)
+    if !CFPreferencesAppSynchronize(domain as CFString) {
+        fputs("Warning: failed to synchronize \(domain) \(key)\n", stderr)
+    }
 }
 
 private func inputSource(id: String) -> TISInputSource? {
@@ -134,6 +190,26 @@ private func disableInputSources(bundleID: String) {
     }
     print("disabled.bundle=\(bundleID)")
     print("disabled.count=\(disabledCount)")
+}
+
+private func dedupePreferences(bundleID: String, modeID: String) {
+    let targets = [
+        ("com.apple.HIToolbox", "AppleEnabledInputSources"),
+        ("com.apple.HIToolbox", "AppleInputSourceHistory"),
+        ("com.apple.inputsources", "AppleEnabledThirdPartyInputSources")
+    ]
+
+    var totalRemoved = 0
+    for (domain, key) in targets {
+        let current = preferenceArray(key, domain: domain)
+        let deduped = deduplicatedPreferences(current, bundleID: bundleID, modeID: modeID)
+        if deduped.removed > 0 {
+            writePreferenceArray(deduped.entries, key: key, domain: domain)
+        }
+        totalRemoved += deduped.removed
+        print("dedupe.\(domain).\(key).removed=\(deduped.removed)")
+    }
+    print("dedupe.total.removed=\(totalRemoved)")
 }
 
 private func currentInputSourceID() -> String? {
@@ -288,6 +364,11 @@ case "disable":
     let bundleID = arguments.option("--bundle-id", default: defaultParentID) ?? defaultParentID
     arguments.ensureConsumed()
     disableInputSources(bundleID: bundleID)
+case "dedupe-preferences":
+    let bundleID = arguments.option("--bundle-id", default: defaultParentID) ?? defaultParentID
+    let modeID = arguments.option("--mode-id", default: defaultModeID) ?? defaultModeID
+    arguments.ensureConsumed()
+    dedupePreferences(bundleID: bundleID, modeID: modeID)
 case "switch-away":
     let prefix = arguments.option("--prefix", default: defaultParentID) ?? defaultParentID
     let fallbackID = arguments.option("--fallback-id", default: defaultFallbackID) ?? defaultFallbackID

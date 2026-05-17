@@ -27,11 +27,11 @@ enum DebugInstallGuidance {
         ),
         DebugInstallStep(
             title: "Enable input source",
-            detail: "If macOS does not switch automatically, open System Settings > Keyboard > Text Input > Input Sources and enable or select KnowType."
+            detail: "If macOS asks to allow 知键/KnowType as an input method, click Allow. Then open System Settings > Keyboard > Text Input > Input Sources and enable or select KnowType if it does not switch automatically."
         ),
         DebugInstallStep(
             title: "Refresh registrar",
-            detail: "If macOS keeps an old registration, restart the input method process or log out and back in before retesting."
+            detail: "If macOS keeps an old registration, run the repair helper to remove stale LaunchServices records, deduplicate KnowType preference entries, and relaunch the installed input method app before retesting."
         ),
         DebugInstallStep(
             title: "Inspect logs",
@@ -45,6 +45,7 @@ enum DebugInstallGuidance {
         "./scripts/install-inputmethod.sh",
         "./scripts/diagnose-inputmethod.sh --strict",
         "./scripts/diagnose-inputmethod.sh --strict --logs",
+        "./scripts/repair-inputmethod-selection.sh",
         "./scripts/select-inputmethod.sh",
         "./scripts/select-inputmethod.sh --require-selected",
         "log stream --predicate 'process == \"KnowTypeInputMethodApp\"'"

@@ -29,9 +29,10 @@ private enum TextInputSourceActivation {
             inputMethodLogger.notice("Using existing input source registration count=\(sources.count, privacy: .public)")
         }
 
+        let activationSources = deduplicatedSources(sources).sorted(by: enableParentBeforeModes)
         var enabledCount = 0
         var modeCount = 0
-        for source in sources.sorted(by: enableParentBeforeModes) {
+        for source in activationSources {
             let id = stringProperty(source, kTISPropertyInputSourceID) ?? "<unknown>"
             let type = stringProperty(source, kTISPropertyInputSourceType) ?? "<unknown>"
             let isMode = id == modeInputSourceID || inputModeID(source) == modeInputSourceID
@@ -51,7 +52,7 @@ private enum TextInputSourceActivation {
         }
 
         inputMethodLogger.notice(
-            "Input source activation complete sources=\(sources.count, privacy: .public) modes=\(modeCount, privacy: .public) enabledRequests=\(enabledCount, privacy: .public)"
+            "Input source activation complete sources=\(sources.count, privacy: .public) uniqueSources=\(activationSources.count, privacy: .public) modes=\(modeCount, privacy: .public) enabledRequests=\(enabledCount, privacy: .public)"
         )
 
         if selectMode {
@@ -67,6 +68,48 @@ private enum TextInputSourceActivation {
     private static func inputSources(id: String) -> [TISInputSource] {
         let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
         return TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource] ?? []
+    }
+
+    private static func deduplicatedSources(_ sources: [TISInputSource]) -> [TISInputSource] {
+        var orderedSignatures: [String] = []
+        var sourcesBySignature: [String: TISInputSource] = [:]
+
+        for source in sources {
+            let signature = sourceSignature(source)
+            guard let existing = sourcesBySignature[signature] else {
+                orderedSignatures.append(signature)
+                sourcesBySignature[signature] = source
+                continue
+            }
+            if sourceIsBetterActivationTarget(source, than: existing) {
+                sourcesBySignature[signature] = source
+            }
+        }
+
+        return orderedSignatures.compactMap { sourcesBySignature[$0] }
+    }
+
+    private static func sourceSignature(_ source: TISInputSource) -> String {
+        let id = stringProperty(source, kTISPropertyInputSourceID) ?? ""
+        let mode = inputModeID(source) ?? ""
+        let type = stringProperty(source, kTISPropertyInputSourceType) ?? ""
+        return "\(id)|\(mode)|\(type)"
+    }
+
+    private static func sourceIsBetterActivationTarget(_ candidate: TISInputSource, than existing: TISInputSource) -> Bool {
+        let candidateEnableCapable = boolProperty(candidate, kTISPropertyInputSourceIsEnableCapable)
+        let existingEnableCapable = boolProperty(existing, kTISPropertyInputSourceIsEnableCapable)
+        if candidateEnableCapable != existingEnableCapable {
+            return candidateEnableCapable
+        }
+
+        let candidateEnabled = boolProperty(candidate, kTISPropertyInputSourceIsEnabled)
+        let existingEnabled = boolProperty(existing, kTISPropertyInputSourceIsEnabled)
+        if candidateEnabled != existingEnabled {
+            return candidateEnabled
+        }
+
+        return false
     }
 
     private static func enableParentBeforeModes(_ lhs: TISInputSource, _ rhs: TISInputSource) -> Bool {

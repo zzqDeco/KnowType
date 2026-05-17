@@ -1,6 +1,6 @@
 # Input Method Diagnostic Scripts
 
-`scripts/diagnose-inputmethod.sh` is the read-only smoke diagnostic for a locally installed KnowType input-method bundle. `scripts/select-inputmethod.sh` is the separate helper that requests KnowType as the current Text Input Source before a manual typing run. Both scripts resolve and run the dedicated SwiftPM executable `knowtype-inputsource-tool` for TIS operations instead of embedding `swift -` snippets.
+`scripts/diagnose-inputmethod.sh` is the read-only smoke diagnostic for a locally installed KnowType input-method bundle. `scripts/select-inputmethod.sh` is the separate helper that requests KnowType as the current Text Input Source before a manual typing run. `scripts/repair-inputmethod-selection.sh` is the mutating local repair helper for stale development registration state. These scripts resolve and run the dedicated SwiftPM executable `knowtype-inputsource-tool` for TIS operations instead of embedding `swift -` snippets.
 
 It intentionally sits after `scripts/install-inputmethod.sh` in the developer loop:
 
@@ -17,6 +17,7 @@ The script does not mutate macOS input-source state. It reports:
 - current Text Input Source ID plus KnowType parent/mode registration, enabled status, localized display name, and duplicate mode-registration count;
 - parent/mode TIS type and select-capable state, because macOS may list a parent input method record that is enabled but not directly selectable;
 - Gatekeeper assessment status, because an Apple Development-signed local bundle can pass `codesign --verify` but still be rejected by system execution policy;
+- stale LaunchServices records for the same KnowType bundle id outside `~/Library/Input Methods/KnowType.app`;
 - `KnowTypeInputMethodApp` process status;
 - provider profile, candidate history, and local lexicon directory paths.
 
@@ -30,13 +31,21 @@ When Gatekeeper rejects an Apple Development build on macOS 15+, the diagnostic 
 
 The helper also reports `AppleSelectedInputSources` and `AppleEnabledInputSources` from `com.apple.HIToolbox`. This makes the local acceptance distinction explicit: a command-line helper can verify registration and helper-local TIS selection, but manual typing must use the active app's selected input source. If HIToolbox enabled preferences include KnowType while selected preferences still point at Apple Pinyin, the next action is to choose KnowType from the active app's input menu or System Settings, not to accept a Pinyin typing result as KnowType.
 
+On first local installation, macOS can show a System Settings authorization
+prompt asking whether to allow `知键` to enable `KnowType`. Until the user
+clicks Allow, TIS can report KnowType as registered and enabled while the
+system input menu or shortcut still falls back to another source. This is a
+permission gate, not a Chinese engine failure.
+
 When HIToolbox enabled preferences include KnowType, `TISSelectInputSource` returns success in the app context, and `AppleSelectedInputSources` still remains on Apple Pinyin, the diagnostic treats this as an input-source selection-chain problem rather than an engine problem. The two log patterns that matter most are `GatekeeperPolicyScanError Code=-67018`, which means system policy has not allowed the locally signed bundle, and `user-preference-write com.apple.inputsources`, which means a sandboxed helper attempted to mutate Text Input Source preferences.
 
 `knowtype-inputsource-tool dump` prints every TIS record for the KnowType bundle. Use it when the input menu shows `知键` but the item is disabled or selection falls back to another source; duplicated mode records or a parent-only selectable path usually point to stale Text Input Source registration.
 
+`scripts/repair-inputmethod-selection.sh` backs up `com.apple.HIToolbox` and `com.apple.inputsources`, unregisters stale LaunchServices records for old KnowType build paths, runs `knowtype-inputsource-tool dedupe-preferences`, restarts `cfprefsd`, `TextInputMenuAgent`, `TextInputSwitcher`, and `KnowTypeInputMethodApp`, then relaunches the installed app with `--knowtype-install-activate`. Use it after repeated local installs when the menu can see KnowType but selection bounces back to Apple Pinyin or ABC.
+
 `knowtype-inputsource-tool disable` remains available for manual cleanup, but the local install script no longer disables or selects through the command-line helper. It copies the new bundle, then launches `KnowType.app --knowtype-install-activate` so registration, enabling, and the best-effort selection request run from the installed app context.
 
-`KnowTypeInputMethodApp` registers its input source on launch only when TIS has no existing KnowType sources, then enables the parent and visible mode from the signed app bundle context. With `--knowtype-install-activate`, it also requests selection and logs both the `TISSelectInputSource` status and the app-local current input source. That app-context enablement is intentionally separate from the command-line helper because modern macOS can treat helper-local TIS selection as a preflight that does not prove the menu item is selectable in the active app. Avoiding unconditional registration also avoids creating more stale duplicate mode rows during repeated local installs.
+`KnowTypeInputMethodApp` registers its input source on launch only when TIS has no existing KnowType sources, then enables one unique parent and visible mode from the signed app bundle context. With `--knowtype-install-activate`, it also requests selection and logs both the `TISSelectInputSource` status and the app-local current input source. That app-context enablement is intentionally separate from the command-line helper because modern macOS can treat helper-local TIS selection as a preflight that does not prove the menu item is selectable in the active app. Avoiding unconditional registration and deduplicating enable requests both reduce stale duplicate mode rows during repeated local installs.
 
 CI validates the non-mutating parts of this workflow: shell syntax for all local input-method scripts, helper packaging expectations, help output for the diagnostic and selection helpers, and `scripts/build-inputmethod-bundle.sh` packaging of the executable, `Info.plist`, SwiftPM core resource bundle, and input-source icon. CI does not install or select the input method because those actions mutate runner Text Input Source state.
 
