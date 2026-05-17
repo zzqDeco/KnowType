@@ -82,9 +82,24 @@ public struct TraditionalInputLexiconFileSource: Sendable {
     }
 
     public static func isManagedPackMetadataFile(_ fileURL: URL) -> Bool {
-        ManagedLexiconPacks.all.contains { pack in
-            fileURL.lastPathComponent == pack.metadataFileName
+        guard fileURL.lastPathComponent.hasSuffix(".metadata.json") else {
+            return false
         }
+        if ManagedLexiconPacks.all.contains(where: { pack in
+            fileURL.lastPathComponent == pack.metadataFileName
+        }) {
+            return true
+        }
+        return isInstalledPackMetadataFile(fileURL)
+    }
+
+    private static func isInstalledPackMetadataFile(_ fileURL: URL) -> Bool {
+        guard let data = try? Data(contentsOf: fileURL) else {
+            return false
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode(InstalledLexiconPackMetadata.self, from: data)) != nil
     }
 
     private static func lexiconFileURLs(in directoryURL: URL) throws -> [URL] {

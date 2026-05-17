@@ -125,6 +125,35 @@ final class TraditionalInputLexiconFileSourceTests: XCTestCase {
         XCTAssertEqual(catalog.entries.map(\.outputs.first?.text), ["产品"])
     }
 
+    func testLoadDirectorySkipsInstalledPackMetadataWithUnknownFileName() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let metadata = InstalledLexiconPackMetadata(
+            id: "custom-pack",
+            displayName: "Custom Pack",
+            sourceURL: URL(string: "https://example.com/custom.dict.yaml")!,
+            sourceVersion: "fixture",
+            sourceSHA256: String(repeating: "a", count: 64),
+            outputFileName: "custom-pack.tsv",
+            entryCount: 10,
+            licenseName: "Apache-2.0",
+            licenseURL: URL(string: "https://example.com/LICENSE")!,
+            installedAt: Date(timeIntervalSince1970: 0)
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(metadata)
+            .write(to: directory.appendingPathComponent("custom-pack.metadata.json"))
+        try Data("ce shi ci\t测试词\t0.995\n".utf8)
+            .write(to: directory.appendingPathComponent("user.tsv"))
+
+        let catalog = TraditionalInputLexiconFileSource().loadDirectory(directory)
+
+        XCTAssertFalse(catalog.hasDiagnostics)
+        XCTAssertEqual(catalog.entries.map(\.outputs.first?.text), ["测试词"])
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("KnowTypeLexiconFileSourceTests-\(UUID().uuidString)")
