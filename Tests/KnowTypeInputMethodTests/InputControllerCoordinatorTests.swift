@@ -77,6 +77,27 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testCommitCompositionPreservesResolvedSegments() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        coordinator.commitComposition(client: client)
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你shishei")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
     func testNumberSelectingSegmentCandidateUpdatesMarkedTextWithoutInsert() throws {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)

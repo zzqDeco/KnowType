@@ -39,10 +39,7 @@ public struct CompositionBuffer: Sendable, Equatable {
 
     public var commitText: String {
         if isFullyResolved {
-            return resolvedSegments
-                .sorted { $0.rawRange.start < $1.rawRange.start }
-                .map(\.text)
-                .joined()
+            return fullyResolvedCommitText()
         }
         return displayText
     }
@@ -159,6 +156,45 @@ public struct CompositionBuffer: Sendable, Equatable {
             offset += 1
         }
         return nil
+    }
+
+    private func fullyResolvedCommitText() -> String {
+        let sorted = resolvedSegments.sorted { $0.rawRange.start < $1.rawRange.start }
+        var output = ""
+        var cursor = 0
+        var previousSegment: CandidateSegment?
+
+        for segment in sorted {
+            if cursor < segment.rawRange.start {
+                let gapRange = KnowTypeCore.TextRange(start: cursor, length: segment.rawRange.start - cursor)
+                if shouldPreserveResolvedGap(
+                    gapRange,
+                    previousSegment: previousSegment,
+                    nextSegment: segment
+                ) {
+                    output += substring(gapRange)
+                }
+            }
+            output += segment.text
+            previousSegment = segment
+            cursor = max(cursor, segment.rawRange.end)
+        }
+        return output
+    }
+
+    private func shouldPreserveResolvedGap(
+        _ range: KnowTypeCore.TextRange,
+        previousSegment: CandidateSegment?,
+        nextSegment: CandidateSegment
+    ) -> Bool {
+        guard containsOnlyWhitespace(in: range) else {
+            return true
+        }
+        return previousSegment?.isPassthrough == true || nextSegment.isPassthrough
+    }
+
+    private func containsOnlyWhitespace(in range: KnowTypeCore.TextRange) -> Bool {
+        substring(range).allSatisfy(\.isWhitespace)
     }
 
     private static func normalized(segments: [CandidateSegment], rawLength: Int) -> [CandidateSegment] {

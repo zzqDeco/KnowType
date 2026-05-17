@@ -57,11 +57,23 @@ final class CompositionBufferTests: XCTestCase {
         XCTAssertEqual(buffer.commitText, "你是谁")
     }
 
+    func testFullyResolvedCommitPreservesWhitespaceAroundPassthroughSegments() {
+        var buffer = CompositionBuffer(rawInput: "ni API")
+
+        XCTAssertTrue(buffer.apply(candidate(text: "你", start: 0, length: 2, reading: "ni")))
+        XCTAssertTrue(buffer.apply(candidate(text: "API", start: 3, length: 3, reading: "API", isPassthrough: true)))
+
+        XCTAssertEqual(buffer.displayText, "你 API")
+        XCTAssertTrue(buffer.isFullyResolved)
+        XCTAssertEqual(buffer.commitText, "你 API")
+    }
+
     private func candidate(
         text: String,
         start: Int,
         length: Int,
-        reading: String
+        reading: String,
+        isPassthrough: Bool = false
     ) -> CorrectionCandidate {
         let rawRange = KnowTypeCore.TextRange(start: start, length: length)
         return CorrectionCandidate(
@@ -75,7 +87,8 @@ final class CompositionBufferTests: XCTestCase {
                     rawRange: rawRange,
                     tokenRange: KnowTypeCore.TextRange(start: 0, length: 1),
                     reading: reading,
-                    text: text
+                    text: text,
+                    isPassthrough: isPassthrough
                 )
             ]
         )

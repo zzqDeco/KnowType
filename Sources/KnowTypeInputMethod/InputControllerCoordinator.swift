@@ -102,7 +102,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func commitComposition(client: InputControllerClient?) {
-        commit(action: .commitRaw, client: client)
+        let text = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
+        _ = applyCommitResult(text.isEmpty ? .noAction : .commit(text), client: client)
     }
 
     func hidePalettes() {
