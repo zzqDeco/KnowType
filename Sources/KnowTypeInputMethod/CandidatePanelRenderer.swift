@@ -16,6 +16,8 @@ public enum CandidatePanelVisualRole: Sendable, Equatable {
 public enum CandidatePanelSelection: Sendable, Equatable {
     case rawInput
     case prefixCandidate(Int)
+    case fullCandidate(Int)
+    case segmentCandidate(Int)
     case continuationCandidate(Int)
 }
 
@@ -73,7 +75,7 @@ public struct CandidatePanelRenderer: Sendable {
             switch item.selection {
             case .rawInput:
                 shortcutLabel = nil
-            case .prefixCandidate:
+            case .prefixCandidate, .fullCandidate, .segmentCandidate:
                 shortcutLabel = "\(offset + 1)"
             case .continuationCandidate(let index):
                 shortcutLabel = continuationShortcutLabel(atGlobalIndex: index)
@@ -109,33 +111,42 @@ public struct CandidatePanelRenderer: Sendable {
             )
         }
 
-        if !viewModel.prefixCandidates.isEmpty {
-            for (index, candidate) in viewModel.prefixCandidates.enumerated() {
-                rows.append(
-                    CandidatePanelRenderableRow(
-                        selection: .prefixCandidate(index),
-                        kind: .prefixCandidate,
-                        text: candidate.text,
-                        visualRole: .lockedPrefix
-                    )
+        for (index, candidate) in viewModel.prefixCandidates.enumerated() {
+            rows.append(
+                CandidatePanelRenderableRow(
+                    selection: prefixSelection(for: candidate, rawInput: viewModel.rawInput, index: index),
+                    kind: .prefixCandidate,
+                    text: candidate.text,
+                    visualRole: .lockedPrefix
                 )
-            }
+            )
         }
 
-        if !viewModel.continuationCandidates.isEmpty {
-            for (index, candidate) in viewModel.continuationCandidates.enumerated() {
-                rows.append(
-                    CandidatePanelRenderableRow(
-                        selection: .continuationCandidate(index),
-                        kind: .continuationCandidate,
-                        text: candidate.text,
-                        visualRole: .continuation
-                    )
+        for (index, candidate) in viewModel.continuationCandidates.enumerated() {
+            rows.append(
+                CandidatePanelRenderableRow(
+                    selection: .continuationCandidate(index),
+                    kind: .continuationCandidate,
+                    text: candidate.text,
+                    visualRole: .continuation
                 )
-            }
+            )
         }
 
         return rows
+    }
+
+    private func prefixSelection(
+        for candidate: CorrectionCandidate,
+        rawInput: String,
+        index: Int
+    ) -> CandidatePanelSelection {
+        guard let range = candidate.rawRange else {
+            return .prefixCandidate(index)
+        }
+        return range == KnowTypeCore.TextRange(start: 0, length: rawInput.count)
+            ? .fullCandidate(index)
+            : .segmentCandidate(index)
     }
 
     private func pagingState(

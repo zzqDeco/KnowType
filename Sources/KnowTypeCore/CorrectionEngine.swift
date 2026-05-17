@@ -144,6 +144,7 @@ public final class CorrectionEngine: Sendable {
 
             for input in traditionalInputs {
                 let normalizationBonus = input == normalizedInput && input != raw ? 0.01 : 0
+                let usesRawInputCoordinates = input == raw
                 for candidate in traditionalInputEngine.candidates(
                     for: input,
                     preserveCapitalizedPinyin: preserveCapitalizedPinyin
@@ -154,7 +155,9 @@ public final class CorrectionEngine: Sendable {
                             source: "local-traditional-input",
                             confidence: min(1.0, candidate.confidence + normalizationBonus),
                             correctionLevel: .contextual,
-                            protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text)
+                            protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text),
+                            rawRange: usesRawInputCoordinates ? candidate.rawRange : nil,
+                            segments: usesRawInputCoordinates ? candidate.segments : []
                         )
                     )
                 }
@@ -190,15 +193,22 @@ public final class CorrectionEngine: Sendable {
     }
 
     private func uniqueSorted(_ candidates: [CorrectionCandidate]) -> [CorrectionCandidate] {
-        var seen = Set<String>()
-        return candidates
-            .filter { candidate in
-                if seen.contains(candidate.text) {
-                    return false
+        var uniqueCandidates: [CorrectionCandidate] = []
+        var indexesByText: [String: Int] = [:]
+
+        for candidate in candidates {
+            if let index = indexesByText[candidate.text] {
+                let existing = uniqueCandidates[index]
+                if shouldPreferDuplicate(candidate, over: existing) {
+                    uniqueCandidates[index] = candidate
                 }
-                seen.insert(candidate.text)
-                return true
+            } else {
+                indexesByText[candidate.text] = uniqueCandidates.count
+                uniqueCandidates.append(candidate)
             }
+        }
+
+        return uniqueCandidates
             .sorted {
                 if $0.correctionLevel == .strongAlternative, $1.correctionLevel != .strongAlternative {
                     return false
@@ -211,6 +221,18 @@ public final class CorrectionEngine: Sendable {
                 }
                 return $0.confidence > $1.confidence
             }
+    }
+
+    private func shouldPreferDuplicate(
+        _ candidate: CorrectionCandidate,
+        over existing: CorrectionCandidate
+    ) -> Bool {
+        let candidateHasSegmentMetadata = candidate.rawRange != nil || !candidate.segments.isEmpty
+        let existingHasSegmentMetadata = existing.rawRange != nil || !existing.segments.isEmpty
+        if candidateHasSegmentMetadata != existingHasSegmentMetadata {
+            return candidateHasSegmentMetadata
+        }
+        return candidate.confidence > existing.confidence
     }
 
     private func applySelectionHistory(

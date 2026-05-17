@@ -4,6 +4,8 @@ import KnowTypeCore
 public enum InputCandidateSelectionKind: Sendable, Equatable {
     case rawInput
     case prefixCandidate(index: Int)
+    case fullCandidate(index: Int)
+    case segmentCandidate(index: Int)
     case continuationCandidate(index: Int)
 }
 
@@ -40,7 +42,7 @@ public struct InputCandidateListBuilder: Sendable {
             candidates.append(
                 InputCandidateSelection(
                     text: prefix.text,
-                    kind: .prefixCandidate(index: index)
+                    kind: prefixSelectionKind(for: prefix, rawInput: rawInput, index: index)
                 )
             )
         }
@@ -58,5 +60,20 @@ public struct InputCandidateListBuilder: Sendable {
             )
         }
         return candidates
+    }
+
+    private func prefixSelectionKind(
+        for candidate: CorrectionCandidate,
+        rawInput: String,
+        index: Int
+    ) -> InputCandidateSelectionKind {
+        guard let range = candidate.rawRange else {
+            return .prefixCandidate(index: index)
+        }
+        let fullRange = KnowTypeCore.TextRange(start: 0, length: rawInput.count)
+        if range == fullRange {
+            return .fullCandidate(index: index)
+        }
+        return .segmentCandidate(index: index)
     }
 }

@@ -27,6 +27,8 @@ The directory layout mirrors the repository layout. Put notes for Swift package 
 - [CandidateAnchorResolver](Sources/KnowTypeInputMethod/CandidateAnchorResolver.plan.md)
 - [CandidatePanelRenderer](Sources/KnowTypeInputMethod/CandidatePanelRenderer.plan.md)
 - [CandidatePanelWindowController](Sources/KnowTypeInputMethod/CandidatePanelWindowController.plan.md)
+- [CompositionBuffer](Sources/KnowTypeInputMethod/CompositionBuffer.plan.md)
+- [InputControllerCoordinator](Sources/KnowTypeInputMethod/InputControllerCoordinator.plan.md)
 - [InputMethodLexiconRuntime](Sources/KnowTypeInputMethod/InputMethodLexiconRuntime.plan.md)
 - [InputSessionController](Sources/KnowTypeInputMethod/InputSessionController.plan.md)
 - [InputSymbolMode](Sources/KnowTypeInputMethod/InputSymbolMode.plan.md)

@@ -15,6 +15,7 @@ The product boundary is strict: correction may refine the prefix, but continuati
 raw input
   -> TextProtection
   -> CorrectionEngine
+  -> CompositionBuffer / candidate spans
   -> LockedPrefix
   -> PrefixContinuationEngine
   -> InputSessionController
@@ -29,6 +30,7 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 
 - `TextProtection` detects Level 0 input such as URLs, emails, paths, commands, code-like snippets, and protected app contexts.
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
+- `TraditionalInputEngine` returns raw-range segment metadata so the IMK frontend can apply partial selections inside the active composition rather than committing every candidate immediately.
 - `TraditionalInputSeedLexicon` loads the clean-room seed lexicon from a bundled TSV resource instead of embedding the table in Swift source.
 - `TraditionalInputEngine` can also be initialized with authorized local lexicon entries. Those entries use the same private index as the seed lexicon, so larger dictionaries, future bundled resources, and local user lexicons do not need a separate parser path.
 - `TraditionalInputLexiconResourceLoader` parses audited JSON or TSV lexicon resources into the same entry shape before they enter the engine.
@@ -95,6 +97,7 @@ Settings status does not import the IMK frontend and does not own dictionary lic
 
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
 - `InputSessionController` turns raw input and actions into suggestion and commit decisions.
+- `CompositionBuffer` separates raw pinyin, resolved candidate segments, active raw range, marked-text display, and final commit text.
 - `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction, using the shared `TraditionalInputLexiconDirectoryResolver`.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
 - The IMK controller checks a lightweight runtime lexicon snapshot at new-composition boundaries and rebuilds its session engine only when local JSON/TSV resources changed.
@@ -105,7 +108,7 @@ Settings status does not import the IMK frontend and does not own dictionary lic
 - Planned adaptive candidate layout inserts a measurement layer between renderer and AppKit rendering so panel
   size and edge avoidance are computed before rows are drawn.
 
-The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Commit replaces the active marked range with either the selected prefix or prefix plus continuation.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Marked text shows raw pinyin until a candidate is confirmed; segment selections update only the marked composition. Commit replaces the active marked range with raw input, a fully resolved Chinese composition, the selected full prefix, or prefix plus continuation depending on the shortcut.
 
 User selection history is stored under Application Support as `user-selection-history.json`. This file is local candidate-learning data only; it is not serialized into provider requests.
 

@@ -91,6 +91,10 @@ public struct InputKeyCommandMapper: Sendable {
         if stroke.keyCode == Self.tabKeyCode || stroke.text == "\t" {
             return .action(.tab)
         }
+        if stroke.keyCode == Self.returnKeyCode || stroke.keyCode == Self.keypadEnterKeyCode
+            || stroke.text == "\r" || stroke.text == "\n" {
+            return .action(.commitRaw)
+        }
         if stroke.keyCode == Self.spaceKeyCode || stroke.text == " " {
             return .action(.space)
         }
@@ -127,6 +131,8 @@ public struct InputKeyCommandMapper: Sendable {
 
     private static let tabKeyCode = 48
     private static let spaceKeyCode = 49
+    private static let returnKeyCode = 36
+    private static let keypadEnterKeyCode = 76
     private static let deleteKeyCode = 51
     private static let deleteText = "\u{7F}"
     private static let escapeKeyCode = 53

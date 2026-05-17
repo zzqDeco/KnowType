@@ -4,11 +4,21 @@ public struct TraditionalInputCandidate: Codable, Sendable, Equatable {
     public var text: String
     public var confidence: Double
     public var inputTokens: [String]
+    public var rawRange: TextRange?
+    public var segments: [CandidateSegment]
 
-    public init(text: String, confidence: Double, inputTokens: [String]) {
+    public init(
+        text: String,
+        confidence: Double,
+        inputTokens: [String],
+        rawRange: TextRange? = nil,
+        segments: [CandidateSegment] = []
+    ) {
         self.text = text
         self.confidence = confidence
         self.inputTokens = inputTokens
+        self.rawRange = rawRange
+        self.segments = segments
     }
 }
 
@@ -109,14 +119,103 @@ public struct TraditionalInputEngine: Sendable {
                 .filter { $0.translatedCount > 0 }
                 .map { state in
                     TraditionalInputCandidate(
-                        text: joinSegments(state.segments),
+                        text: joinSegments(state.segments.map(\.text)),
                         confidence: state.confidence * tokenizationConfidence(tokens),
-                        inputTokens: tokens.map(\.surface)
+                        inputTokens: tokens.map(\.surface),
+                        rawRange: TextRange.covering(state.segments.map(\.rawRange)),
+                        segments: state.segments
                     )
                 }
         }
 
         return uniqueSorted(parsed)
+    }
+
+    public func segmentCandidates(
+        for rawInput: String,
+        activeRange: TextRange,
+        preserveCapitalizedPinyin: Bool = true
+    ) -> [TraditionalInputCandidate] {
+        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !activeRange.isEmpty else {
+            return []
+        }
+
+        let candidates = tokenizations(for: trimmed).flatMap { tokens -> [TraditionalInputCandidate] in
+            guard let startIndex = tokens.firstIndex(where: { token in
+                token.rawRange.intersects(activeRange) || token.rawRange.start == activeRange.start
+            }) else {
+                return []
+            }
+
+            var candidates: [TraditionalInputCandidate] = []
+            let maxLength = min(lexiconIndex.maxEntryLength, tokens.count - startIndex)
+            for length in stride(from: maxLength, through: 1, by: -1) {
+                let tokenSlice = tokens[startIndex..<(startIndex + length)]
+                guard let rawRange = TextRange.covering(tokenSlice.map(\.rawRange)),
+                      activeRange.contains(rawRange) || rawRange.start == activeRange.start else {
+                    continue
+                }
+                if preserveCapitalizedPinyin {
+                    guard !tokenSlice.contains(where: { token in
+                        isCapitalizedASCIIWord(token.surface) && knownPinyinTokens.contains(token.normalized)
+                    }) else {
+                        continue
+                    }
+                }
+
+                let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
+                let entries = lexiconIndex.matchingEntries(for: tokenSlice)
+                if length == 1,
+                   let token = tokenSlice.first,
+                   let passthrough = passthroughText(
+                    for: token,
+                    preserveCapitalizedPinyin: preserveCapitalizedPinyin
+                   ) {
+                    let segment = CandidateSegment(
+                        rawRange: rawRange,
+                        tokenRange: TextRange(start: startIndex, length: 1),
+                        reading: token.normalized,
+                        text: passthrough,
+                        isPassthrough: true
+                    )
+                    candidates.append(
+                        TraditionalInputCandidate(
+                            text: passthrough,
+                            confidence: 0.96,
+                            inputTokens: [token.surface],
+                            rawRange: rawRange,
+                            segments: [segment]
+                        )
+                    )
+                }
+                for entry in entries {
+                    let matchPenalty = typoPenalty + partialMatchPenalty(entry: entry, tokens: tokenSlice)
+                    let reading = tokenSlice.map(\.normalized).joined(separator: " ")
+                    for output in entry.outputs {
+                        let segment = CandidateSegment(
+                            rawRange: rawRange,
+                            tokenRange: TextRange(start: startIndex, length: length),
+                            reading: reading,
+                            text: output.text,
+                            isPassthrough: false
+                        )
+                        candidates.append(
+                            TraditionalInputCandidate(
+                                text: output.text,
+                                confidence: max(0.01, output.confidence - matchPenalty),
+                                inputTokens: tokenSlice.map(\.surface),
+                                rawRange: rawRange,
+                                segments: [segment]
+                            )
+                        )
+                    }
+                }
+            }
+            return candidates
+        }
+
+        return uniqueSorted(candidates)
     }
 
     public func analyzePinyinInput(
@@ -162,14 +261,16 @@ public struct TraditionalInputEngine: Sendable {
     }
 
     private func tokenizations(for rawInput: String) -> [[InputToken]] {
-        let separated = rawInput
-            .split(whereSeparator: { $0.isWhitespace })
-            .map(String.init)
+        let separated = rawComponents(in: rawInput)
 
         if separated.count > 1 {
             var paths: [[InputToken]] = [[]]
             for component in separated {
-                let componentPaths = tokenizations(forComponent: component, allowCompactSegmentation: false)
+                let componentPaths = tokenizations(
+                    forComponent: component.surface,
+                    rawRange: component.rawRange,
+                    allowCompactSegmentation: false
+                )
                 guard !componentPaths.isEmpty else {
                     return []
                 }
@@ -182,26 +283,33 @@ public struct TraditionalInputEngine: Sendable {
             return []
         }
 
-        if isPassthroughToken(token) {
+        if isPassthroughToken(token.surface) {
             return [[InputToken(
-                surface: token,
-                normalized: token,
+                surface: token.surface,
+                normalized: token.surface,
+                rawRange: token.rawRange,
                 isTypoNormalized: false,
                 isPartial: false
             )]]
         }
 
-        return tokenizations(forComponent: token, allowCompactSegmentation: true)
+        return tokenizations(
+            forComponent: token.surface,
+            rawRange: token.rawRange,
+            allowCompactSegmentation: true
+        )
     }
 
     private func tokenizations(
         forComponent token: String,
+        rawRange: TextRange,
         allowCompactSegmentation: Bool
     ) -> [[InputToken]] {
         if isPassthroughToken(token) {
             return [[InputToken(
                 surface: token,
                 normalized: token,
+                rawRange: rawRange,
                 isTypoNormalized: false,
                 isPartial: false
             )]]
@@ -212,15 +320,16 @@ public struct TraditionalInputEngine: Sendable {
             return [[InputToken(
                 surface: token,
                 normalized: normalized,
+                rawRange: rawRange,
                 isTypoNormalized: isTypo(token),
                 isPartial: isPartialPinyinComponent(normalized)
             )]]
         }
 
-        return segmentCompact(token)
+        return segmentCompact(token, baseOffset: rawRange.start)
     }
 
-    private func segmentCompact(_ token: String) -> [[InputToken]] {
+    private func segmentCompact(_ token: String, baseOffset: Int) -> [[InputToken]] {
         let lower = token.lowercased()
         let end = lower.endIndex
         var memo: [String.Index: [[InputToken]]] = [:]
@@ -246,6 +355,7 @@ public struct TraditionalInputEngine: Sendable {
                 let token = InputToken(
                     surface: surface,
                     normalized: normalize(remaining),
+                    rawRange: TextRange(start: baseOffset + offset(of: index, in: lower), length: remaining.count),
                     isTypoNormalized: isTypo(remaining),
                     isPartial: false
                 )
@@ -270,6 +380,7 @@ public struct TraditionalInputEngine: Sendable {
                 let token = InputToken(
                     surface: surface,
                     normalized: normalize(key),
+                    rawRange: TextRange(start: baseOffset + offset(of: index, in: lower), length: key.count),
                     isTypoNormalized: isTypo(key),
                     isPartial: pinyinInitialTokens.contains(key)
                 )
@@ -295,6 +406,7 @@ public struct TraditionalInputEngine: Sendable {
                     InputToken(
                         surface: surface,
                         normalized: remaining,
+                        rawRange: TextRange(start: baseOffset + offset(of: index, in: lower), length: remaining.count),
                         isTypoNormalized: false,
                         isPartial: true
                     )
@@ -350,9 +462,18 @@ public struct TraditionalInputEngine: Sendable {
                         preserveCapitalizedPinyin: preserveCapitalizedPinyin,
                         memo: &memo
                     ) {
+                        let rawRange = TextRange.covering(tokenSlice.map(\.rawRange))
+                            ?? TextRange(start: 0, length: 0)
+                        let segment = CandidateSegment(
+                            rawRange: rawRange,
+                            tokenRange: TextRange(start: index, length: length),
+                            reading: tokenSlice.map(\.normalized).joined(separator: " "),
+                            text: output.text,
+                            isPassthrough: false
+                        )
                         states.append(
                             ParseState(
-                                segments: [output.text] + tail.segments,
+                                segments: [segment] + tail.segments,
                                 confidence: max(0.01, output.confidence - matchPenalty) * tail.confidence,
                                 translatedCount: tail.translatedCount + 1
                             )
@@ -376,9 +497,16 @@ public struct TraditionalInputEngine: Sendable {
                 preserveCapitalizedPinyin: preserveCapitalizedPinyin,
                 memo: &memo
             ) {
+                let segment = CandidateSegment(
+                    rawRange: token.rawRange,
+                    tokenRange: TextRange(start: index, length: 1),
+                    reading: token.normalized,
+                    text: passthrough,
+                    isPassthrough: true
+                )
                 states.append(
                     ParseState(
-                        segments: [passthrough] + tail.segments,
+                        segments: [segment] + tail.segments,
                         confidence: 0.96 * tail.confidence,
                         translatedCount: tail.translatedCount
                     )
@@ -510,14 +638,20 @@ public struct TraditionalInputEngine: Sendable {
 private struct InputToken: Sendable, Equatable {
     var surface: String
     var normalized: String
+    var rawRange: TextRange
     var isTypoNormalized: Bool
     var isPartial: Bool
 }
 
 private struct ParseState: Sendable, Equatable {
-    var segments: [String]
+    var segments: [CandidateSegment]
     var confidence: Double
     var translatedCount: Int
+}
+
+private struct RawInputComponent: Sendable, Equatable {
+    var surface: String
+    var rawRange: TextRange
 }
 
 private struct LexiconEntry: Sendable, Equatable {
@@ -767,6 +901,49 @@ private func joinSegments(_ segments: [String]) -> String {
         previousWasASCII = currentIsASCII
     }
     return output
+}
+
+private func rawComponents(in rawInput: String) -> [RawInputComponent] {
+    var components: [RawInputComponent] = []
+    var currentStart: String.Index?
+    var currentOffset = 0
+    var startOffset = 0
+
+    for index in rawInput.indices {
+        let character = rawInput[index]
+        if character.isWhitespace {
+            if let start = currentStart {
+                let surface = String(rawInput[start..<index])
+                components.append(
+                    RawInputComponent(
+                        surface: surface,
+                        rawRange: TextRange(start: startOffset, length: currentOffset - startOffset)
+                    )
+                )
+                currentStart = nil
+            }
+        } else if currentStart == nil {
+            currentStart = index
+            startOffset = currentOffset
+        }
+        currentOffset += 1
+    }
+
+    if let start = currentStart {
+        let surface = String(rawInput[start..<rawInput.endIndex])
+        components.append(
+            RawInputComponent(
+                surface: surface,
+                rawRange: TextRange(start: startOffset, length: currentOffset - startOffset)
+            )
+        )
+    }
+
+    return components
+}
+
+private func offset(of index: String.Index, in string: String) -> Int {
+    string.distance(from: string.startIndex, to: index)
 }
 
 private func isASCIIWord(_ text: String) -> Bool {
