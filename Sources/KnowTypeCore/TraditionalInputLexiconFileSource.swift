@@ -75,6 +75,33 @@ public struct TraditionalInputLexiconFileSource: Sendable {
         }
     }
 
+    public static func isLexiconResourceFile(_ fileURL: URL) -> Bool {
+        !fileURL.lastPathComponent.hasPrefix(".")
+            && !isManagedPackMetadataFile(fileURL)
+            && format(for: fileURL) != nil
+    }
+
+    public static func isManagedPackMetadataFile(_ fileURL: URL) -> Bool {
+        guard fileURL.lastPathComponent.hasSuffix(".metadata.json") else {
+            return false
+        }
+        if ManagedLexiconPacks.all.contains(where: { pack in
+            fileURL.lastPathComponent == pack.metadataFileName
+        }) {
+            return true
+        }
+        return isInstalledPackMetadataFile(fileURL)
+    }
+
+    private static func isInstalledPackMetadataFile(_ fileURL: URL) -> Bool {
+        guard let data = try? Data(contentsOf: fileURL) else {
+            return false
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode(InstalledLexiconPackMetadata.self, from: data)) != nil
+    }
+
     private static func lexiconFileURLs(in directoryURL: URL) throws -> [URL] {
         try FileManager.default.contentsOfDirectory(
             at: directoryURL,
@@ -82,7 +109,7 @@ public struct TraditionalInputLexiconFileSource: Sendable {
             options: [.skipsPackageDescendants]
         )
         .filter { url in
-            guard !url.lastPathComponent.hasPrefix(".") else {
+            guard isLexiconResourceFile(url) else {
                 return false
             }
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey])

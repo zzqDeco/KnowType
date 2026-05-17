@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import KnowTypeCore
 @testable import KnowTypeSettingsApp
 
 final class LexiconSettingsPresentationTests: XCTestCase {
@@ -25,6 +26,8 @@ final class LexiconSettingsPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.lastRefreshDate, Date(timeIntervalSince1970: 123))
         XCTAssertEqual(presentation.refreshActionLabel, "Refresh")
         XCTAssertEqual(presentation.createSampleActionLabel, "Create Sample TSV")
+        XCTAssertEqual(presentation.installRecommendedPackActionLabel, "Install Recommended Lexicon")
+        XCTAssertFalse(presentation.isInstallingRecommendedPack)
         XCTAssertEqual(presentation.createMissingDirectoriesActionLabel, "Create Missing Directories")
         XCTAssertTrue(presentation.showsCreateMissingDirectoriesAction)
         XCTAssertEqual(presentation.lastActionMessage, "Created 1 lexicon directory.")
@@ -79,5 +82,48 @@ final class LexiconSettingsPresentationTests: XCTestCase {
         XCTAssertEqual(diagnosticPresentation.id, "broken.tsv:Line 1 has too few columns.")
         XCTAssertEqual(diagnosticPresentation.title, "broken.tsv")
         XCTAssertEqual(diagnosticPresentation.message, "Line 1 has too few columns.")
+    }
+
+    func testPresentationMapsInstalledManagedPacksAndInstallingState() throws {
+        let status = LexiconDirectoryStatus(
+            directory: URL(fileURLWithPath: "/tmp/KnowType/Lexicons"),
+            exists: true,
+            resourceFileCount: 1,
+            loadedEntryCount: 1,
+            installedPacks: [
+                InstalledLexiconPackStatus(
+                    metadata: InstalledLexiconPackMetadata(
+                        id: "fixture",
+                        displayName: "Fixture Pack",
+                        sourceURL: URL(string: "https://example.com/source")!,
+                        sourceVersion: "fixture",
+                        sourceSHA256: "abc",
+                        outputFileName: "fixture.tsv",
+                        entryCount: 1,
+                        licenseName: "Apache-2.0",
+                        licenseURL: URL(string: "https://example.com/license")!,
+                        installedAt: Date(timeIntervalSince1970: 1_234)
+                    )
+                )
+            ],
+            diagnostics: []
+        )
+
+        let presentation = LexiconSettingsPresentation(
+            totalLoadedEntryCount: 1,
+            lastRefreshDate: nil,
+            directories: [status],
+            lastActionMessage: nil,
+            isInstallingRecommendedPack: true
+        )
+
+        XCTAssertEqual(presentation.installRecommendedPackActionLabel, "Installing Recommended Lexicon...")
+        XCTAssertTrue(presentation.isInstallingRecommendedPack)
+        let pack = try XCTUnwrap(presentation.directories.first?.installedPacks.first)
+        XCTAssertEqual(pack.id, "fixture")
+        XCTAssertEqual(pack.title, "Fixture Pack")
+        XCTAssertEqual(pack.entries, SettingsKeyValuePresentation(label: "Entries", value: "1"))
+        XCTAssertEqual(pack.license, SettingsKeyValuePresentation(label: "License", value: "Apache-2.0"))
+        XCTAssertEqual(pack.source, SettingsKeyValuePresentation(label: "Source", value: "https://example.com/source"))
     }
 }

@@ -25,6 +25,7 @@ public struct LexiconDirectoryStatus: Sendable, Equatable, Identifiable {
     public var exists: Bool
     public var resourceFileCount: Int
     public var loadedEntryCount: Int
+    public var installedPacks: [InstalledLexiconPackStatus]
     public var diagnostics: [LexiconDiagnosticStatus]
 
     public init(
@@ -32,13 +33,35 @@ public struct LexiconDirectoryStatus: Sendable, Equatable, Identifiable {
         exists: Bool,
         resourceFileCount: Int,
         loadedEntryCount: Int,
+        installedPacks: [InstalledLexiconPackStatus] = [],
         diagnostics: [LexiconDiagnosticStatus]
     ) {
         self.directory = directory
         self.exists = exists
         self.resourceFileCount = resourceFileCount
         self.loadedEntryCount = loadedEntryCount
+        self.installedPacks = installedPacks
         self.diagnostics = diagnostics
+    }
+}
+
+public struct InstalledLexiconPackStatus: Sendable, Equatable, Identifiable {
+    public var id: String
+    public var displayName: String
+    public var entryCount: Int
+    public var licenseName: String
+    public var licenseURL: URL
+    public var sourceURL: URL
+    public var installedAt: Date
+
+    public init(metadata: InstalledLexiconPackMetadata) {
+        self.id = metadata.id
+        self.displayName = metadata.displayName
+        self.entryCount = metadata.entryCount
+        self.licenseName = metadata.licenseName
+        self.licenseURL = metadata.licenseURL
+        self.sourceURL = metadata.sourceURL
+        self.installedAt = metadata.installedAt
     }
 }
 
@@ -57,25 +80,36 @@ public final class LexiconSettingsViewModel: ObservableObject {
     @Published public private(set) var totalLoadedEntryCount: Int
     @Published public private(set) var lastRefreshDate: Date?
     @Published public private(set) var lastActionMessage: String?
+    @Published public private(set) var isInstallingRecommendedPack: Bool
 
     private let directoryURLs: [URL]
     private let fileManager: FileManager
     private let fileSource: TraditionalInputLexiconFileSource
     private let dateProvider: () -> Date
+    private let recommendedPackInstaller: (ManagedLexiconPack, URL, Bool) async throws -> InstalledLexiconPackMetadata
 
     public init(
         directoryURLs: [URL] = LexiconSettingsViewModel.defaultLexiconDirectories(),
         fileManager: FileManager = .default,
         fileSource: TraditionalInputLexiconFileSource = TraditionalInputLexiconFileSource(),
-        dateProvider: @escaping () -> Date = Date.init
+        dateProvider: @escaping () -> Date = Date.init,
+        recommendedPackInstaller: @escaping (ManagedLexiconPack, URL, Bool) async throws -> InstalledLexiconPackMetadata = { pack, directory, force in
+            try await ManagedLexiconPackInstaller().install(
+                pack,
+                destinationDirectory: directory,
+                force: force
+            )
+        }
     ) {
         self.directoryURLs = TraditionalInputLexiconDirectoryResolver.uniqueDirectories(directoryURLs)
         self.fileManager = fileManager
         self.fileSource = fileSource
         self.dateProvider = dateProvider
+        self.recommendedPackInstaller = recommendedPackInstaller
         self.directories = []
         self.totalLoadedEntryCount = 0
         self.lastActionMessage = nil
+        self.isInstallingRecommendedPack = false
         refresh()
     }
 
@@ -149,6 +183,34 @@ public final class LexiconSettingsViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    public func installRecommendedLexiconPack(force: Bool = false) async -> Bool {
+        guard let directory = directoryURLs.first else {
+            lastActionMessage = "No lexicon directory is configured."
+            refresh()
+            return false
+        }
+
+        isInstallingRecommendedPack = true
+        defer {
+            isInstallingRecommendedPack = false
+            refresh()
+        }
+
+        do {
+            let metadata = try await recommendedPackInstaller(
+                ManagedLexiconPacks.recommended,
+                directory,
+                force
+            )
+            lastActionMessage = "Installed \(metadata.displayName) with \(metadata.entryCount) entries."
+            return true
+        } catch {
+            lastActionMessage = error.localizedDescription
+            return false
+        }
+    }
+
     private func loadDirectoryStatus(_ directory: URL) -> LexiconDirectoryStatus {
         guard isDirectory(directory) else {
             return LexiconDirectoryStatus(
@@ -156,6 +218,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
                 exists: false,
                 resourceFileCount: 0,
                 loadedEntryCount: 0,
+                installedPacks: [],
                 diagnostics: []
             )
         }
@@ -166,6 +229,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
             exists: true,
             resourceFileCount: resourceFileCount(in: directory),
             loadedEntryCount: catalog.entries.count,
+            installedPacks: installedPackStatuses(in: directory),
             diagnostics: catalog.diagnostics.map { diagnostic in
                 LexiconDiagnosticStatus(
                     resourceID: diagnostic.resourceID,
@@ -191,8 +255,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
         }
 
         return files.filter { url in
-            guard !url.lastPathComponent.hasPrefix("."),
-                  TraditionalInputLexiconFileSource.format(for: url) != nil else {
+            guard TraditionalInputLexiconFileSource.isLexiconResourceFile(url) else {
                 return false
             }
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey])
@@ -200,4 +263,34 @@ public final class LexiconSettingsViewModel: ObservableObject {
         }.count
     }
 
+    private func installedPackStatuses(in directory: URL) -> [InstalledLexiconPackStatus] {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+            options: [.skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return files
+            .filter { url in
+                guard url.lastPathComponent.hasSuffix(".metadata.json") else {
+                    return false
+                }
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey])
+                return values?.isDirectory != true && values?.isHidden != true
+            }
+            .compactMap { url in
+                guard let data = try? Data(contentsOf: url),
+                      let metadata = try? decoder.decode(InstalledLexiconPackMetadata.self, from: data) else {
+                    return nil
+                }
+                return InstalledLexiconPackStatus(metadata: metadata)
+            }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+            }
+    }
 }

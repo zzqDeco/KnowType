@@ -114,6 +114,9 @@ Core candidate types:
 - `TraditionalInputLexiconFileSource`: file and directory loader for local lexicon resources.
 - `TraditionalInputLexiconResourceLoader`: JSON/TSV parser for audited local lexicon resources.
 - `TraditionalInputSeedLexicon`: packaged clean-room seed lexicon loaded through the same file/resource path.
+- `ManagedLexiconPack`: pinned, license-aware dictionary source descriptor.
+- `InstalledLexiconPackMetadata`: local metadata written beside installed managed lexicon TSV files.
+- `ManagedLexiconPackInstaller`: downloader, verifier, converter, and atomic writer for managed lexicon packs.
 - `InputMethodLexiconRuntime`: input-method runtime loader for user-owned local lexicon directories.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
@@ -129,7 +132,7 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 
 `TraditionalInputLexiconCatalogLoader` accepts named resources, loads each one independently, preserves valid entries, and returns diagnostics for failed resources. `TraditionalInputLexiconCatalog.makeEngine()` is the preferred handoff into `TraditionalInputEngine`.
 
-`TraditionalInputLexiconFileSource` infers `.json` and `.tsv` formats from file extensions, reads explicit file lists or sorted directory contents, skips hidden directory entries, and reports unsupported or unreadable files through catalog diagnostics.
+`TraditionalInputLexiconFileSource` infers `.json` and `.tsv` formats from file extensions, reads explicit file lists or sorted directory contents, skips hidden directory entries and known managed-pack metadata filenames, and reports unsupported or unreadable files through catalog diagnostics.
 
 `TraditionalInputLexiconDirectoryResolver` resolves `KNOWTYPE_LEXICON_DIR`, colon-separated `KNOWTYPE_LEXICON_DIRS`, and `~/Library/Application Support/KnowType/Lexicons`, trimming empty paths and de-duplicating standardized file paths while preserving order.
 
@@ -137,7 +140,9 @@ Raw input is tracked outside `SuggestionResponse` by the input-method session, f
 
 `InputMethodLexiconRuntime.snapshot()` reports each configured directory's existence and supported JSON/TSV resource files with modification metadata. The IMK frontend uses that snapshot to refresh its runtime engine at the start of a new composition when local lexicon resources changed, without changing active marked text mid-composition.
 
-`LexiconSettingsViewModel` uses the shared resolver for settings status. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, and it can create missing directories or a non-overwriting `knowtype-sample.tsv` file on explicit user action. It does not import bulk dictionaries or own licensing decisions in the MVP.
+`ManagedLexiconPackInstaller` currently supports the recommended `rime-pinyin-simp` pack. It downloads the pinned Rime source dictionary, verifies the expected SHA256, converts Rime rows shaped as `text<TAB>pinyin<TAB>weight?` into KnowType TSV, writes the TSV atomically, and writes metadata containing source, version, checksum, license, entry count, and install date. It refuses to overwrite an existing output file unless `force` is true.
+
+`LexiconSettingsViewModel` uses the shared resolver for settings status. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, can create missing directories or a non-overwriting `knowtype-sample.tsv`, and can install the recommended managed lexicon pack on explicit user action. It displays `*.metadata.json` pack metadata but does not treat metadata files as lexicon resources.
 
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 

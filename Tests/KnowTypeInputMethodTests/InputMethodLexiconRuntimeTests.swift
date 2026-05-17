@@ -56,6 +56,8 @@ final class InputMethodLexiconRuntimeTests: XCTestCase {
         try Data("ignored".utf8).write(to: directory.appendingPathComponent("notes.txt"))
         try Data("ce shi ci\t测试词\t0.995\n".utf8)
             .write(to: directory.appendingPathComponent("user.tsv"))
+        try Data(#"{"id":"pack"}"#.utf8)
+            .write(to: directory.appendingPathComponent("rime-pinyin-simp.metadata.json"))
         try Data(#"[{"pinyin":["zi","zao"],"outputs":[{"text":"自造","confidence":0.99}]}]"#.utf8)
             .write(to: directory.appendingPathComponent("custom.json"))
 

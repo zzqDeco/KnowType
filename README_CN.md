@@ -138,8 +138,16 @@ KnowType 通过 `ProviderProfile` 和 `ProviderFactory` 加载模型 provider。
 ~/Library/Application Support/KnowType/Lexicons
 ```
 
-设置页会显示这个目录是否存在、加载了多少词条，以及资源诊断，也可以一键创建缺失目录。目录不存在是允许的；KnowType 会继续使用内置 seed 词库。
+设置页会显示这个目录是否存在、加载了多少词条、已安装哪些托管词库包，以及资源诊断；也可以一键创建缺失目录、创建示例 TSV，或安装推荐的 Rime 简体拼音词库包。目录不存在是允许的；KnowType 会继续使用内置 seed 词库。
 开发时也可以通过 `KNOWTYPE_LEXICON_DIR` 和冒号分隔的 `KNOWTYPE_LEXICON_DIRS` 指定额外目录，这些目录会排在默认目录之前。
+
+也可以通过命令行安装同一个推荐词库：
+
+```bash
+scripts/install-lexicon-pack.sh rime-pinyin-simp
+```
+
+安装器会下载固定 commit 的 Apache-2.0 Rime 词库，校验 SHA256，转换为 KnowType TSV，并在 TSV 旁写入本地 metadata。第三方大词库数据不会直接提交到本仓库。
 
 Profile 字段：
 

@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import KnowTypeCore
 @testable import KnowTypeSettingsApp
 
 @MainActor
@@ -54,6 +55,35 @@ final class LexiconSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 1)
         XCTAssertEqual(viewModel.directories.first?.diagnostics.count, 1)
         XCTAssertEqual(viewModel.directories.first?.diagnostics.first?.resourceID, "invalid.tsv")
+    }
+
+    func testRefreshReportsInstalledManagedPackMetadataWithoutCountingItAsResource() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("ce shi ci\t测试词\t0.99\n".utf8)
+            .write(to: directory.appendingPathComponent("valid.tsv"))
+        let metadata = """
+        {
+          "displayName" : "Fixture Pack",
+          "entryCount" : 1,
+          "id" : "fixture",
+          "installedAt" : "1970-01-01T00:20:34Z",
+          "licenseName" : "Apache-2.0",
+          "licenseURL" : "https://example.com/license",
+          "outputFileName" : "fixture.tsv",
+          "sourceSHA256" : "abc",
+          "sourceURL" : "https://example.com/source",
+          "sourceVersion" : "fixture"
+        }
+        """
+        try Data(metadata.utf8).write(to: directory.appendingPathComponent("rime-pinyin-simp.metadata.json"))
+
+        let viewModel = LexiconSettingsViewModel(directoryURLs: [directory])
+
+        XCTAssertEqual(viewModel.directories.first?.resourceFileCount, 1)
+        XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 1)
+        XCTAssertEqual(viewModel.directories.first?.installedPacks.first?.displayName, "Fixture Pack")
+        XCTAssertEqual(viewModel.directories.first?.installedPacks.first?.entryCount, 1)
     }
 
     func testMissingDirectoryIsSilent() {
@@ -126,6 +156,66 @@ final class LexiconSettingsViewModelTests: XCTestCase {
             "zi zao ci\t已有词\t0.5\n"
         )
         XCTAssertEqual(viewModel.lastActionMessage, "knowtype-sample.tsv already exists.")
+    }
+
+    func testInstallRecommendedLexiconPackCreatesDirectoryAndRefreshesStatus() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KnowTypeInstallRecommendedLexicon-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let viewModel = LexiconSettingsViewModel(
+            directoryURLs: [directory],
+            recommendedPackInstaller: { pack, directory, _ in
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try Data("ni hao\t你好\t0.99\n".utf8)
+                    .write(to: directory.appendingPathComponent(pack.outputFileName))
+                let metadata = InstalledLexiconPackMetadata(
+                    id: pack.id,
+                    displayName: pack.displayName,
+                    sourceURL: pack.sourceURL,
+                    sourceVersion: pack.sourceVersion,
+                    sourceSHA256: pack.sourceSHA256,
+                    outputFileName: pack.outputFileName,
+                    entryCount: 1,
+                    licenseName: pack.licenseName,
+                    licenseURL: pack.licenseURL,
+                    installedAt: Date(timeIntervalSince1970: 1_234)
+                )
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                try encoder.encode(metadata)
+                    .write(to: directory.appendingPathComponent(pack.metadataFileName))
+                return metadata
+            }
+        )
+
+        let installed = await viewModel.installRecommendedLexiconPack()
+
+        XCTAssertTrue(installed)
+        XCTAssertEqual(viewModel.lastActionMessage, "Installed Rime Pinyin Simplified with 1 entries.")
+        XCTAssertEqual(viewModel.directories.first?.resourceFileCount, 1)
+        XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 1)
+        XCTAssertEqual(viewModel.directories.first?.installedPacks.first?.id, "rime-pinyin-simp")
+        XCTAssertFalse(viewModel.isInstallingRecommendedPack)
+    }
+
+    func testInstallRecommendedLexiconPackKeepsExistingStatusOnFailure() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("ni hao\t你好\t0.99\n".utf8)
+            .write(to: directory.appendingPathComponent("valid.tsv"))
+        let viewModel = LexiconSettingsViewModel(
+            directoryURLs: [directory],
+            recommendedPackInstaller: { _, _, _ in
+                throw ManagedLexiconPackInstallerError.outputAlreadyExists("fixture.tsv")
+            }
+        )
+
+        let installed = await viewModel.installRecommendedLexiconPack()
+
+        XCTAssertFalse(installed)
+        XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 1)
+        XCTAssertEqual(viewModel.lastActionMessage, "Lexicon pack output already exists: fixture.tsv")
+        XCTAssertFalse(viewModel.isInstallingRecommendedPack)
     }
 
     func testDuplicateDirectoriesAreShownOnce() throws {
