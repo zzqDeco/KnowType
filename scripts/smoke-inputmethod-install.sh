@@ -119,6 +119,7 @@ help_scripts=(
   "$ROOT_DIR/scripts/create-local-system-policy-profile.sh"
   "$ROOT_DIR/scripts/diagnose-inputmethod.sh"
   "$ROOT_DIR/scripts/install-inputmethod.sh"
+  "$ROOT_DIR/scripts/repair-inputmethod-selection.sh"
   "$ROOT_DIR/scripts/select-inputmethod.sh"
   "$ROOT_DIR/scripts/smoke-inputmethod-install.sh"
   "$ROOT_DIR/scripts/uninstall-inputmethod.sh"

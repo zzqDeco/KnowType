@@ -93,6 +93,37 @@ info() {
   printf '[info] %s\n' "$1"
 }
 
+strip_lsregister_suffix() {
+  local value="$1"
+  value="${value% (0x*)}"
+  printf '%s' "$value"
+}
+
+expand_home_path() {
+  local path="$1"
+  case "$path" in
+    "~")
+      printf '%s' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s' "$HOME" "${path#~/}"
+      ;;
+    *)
+      printf '%s' "$path"
+      ;;
+  esac
+}
+
+canonical_bundle_path() {
+  local path="$1"
+  path="$(expand_home_path "$(strip_lsregister_suffix "$path")")"
+  if [[ -e "$path" ]]; then
+    printf '%s/%s' "$(cd "$(dirname "$path")" && pwd -P)" "$(basename "$path")"
+  else
+    printf '%s' "$path"
+  fi
+}
+
 plist_value() {
   local key="$1"
   local plist="$2"
@@ -140,13 +171,61 @@ if [[ -f "$INFO_PLIST" ]]; then
   expect_plist_value "InputMethodConnectionName" "com.knowtype.inputmethod.KnowType_Connection" "$INFO_PLIST"
   expect_plist_value "InputMethodServerControllerClass" "KnowTypeInputController" "$INFO_PLIST"
   expect_plist_value "InputMethodServerDelegateClass" "KnowTypeInputController" "$INFO_PLIST"
-  expect_plist_value "LSBackgroundOnly" "true" "$INFO_PLIST"
+  expect_plist_value "LSBackgroundOnly" "false" "$INFO_PLIST"
+  expect_plist_value "LSUIElement" "true" "$INFO_PLIST"
   expect_plist_value "LSHasLocalizedDisplayName" "true" "$INFO_PLIST"
   if [[ -n "$(plist_value "TISIconIsTemplate" "$INFO_PLIST")" ]]; then
     warn "Info.plist contains private/undocumented TISIconIsTemplate; rebuild from current sources"
   fi
 else
   fail "Info.plist is missing"
+fi
+
+if [[ -d "$BUNDLE_PATH" ]]; then
+  LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  if [[ -x "$LSREGISTER" ]]; then
+    CANONICAL_BUNDLE_PATH="$(canonical_bundle_path "$BUNDLE_PATH")"
+    STALE_LS_PATHS="$(
+      "$LSREGISTER" -dump 2>/dev/null | awk -v id="$PARENT_ID" '
+        /^bundle id:/ {
+          path = ""
+          matched = 0
+        }
+        /^[[:space:]]*path:/ {
+          sub(/^[^:]*:[[:space:]]*/, "")
+          path = $0
+        }
+        /^[[:space:]]*identifier:/ {
+          value = $0
+          sub(/^[^:]*:[[:space:]]*/, "", value)
+          sub(/[[:space:]]*\(0x[[:xdigit:]]+\)$/, "", value)
+          if (value == id) {
+            matched = 1
+          }
+        }
+        matched == 1 && path != "" {
+          print path
+          matched = 0
+        }
+      ' | while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        canonical_path="$(canonical_bundle_path "$path")"
+        if [[ "$canonical_path" != "$CANONICAL_BUNDLE_PATH" ]]; then
+          printf '%s\n' "$path"
+        fi
+      done
+    )"
+    if [[ -z "$STALE_LS_PATHS" ]]; then
+      ok "LaunchServices has no stale KnowType bundle records"
+    else
+      fail "LaunchServices has stale KnowType bundle records outside the installed path; run ./scripts/repair-inputmethod-selection.sh"
+      while IFS= read -r path; do
+        [[ -n "$path" ]] && info "stale LaunchServices path: $path"
+      done <<<"$STALE_LS_PATHS"
+    fi
+  else
+    warn "lsregister command is unavailable; cannot check stale LaunchServices records"
+  fi
 fi
 
 if [[ -x "$EXECUTABLE" ]]; then
@@ -282,6 +361,7 @@ else
           ok "HIToolbox selected preference is KnowType"
         else
           warn "HIToolbox selected preference is not KnowType; choose KnowType from the input menu/System Settings before typing"
+          info "If macOS shows an authorization prompt to allow 知键/KnowType as an input method, click Allow; until it is allowed, the menu can list KnowType while normal switching still falls back to another source"
         fi
         ;;
       preference.enabled.knowtype)

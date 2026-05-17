@@ -31,9 +31,9 @@ chain can restore Apple Pinyin when the bundle is not allowed by system policy.
   installation with `--open`.
 - `scripts/diagnose-inputmethod.sh` now points to this profile path when
   Gatekeeper rejects a local Apple Development build.
-- The input-method bundle metadata is aligned with IMKit expectations:
-  `LSBackgroundOnly` is `true`, `LSUIElement` is omitted, and the Chinese
-  repertoire uses `zh-Hans` instead of the script-only `Hans`.
+- The input-method bundle metadata is aligned with mature IMK frontends:
+  `LSUIElement` is `true`, `LSBackgroundOnly` is `false`, and the repertoire
+  uses Chinese script values such as `Hans`, `Hant`, `Hani`, `Hanb`, and `Han`.
 - Documentation is kept in `doc/`, not in the product README.
 
 ## Verification

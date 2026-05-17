@@ -57,4 +57,5 @@ sleep 1.25
 echo "Installed KnowType to: $TARGET_PATH"
 echo "Run ./scripts/diagnose-inputmethod.sh --strict for the read-only install status check."
 echo "Activate the target text app, run ./scripts/select-inputmethod.sh --require-selected, then type a real probe before manual acceptance."
-echo "If diagnostics show HIToolbox selected preference is still Apple Pinyin, choose KnowType from the active app's input menu/System Settings."
+echo "If System Settings asks to allow 知键/KnowType as an input method, click Allow before testing selection."
+echo "If diagnostics show HIToolbox selected preference is still another source, choose KnowType from the active app's input menu/System Settings."

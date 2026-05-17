@@ -81,11 +81,26 @@ Useful evidence:
 - KnowType logs appear while typing, not only during installation;
 - `Gatekeeper assessment accepts the installed bundle` appears in diagnostics.
 
-If the active app remains on Apple Pinyin after the profile is installed, log
-out and back in to clear stale Text Input Source cache entries before repeating
-the install and selection checks.
+If macOS shows an authorization prompt asking whether to allow `知键` to enable
+`KnowType`, click Allow before treating any typing probe as KnowType behavior.
 
-The bundle metadata should also match IMKit's background input-method shape:
-`LSBackgroundOnly=true`, no foreground `LSUIElement`, and `zh-Hans` in the
-character repertoire so System Settings can classify the input method under
-Simplified Chinese.
+If the active app remains on Apple Pinyin after the profile is installed, run
+the local repair helper before falling back to logout:
+
+```bash
+./scripts/repair-inputmethod-selection.sh
+```
+
+The helper backs up Text Input Source preferences, unregisters stale
+LaunchServices records for older KnowType build paths, deduplicates KnowType
+preference entries, restarts Text Input menu agents, and relaunches the
+installed input method app. If selection still falls back after repair, log out
+and back in to clear session-level Text Input Source state before repeating the
+install and selection checks.
+
+The bundle metadata should match mature IMK frontend shape: `LSUIElement=true`,
+`LSBackgroundOnly=false`, a compact `TISIconLabels` primary label, and Chinese
+script repertoire values such as `Hans`, `Hant`, `Hani`, `Hanb`, and `Han`.
+Do not advertise `Latn` in the visible Chinese input mode; KnowType can still
+pass through English keystrokes internally, but the system input source should
+not be classified as an ASCII-capable keyboard layout.
