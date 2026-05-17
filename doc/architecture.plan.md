@@ -34,6 +34,7 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 - `TraditionalInputLexiconResourceLoader` parses audited JSON or TSV lexicon resources into the same entry shape before they enter the engine.
 - `TraditionalInputLexiconCatalogLoader` composes multiple local resources, keeps valid entries when one resource fails, and records per-resource diagnostics for settings or debug UI.
 - `TraditionalInputLexiconFileSource` reads JSON/TSV resources from explicit files or a directory, then hands them to the catalog path.
+- `ManagedLexiconPackInstaller` can install the recommended Rime Pinyin Simplified pack by downloading a pinned Apache-2.0 source, verifying SHA256, converting it to local TSV, and writing pack metadata beside the TSV.
 - `CorrectionEngine` can boost generated prefix candidates from local user selection history without adding new dictionary entries or sending selection data to providers.
 - English and mixed-input paths preserve technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`.
 - `CorrectionEngine` may ask a configured provider for unknown pinyin-shaped input only when `TraditionalInputEngine` reports no local candidate and the input is not protected technical or English text.
@@ -51,7 +52,7 @@ Current Chinese-input coverage includes examples such as:
 - `zhongguoren -> 中国人`
 - `zhege api latnecy youdian gao -> 这个 API latency 有点高`
 
-The local engine is intentionally small but should behave like a normal input method for the MVP cases it claims to support. Broader dictionaries should enter through the local lexicon-extension path after license review; unknown pinyin-shaped gaps may use provider fallback only when the local engine has no candidate.
+The bundled seed engine is intentionally small but should behave like a normal input method for the MVP cases it claims to support. Broader coverage enters through managed or user-owned local lexicons after license review; unknown pinyin-shaped gaps may use provider fallback only when the local engine has no candidate.
 
 ## Provider Layer
 
@@ -84,7 +85,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
 - `InputModePreferencesViewModel` edits punctuation language and symbol-width defaults stored in the shared `com.knowtype.preferences` defaults domain.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
-- Lexicon settings can create missing directories and a non-overwriting sample TSV file, but broader dictionary import and licensing review remain outside the MVP settings model.
+- Lexicon settings can create missing directories, create a non-overwriting sample TSV file, install the recommended managed lexicon pack, and display installed pack metadata.
 
 Settings status does not import the IMK frontend and does not own dictionary licensing.
 

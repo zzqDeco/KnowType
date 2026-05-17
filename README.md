@@ -134,8 +134,16 @@ Local JSON/TSV lexicons are read from:
 ~/Library/Application Support/KnowType/Lexicons
 ```
 
-The settings app shows whether this directory exists, how many lexicon entries loaded, and any resource diagnostics. It can create missing directories for you. Missing directories are allowed; KnowType falls back to the bundled seed lexicon.
+The settings app shows whether this directory exists, how many lexicon entries loaded, installed managed lexicon packs, and any resource diagnostics. It can create missing directories, create a sample TSV, or install the recommended Rime Pinyin Simplified lexicon pack. Missing directories are allowed; KnowType falls back to the bundled seed lexicon.
 For development, `KNOWTYPE_LEXICON_DIR` and colon-separated `KNOWTYPE_LEXICON_DIRS` are also recognized before the default directory.
+
+The same recommended lexicon can be installed from the command line:
+
+```bash
+scripts/install-lexicon-pack.sh rime-pinyin-simp
+```
+
+The installer downloads a pinned Apache-2.0 Rime dictionary, verifies SHA256, converts it into KnowType TSV, and writes local metadata beside the TSV. Third-party bulk dictionary data is not committed to this repository.
 
 Profile fields:
 

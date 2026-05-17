@@ -23,6 +23,7 @@
 | [runtime-lexicon-default-refresh.plan.md](runtime-lexicon-default-refresh.plan.md) | Avoid stale default-engine caches for local lexicon iteration | Active reference |
 | [runtime-lexicon-session-refresh.plan.md](runtime-lexicon-session-refresh.plan.md) | Refresh running IMK sessions when local lexicon resources change | Active reference |
 | [lexicon-sample-resource-action.plan.md](lexicon-sample-resource-action.plan.md) | Settings action for creating a known-good sample TSV lexicon | Active reference |
+| [managed-lexicon-pack-installer.plan.md](managed-lexicon-pack-installer.plan.md) | License-aware recommended lexicon pack download, conversion, and settings install action | Active reference |
 | [provider-runtime-seeded-defaults.plan.md](provider-runtime-seeded-defaults.plan.md) | Shared seeded provider defaults for settings and runtime loading | Active reference |
 | [provider-connection-diagnostics.plan.md](provider-connection-diagnostics.plan.md) | Settings-side provider connection testing without persisting draft secrets | Active reference |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Keep provider-backed continuation honest by not replacing failures with local fallback text | Active reference |

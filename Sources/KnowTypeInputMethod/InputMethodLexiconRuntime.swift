@@ -141,8 +141,7 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
 
         return files
             .filter { file in
-                guard !file.lastPathComponent.hasPrefix("."),
-                      TraditionalInputLexiconFileSource.format(for: file) != nil else {
+                guard TraditionalInputLexiconFileSource.isLexiconResourceFile(file) else {
                     return false
                 }
                 let values = try? file.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey])

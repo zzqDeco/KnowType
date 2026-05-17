@@ -7,6 +7,7 @@ The directory layout mirrors the repository layout. Put notes for Swift package 
 ## Sources/KnowTypeCore
 
 - [Overview](Sources/KnowTypeCore/README.plan.md)
+- [ManagedLexiconPack](Sources/KnowTypeCore/ManagedLexiconPack.plan.md)
 - [TraditionalInputEngine](Sources/KnowTypeCore/TraditionalInputEngine.plan.md)
 - [TraditionalInputLexiconCatalog](Sources/KnowTypeCore/TraditionalInputLexiconCatalog.plan.md)
 - [TraditionalInputLexiconDirectoryResolver](Sources/KnowTypeCore/TraditionalInputLexiconDirectoryResolver.plan.md)
@@ -47,5 +48,6 @@ The directory layout mirrors the repository layout. Put notes for Swift package 
 
 ## scripts
 
+- [Managed Lexicon Pack Installer](scripts/install-lexicon-pack.plan.md)
 - [Local System Policy Profile Generator](scripts/create-local-system-policy-profile.plan.md)
 - [Input Method Diagnostic Scripts](scripts/inputmethod-diagnostics.plan.md)

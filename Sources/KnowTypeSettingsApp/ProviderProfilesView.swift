@@ -185,6 +185,14 @@ private struct LexiconSettingsView: View {
                 } label: {
                     Label(presentation.createSampleActionLabel, systemImage: "doc.badge.plus")
                 }
+                Button {
+                    Task {
+                        await viewModel.installRecommendedLexiconPack()
+                    }
+                } label: {
+                    Label(presentation.installRecommendedPackActionLabel, systemImage: "square.and.arrow.down")
+                }
+                .disabled(presentation.isInstallingRecommendedPack)
                 if presentation.showsCreateMissingDirectoriesAction {
                     Button {
                         _ = viewModel.createMissingDirectories()
@@ -208,6 +216,21 @@ private struct LexiconSettingsView: View {
                         Text(directory.pathLabel)
                             .foregroundStyle(.secondary)
                         MonospacedText(directory.path)
+                    }
+
+                    ForEach(directory.installedPacks) { pack in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(pack.title)
+                                .font(.headline)
+                            LabeledContent(pack.entries.label, value: pack.entries.value)
+                            LabeledContent(pack.license.label, value: pack.license.value)
+                            LabeledContent(pack.installedAt.label, value: pack.installedAt.value)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(pack.source.label)
+                                    .foregroundStyle(.secondary)
+                                MonospacedText(pack.source.value)
+                            }
+                        }
                     }
 
                     if !directory.diagnostics.isEmpty {
