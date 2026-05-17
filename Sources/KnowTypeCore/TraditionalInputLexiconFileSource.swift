@@ -77,8 +77,14 @@ public struct TraditionalInputLexiconFileSource: Sendable {
 
     public static func isLexiconResourceFile(_ fileURL: URL) -> Bool {
         !fileURL.lastPathComponent.hasPrefix(".")
-            && !fileURL.lastPathComponent.hasSuffix(".metadata.json")
+            && !isManagedPackMetadataFile(fileURL)
             && format(for: fileURL) != nil
+    }
+
+    public static func isManagedPackMetadataFile(_ fileURL: URL) -> Bool {
+        ManagedLexiconPacks.all.contains { pack in
+            fileURL.lastPathComponent == pack.metadataFileName
+        }
     }
 
     private static func lexiconFileURLs(in directoryURL: URL) throws -> [URL] {

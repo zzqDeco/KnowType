@@ -292,6 +292,11 @@ public struct ManagedLexiconPackInstaller {
         destinationDirectory: URL = TraditionalInputLexiconDirectoryResolver.applicationSupportLexiconDirectory(),
         force: Bool = false
     ) async throws -> InstalledLexiconPackMetadata {
+        let outputURL = destinationDirectory.appendingPathComponent(pack.outputFileName)
+        if fileManager.fileExists(atPath: outputURL.path), !force {
+            throw ManagedLexiconPackInstallerError.outputAlreadyExists(outputURL.path)
+        }
+
         let sourceData = try await dataProvider(pack.sourceURL)
         let actualChecksum = Self.sha256Hex(sourceData)
         guard actualChecksum == pack.sourceSHA256 else {
@@ -308,11 +313,6 @@ public struct ManagedLexiconPackInstaller {
         }
 
         try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
-        let outputURL = destinationDirectory.appendingPathComponent(pack.outputFileName)
-        if fileManager.fileExists(atPath: outputURL.path), !force {
-            throw ManagedLexiconPackInstallerError.outputAlreadyExists(outputURL.path)
-        }
-
         let metadata = InstalledLexiconPackMetadata(
             id: pack.id,
             displayName: pack.displayName,

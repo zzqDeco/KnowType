@@ -76,7 +76,7 @@ final class LexiconSettingsViewModelTests: XCTestCase {
           "sourceVersion" : "fixture"
         }
         """
-        try Data(metadata.utf8).write(to: directory.appendingPathComponent("fixture.metadata.json"))
+        try Data(metadata.utf8).write(to: directory.appendingPathComponent("rime-pinyin-simp.metadata.json"))
 
         let viewModel = LexiconSettingsViewModel(directoryURLs: [directory])
 

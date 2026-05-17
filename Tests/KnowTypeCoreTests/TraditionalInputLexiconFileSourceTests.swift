@@ -102,12 +102,27 @@ final class TraditionalInputLexiconFileSourceTests: XCTestCase {
         try Data("ce shi ci\t测试词\t0.995\n".utf8)
             .write(to: directory.appendingPathComponent("user.tsv"))
         try Data(#"{"id":"pack"}"#.utf8)
-            .write(to: directory.appendingPathComponent("user.metadata.json"))
+            .write(to: directory.appendingPathComponent("rime-pinyin-simp.metadata.json"))
 
         let catalog = TraditionalInputLexiconFileSource().loadDirectory(directory)
 
         XCTAssertFalse(catalog.hasDiagnostics)
         XCTAssertEqual(catalog.entries.map(\.outputs.first?.text), ["测试词"])
+    }
+
+    func testLoadDirectoryAllowsUserLexiconJSONWithMetadataSuffix() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try Data("""
+        [{ "pinyin": ["chan", "pin"], "outputs": [{ "text": "产品", "confidence": 0.995 }] }]
+        """.utf8)
+            .write(to: directory.appendingPathComponent("product.metadata.json"))
+
+        let catalog = TraditionalInputLexiconFileSource().loadDirectory(directory)
+
+        XCTAssertFalse(catalog.hasDiagnostics)
+        XCTAssertEqual(catalog.entries.map(\.outputs.first?.text), ["产品"])
     }
 
     private func makeTemporaryDirectory() throws -> URL {

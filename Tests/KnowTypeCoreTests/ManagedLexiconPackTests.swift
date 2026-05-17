@@ -124,6 +124,37 @@ final class ManagedLexiconPackTests: XCTestCase {
         }
     }
 
+    func testInstallerChecksExistingOutputBeforeDownloading() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pack = ManagedLexiconPack(
+            id: "fixture",
+            displayName: "Fixture",
+            sourceURL: URL(string: "https://example.com/fixture.dict.yaml")!,
+            sourceVersion: "fixture",
+            sourceSHA256: "unused",
+            licenseName: "Apache-2.0",
+            licenseURL: URL(string: "https://example.com/license")!,
+            outputFileName: "fixture.tsv",
+            metadataFileName: "fixture.metadata.json",
+            format: .rimeDictYAML
+        )
+        try Data("old".utf8).write(to: directory.appendingPathComponent("fixture.tsv"))
+        let installer = ManagedLexiconPackInstaller(dataProvider: { _ in
+            throw URLError(.cannotLoadFromNetwork)
+        })
+
+        do {
+            _ = try await installer.install(pack, destinationDirectory: directory)
+            XCTFail("Expected existing output error")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedLexiconPackInstallerError,
+                .outputAlreadyExists(directory.appendingPathComponent("fixture.tsv").path)
+            )
+        }
+    }
+
     func testInstallerForceReplacesExistingOutput() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
