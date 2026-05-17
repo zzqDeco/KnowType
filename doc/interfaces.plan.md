@@ -152,6 +152,11 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 - rows are paged through `CandidatePanelPagingState`, currently 9 visible rows per page
 - when a provider is configured, immediate local output may omit fallback continuation rows until provider output arrives
 
+Candidate panel sizing should be measurement-first. `CandidatePanelRenderer` owns row semantics only; the
+planned `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete
+candidates when possible, switches to vertical layout for long phrases, and returns the final panel size,
+origin, and per-row text limits used by the AppKit view.
+
 ## Candidate Geometry
 
 Candidate panel movement consumes `CandidateAnchorResult`. UI code should not use pointer location as a moving fallback.

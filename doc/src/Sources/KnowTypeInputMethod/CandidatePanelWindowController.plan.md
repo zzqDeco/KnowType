@@ -19,6 +19,14 @@ Current behavior:
 - uses a borderless AppKit floating panel with `NSVisualEffectView` popover material, compact row sizing, full-width blue selected rows, and muted continuation styling to stay close to macOS native input method candidate windows
 - avoids preview text, section headers, and raw-input rows once correction candidates are available
 
+Planned adaptive layout:
+
+- introduce `CandidatePanelLayoutEngine` as the measurement-first layer between renderer and AppKit view
+- measure shortcut and text widths using the same fonts as rendered rows before deciding panel size
+- prefer horizontal layout for 4-6 complete candidates and switch to vertical layout when long phrases would force horizontal truncation below 4 complete candidates
+- compute the final panel size and screen-edge-avoiding origin before rendering rows
+- pass per-row frames and text width limits to `CandidatePanelContentView` instead of relying on fixed text-width constants or `fittingSize` as the source of truth
+
 Selection shortcuts:
 
 - `1...9` commit visible prefix candidates
