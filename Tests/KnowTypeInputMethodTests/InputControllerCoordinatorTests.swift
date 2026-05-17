@@ -114,6 +114,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "nishishei")
     }
 
+    @MainActor
     func testFullyResolvedSegmentSelectionRefreshesProviderContinuations() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
@@ -144,12 +145,11 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(client.markedTextWrites.last?.text, "你是谁")
 
-        XCTAssertTrue(
-            waitUntil {
-                host.panelStates.last?.windowState.viewModel.continuationCandidates
-                    .contains { $0.text == "继续推进" } == true
-            }
-        )
+        let hasContinuation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.continuationCandidates
+                .contains { $0.text == "继续推进" } == true
+        }
+        XCTAssertTrue(hasContinuation)
         let requests = await provider.requests
         XCTAssertTrue(requests.contains { $0.task == .continuation && $0.lockedPrefix == "你是谁" })
 
@@ -162,6 +162,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁继续推进")
     }
 
+    @MainActor
     func testSelectedContinuationAfterSegmentResolutionIsCommitted() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
@@ -188,11 +189,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
             host: host,
             client: client
         )
-        XCTAssertTrue(
-            waitUntil {
-                host.panelStates.last?.windowState.viewModel.continuationCandidates.count == 2
-            }
-        )
+        let hasContinuationPage = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.continuationCandidates.count == 2
+        }
+        XCTAssertTrue(hasContinuationPage)
 
         XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "", keyCode: 125), client: client))
         XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "", keyCode: 125), client: client))
@@ -441,16 +441,17 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
     }
 
-    private func waitUntil(
+    @MainActor
+    private func waitUntilOnMainActor(
         timeout: TimeInterval = 3,
         condition: () -> Bool
-    ) -> Bool {
+    ) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() {
                 return true
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return condition()
     }
