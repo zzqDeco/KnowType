@@ -12,6 +12,7 @@
 | [privacy-app-rules-mvp.plan.md](privacy-app-rules-mvp.plan.md) | Level 0 no-provider routing and protected app rules | Active reference |
 | [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Local candidate learning persisted across IMK restarts | Active reference |
 | [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | Candidate PageDown/PageUp offset-preserving behavior | Active reference |
+| [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive horizontal/vertical candidate panel layout | Active reference |
 | [traditional-lexicon-extension.plan.md](traditional-lexicon-extension.plan.md) | Authorized local lexicon extension path for the Chinese engine | Active reference |
 | [traditional-lexicon-resource-loader.plan.md](traditional-lexicon-resource-loader.plan.md) | JSON/TSV resource loader for authorized local lexicons | Active reference |
 | [traditional-lexicon-catalog.plan.md](traditional-lexicon-catalog.plan.md) | Multi-resource catalog and diagnostics for local lexicons | Active reference |

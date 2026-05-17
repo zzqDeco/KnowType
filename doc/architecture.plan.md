@@ -102,6 +102,8 @@ Settings status does not import the IMK frontend and does not own dictionary lic
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
 - `CandidatePanelWindowController` owns the AppKit panel.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
+- Planned adaptive candidate layout inserts a measurement layer between renderer and AppKit rendering so panel
+  size and edge avoidance are computed before rows are drawn.
 
 The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Commit replaces the active marked range with either the selected prefix or prefix plus continuation.
 
@@ -117,6 +119,10 @@ Candidate rows are flat and compact:
 - continuation candidates appear after prefix candidates
 - raw input appears only when no suggestion is available
 - rows are paged in 9-row windows
+
+The next candidate-window layout slice should keep those row semantics but derive horizontal versus vertical
+presentation from measured row widths. Horizontal layout targets 4-6 complete candidates; vertical layout is
+used when long phrases would otherwise leave only 1-3 complete horizontal candidates.
 
 Candidate positioning is centralized in `CandidateAnchorResolver`. The resolver tries fresh text geometry first, then progressively falls back:
 
