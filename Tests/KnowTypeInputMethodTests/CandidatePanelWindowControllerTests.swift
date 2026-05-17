@@ -7,7 +7,7 @@ import XCTest
 final class CandidatePanelWindowControllerTests: XCTestCase {
     @MainActor
     func testUpdateMovesExistingWindowWhenAnchorMoves() {
-        let contentView = FakeCandidatePanelContentRenderer(fittingSize: NSSize(width: 220, height: 36))
+        let contentView = FakeCandidatePanelContentRenderer()
         let window = FakeCandidatePanelWindow()
         let screenProvider = fakeScreenProvider()
         var factoryCallCount = 0
@@ -15,6 +15,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         let controller = CandidatePanelWindowController(
             screenProvider: screenProvider,
             contentView: contentView,
+            layoutEngine: layoutEngine(),
             makePanel: { view in
                 factoryCallCount += 1
                 factoryContentViews.append(view)
@@ -32,6 +33,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         )
 
         let origins = window.frameOrigins
+        let contentSizes = window.contentSizes
         let frontCount = window.orderFrontCount
         let outCount = window.orderOutCount
         let modelCount = contentView.models.count
@@ -46,12 +48,14 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                 NSPoint(x: 160, y: 378)
             ]
         )
+        XCTAssertEqual(contentSizes, [NSSize(width: 220, height: 36), NSSize(width: 220, height: 36)])
         XCTAssertEqual(frontCount, 2)
         XCTAssertEqual(outCount, 0)
         XCTAssertEqual(modelCount, 2)
     }
 
     func testPlacementAvoidsVisibleFrameEdges() {
+        let engine = layoutEngine()
         let screenProvider = FakeCandidatePanelScreenProvider(
             screens: [
                 CandidateAnchorScreen(
@@ -61,27 +65,27 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                 )
             ]
         )
-        let contentSize = NSSize(width: 240, height: 36)
 
         XCTAssertEqual(
-            CandidatePanelWindowPlacement.origin(
-                for: CGRect(x: 20, y: 60, width: 0, height: 18),
-                contentSize: contentSize,
+            engine.layout(
+                model: rawRenderModel(),
+                anchorRect: CGRect(x: 20, y: 60, width: 0, height: 18),
                 screenProvider: screenProvider
-            ),
+            )?.panelOrigin,
             NSPoint(x: 58, y: 84)
         )
         XCTAssertEqual(
-            CandidatePanelWindowPlacement.origin(
-                for: CGRect(x: 490, y: 390, width: 0, height: 18),
-                contentSize: contentSize,
+            engine.layout(
+                model: rawRenderModel(),
+                anchorRect: CGRect(x: 490, y: 390, width: 0, height: 18),
                 screenProvider: screenProvider
-            ),
-            NSPoint(x: 202, y: 296)
+            )?.panelOrigin,
+            NSPoint(x: 222, y: 296)
         )
     }
 
     func testPlacementUsesValidatedScreenForCaretJustOutsideSecondaryDisplayFrame() {
+        let engine = layoutEngine()
         let screenProvider = FakeCandidatePanelScreenProvider(
             screens: [
                 CandidateAnchorScreen(
@@ -98,23 +102,24 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            CandidatePanelWindowPlacement.origin(
-                for: CGRect(x: 999, y: 300, width: 0, height: 18),
-                contentSize: NSSize(width: 240, height: 36),
+            engine.layout(
+                model: rawRenderModel(),
+                anchorRect: CGRect(x: 999, y: 300, width: 0, height: 18),
                 screenProvider: screenProvider
-            ),
+            )?.panelOrigin,
             NSPoint(x: 1_008, y: 258)
         )
     }
 
     @MainActor
     func testUpdateOrdersOutForVisibleStateWithNoUsableAnchor() {
-        let contentView = FakeCandidatePanelContentRenderer(fittingSize: NSSize(width: 220, height: 36))
+        let contentView = FakeCandidatePanelContentRenderer()
         let window = FakeCandidatePanelWindow()
         var factoryCallCount = 0
         let controller = CandidatePanelWindowController(
             screenProvider: fakeScreenProvider(),
             contentView: contentView,
+            layoutEngine: layoutEngine(),
             makePanel: { _ in
                 factoryCallCount += 1
                 return window
@@ -131,16 +136,18 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(frontCount, 0)
         XCTAssertEqual(outCount, 1)
         XCTAssertEqual(origins, [])
+        XCTAssertEqual(contentView.models, [])
     }
 
     @MainActor
     func testHiddenStateOrdersOutExistingWindow() {
-        let contentView = FakeCandidatePanelContentRenderer(fittingSize: NSSize(width: 220, height: 36))
+        let contentView = FakeCandidatePanelContentRenderer()
         let window = FakeCandidatePanelWindow()
         var factoryCallCount = 0
         let controller = CandidatePanelWindowController(
             screenProvider: fakeScreenProvider(),
             contentView: contentView,
+            layoutEngine: layoutEngine(),
             makePanel: { _ in
                 factoryCallCount += 1
                 return window
@@ -162,8 +169,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testLongCandidateContentSizeIsConstrainedBeforePlacement() {
-        let contentView = FakeCandidatePanelContentRenderer(fittingSize: NSSize(width: 900, height: 80))
+    func testLongCandidatesUseMeasuredVerticalLayoutBeforePlacement() {
+        let contentView = FakeCandidatePanelContentRenderer()
         let window = FakeCandidatePanelWindow()
         let screenProvider = FakeCandidatePanelScreenProvider(
             screens: [
@@ -177,19 +184,59 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         let controller = CandidatePanelWindowController(
             screenProvider: screenProvider,
             contentView: contentView,
+            layoutEngine: layoutEngine(defaultTextWidth: 250),
             makePanel: { _ in window }
         )
 
         controller.update(
-            state: visibleState(anchor: CGRect(x: 650, y: 200, width: 0, height: 18)),
+            state: visibleState(
+                anchor: CGRect(x: 650, y: 200, width: 0, height: 18),
+                prefixTexts: [
+                    "候选一很长",
+                    "候选二很长",
+                    "候选三很长",
+                    "候选四很长",
+                    "候选五很长",
+                    "候选六很长"
+                ]
+            ),
             locale: .zhCN
         )
 
         let contentSizes = window.contentSizes
         let origins = window.frameOrigins
+        let layoutPlans = contentView.layoutPlans
 
-        XCTAssertEqual(contentSizes, [CandidatePanelWindowSizing.maximumSize])
-        XCTAssertEqual(origins, [NSPoint(x: 132, y: 150)])
+        XCTAssertEqual(contentSizes, [NSSize(width: 296, height: 186)])
+        XCTAssertEqual(origins, [NSPoint(x: 396, y: 8)])
+        XCTAssertEqual(layoutPlans.map(\.orientation), [.vertical])
+        XCTAssertEqual(layoutPlans.first?.items.map(\.isTruncated), Array(repeating: false, count: 6))
+    }
+
+    @MainActor
+    func testPagedStateLayoutsOnlyCurrentVisibleRows() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(defaultTextWidth: 32),
+            makePanel: { _ in window }
+        )
+        let candidates = (1...9).map { "候选\($0)" }
+
+        controller.update(
+            state: visibleState(
+                anchor: CGRect(x: 100, y: 400, width: 0, height: 18),
+                prefixTexts: candidates,
+                paging: CandidatePanelPagingState(currentPage: 1, pageSize: 4)
+            ),
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(contentView.models.first?.rows.map(\.text), Array(candidates[4..<8]))
+        XCTAssertEqual(contentView.layoutPlans.first?.items.count, 4)
+        XCTAssertEqual(contentView.layoutPlans.first?.orientation, .horizontal)
     }
 
     private func fakeScreenProvider() -> FakeCandidatePanelScreenProvider {
@@ -204,17 +251,51 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         )
     }
 
-    private func visibleState(anchor: CGRect) -> CandidatePanelState {
+    private func visibleState(
+        anchor: CGRect,
+        prefixTexts: [String] = [],
+        paging: CandidatePanelPagingState = CandidatePanelPagingState()
+    ) -> CandidatePanelState {
         CandidatePanelState(
             windowState: CandidatePanelWindowState(
                 isVisible: true,
                 anchorRect: anchor,
                 viewModel: CandidatePanelViewModel(
                     rawInput: "candidate",
-                    prefixCandidates: [],
+                    prefixCandidates: prefixTexts.map {
+                        CorrectionCandidate(
+                            text: $0,
+                            source: "test",
+                            confidence: 1,
+                            correctionLevel: .light
+                        )
+                    },
                     continuationCandidates: []
-                )
+                ),
+                paging: paging
             )
+        )
+    }
+
+    private func rawRenderModel() -> CandidatePanelRenderModel {
+        CandidatePanelRenderModel(
+            title: "KnowType",
+            previewText: nil,
+            rows: [
+                CandidatePanelRenderRow(
+                    kind: .rawInput,
+                    shortcutLabel: nil,
+                    text: "candidate",
+                    isSelected: false,
+                    visualRole: .rawInput
+                )
+            ]
+        )
+    }
+
+    private func layoutEngine(defaultTextWidth: CGFloat = 60) -> CandidatePanelLayoutEngine {
+        CandidatePanelLayoutEngine(
+            textMeasurer: WindowControllerCandidatePanelTextMeasurer(defaultTextWidth: defaultTextWidth)
         )
     }
 }
@@ -226,15 +307,25 @@ private struct FakeCandidatePanelScreenProvider: ScreenGeometryProviding {
 @MainActor
 private final class FakeCandidatePanelContentRenderer: CandidatePanelContentRendering {
     let appKitView = NSView()
-    var fittingSize: NSSize
     private(set) var models: [CandidatePanelRenderModel] = []
+    private(set) var layoutPlans: [CandidatePanelLayoutPlan] = []
 
-    init(fittingSize: NSSize) {
-        self.fittingSize = fittingSize
+    func update(model: CandidatePanelRenderModel, layoutPlan: CandidatePanelLayoutPlan) {
+        models.append(model)
+        layoutPlans.append(layoutPlan)
+    }
+}
+
+private struct WindowControllerCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
+    var defaultTextWidth: CGFloat
+    var defaultShortcutWidth: CGFloat = 10
+
+    func textWidth(for row: CandidatePanelRenderRow) -> CGFloat {
+        defaultTextWidth
     }
 
-    func update(model: CandidatePanelRenderModel) {
-        models.append(model)
+    func shortcutWidth(for label: String) -> CGFloat {
+        defaultShortcutWidth
     }
 }
 
