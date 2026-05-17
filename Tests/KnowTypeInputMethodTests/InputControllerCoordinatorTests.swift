@@ -135,6 +135,34 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "nishishei")
     }
 
+    func testTabDoesNotCommitContinuationForPartialSegmentCandidate() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        for character in "nish" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+
+        XCTAssertTrue(
+            viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            }
+        )
+
+        _ = coordinator.candidates()
+        coordinator.candidateSelectionChanged("你")
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(coordinator.composedString() as? String, "nish")
+    }
+
     @MainActor
     func testFullyResolvedSegmentSelectionRefreshesProviderContinuations() async throws {
         let client = FakeInputControllerClient()

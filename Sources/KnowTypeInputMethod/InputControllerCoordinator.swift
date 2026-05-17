@@ -417,7 +417,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 prefixCandidates = mergedPrefixCandidates(leadingMerged, with: remainingFullCandidates)
             }
         }
-        let continuations = compositionBuffer.hasResolvedSegments && !compositionBuffer.isFullyResolved
+        let continuations = shouldSuppressContinuations(prefixCandidates: prefixCandidates)
             ? []
             : suggestion.continuationCandidates
         let lockedPrefix: LockedPrefix?
@@ -517,6 +517,24 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         var probe = compositionBuffer
         return probe.apply(candidate)
+    }
+
+    private func shouldSuppressContinuations(prefixCandidates: [CorrectionCandidate]) -> Bool {
+        if compositionBuffer.hasResolvedSegments && !compositionBuffer.isFullyResolved {
+            return true
+        }
+        guard !compositionBuffer.isFullyResolved,
+              let firstPrefix = prefixCandidates.first else {
+            return false
+        }
+        return isPartialSegmentCandidate(firstPrefix)
+    }
+
+    private func isPartialSegmentCandidate(_ candidate: CorrectionCandidate) -> Bool {
+        guard let rawRange = candidate.rawRange else {
+            return false
+        }
+        return rawRange != compositionBuffer.rawRange
     }
 
     @discardableResult
@@ -619,6 +637,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if action == .tab,
            compositionBuffer.hasResolvedSegments,
            !compositionBuffer.isFullyResolved {
+            return .noAction
+        }
+        if action == .tab,
+           let selectedNativeCandidate,
+           case .segmentCandidate = selectedNativeCandidate.kind {
             return .noAction
         }
         if compositionBuffer.hasResolvedSegments,

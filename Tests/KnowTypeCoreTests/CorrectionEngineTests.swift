@@ -81,6 +81,18 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "我觉得这个方案")
     }
 
+    func testCaseOnlyNormalizedPinyinKeepsSegmentMetadata() async {
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "NiSh", locale: .zhCN)
+        )
+
+        let segmentCandidate = candidates.first { $0.text == "你" }
+
+        XCTAssertEqual(segmentCandidate?.rawRange, TextRange(start: 0, length: 2))
+        XCTAssertEqual(segmentCandidate?.segments.first?.rawRange, TextRange(start: 0, length: 2))
+    }
+
     func testCompactPinyinCorrectionHandlesTypingWithoutSpaces() async {
         let engine = CorrectionEngine()
         let candidates = await engine.correct(
