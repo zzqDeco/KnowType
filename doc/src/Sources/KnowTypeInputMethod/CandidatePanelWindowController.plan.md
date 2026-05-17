@@ -16,7 +16,8 @@ Current behavior:
 - computes final panel size, per-row text limits, and the screen-edge-avoiding origin before rendering rows
 - consumes the rect chosen by `CandidateAnchorResolver`; if no usable rect is available, it hides/skips display until a valid anchor arrives
 - treats hidden candidate rows as non-selectable so arrow keys and numeric shortcuts do not act on invisible candidates
-- clamps the panel to the visible frame of the caret's validated screen, limiting vertical rows when a constrained visible frame cannot fit the full page
+- clamps the panel to the visible frame of the caret's validated screen, compressing vertical row height and spacing on constrained screens without dropping selectable rows
+- resizes the panel before asking the content view to lay out fixed measured row constraints
 - hides from composition reset, `hidePalettes`, and input-controller close lifecycle
 - uses a borderless AppKit floating panel with `NSVisualEffectView` popover material, compact row sizing, full-width blue selected rows, and muted continuation styling to stay close to macOS native input method candidate windows
 - avoids preview text, section headers, and raw-input rows once correction candidates are available

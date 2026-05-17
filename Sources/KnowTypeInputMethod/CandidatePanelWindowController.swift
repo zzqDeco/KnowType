@@ -72,8 +72,8 @@ final class CandidatePanelWindowController {
             panel.orderOut(nil)
             return
         }
-        contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.setContentSize(layoutPlan.panelSize)
+        contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.setFrameOrigin(layoutPlan.panelOrigin)
         panel.orderFrontRegardless()
     }

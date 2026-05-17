@@ -65,7 +65,7 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         XCTAssertEqual(plan?.items.map(\.rowIndex), Array(0..<9))
     }
 
-    func testVerticalLayoutLimitsRowsToVisibleFrameHeight() {
+    func testVerticalLayoutCompressesRowsToVisibleFrameHeightWithoutDroppingCandidates() {
         let engine = engine(defaultTextWidth: 32)
 
         let plan = engine.layout(
@@ -75,8 +75,10 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(plan?.orientation, .vertical)
-        XCTAssertEqual(plan?.items.count, 5)
-        XCTAssertEqual(plan?.items.map(\.rowIndex), Array(0..<5))
+        XCTAssertEqual(plan?.items.count, 9)
+        XCTAssertEqual(plan?.items.map(\.rowIndex), Array(0..<9))
+        XCTAssertEqual(plan?.items.first?.frame.height, 18)
+        XCTAssertEqual(plan?.itemSpacing, 1.75)
         XCTAssertLessThanOrEqual(plan?.panelSize.height ?? .infinity, 184)
     }
 

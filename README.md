@@ -13,7 +13,7 @@ Chinese name: 知键.
 - **Chinese input first**: pinyin decoding, compact pinyin segmentation, typo normalization, same-pinyin candidates, common initial abbreviations such as `sm`/`zmb`/`wsm`, and partial-syllable input.
 - **Local candidate learning**: recent prefix choices can boost candidate ranking across input-method restarts without being sent to providers.
 - **Prefix-locked AI continuation**: continuation candidates append after the locked prefix; explicit polish is the only path that may rewrite existing text.
-- **Native macOS input flow**: marked text, candidate selection, paging, punctuation handling, and an AppKit candidate panel anchored near the text caret.
+- **Native macOS input flow**: marked text, candidate selection, paging, punctuation handling, and an adaptive AppKit candidate panel anchored near the text caret.
 - **Provider-compatible by design**: OpenAI-compatible chat, OpenAI Responses, Anthropic Messages, Gemini native, Ollama native, and custom HTTP profiles all normalize into one provider interface.
 - **Local privacy guardrails**: URLs, emails, paths, commands, code-like text, and protected app contexts use the no-provider path.
 
@@ -42,7 +42,7 @@ KnowType is currently a local MVP for development and manual testing. It include
 
 - a Swift package with core correction, provider adapters, and input-method interaction logic
 - a local InputMethodKit app bundle built into `dist/KnowType.app`
-- a compact custom candidate panel instead of relying on `IMKCandidates` as the main UI
+- a compact custom candidate panel with measured horizontal/vertical layout instead of relying on `IMKCandidates` as the main UI
 - a clean-room pinyin engine for MVP Chinese input coverage
 - SwiftUI settings for provider profiles, local lexicon status, privacy summary, input/candidate behavior, and debug install notes
 - a Debug Install settings tab that mirrors the local build, install, diagnose, selection, and logging commands
@@ -184,7 +184,7 @@ Local OpenAI-compatible runtimes may leave the model blank so KnowType can disco
 
 The Input settings tab persists default punctuation language and symbol width for normal apps and code-style apps. Terminal, iTerm, Xcode, VS Code, and Codex desktop start with the code-app defaults while keeping the Chinese text pipeline available.
 
-The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows may cover the whole raw buffer or just the active segment; selecting a segment updates marked text without inserting committed text. Candidate rows are paged in 9-row windows. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives. If that provider fails or returns no usable continuation, KnowType keeps the traditional prefix candidates and does not substitute fixed local fallback text as AI output.
+The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows may cover the whole raw buffer or just the active segment; selecting a segment updates marked text without inserting committed text. Candidate rows are paged in 9-row windows. The panel measures candidate text before rendering, uses horizontal layout for compact 4-6 row pages, switches to vertical layout for long phrases, and avoids screen edges. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives. If that provider fails or returns no usable continuation, KnowType keeps the traditional prefix candidates and does not substitute fixed local fallback text as AI output.
 
 ## Privacy Baseline
 

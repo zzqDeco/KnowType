@@ -239,6 +239,29 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(contentView.layoutPlans.first?.orientation, .horizontal)
     }
 
+    @MainActor
+    func testWindowResizesBeforeContentViewLaysOutMeasuredRows() {
+        let operationLog = CandidatePanelWindowOperationLog()
+        let contentView = FakeCandidatePanelContentRenderer(operationLog: operationLog)
+        let window = FakeCandidatePanelWindow(operationLog: operationLog)
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(defaultTextWidth: 120),
+            makePanel: { _ in window }
+        )
+
+        controller.update(
+            state: visibleState(
+                anchor: CGRect(x: 100, y: 400, width: 0, height: 18),
+                prefixTexts: ["候选1", "候选2", "候选3", "候选4"]
+            ),
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(operationLog.events, ["setContentSize", "contentUpdate", "setFrameOrigin", "orderFront"])
+    }
+
     private func fakeScreenProvider() -> FakeCandidatePanelScreenProvider {
         FakeCandidatePanelScreenProvider(
             screens: [
@@ -309,8 +332,14 @@ private final class FakeCandidatePanelContentRenderer: CandidatePanelContentRend
     let appKitView = NSView()
     private(set) var models: [CandidatePanelRenderModel] = []
     private(set) var layoutPlans: [CandidatePanelLayoutPlan] = []
+    private let operationLog: CandidatePanelWindowOperationLog?
+
+    init(operationLog: CandidatePanelWindowOperationLog? = nil) {
+        self.operationLog = operationLog
+    }
 
     func update(model: CandidatePanelRenderModel, layoutPlan: CandidatePanelLayoutPlan) {
+        operationLog?.events.append("contentUpdate")
         models.append(model)
         layoutPlans.append(layoutPlan)
     }
@@ -335,21 +364,34 @@ private final class FakeCandidatePanelWindow: CandidatePanelWindowOperating {
     private(set) var frameOrigins: [NSPoint] = []
     private(set) var orderFrontCount = 0
     private(set) var orderOutCount = 0
+    private let operationLog: CandidatePanelWindowOperationLog?
+
+    init(operationLog: CandidatePanelWindowOperationLog? = nil) {
+        self.operationLog = operationLog
+    }
 
     func setContentSize(_ size: NSSize) {
+        operationLog?.events.append("setContentSize")
         contentSizes.append(size)
     }
 
     func setFrameOrigin(_ point: NSPoint) {
+        operationLog?.events.append("setFrameOrigin")
         frameOrigins.append(point)
     }
 
     func orderFrontRegardless() {
+        operationLog?.events.append("orderFront")
         orderFrontCount += 1
     }
 
     func orderOut(_ sender: Any?) {
+        operationLog?.events.append("orderOut")
         orderOutCount += 1
     }
+}
+
+private final class CandidatePanelWindowOperationLog {
+    var events: [String] = []
 }
 #endif
