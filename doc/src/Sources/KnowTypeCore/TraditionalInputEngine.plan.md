@@ -10,6 +10,8 @@
 - Its capitalized-pinyin passthrough is configurable so English-name preservation can remain on for English contexts while `zh-CN` composition can decode sentence-initial pinyin such as `Wo`.
 - It exposes a table-driven scheme hook; v1 includes a minimal Xiaohe double-pinyin mapping for the supported smoke tests.
 - It returns multiple prefix candidates for ambiguous entries such as `fangan`, so the candidate panel can behave like a traditional input method before AI continuation appears.
+- It attaches raw input ranges and candidate segments to outputs, allowing the input-method frontend to apply only `ni -> 你` inside `nishishei` while keeping the rest of the raw buffer composing.
+- `segmentCandidates(for:activeRange:)` exposes candidates for the active unresolved raw span. It can return whole-phrase, phrase-prefix, or single-token candidates, each carrying the raw range it covers.
 - It includes deterministic seed entries for common initial abbreviations such as `sm -> 什么`, `zmb -> 怎么办`, and `wsm -> 为什么`; these remain local engine behavior rather than cloud fallback.
 - It routes lexicon lookup through a private `LexiconIndex` that owns exact phrase lookup, duplicate-key merging, length buckets, first-token buckets, known input tokens, max phrase length, and partial-match caps.
 - It accepts public `TraditionalInputLexiconEntry` values at initialization time, normalizes their pinyin tokens, ignores malformed empty rows, and folds them into the same private index as the bundled seed lexicon.

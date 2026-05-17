@@ -49,6 +49,71 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testCompositionDisplaysRawPinyinUntilCandidateIsConfirmed() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "ni")
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+    }
+
+    func testReturnCommitsRawInputInsteadOfSelectedChineseCandidate() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        let handled = coordinator.handle(
+            stroke: InputKeyStroke(text: "\r", keyCode: 36),
+            client: client
+        )
+
+        XCTAssertTrue(handled)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "ni")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testNumberSelectingSegmentCandidateUpdatesMarkedTextWithoutInsert() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+        let segmentIndex = try XCTUnwrap(
+            viewModel.prefixCandidates.firstIndex {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            }
+        )
+        XCTAssertLessThan(segmentIndex, 9)
+
+        let shortcutNumber = segmentIndex + 1
+        let handled = coordinator.handle(
+            stroke: InputKeyStroke(
+                text: String(shortcutNumber),
+                keyCode: keyCode(forNumber: shortcutNumber)
+            ),
+            client: client
+        )
+
+        XCTAssertTrue(handled)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "你shishei")
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\r", keyCode: 36),
+                client: client
+            )
+        )
+        XCTAssertEqual(client.insertTextWrites.last?.text, "nishishei")
+    }
+
     func testCancelClearsMarkedTextAndHidesCandidatePanel() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -231,6 +296,22 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: false
         )
         return (coordinator, host, persistence)
+    }
+
+    private func keyCode(forNumber number: Int) -> Int {
+        switch number {
+        case 0: return 29
+        case 1: return 18
+        case 2: return 19
+        case 3: return 20
+        case 4: return 21
+        case 5: return 23
+        case 6: return 22
+        case 7: return 26
+        case 8: return 28
+        case 9: return 25
+        default: return -1
+        }
     }
 }
 

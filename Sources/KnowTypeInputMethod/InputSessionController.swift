@@ -55,6 +55,9 @@ public enum InputSessionCommitPolicy {
         locale: KnowTypeLocale = .mixed,
         traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
     ) -> InputCommitResult {
+        if action == .commitRaw {
+            return rawInput.isEmpty ? .noAction : .commit(rawInput)
+        }
         guard let suggestion,
               SuggestionPublicationGuard.hasCurrentSuggestion(
                 suggestionRawInput: suggestionRawInput,
@@ -147,7 +150,7 @@ public enum InputSessionCommitPolicy {
             )
         case .optionR:
             return .polishRequested(rawInput)
-        case .optionNumber, .toggleSymbolMode:
+        case .optionNumber, .toggleSymbolMode, .commitRaw:
             return .noAction
         }
     }
@@ -161,7 +164,7 @@ public enum InputSessionCommitPolicy {
         switch selectedCandidate {
         case .rawInput:
             switch action {
-            case .space, .tab:
+            case .space, .tab, .commitRaw:
                 return .commit(rawInput)
             case .optionR:
                 return .polishRequested(rawInput)
@@ -180,7 +183,12 @@ public enum InputSessionCommitPolicy {
                     return .polishRequested(rawInput)
                 case .toggleSymbolMode:
                     return .noAction
+                case .commitRaw:
+                    return .commit(rawInput)
                 }
+            }
+            if action == .commitRaw {
+                return .commit(rawInput)
             }
             return InputCompositionController().handle(
                 action: action,
@@ -204,6 +212,8 @@ public enum InputSessionCommitPolicy {
                 return .polishRequested(rawInput)
             case .toggleSymbolMode:
                 return .noAction
+            case .commitRaw:
+                return .commit(rawInput)
             }
         }
     }
@@ -328,6 +338,9 @@ public actor InputSessionController {
     }
 
     public func handle(action: InputAction) -> InputCommitResult {
+        if action == .commitRaw {
+            return state.rawInput.isEmpty ? .noAction : .commit(state.rawInput)
+        }
         guard let suggestion = state.latestSuggestion,
               state.latestSuggestionRawInput == state.rawInput,
               let prefix = selectedPrefix(in: suggestion),
@@ -362,6 +375,8 @@ public actor InputSessionController {
                 continuationCandidates: [suggestion.continuationCandidates[index]],
                 originalText: state.rawInput
             )
+        case .commitRaw:
+            result = state.rawInput.isEmpty ? .noAction : .commit(state.rawInput)
         }
 
         if case .polishRequested = result {

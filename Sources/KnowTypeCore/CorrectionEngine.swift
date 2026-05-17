@@ -154,7 +154,9 @@ public final class CorrectionEngine: Sendable {
                             source: "local-traditional-input",
                             confidence: min(1.0, candidate.confidence + normalizationBonus),
                             correctionLevel: .contextual,
-                            protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text)
+                            protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text),
+                            rawRange: candidate.rawRange,
+                            segments: candidate.segments
                         )
                     )
                 }

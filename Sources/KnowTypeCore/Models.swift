@@ -41,6 +41,67 @@ public struct ProtectedRange: Codable, Sendable, Equatable {
     }
 }
 
+public struct TextRange: Codable, Sendable, Equatable, Hashable {
+    public var start: Int
+    public var length: Int
+
+    public init(start: Int, length: Int) {
+        self.start = max(0, start)
+        self.length = max(0, length)
+    }
+
+    public var end: Int {
+        start + length
+    }
+
+    public var isEmpty: Bool {
+        length == 0
+    }
+
+    public func contains(_ offset: Int) -> Bool {
+        start <= offset && offset < end
+    }
+
+    public func contains(_ other: TextRange) -> Bool {
+        start <= other.start && other.end <= end
+    }
+
+    public func intersects(_ other: TextRange) -> Bool {
+        start < other.end && other.start < end
+    }
+
+    public static func covering(_ ranges: [TextRange]) -> TextRange? {
+        guard let first = ranges.first else {
+            return nil
+        }
+        let start = ranges.map(\.start).min() ?? first.start
+        let end = ranges.map(\.end).max() ?? first.end
+        return TextRange(start: start, length: end - start)
+    }
+}
+
+public struct CandidateSegment: Codable, Sendable, Equatable {
+    public var rawRange: TextRange
+    public var tokenRange: TextRange
+    public var reading: String
+    public var text: String
+    public var isPassthrough: Bool
+
+    public init(
+        rawRange: TextRange,
+        tokenRange: TextRange,
+        reading: String,
+        text: String,
+        isPassthrough: Bool = false
+    ) {
+        self.rawRange = rawRange
+        self.tokenRange = tokenRange
+        self.reading = reading
+        self.text = text
+        self.isPassthrough = isPassthrough
+    }
+}
+
 public struct InputContext: Codable, Sendable, Equatable {
     public var rawInput: String
     public var appBundleID: String?
@@ -66,19 +127,25 @@ public struct CorrectionCandidate: Codable, Sendable, Equatable {
     public var confidence: Double
     public var correctionLevel: CorrectionLevel
     public var protectedRanges: [ProtectedRange]
+    public var rawRange: TextRange?
+    public var segments: [CandidateSegment]
 
     public init(
         text: String,
         source: String,
         confidence: Double,
         correctionLevel: CorrectionLevel,
-        protectedRanges: [ProtectedRange] = []
+        protectedRanges: [ProtectedRange] = [],
+        rawRange: TextRange? = nil,
+        segments: [CandidateSegment] = []
     ) {
         self.text = text
         self.source = source
         self.confidence = confidence
         self.correctionLevel = correctionLevel
         self.protectedRanges = protectedRanges
+        self.rawRange = rawRange
+        self.segments = segments
     }
 }
 

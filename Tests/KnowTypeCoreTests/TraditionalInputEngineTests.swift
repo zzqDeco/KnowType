@@ -44,6 +44,40 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "nishishei").first?.text, "你是谁")
     }
 
+    func testFullCandidatesCarryRawRangesAndSegments() {
+        let engine = TraditionalInputEngine()
+        let candidate = engine.candidates(for: "nishishei").first
+
+        XCTAssertEqual(candidate?.text, "你是谁")
+        XCTAssertEqual(candidate?.rawRange, TextRange(start: 0, length: 9))
+        XCTAssertEqual(candidate?.segments.map(\.text), ["你是谁"])
+        XCTAssertEqual(candidate?.segments.first?.rawRange, TextRange(start: 0, length: 9))
+    }
+
+    func testSegmentCandidatesCoverActiveRawRange() {
+        let engine = TraditionalInputEngine()
+        let candidates = engine.segmentCandidates(
+            for: "nishishei",
+            activeRange: TextRange(start: 0, length: 9)
+        )
+
+        XCTAssertTrue(candidates.contains { $0.text == "你是谁" && $0.rawRange == TextRange(start: 0, length: 9) })
+        XCTAssertTrue(candidates.contains { $0.text == "你是" && $0.rawRange == TextRange(start: 0, length: 5) })
+        XCTAssertTrue(candidates.contains { $0.text == "你" && $0.rawRange == TextRange(start: 0, length: 2) })
+    }
+
+    func testSegmentCandidatesAdvanceAfterResolvedPrefix() {
+        let engine = TraditionalInputEngine()
+        let candidates = engine.segmentCandidates(
+            for: "nishishei",
+            activeRange: TextRange(start: 2, length: 7)
+        )
+
+        XCTAssertTrue(candidates.contains { $0.text == "是谁" && $0.rawRange == TextRange(start: 2, length: 7) })
+        XCTAssertTrue(candidates.contains { $0.text == "是" && $0.rawRange == TextRange(start: 2, length: 3) })
+        XCTAssertFalse(candidates.contains { $0.rawRange == TextRange(start: 0, length: 2) })
+    }
+
     func testPartialSecondSyllableUsesLegalPinyinPrefixes() {
         let engine = TraditionalInputEngine()
 

@@ -7,6 +7,7 @@ public enum InputAction: Sendable, Equatable {
     case optionNumber(Int)
     case optionR
     case toggleSymbolMode
+    case commitRaw
 }
 
 public enum InputCommitResult: Sendable, Equatable {
@@ -53,6 +54,9 @@ public struct InputCompositionController: Sendable {
         continuationCandidates: [ContinuationCandidate],
         originalText: String
     ) -> InputCommitResult {
+        if action == .commitRaw {
+            return originalText.isEmpty ? .noAction : .commit(originalText)
+        }
         guard let prefix = prefixCandidates.first?.text else {
             return .noAction
         }
@@ -78,6 +82,8 @@ public struct InputCompositionController: Sendable {
             return .polishRequested(originalText)
         case .toggleSymbolMode:
             return .noAction
+        case .commitRaw:
+            return .commit(originalText)
         }
     }
 

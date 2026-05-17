@@ -15,6 +15,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let anchorResolver: CandidateAnchorResolver
     private weak var host: InputControllerHost?
     private var rawBuffer = ""
+    private var compositionBuffer = CompositionBuffer()
     private var compositionID = 0
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
@@ -75,10 +76,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func composedString() -> Any {
-        guard let prefix = lastSuggestion?.prefixCandidates.first?.text else {
-            return rawBuffer
-        }
-        return prefix
+        compositionBuffer.displayText
     }
 
     func originalString() -> NSAttributedString {
@@ -104,7 +102,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func commitComposition(client: InputControllerClient?) {
-        commit(action: .space, client: client)
+        commit(action: .commitRaw, client: client)
     }
 
     func hidePalettes() {
@@ -137,9 +135,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
             guard !rawBuffer.isEmpty else {
                 return false
             }
-            rawBuffer.removeLast()
-            if rawBuffer.isEmpty {
-                resetAnchorState()
+            if !compositionBuffer.undoLastResolvedSegment() {
+                rawBuffer.removeLast()
+                compositionBuffer.updateRawInput(rawBuffer)
+                if rawBuffer.isEmpty {
+                    resetAnchorState()
+                }
             }
             invalidateSuggestion()
             publishLocalSuggestion(client: client)
@@ -173,18 +174,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                    let inputSelection = inputCandidateSelection(
                        for: visibleSelection,
                        in: candidatePanelState.windowState.viewModel
-                   ),
-                   let selectedCandidate = sessionSelection(from: inputSelection) {
+                   ) {
                     selectedNativeCandidate = inputSelection
-                    let result = InputSessionCommitPolicy.result(
-                        for: .space,
-                        rawInput: rawBuffer,
-                        suggestion: lastSuggestion,
-                        suggestionRawInput: lastSuggestionRawInput,
-                        selectedCandidate: selectedCandidate,
-                        appBundleID: appBundleIdentifier(client: client),
-                        locale: locale
-                    )
+                    let result = resultForNumberSelection(inputSelection, client: client)
                     learnSelectedPrefix(action: .space, result: result)
                     return applyCommitResult(result, client: client)
                 }
@@ -203,6 +195,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func appendComposition(_ text: String, client: InputControllerClient?) -> Bool {
         beginCompositionIfNeeded(client: client)
         rawBuffer.append(text)
+        compositionBuffer.updateRawInput(rawBuffer)
         invalidateSuggestion()
         publishLocalSuggestion(client: client)
         refreshSuggestion(client: client)
@@ -235,6 +228,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawInput) else {
             return
         }
+        guard !compositionBuffer.hasResolvedSegments else {
+            return
+        }
         let appBundleID = appBundleIdentifier(client: client)
         let selectionHistory = userSelectionHistory
         suggestionTask = Task { [weak self] in
@@ -259,11 +255,37 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 ) else {
                     return
                 }
-                self.lastSuggestion = suggestion
+                let augmentedSuggestion = self.augmentedSuggestion(suggestion)
+                self.lastSuggestion = augmentedSuggestion
                 self.lastSuggestionRawInput = rawInput
                 self.refreshComposition(client: currentClient)
-                self.updateCandidatePanel(suggestion: suggestion, client: currentClient)
+                self.updateCandidatePanel(suggestion: augmentedSuggestion, client: currentClient)
             }
+        }
+    }
+
+    private func resultForNumberSelection(
+        _ selection: InputCandidateSelection,
+        client: InputControllerClient?
+    ) -> InputCommitResult {
+        switch selection.kind {
+        case .segmentCandidate(let index):
+            return applySegmentCandidate(at: index, commitIfFullyResolved: false, client: client)
+        case .rawInput:
+            return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
+        case .prefixCandidate, .fullCandidate, .continuationCandidate:
+            guard let selectedCandidate = sessionSelection(from: selection) else {
+                return .noAction
+            }
+            return InputSessionCommitPolicy.result(
+                for: .space,
+                rawInput: rawBuffer,
+                suggestion: lastSuggestion,
+                suggestionRawInput: lastSuggestionRawInput,
+                selectedCandidate: selectedCandidate,
+                appBundleID: appBundleIdentifier(client: client),
+                locale: locale
+            )
         }
     }
 
@@ -291,10 +313,116 @@ final class InputControllerCoordinator: @unchecked Sendable {
             includeFallbackContinuations: !hasProvider,
             traditionalInputEngine: traditionalInputEngine
         )
-        lastSuggestion = suggestion
+        let augmentedSuggestion = augmentedSuggestion(suggestion)
+        lastSuggestion = augmentedSuggestion
         lastSuggestionRawInput = rawBuffer
         refreshComposition(client: client)
-        updateCandidatePanel(suggestion: suggestion, client: client)
+        updateCandidatePanel(suggestion: augmentedSuggestion, client: client)
+    }
+
+    private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
+        var prefixCandidates = compositionBuffer.hasResolvedSegments ? [] : suggestion.prefixCandidates
+        if let activeRange = compositionBuffer.activeRange {
+            let segmentCandidates = prioritizedSegmentCandidates(for: activeRange)
+                .filter { canApplyOrCommit(candidate: $0) }
+            if compositionBuffer.hasResolvedSegments {
+                prefixCandidates = segmentCandidates
+            } else {
+                let leadingFullCandidates = Array(prefixCandidates.prefix(Self.leadingFullCandidateCount))
+                let remainingFullCandidates = Array(prefixCandidates.dropFirst(Self.leadingFullCandidateCount))
+                let leadingMerged = mergedPrefixCandidates(leadingFullCandidates, with: segmentCandidates)
+                prefixCandidates = mergedPrefixCandidates(leadingMerged, with: remainingFullCandidates)
+            }
+        }
+        let continuations = compositionBuffer.hasResolvedSegments && !compositionBuffer.isFullyResolved
+            ? []
+            : suggestion.continuationCandidates
+        let lockedPrefix: LockedPrefix?
+        if compositionBuffer.isFullyResolved {
+            lockedPrefix = LockedPrefix(
+                text: compositionBuffer.commitText,
+                rawInput: rawBuffer,
+                candidateID: "composition-buffer"
+            )
+        } else {
+            lockedPrefix = suggestion.lockedPrefix
+        }
+        return SuggestionResponse(
+            prefixCandidates: prefixCandidates,
+            lockedPrefix: lockedPrefix,
+            continuationCandidates: continuations,
+            latencyMs: suggestion.latencyMs
+        )
+    }
+
+    private func prioritizedSegmentCandidates(for activeRange: KnowTypeCore.TextRange) -> [CorrectionCandidate] {
+        let preserveCapitalizedPinyin = locale != .zhCN
+        let candidates = traditionalInputEngine
+            .segmentCandidates(
+                for: rawBuffer,
+                activeRange: activeRange,
+                preserveCapitalizedPinyin: preserveCapitalizedPinyin
+            )
+            .map { candidate in
+                CorrectionCandidate(
+                    text: candidate.text,
+                    source: candidate.rawRange == compositionBuffer.rawRange
+                        ? "local-full-input"
+                        : "local-segment-input",
+                    confidence: candidate.confidence,
+                    correctionLevel: .contextual,
+                    rawRange: candidate.rawRange,
+                    segments: candidate.segments
+                )
+            }
+
+        let grouped = Dictionary(grouping: candidates) { candidate in
+            candidate.rawRange ?? KnowTypeCore.TextRange(start: 0, length: 0)
+        }
+        let orderedRanges = grouped.keys.sorted { lhs, rhs in
+            if lhs.length == rhs.length {
+                return lhs.start < rhs.start
+            }
+            return lhs.length > rhs.length
+        }
+        let sortedGroups = orderedRanges.map { range in
+            (grouped[range] ?? [])
+                .sorted { lhs, rhs in
+                    if lhs.confidence == rhs.confidence {
+                        return lhs.text < rhs.text
+                    }
+                    return lhs.confidence > rhs.confidence
+                }
+        }
+        let primaryCandidates = sortedGroups.compactMap(\.first)
+        let alternateCandidates = sortedGroups.flatMap { group in
+            group.dropFirst().prefix(2)
+        }
+        return primaryCandidates + alternateCandidates
+    }
+
+    private func mergedPrefixCandidates(
+        _ existingCandidates: [CorrectionCandidate],
+        with additionalCandidates: [CorrectionCandidate]
+    ) -> [CorrectionCandidate] {
+        var merged = existingCandidates
+        for candidate in additionalCandidates {
+            guard !merged.contains(where: { existing in
+                existing.text == candidate.text && existing.rawRange == candidate.rawRange
+            }) else {
+                continue
+            }
+            merged.append(candidate)
+        }
+        return merged
+    }
+
+    private func canApplyOrCommit(candidate: CorrectionCandidate) -> Bool {
+        guard candidate.rawRange != compositionBuffer.rawRange else {
+            return true
+        }
+        var probe = compositionBuffer
+        return probe.apply(candidate)
     }
 
     @discardableResult
@@ -342,16 +470,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
             switch selectedNativeCandidate.kind {
             case .rawInput:
                 return nil
-            case .prefixCandidate(let index):
+            case .prefixCandidate(let index), .fullCandidate(let index):
                 return lastSuggestion?.prefixCandidates[inputControllerSafe: index]?.text
+            case .segmentCandidate:
+                return nil
             case .continuationCandidate:
                 return lastSuggestion?.prefixCandidates.first?.text
             }
         }
 
         switch candidatePanelState.windowState.selection {
-        case .prefixCandidate(let index):
+        case .prefixCandidate(let index), .fullCandidate(let index):
             return lastSuggestion?.prefixCandidates[inputControllerSafe: index]?.text
+        case .segmentCandidate:
+            return nil
         case .continuationCandidate:
             return lastSuggestion?.prefixCandidates.first?.text
         case .rawInput, .none:
@@ -387,6 +519,46 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func commitResult(for action: InputAction, client: InputControllerClient?) -> InputCommitResult {
+        if action == .commitRaw {
+            return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
+        }
+        if action == .tab,
+           compositionBuffer.hasResolvedSegments,
+           !compositionBuffer.isFullyResolved {
+            return .noAction
+        }
+        if compositionBuffer.hasResolvedSegments,
+           compositionBuffer.isFullyResolved {
+            switch action {
+            case .space:
+                return .commit(compositionBuffer.commitText)
+            case .tab:
+                return InputCompositionController().handle(
+                    action: .tab,
+                    prefixCandidates: [
+                        CorrectionCandidate(
+                            text: compositionBuffer.commitText,
+                            source: "composition-buffer",
+                            confidence: 1.0,
+                            correctionLevel: .light,
+                            rawRange: compositionBuffer.rawRange,
+                            segments: compositionBuffer.resolvedSegments
+                        )
+                    ],
+                    continuationCandidates: lastSuggestion?.continuationCandidates ?? [],
+                    originalText: rawBuffer
+                )
+            case .optionR:
+                return .polishRequested(compositionBuffer.commitText)
+            case .optionNumber, .toggleSymbolMode, .commitRaw:
+                break
+            }
+        }
+        if let selectedNativeCandidate,
+           case .segmentCandidate(let index) = selectedNativeCandidate.kind,
+           action == .space {
+            return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
+        }
         if case .optionNumber = action,
            !candidatePanelState.windowState.isVisible {
             return .noAction
@@ -404,12 +576,32 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
+    private func applySegmentCandidate(
+        at index: Int,
+        commitIfFullyResolved: Bool,
+        client: InputControllerClient?
+    ) -> InputCommitResult {
+        guard let candidate = lastSuggestion?.prefixCandidates[inputControllerSafe: index],
+              candidate.rawRange != compositionBuffer.rawRange else {
+            return .noAction
+        }
+        guard compositionBuffer.apply(candidate) else {
+            return .noAction
+        }
+        if commitIfFullyResolved, compositionBuffer.isFullyResolved {
+            return .commit(compositionBuffer.commitText)
+        }
+        publishLocalSuggestion(client: client)
+        return .noAction
+    }
+
     private func insert(_ text: String, client: InputControllerClient?) {
         client?.insertText(text, replacementRange: replacementRangeForCommit(client))
     }
 
     private func resetComposition() {
         rawBuffer = ""
+        compositionBuffer = CompositionBuffer()
         resetAnchorState()
         invalidateSuggestion()
         hideCandidatePanel()
@@ -419,6 +611,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if rawBuffer.isEmpty {
             reloadInputModeDefaultsIfNeeded(client: client)
             reloadRuntimeLexiconEngineIfNeeded()
+            compositionBuffer = CompositionBuffer()
             compositionID += 1
             anchorResolver.reset()
         }
@@ -545,6 +738,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 text: viewModel.prefixCandidates[index].text,
                 kind: .prefixCandidate(index: index)
             )
+        case .fullCandidate(let index):
+            guard viewModel.prefixCandidates.indices.contains(index) else {
+                return nil
+            }
+            return InputCandidateSelection(
+                text: viewModel.prefixCandidates[index].text,
+                kind: .fullCandidate(index: index)
+            )
+        case .segmentCandidate(let index):
+            guard viewModel.prefixCandidates.indices.contains(index) else {
+                return nil
+            }
+            return InputCandidateSelection(
+                text: viewModel.prefixCandidates[index].text,
+                kind: .segmentCandidate(index: index)
+            )
         case .continuationCandidate(let index):
             guard viewModel.continuationCandidates.indices.contains(index) else {
                 return nil
@@ -563,8 +772,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         switch selection.kind {
         case .rawInput:
             return .rawInput
-        case .prefixCandidate(let index):
+        case .prefixCandidate(let index), .fullCandidate(let index):
             return .prefixCandidate(index: index)
+        case .segmentCandidate:
+            return nil
         case .continuationCandidate(let index):
             return .continuationCandidate(index: index)
         }
@@ -576,7 +787,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        let markedText = (lastSuggestion?.prefixCandidates.first?.text).flatMap { $0.isEmpty ? nil : $0 } ?? rawBuffer
+        let markedText = compositionBuffer.displayText
         guard !markedText.isEmpty else {
             clearMarkedText(client)
             return
@@ -640,6 +851,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private static let textOnlyKeyCode = -1
     private static let maxUserSelectionHistory = 64
+    private static let leadingFullCandidateCount = 5
 }
 
 private extension Collection {

@@ -142,7 +142,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         }
         let visibleRows = visibleSelectableRows()
         let prefixRows = visibleRows.filter { selection in
-            if case .prefixCandidate = selection {
+            if selection.isPrefixLike {
                 return true
             }
             return false
@@ -164,8 +164,8 @@ public struct CandidatePanelState: Sendable, Equatable {
         prefixCandidates: [CorrectionCandidate],
         continuationCandidates: [ContinuationCandidate]
     ) -> CandidatePanelSelection? {
-        if !prefixCandidates.isEmpty {
-            return .prefixCandidate(0)
+        if let firstPrefix = prefixCandidates.first {
+            return prefixSelection(for: firstPrefix, rawInput: rawInput, index: 0)
         }
         if !rawInput.isEmpty {
             return .rawInput
@@ -205,12 +205,17 @@ public struct CandidatePanelState: Sendable, Equatable {
         switch selection {
         case .rawInput:
             return windowState.viewModel.rawInput == viewModel.rawInput
-        case .prefixCandidate(let index):
+        case .prefixCandidate(let index), .fullCandidate(let index), .segmentCandidate(let index):
             guard windowState.viewModel.prefixCandidates.indices.contains(index),
                   viewModel.prefixCandidates.indices.contains(index) else {
                 return false
             }
             return windowState.viewModel.prefixCandidates[index].text == viewModel.prefixCandidates[index].text
+                && prefixSelection(
+                    for: viewModel.prefixCandidates[index],
+                    rawInput: viewModel.rawInput,
+                    index: index
+                ) == selection
         case .continuationCandidate(let index):
             guard windowState.viewModel.continuationCandidates.indices.contains(index),
                   viewModel.continuationCandidates.indices.contains(index) else {
@@ -228,9 +233,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         if !viewModel.rawInput.isEmpty && !hasSuggestions {
             rows.append(.rawInput)
         }
-        rows.append(
-            contentsOf: viewModel.prefixCandidates.indices.map { .prefixCandidate($0) }
-        )
+        rows.append(contentsOf: prefixRows(in: viewModel))
         rows.append(
             contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
         )
@@ -284,12 +287,40 @@ public struct CandidatePanelState: Sendable, Equatable {
         if !viewModel.rawInput.isEmpty && !hasSuggestions {
             rows.append(.rawInput)
         }
-        rows.append(
-            contentsOf: viewModel.prefixCandidates.indices.map { .prefixCandidate($0) }
-        )
+        rows.append(contentsOf: prefixRows(in: viewModel))
         rows.append(
             contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
         )
         return rows
+    }
+
+    private func prefixRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection] {
+        viewModel.prefixCandidates.enumerated().map { index, candidate in
+            prefixSelection(for: candidate, rawInput: viewModel.rawInput, index: index)
+        }
+    }
+
+    private func prefixSelection(
+        for candidate: CorrectionCandidate,
+        rawInput: String,
+        index: Int
+    ) -> CandidatePanelSelection {
+        guard let range = candidate.rawRange else {
+            return .prefixCandidate(index)
+        }
+        return range == KnowTypeCore.TextRange(start: 0, length: rawInput.count)
+            ? .fullCandidate(index)
+            : .segmentCandidate(index)
+    }
+}
+
+private extension CandidatePanelSelection {
+    var isPrefixLike: Bool {
+        switch self {
+        case .prefixCandidate, .fullCandidate, .segmentCandidate:
+            return true
+        case .rawInput, .continuationCandidate:
+            return false
+        }
     }
 }

@@ -53,9 +53,9 @@ final class InputKeyCommandMapperTests: XCTestCase {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "@", keyCode: 19)), .symbol("@"))
     }
 
-    func testControlCharactersAreIgnored() {
-        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\r", keyCode: 36)), .ignored)
-        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\n", keyCode: 76)), .ignored)
+    func testReturnAndEnterCommitRawComposition() {
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\r", keyCode: 36)), .action(.commitRaw))
+        XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "\n", keyCode: 76)), .action(.commitRaw))
         XCTAssertFalse(InputKeyCommandMapper.isAppendableText("\r"))
     }
 
