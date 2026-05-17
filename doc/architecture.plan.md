@@ -105,8 +105,9 @@ Settings status does not import the IMK frontend and does not own dictionary lic
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
 - `CandidatePanelWindowController` owns the AppKit panel.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
-- Planned adaptive candidate layout inserts a measurement layer between renderer and AppKit rendering so panel
-  size and edge avoidance are computed before rows are drawn.
+- `CandidatePanelLayoutEngine` measures rendered rows before AppKit layout, chooses horizontal versus vertical
+  presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
+  frame cannot fit the natural height.
 
 The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Marked text shows raw pinyin until a candidate is confirmed; segment selections update only the marked composition. Commit replaces the active marked range with raw input, a fully resolved Chinese composition, the selected full prefix, or prefix plus continuation depending on the shortcut.
 
@@ -123,9 +124,11 @@ Candidate rows are flat and compact:
 - raw input appears only when no suggestion is available
 - rows are paged in 9-row windows
 
-The next candidate-window layout slice should keep those row semantics but derive horizontal versus vertical
-presentation from measured row widths. Horizontal layout targets 4-6 complete candidates; vertical layout is
-used when long phrases would otherwise leave only 1-3 complete horizontal candidates.
+Candidate-window layout keeps those row semantics but derives horizontal versus vertical presentation from measured
+row widths. Horizontal layout targets 4-6 complete candidates; vertical layout is used when long phrases would
+otherwise leave only 1-3 complete horizontal candidates. The layout layer does not drop selectable rows after
+shortcuts are assigned; on constrained visible frames it compresses vertical row height and spacing, and hides only
+when the frame cannot fit the current page at the minimum row height.
 
 Candidate positioning is centralized in `CandidateAnchorResolver`. The resolver tries fresh text geometry first, then progressively falls back:
 

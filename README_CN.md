@@ -17,7 +17,7 @@ KnowType 是一款面向 macOS 的中英文输入法。它的 AI 能力围绕一
 - **先做好中文输入**：支持拼音解码、连续拼音切分、轻量错拼纠正、同音候选、`sm`/`zmb`/`wsm` 这类常用声母缩写和尾部半音节输入。
 - **本地候选学习**：最近选择过的前缀候选会在输入法重启后继续影响排序，不发送给 provider。
 - **前缀锁定的 AI 延续**：AI 只补前缀后面的内容；只有用户主动润色时，才允许改写已输入文本。
-- **macOS 原生输入流程**：使用 marked text、候选选择、翻页、标点处理和跟随文本光标的 AppKit 候选窗。
+- **macOS 原生输入流程**：使用 marked text、候选选择、翻页、标点处理和跟随文本光标的自适应 AppKit 候选窗。
 - **多协议 provider 兼容**：OpenAI-compatible chat、OpenAI Responses、Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到同一层接口。
 - **本地隐私保护**：URL、邮箱、路径、命令、代码片段和受保护 app 场景走无 provider 路径。
 
@@ -46,7 +46,7 @@ KnowType 当前是用于本地开发和手动验收的 MVP。已经包含：
 
 - Swift Package 形式的核心纠错、provider adapter 和输入法交互逻辑
 - 构建到 `dist/KnowType.app` 的本地 InputMethodKit app bundle
-- 自绘紧凑候选窗，不把 `IMKCandidates` 作为主候选 UI
+- 自绘紧凑候选窗，按真实测量结果切换横向/竖向布局，不把 `IMKCandidates` 作为主候选 UI
 - clean-room 的 MVP 拼音引擎
 - SwiftUI 设置页，覆盖 provider、本地词库状态、隐私、输入/候选行为和调试安装说明
 - Debug Install 设置页会同步展示本地构建、安装、诊断、选择输入源和日志命令
@@ -188,7 +188,7 @@ AI Provider 设置页可以测试当前 draft profile 的连接。测试时输�
 
 Input 设置页会持久化普通 App 和代码类 App 的默认标点语言、符号宽度。Terminal、iTerm、Xcode、VS Code 和 Codex desktop 使用代码类 App 默认值，同时仍保留中文输入管线。
 
-候选窗先显示前缀候选，再显示延续候选。候选可以覆盖整个 raw buffer，也可以只覆盖当前分段；选择分段候选只更新 marked text，不会立刻上屏。候选按 9 行一页分页。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。如果 provider 失败或没有返回可用延续，KnowType 会保留传统前缀候选，不再用固定本地 fallback 文本伪装成 AI 输出。
+候选窗先显示前缀候选，再显示延续候选。候选可以覆盖整个 raw buffer，也可以只覆盖当前分段；选择分段候选只更新 marked text，不会立刻上屏。候选按 9 行一页分页。候选窗会先测量候选文本再渲染，短候选优先使用 4-6 项横向布局，长词组切换为竖向布局，并做屏幕边缘避让。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。如果 provider 失败或没有返回可用延续，KnowType 会保留传统前缀候选，不再用固定本地 fallback 文本伪装成 AI 输出。
 
 ## 隐私基线
 

@@ -158,10 +158,12 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 - rows are paged through `CandidatePanelPagingState`, currently 9 visible rows per page
 - when a provider is configured, immediate local output may omit fallback continuation rows until provider output arrives
 
-Candidate panel sizing should be measurement-first. `CandidatePanelRenderer` owns row semantics only; the
-planned `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete
-candidates when possible, switches to vertical layout for long phrases, and returns the final panel size,
-origin, and per-row text limits used by the AppKit view.
+Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
+`CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when
+possible, switches to vertical layout for long phrases, and returns the final panel size, origin, row frames, and
+per-row text limits used by the AppKit view. The layout plan must keep shortcut/selectable rows in sync with
+rendered rows; constrained vertical layouts compress row height and spacing instead of dropping rows after
+shortcuts are assigned.
 
 `CompositionBuffer` keeps `rawInput`, resolved segments, active range, display text, and commit text separate. While composing `nishishei`, marked text displays `nishishei`; selecting the segment `你` changes marked text to `你shishei` without calling `insertText`.
 

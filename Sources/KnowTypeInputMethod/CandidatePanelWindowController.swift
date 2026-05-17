@@ -17,67 +17,8 @@ extension NSPanel: CandidatePanelWindowOperating {}
 @MainActor
 protocol CandidatePanelContentRendering: AnyObject {
     var appKitView: NSView { get }
-    var fittingSize: NSSize { get }
 
-    func update(model: CandidatePanelRenderModel)
-}
-
-enum CandidatePanelWindowSizing {
-    static let minimumSize = NSSize(width: 180, height: 30)
-    static let maximumSize = NSSize(width: 560, height: 44)
-
-    static func constrained(_ size: NSSize) -> NSSize {
-        NSSize(
-            width: clamp(size.width, minimum: minimumSize.width, maximum: maximumSize.width),
-            height: clamp(size.height, minimum: minimumSize.height, maximum: maximumSize.height)
-        )
-    }
-
-    private static func clamp(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
-        guard maximum >= minimum else {
-            return minimum
-        }
-        return min(max(value, minimum), maximum)
-    }
-}
-
-enum CandidatePanelWindowPlacement {
-    private static let visibleFrameInset: CGFloat = 8
-    private static let verticalAnchorSpacing: CGFloat = 6
-
-    static func origin(
-        for anchorRect: CGRect,
-        contentSize: NSSize,
-        screenProvider: ScreenGeometryProviding
-    ) -> NSPoint? {
-        guard CandidateAnchorValidation.isUsable(anchorRect, screenProvider: screenProvider) else {
-            return nil
-        }
-
-        let anchor = CandidateAnchorValidation.normalized(anchorRect)
-        guard let visibleFrame = screenProvider.screen(containing: anchor)?.visibleFrame else {
-            return nil
-        }
-
-        let minX = visibleFrame.minX + visibleFrameInset
-        let maxX = visibleFrame.maxX - contentSize.width - visibleFrameInset
-        let minY = visibleFrame.minY + visibleFrameInset
-        let maxY = visibleFrame.maxY - contentSize.height - visibleFrameInset
-        let preferredY = anchor.minY - contentSize.height - verticalAnchorSpacing
-        let fallbackY = anchor.maxY + verticalAnchorSpacing
-
-        return NSPoint(
-            x: clamp(anchor.minX, minimum: minX, maximum: maxX),
-            y: clamp(preferredY < minY ? fallbackY : preferredY, minimum: minY, maximum: maxY)
-        )
-    }
-
-    private static func clamp(_ value: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
-        guard maximum >= minimum else {
-            return minimum
-        }
-        return min(max(value, minimum), maximum)
-    }
+    func update(model: CandidatePanelRenderModel, layoutPlan: CandidatePanelLayoutPlan)
 }
 
 @MainActor
@@ -85,12 +26,14 @@ final class CandidatePanelWindowController {
     private var panel: CandidatePanelWindowOperating?
     private let contentView: CandidatePanelContentRendering
     private let screenProvider: ScreenGeometryProviding
+    private let layoutEngine: CandidatePanelLayoutEngine
     private let makePanel: @MainActor (NSView) -> CandidatePanelWindowOperating
 
     convenience init() {
         self.init(
             screenProvider: AppKitScreenGeometryProvider(),
             contentView: CandidatePanelContentView(),
+            layoutEngine: CandidatePanelLayoutEngine(textMeasurer: AppKitCandidatePanelTextMeasurer()),
             makePanel: Self.makeAppKitPanel
         )
     }
@@ -98,10 +41,12 @@ final class CandidatePanelWindowController {
     init(
         screenProvider: ScreenGeometryProviding,
         contentView: CandidatePanelContentRendering,
+        layoutEngine: CandidatePanelLayoutEngine,
         makePanel: @escaping @MainActor (NSView) -> CandidatePanelWindowOperating
     ) {
         self.screenProvider = screenProvider
         self.contentView = contentView
+        self.layoutEngine = layoutEngine
         self.makePanel = makePanel
     }
 
@@ -117,21 +62,19 @@ final class CandidatePanelWindowController {
             selected: windowState.selection,
             paging: windowState.paging
         )
-        contentView.update(model: renderModel)
 
         let panel = candidatePanel()
-        let contentSize = CandidatePanelWindowSizing.constrained(contentView.fittingSize)
-        panel.setContentSize(contentSize)
-        if let origin = CandidatePanelWindowPlacement.origin(
-            for: windowState.anchorRect,
-            contentSize: contentSize,
+        guard let layoutPlan = layoutEngine.layout(
+            model: renderModel,
+            anchorRect: windowState.anchorRect,
             screenProvider: screenProvider
-        ) {
-            panel.setFrameOrigin(origin)
-        } else {
+        ) else {
             panel.orderOut(nil)
             return
         }
+        panel.setContentSize(layoutPlan.panelSize)
+        contentView.update(model: renderModel, layoutPlan: layoutPlan)
+        panel.setFrameOrigin(layoutPlan.panelOrigin)
         panel.orderFrontRegardless()
     }
 
@@ -169,6 +112,45 @@ final class CandidatePanelWindowController {
 
 }
 
+private struct AppKitCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
+    func textWidth(for row: CandidatePanelRenderRow) -> CGFloat {
+        ceil(
+            (row.text as NSString).size(
+                withAttributes: [
+                    .font: CandidatePanelTypography.font(for: row.visualRole)
+                ]
+            ).width
+        )
+    }
+
+    func shortcutWidth(for label: String) -> CGFloat {
+        ceil(
+            (label as NSString).size(
+                withAttributes: [
+                    .font: CandidatePanelTypography.shortcutFont()
+                ]
+            ).width
+        )
+    }
+}
+
+private enum CandidatePanelTypography {
+    static func shortcutFont() -> NSFont {
+        NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+    }
+
+    static func font(for role: CandidatePanelVisualRole) -> NSFont {
+        switch role {
+        case .lockedPrefix:
+            return .systemFont(ofSize: 15, weight: .regular)
+        case .continuation:
+            return .systemFont(ofSize: 15, weight: .regular)
+        case .rawInput:
+            return .monospacedSystemFont(ofSize: 13, weight: .regular)
+        }
+    }
+}
+
 @MainActor
 private final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
     private let effectView = NSVisualEffectView()
@@ -192,14 +174,27 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         true
     }
 
-    func update(model: CandidatePanelRenderModel) {
+    func update(model: CandidatePanelRenderModel, layoutPlan: CandidatePanelLayoutPlan) {
         stackView.arrangedSubviews.forEach {
             stackView.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
 
-        for row in model.rows {
-            stackView.addArrangedSubview(makeRowView(row))
+        stackView.orientation = layoutPlan.orientation == .horizontal ? .horizontal : .vertical
+        stackView.alignment = layoutPlan.orientation == .horizontal ? .centerY : .leading
+        stackView.spacing = layoutPlan.itemSpacing
+        stackView.edgeInsets = NSEdgeInsets(
+            top: layoutPlan.contentInsets.top,
+            left: layoutPlan.contentInsets.left,
+            bottom: layoutPlan.contentInsets.bottom,
+            right: layoutPlan.contentInsets.right
+        )
+
+        for item in layoutPlan.items {
+            guard model.rows.indices.contains(item.rowIndex) else {
+                continue
+            }
+            stackView.addArrangedSubview(makeRowView(model.rows[item.rowIndex], layoutItem: item))
         }
 
         needsLayout = true
@@ -240,15 +235,11 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
             stackView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
             stackView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
             stackView.topAnchor.constraint(equalTo: effectView.topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: CandidatePanelWindowSizing.minimumSize.width),
-            widthAnchor.constraint(lessThanOrEqualToConstant: CandidatePanelWindowSizing.maximumSize.width),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: CandidatePanelWindowSizing.minimumSize.height),
-            heightAnchor.constraint(lessThanOrEqualToConstant: CandidatePanelWindowSizing.maximumSize.height)
+            stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor)
         ])
     }
 
-    private func makeRowView(_ row: CandidatePanelRenderRow) -> NSView {
+    private func makeRowView(_ row: CandidatePanelRenderRow, layoutItem: CandidatePanelLayoutItem) -> NSView {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
@@ -258,7 +249,8 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         container.layer?.cornerRadius = 4
         container.layer?.cornerCurve = .continuous
         container.layer?.backgroundColor = rowBackgroundColor(row).cgColor
-        container.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        container.widthAnchor.constraint(equalToConstant: layoutItem.frame.width).isActive = true
+        container.heightAnchor.constraint(equalToConstant: layoutItem.frame.height).isActive = true
 
         if let shortcutLabel = row.shortcutLabel {
             container.addArrangedSubview(
@@ -271,11 +263,11 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         }
 
         let textLabel = baseLabel(row.text)
-        textLabel.font = font(for: row.visualRole)
+        textLabel.font = CandidatePanelTypography.font(for: row.visualRole)
         textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected)
         textLabel.lineBreakMode = .byTruncatingTail
         textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: textWidthLimit(for: row.visualRole)).isActive = true
+        textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: layoutItem.textWidthLimit).isActive = true
         container.addArrangedSubview(textLabel)
         return container
     }
@@ -293,7 +285,7 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         isSelected: Bool
     ) -> NSTextField {
         let label = baseLabel(text)
-        label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        label.font = CandidatePanelTypography.shortcutFont()
         label.textColor = shortcutColor(for: role, isSelected: isSelected)
         label.alignment = .right
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -307,28 +299,6 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         label.maximumNumberOfLines = 1
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
-    }
-
-    private func font(for role: CandidatePanelVisualRole) -> NSFont {
-        switch role {
-        case .lockedPrefix:
-            return .systemFont(ofSize: 15, weight: .regular)
-        case .continuation:
-            return .systemFont(ofSize: 15, weight: .regular)
-        case .rawInput:
-            return .monospacedSystemFont(ofSize: 13, weight: .regular)
-        }
-    }
-
-    private func textWidthLimit(for role: CandidatePanelVisualRole) -> CGFloat {
-        switch role {
-        case .lockedPrefix:
-            return 148
-        case .continuation:
-            return 188
-        case .rawInput:
-            return 260
-        }
     }
 
     private func textColor(for role: CandidatePanelVisualRole, isSelected: Bool) -> NSColor {
