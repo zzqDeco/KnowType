@@ -155,6 +155,47 @@ final class ManagedLexiconPackTests: XCTestCase {
         }
     }
 
+    func testInstallerRechecksExistingOutputAfterDownloadBeforeWriting() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = """
+        ---
+        name: fixture
+        ...
+        你好\tni hao\t20728
+        """
+        let sourceData = Data(source.utf8)
+        let pack = ManagedLexiconPack(
+            id: "fixture",
+            displayName: "Fixture",
+            sourceURL: URL(string: "https://example.com/fixture.dict.yaml")!,
+            sourceVersion: "fixture",
+            sourceSHA256: ManagedLexiconPackInstaller.sha256Hex(sourceData),
+            licenseName: "Apache-2.0",
+            licenseURL: URL(string: "https://example.com/license")!,
+            outputFileName: "fixture.tsv",
+            metadataFileName: "fixture.metadata.json",
+            format: .rimeDictYAML
+        )
+        let outputURL = directory.appendingPathComponent("fixture.tsv")
+        let installer = ManagedLexiconPackInstaller(dataProvider: { _ in
+            try Data("concurrent".utf8).write(to: outputURL)
+            return sourceData
+        })
+
+        do {
+            _ = try await installer.install(pack, destinationDirectory: directory)
+            XCTFail("Expected existing output error")
+        } catch {
+            XCTAssertEqual(
+                error as? ManagedLexiconPackInstallerError,
+                .outputAlreadyExists(outputURL.path)
+            )
+        }
+
+        XCTAssertEqual(String(decoding: try Data(contentsOf: outputURL), as: UTF8.self), "concurrent")
+    }
+
     func testInstallerForceReplacesExistingOutput() async throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -331,6 +331,9 @@ public struct ManagedLexiconPackInstaller {
         metadataEncoder.dateEncodingStrategy = .iso8601
 
         do {
+            if fileManager.fileExists(atPath: outputURL.path), !force {
+                throw ManagedLexiconPackInstallerError.outputAlreadyExists(outputURL.path)
+            }
             try Self.writeAtomically(conversion.tsvData, to: outputURL, fileManager: fileManager)
             try Self.writeAtomically(try metadataEncoder.encode(metadata), to: metadataURL, fileManager: fileManager)
         } catch let error as ManagedLexiconPackInstallerError {
