@@ -65,6 +65,33 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         XCTAssertEqual(plan?.items.map(\.rowIndex), Array(0..<9))
     }
 
+    func testVerticalLayoutLimitsRowsToVisibleFrameHeight() {
+        let engine = engine(defaultTextWidth: 32)
+
+        let plan = engine.layout(
+            model: renderModel(rowCount: 9),
+            anchorRect: CGRect(x: 100, y: 120, width: 0, height: 18),
+            screenProvider: screenProvider(width: 800, height: 200)
+        )
+
+        XCTAssertEqual(plan?.orientation, .vertical)
+        XCTAssertEqual(plan?.items.count, 5)
+        XCTAssertEqual(plan?.items.map(\.rowIndex), Array(0..<5))
+        XCTAssertLessThanOrEqual(plan?.panelSize.height ?? .infinity, 184)
+    }
+
+    func testLayoutReturnsNilWhenVisibleFrameCannotFitOneRow() {
+        let engine = engine(defaultTextWidth: 32)
+
+        let plan = engine.layout(
+            model: renderModel(rowCount: 6),
+            anchorRect: CGRect(x: 100, y: 20, width: 0, height: 18),
+            screenProvider: screenProvider(width: 800, height: 30)
+        )
+
+        XCTAssertNil(plan)
+    }
+
     func testVerticalLayoutTruncatesOnlyAfterMaximumWidth() {
         let engine = engine(defaultTextWidth: 900)
 

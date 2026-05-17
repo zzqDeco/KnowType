@@ -80,6 +80,11 @@ struct CandidatePanelLayoutEngine {
         }
     }
 
+    private struct LayoutMeasurement {
+        var rows: [MeasuredRow]
+        var panelSize: CGSize
+    }
+
     var configuration: CandidatePanelLayoutConfiguration
     var textMeasurer: CandidatePanelTextMeasuring
 
@@ -115,20 +120,32 @@ struct CandidatePanelLayoutEngine {
             )
         }
         let availableWidth = max(0, visibleFrame.width - configuration.visibleFrameInset * 2)
+        let availableHeight = max(0, visibleFrame.height - configuration.visibleFrameInset * 2)
         let orientation = orientation(for: measuredRows, availableWidth: availableWidth)
-        let panelSize = size(for: measuredRows, orientation: orientation, availableWidth: availableWidth)
+        guard let measurement = measurement(
+            for: measuredRows,
+            orientation: orientation,
+            availableWidth: availableWidth,
+            availableHeight: availableHeight
+        ) else {
+            return nil
+        }
         guard let origin = origin(
             for: anchor,
-            panelSize: panelSize,
+            panelSize: measurement.panelSize,
             visibleFrame: visibleFrame
         ) else {
             return nil
         }
-        let items = layoutItems(for: measuredRows, orientation: orientation, panelSize: panelSize)
+        let items = layoutItems(
+            for: measurement.rows,
+            orientation: orientation,
+            panelSize: measurement.panelSize
+        )
 
         return CandidatePanelLayoutPlan(
             orientation: orientation,
-            panelSize: panelSize,
+            panelSize: measurement.panelSize,
             panelOrigin: origin,
             contentInsets: configuration.contentInsets,
             itemSpacing: orientation == .horizontal
@@ -154,40 +171,69 @@ struct CandidatePanelLayoutEngine {
             : .vertical
     }
 
-    private func size(
+    private func measurement(
         for rows: [MeasuredRow],
         orientation: CandidatePanelLayoutOrientation,
-        availableWidth: CGFloat
-    ) -> CGSize {
+        availableWidth: CGFloat,
+        availableHeight: CGFloat
+    ) -> LayoutMeasurement? {
         switch orientation {
         case .horizontal:
             let maximumWidth = horizontalMaximumWidth(availableWidth: availableWidth)
+            let height = ceil(configuration.horizontalRowHeight + configuration.contentInsets.vertical)
+            guard height <= availableHeight else {
+                return nil
+            }
             let width = clamp(
                 horizontalNaturalWidth(for: rows),
                 minimum: min(configuration.horizontalMinimumWidth, maximumWidth),
                 maximum: maximumWidth
             )
-            return CGSize(
-                width: ceil(width),
-                height: ceil(configuration.horizontalRowHeight + configuration.contentInsets.vertical)
+            return LayoutMeasurement(
+                rows: rows,
+                panelSize: CGSize(width: ceil(width), height: height)
             )
         case .vertical:
+            let visibleRowCount = verticalVisibleRowCount(
+                requestedRowCount: rows.count,
+                availableHeight: availableHeight
+            )
+            guard visibleRowCount > 0 else {
+                return nil
+            }
+            let visibleRows = Array(rows.prefix(visibleRowCount))
             let maximumWidth = verticalMaximumWidth(availableWidth: availableWidth)
             let width = clamp(
-                verticalNaturalWidth(for: rows),
+                verticalNaturalWidth(for: visibleRows),
                 minimum: min(configuration.verticalMinimumWidth, maximumWidth),
                 maximum: maximumWidth
             )
-            let totalSpacing = CGFloat(max(rows.count - 1, 0)) * configuration.verticalItemSpacing
-            return CGSize(
-                width: ceil(width),
-                height: ceil(
-                    configuration.contentInsets.vertical
-                    + CGFloat(rows.count) * configuration.verticalRowHeight
-                    + totalSpacing
+            return LayoutMeasurement(
+                rows: visibleRows,
+                panelSize: CGSize(
+                    width: ceil(width),
+                    height: ceil(verticalHeight(rowCount: visibleRows.count))
                 )
             )
         }
+    }
+
+    private func verticalVisibleRowCount(requestedRowCount: Int, availableHeight: CGFloat) -> Int {
+        let availableContentHeight = availableHeight - configuration.contentInsets.vertical
+        guard availableContentHeight >= configuration.verticalRowHeight else {
+            return 0
+        }
+        let rowStride = configuration.verticalRowHeight + configuration.verticalItemSpacing
+        let maximumVisibleRows = Int(
+            floor((availableContentHeight + configuration.verticalItemSpacing) / rowStride)
+        )
+        return min(requestedRowCount, max(0, maximumVisibleRows))
+    }
+
+    private func verticalHeight(rowCount: Int) -> CGFloat {
+        configuration.contentInsets.vertical
+            + CGFloat(rowCount) * configuration.verticalRowHeight
+            + CGFloat(max(rowCount - 1, 0)) * configuration.verticalItemSpacing
     }
 
     private func layoutItems(
