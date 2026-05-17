@@ -264,6 +264,66 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
+    private func refreshResolvedCompositionContinuations(client: InputControllerClient?) {
+        guard enablesAsyncSuggestionRefresh,
+              let provider,
+              compositionBuffer.isFullyResolved else {
+            return
+        }
+        suggestionTask?.cancel()
+        let rawInput = rawBuffer
+        let lockedPrefixText = compositionBuffer.commitText
+        let appBundleID = appBundleIdentifier(client: client)
+        let currentLocale = locale
+        let selectedCompositionID = compositionID
+        let lockedPrefix = LockedPrefix(
+            text: lockedPrefixText,
+            rawInput: rawInput,
+            candidateID: "composition-buffer"
+        )
+        let context = InputContext(
+            rawInput: rawInput,
+            appBundleID: appBundleID,
+            locale: currentLocale,
+            userSelectionHistory: userSelectionHistory
+        )
+        suggestionTask = Task { @MainActor [weak self, provider] in
+            guard let self else {
+                return
+            }
+            let continuations = await PrefixContinuationEngine(provider: provider).continuations(
+                for: lockedPrefix,
+                context: context,
+                lengthLevel: .medium,
+                maxCandidates: InputMethodPipeline.defaultMaxContinuationCandidates
+            )
+            guard !Task.isCancelled else {
+                return
+            }
+            guard self.rawBuffer == rawInput,
+                  self.compositionID == selectedCompositionID,
+                  self.compositionBuffer.isFullyResolved,
+                  self.compositionBuffer.commitText == lockedPrefixText else {
+                return
+            }
+            let currentClient = self.host?.currentClient
+            let currentSuggestion = self.lastSuggestion
+            let prefixCandidates = currentSuggestion?.prefixCandidates.isEmpty == false
+                ? currentSuggestion?.prefixCandidates ?? []
+                : [self.resolvedCompositionCandidate()]
+            let suggestion = SuggestionResponse(
+                prefixCandidates: prefixCandidates,
+                lockedPrefix: lockedPrefix,
+                continuationCandidates: continuations,
+                latencyMs: currentSuggestion?.latencyMs ?? 0
+            )
+            self.lastSuggestion = suggestion
+            self.lastSuggestionRawInput = rawInput
+            self.refreshComposition(client: currentClient)
+            self.updateCandidatePanel(suggestion: suggestion, client: currentClient)
+        }
+    }
+
     private func resultForNumberSelection(
         _ selection: InputCandidateSelection,
         client: InputControllerClient?
@@ -321,7 +381,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
-        var prefixCandidates = compositionBuffer.hasResolvedSegments ? [] : suggestion.prefixCandidates
+        var prefixCandidates: [CorrectionCandidate]
+        if compositionBuffer.isFullyResolved {
+            prefixCandidates = [resolvedCompositionCandidate()]
+        } else if compositionBuffer.hasResolvedSegments {
+            prefixCandidates = []
+        } else {
+            prefixCandidates = suggestion.prefixCandidates
+        }
         if let activeRange = compositionBuffer.activeRange {
             let segmentCandidates = prioritizedSegmentCandidates(for: activeRange)
                 .filter { canApplyOrCommit(candidate: $0) }
@@ -352,6 +419,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
             lockedPrefix: lockedPrefix,
             continuationCandidates: continuations,
             latencyMs: suggestion.latencyMs
+        )
+    }
+
+    private func resolvedCompositionCandidate() -> CorrectionCandidate {
+        CorrectionCandidate(
+            text: compositionBuffer.commitText,
+            source: "composition-buffer",
+            confidence: 1.0,
+            correctionLevel: .contextual,
+            rawRange: compositionBuffer.rawRange,
+            segments: compositionBuffer.resolvedSegments
         )
     }
 
@@ -592,6 +670,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return .commit(compositionBuffer.commitText)
         }
         publishLocalSuggestion(client: client)
+        if compositionBuffer.isFullyResolved {
+            refreshResolvedCompositionContinuations(client: client)
+        }
         return .noAction
     }
 

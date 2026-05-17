@@ -114,6 +114,54 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "nishishei")
     }
 
+    func testFullyResolvedSegmentSelectionRefreshesProviderContinuations() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        XCTAssertEqual(client.markedTextWrites.last?.text, "你shishei")
+
+        try selectCandidate(
+            text: "是谁",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 7),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        XCTAssertEqual(client.markedTextWrites.last?.text, "你是谁")
+
+        XCTAssertTrue(
+            waitUntil {
+                host.panelStates.last?.windowState.viewModel.continuationCandidates
+                    .contains { $0.text == "继续推进" } == true
+            }
+        )
+        let requests = await provider.requests
+        XCTAssertTrue(requests.contains { $0.task == .continuation && $0.lockedPrefix == "你是谁" })
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁继续推进")
+    }
+
     func testCancelClearsMarkedTextAndHidesCandidatePanel() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -271,7 +319,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
     private func makeCoordinator(
         client: FakeInputControllerClient,
-        persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence()
+        persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence(),
+        provider: (any LLMProvider)? = nil,
+        enablesAsyncSuggestionRefresh: Bool = false
     ) -> (
         InputControllerCoordinator,
         FakeInputControllerHost,
@@ -281,7 +331,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         host.currentClientValue = client
         let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
         let coordinator = InputControllerCoordinator(
-            provider: nil,
+            provider: provider,
             traditionalInputEngine: lexiconRuntime.makeEngine(),
             lexiconRuntimeSnapshot: lexiconRuntime.snapshot(),
             inputModePreferenceStore: FixedInputModePreferenceStore(),
@@ -293,9 +343,49 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 accessibilityProvider: NoopAccessibilityAnchorProvider(),
                 traceEnabled: false
             ),
-            enablesAsyncSuggestionRefresh: false
+            enablesAsyncSuggestionRefresh: enablesAsyncSuggestionRefresh
         )
         return (coordinator, host, persistence)
+    }
+
+    private func selectCandidate(
+        text: String,
+        rawRange: KnowTypeCore.TextRange,
+        coordinator: InputControllerCoordinator,
+        host: FakeInputControllerHost,
+        client: FakeInputControllerClient
+    ) throws {
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+        let index = try XCTUnwrap(
+            viewModel.prefixCandidates.firstIndex {
+                $0.text == text && $0.rawRange == rawRange
+            }
+        )
+        XCTAssertLessThan(index, 9)
+        let shortcutNumber = index + 1
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(
+                    text: String(shortcutNumber),
+                    keyCode: keyCode(forNumber: shortcutNumber)
+                ),
+                client: client
+            )
+        )
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 3,
+        condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return condition()
     }
 
     private func keyCode(forNumber number: Int) -> Int {
@@ -323,6 +413,25 @@ private struct FixedInputModePreferenceStore: InputModePreferenceStore {
     }
 
     func savePreferences(_ preferences: InputModePreferences) throws {}
+}
+
+private actor RecordingContinuationProvider: LLMProvider {
+    nonisolated let providerName = "recording-continuation"
+    private var recordedRequests: [LLMRequest] = []
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        guard request.task == .continuation else {
+            return LLMResponse(candidates: [])
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.9)
+        ])
+    }
+
+    var requests: [LLMRequest] {
+        recordedRequests
+    }
 }
 
 private struct FixedInputControllerScreenProvider: ScreenGeometryProviding {

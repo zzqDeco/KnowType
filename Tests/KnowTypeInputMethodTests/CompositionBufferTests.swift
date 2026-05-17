@@ -46,6 +46,17 @@ final class CompositionBufferTests: XCTestCase {
         XCTAssertEqual(buffer.activeRange, KnowTypeCore.TextRange(start: 2, length: 7))
     }
 
+    func testFullyResolvedCommitDropsWhitespaceSeparators() {
+        var buffer = CompositionBuffer(rawInput: "ni shi shei")
+
+        XCTAssertTrue(buffer.apply(candidate(text: "你", start: 0, length: 2, reading: "ni")))
+        XCTAssertTrue(buffer.apply(candidate(text: "是谁", start: 3, length: 8, reading: "shi shei")))
+
+        XCTAssertEqual(buffer.displayText, "你 是谁")
+        XCTAssertTrue(buffer.isFullyResolved)
+        XCTAssertEqual(buffer.commitText, "你是谁")
+    }
+
     private func candidate(
         text: String,
         start: Int,

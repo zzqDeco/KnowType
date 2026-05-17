@@ -269,6 +269,19 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(candidates.first?.text, "这个 API latency 有点高")
     }
 
+    func testNormalizedMixedInputDoesNotExposeShiftedRawRanges() async {
+        let engine = CorrectionEngine()
+        let candidates = await engine.correct(
+            InputContext(rawInput: "zhege api latnecy youdian gao", locale: .mixed)
+        )
+
+        let candidate = candidates.first { $0.text == "这个 API latency 有点高" }
+
+        XCTAssertNotNil(candidate)
+        XCTAssertNil(candidate?.rawRange)
+        XCTAssertEqual(candidate?.segments, [])
+    }
+
     func testTechnicalTokensArePreserved() async {
         let raw = "API JSON CSS GPT LLM npm SDK SSH macOS InputMethodKit snake_case camelCase"
         let engine = CorrectionEngine()

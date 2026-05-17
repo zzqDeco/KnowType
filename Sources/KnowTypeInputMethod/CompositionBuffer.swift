@@ -38,7 +38,13 @@ public struct CompositionBuffer: Sendable, Equatable {
     }
 
     public var commitText: String {
-        displayText
+        if isFullyResolved {
+            return resolvedSegments
+                .sorted { $0.rawRange.start < $1.rawRange.start }
+                .map(\.text)
+                .joined()
+        }
+        return displayText
     }
 
     public var isFullyResolved: Bool {

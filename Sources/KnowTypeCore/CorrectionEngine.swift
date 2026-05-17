@@ -144,6 +144,7 @@ public final class CorrectionEngine: Sendable {
 
             for input in traditionalInputs {
                 let normalizationBonus = input == normalizedInput && input != raw ? 0.01 : 0
+                let usesRawInputCoordinates = input == raw
                 for candidate in traditionalInputEngine.candidates(
                     for: input,
                     preserveCapitalizedPinyin: preserveCapitalizedPinyin
@@ -155,8 +156,8 @@ public final class CorrectionEngine: Sendable {
                             confidence: min(1.0, candidate.confidence + normalizationBonus),
                             correctionLevel: .contextual,
                             protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text),
-                            rawRange: candidate.rawRange,
-                            segments: candidate.segments
+                            rawRange: usesRawInputCoordinates ? candidate.rawRange : nil,
+                            segments: usesRawInputCoordinates ? candidate.segments : []
                         )
                     )
                 }
