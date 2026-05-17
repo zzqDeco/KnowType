@@ -162,6 +162,73 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁继续推进")
     }
 
+    func testSelectedContinuationAfterSegmentResolutionIsCommitted() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        try selectCandidate(
+            text: "是谁",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 7),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        XCTAssertTrue(
+            waitUntil {
+                host.panelStates.last?.windowState.viewModel.continuationCandidates.count == 2
+            }
+        )
+
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "", keyCode: 125), client: client))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "", keyCode: 125), client: client))
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁第二延续")
+    }
+
+    func testPunctuationAfterPartialSegmentSelectionCommitsDisplayedComposition() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        try selectCandidate(
+            text: "是",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 3),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "你是shei")
+        XCTAssertTrue(coordinator.handleText(",", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是shei，")
+    }
+
     func testCancelClearsMarkedTextAndHidesCandidatePanel() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -425,7 +492,8 @@ private actor RecordingContinuationProvider: LLMProvider {
             return LLMResponse(candidates: [])
         }
         return LLMResponse(candidates: [
-            LLMCandidate(text: "继续推进", confidence: 0.9)
+            LLMCandidate(text: "继续推进", confidence: 0.9),
+            LLMCandidate(text: "第二延续", confidence: 0.8)
         ])
     }
 

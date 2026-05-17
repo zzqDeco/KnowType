@@ -78,6 +78,19 @@ final class TraditionalInputEngineTests: XCTestCase {
         XCTAssertFalse(candidates.contains { $0.rawRange == TextRange(start: 0, length: 2) })
     }
 
+    func testSegmentCandidatesIncludePassthroughTechnicalTokens() {
+        let engine = TraditionalInputEngine()
+        let candidates = engine.segmentCandidates(
+            for: "ni API",
+            activeRange: TextRange(start: 3, length: 3)
+        )
+
+        let passthrough = candidates.first {
+            $0.text == "API" && $0.rawRange == TextRange(start: 3, length: 3)
+        }
+        XCTAssertEqual(passthrough?.segments.first?.isPassthrough, true)
+    }
+
     func testPartialSecondSyllableUsesLegalPinyinPrefixes() {
         let engine = TraditionalInputEngine()
 

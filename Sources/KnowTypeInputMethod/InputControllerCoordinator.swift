@@ -208,7 +208,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return true
         }
 
+        if compositionBuffer.hasResolvedSegments,
+           !compositionBuffer.isFullyResolved {
+            return applyCommitResult(
+                .commit(compositionBuffer.commitText + symbol),
+                client: client
+            )
+        }
+
         let baseResult = commitResult(for: .space, client: client)
+        if case .noAction = baseResult,
+           compositionBuffer.hasResolvedSegments {
+            return applyCommitResult(
+                .commit(compositionBuffer.commitText + symbol),
+                client: client
+            )
+        }
         return applyCommitResult(
             InputSymbolCommitPolicy.result(
                 symbol: symbol,
@@ -607,6 +622,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         if compositionBuffer.hasResolvedSegments,
            compositionBuffer.isFullyResolved {
+            if let selectedNativeCandidate,
+               case .continuationCandidate(let index) = selectedNativeCandidate.kind,
+               (action == .space || action == .tab),
+               lastSuggestion?.continuationCandidates.indices.contains(index) == true {
+                return InputCompositionController().handle(
+                    action: .optionNumber(index + 1),
+                    prefixCandidates: [resolvedCompositionCandidate()],
+                    continuationCandidates: lastSuggestion?.continuationCandidates ?? [],
+                    originalText: rawBuffer
+                )
+            }
             switch action {
             case .space:
                 return .commit(compositionBuffer.commitText)

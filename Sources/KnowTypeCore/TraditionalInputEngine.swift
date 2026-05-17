@@ -166,6 +166,29 @@ public struct TraditionalInputEngine: Sendable {
 
                 let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
                 let entries = lexiconIndex.matchingEntries(for: tokenSlice)
+                if length == 1,
+                   let token = tokenSlice.first,
+                   let passthrough = passthroughText(
+                    for: token,
+                    preserveCapitalizedPinyin: preserveCapitalizedPinyin
+                   ) {
+                    let segment = CandidateSegment(
+                        rawRange: rawRange,
+                        tokenRange: TextRange(start: startIndex, length: 1),
+                        reading: token.normalized,
+                        text: passthrough,
+                        isPassthrough: true
+                    )
+                    candidates.append(
+                        TraditionalInputCandidate(
+                            text: passthrough,
+                            confidence: 0.96,
+                            inputTokens: [token.surface],
+                            rawRange: rawRange,
+                            segments: [segment]
+                        )
+                    )
+                }
                 for entry in entries {
                     let matchPenalty = typoPenalty + partialMatchPenalty(entry: entry, tokens: tokenSlice)
                     let reading = tokenSlice.map(\.normalized).joined(separator: " ")
