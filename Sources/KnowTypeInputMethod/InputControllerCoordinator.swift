@@ -716,12 +716,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard compositionBuffer.apply(candidate) else {
             return .noAction
         }
-        if commitIfFullyResolved, compositionBuffer.isFullyResolved {
-            return .commit(compositionBuffer.commitText)
-        }
+        let isFullyResolvedAfterApply = compositionBuffer.isFullyResolved
         publishLocalSuggestion(client: client)
-        if compositionBuffer.isFullyResolved {
+        if isFullyResolvedAfterApply {
             refreshResolvedCompositionContinuations(client: client)
+        }
+        if commitIfFullyResolved, isFullyResolvedAfterApply {
+            return .commit(compositionBuffer.commitText)
         }
         return .noAction
     }
