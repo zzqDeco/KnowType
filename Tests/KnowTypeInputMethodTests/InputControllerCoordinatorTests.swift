@@ -234,6 +234,28 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAsyncPendingTabUsesLocalContinuationFallback() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你还有进一步优化空间")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
     func testAsyncPendingSpaceAppliesRemainingSegmentBeforeCommit() async throws {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
@@ -292,6 +314,60 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(",", client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁，")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testAsyncPendingPunctuationDoesNotApplyPartialFallbackSegment() async throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishix" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFirstSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            } == true
+        }
+        XCTAssertTrue(hasFirstSegment)
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertTrue(coordinator.handleText(",", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你shix，")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testAsyncPendingRawShortcutCommitsRawInput() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .rawInput)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "0", keyCode: keyCode(forNumber: 0)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "zhegeapi")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 

@@ -182,6 +182,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
                    ) {
                     return applyCommitResult(result, client: client)
                 }
+                if number == 0,
+                   candidatePanelState.windowState.selection == .rawInput,
+                   !rawBuffer.isEmpty {
+                    return applyCommitResult(.commit(rawBuffer), client: client)
+                }
                 if let visibleSelection = candidatePanelState.selectVisiblePrefixCandidate(shortcutNumber: number),
                    let inputSelection = inputCandidateSelection(
                        for: visibleSelection,
@@ -223,10 +228,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if compositionBuffer.hasResolvedSegments,
            !compositionBuffer.isFullyResolved {
             if enablesAsyncSuggestionRefresh {
+                let snapshot = compositionBuffer
                 let segmentResult = applyPendingSegmentFallback(commitIfFullyResolved: true, client: client)
                 if case .commit(let text) = segmentResult {
                     return applyCommitResult(.commit(text + symbol), client: client)
                 }
+                compositionBuffer = snapshot
             }
             return applyCommitResult(
                 .commit(compositionBuffer.commitText + symbol),
@@ -916,7 +923,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return (lastSuggestion, lastSuggestionRawInput, false)
         }
         guard enablesAsyncSuggestionRefresh,
-              action == .space,
+              action == .space || action == .tab,
               SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
             return (lastSuggestion, lastSuggestionRawInput, false)
         }
@@ -929,7 +936,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
         let suggestion = InputMethodPipeline.localSuggestions(
             for: context,
-            includeFallbackContinuations: false,
+            includeFallbackContinuations: action == .tab,
             traditionalInputEngine: traditionalInputEngine
         )
         return (augmentedSuggestion(suggestion), rawBuffer, true)

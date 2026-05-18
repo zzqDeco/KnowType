@@ -12,7 +12,7 @@ KnowType must not run large-lexicon pinyin decoding or runtime lexicon loading d
 - Candidate augmentation, including segmented candidate generation, runs off the keydown path with an interactive query budget.
 - Stale async publications are rejected by raw input, composition id, composition buffer, and generation checks.
 - `InputSessionCommitPolicy` can skip broad synchronous fallback generation while production suggestions are pending; Space and punctuation commits use a bounded local fallback so the first commit key is not swallowed and raw pinyin is not inserted prematurely.
-- Pending Space and punctuation after partial segment selection apply the best remaining local segment before committing, preserving the already locked segment prefix.
+- Pending Space, Tab, raw shortcuts, and punctuation keep local behavior while async suggestions load. Space and punctuation after partial segment selection apply the best remaining local segment before committing when that fully resolves the composition; punctuation rolls back the fallback mutation when only a partial tail can be applied.
 - Fully resolved segmented compositions keep local fallback continuations when no provider is configured.
 - Runtime lexicon reloads carry a generation token so cancellation and controller close prevent late MainActor engine swaps.
 - `TraditionalInputEngine` exposes `TraditionalInputQueryOptions` and caps tokenization paths, parse states, candidate count, segment candidates, and partial-match fanout for interactive use.
@@ -24,6 +24,7 @@ KnowType must not run large-lexicon pinyin decoding or runtime lexicon loading d
 - `InputControllerCoordinatorTests/testAsyncAppendPublishesRawCompositionBeforeCandidatesArrive` verifies key handling publishes raw marked text before candidates arrive.
 - `InputControllerCoordinatorTests/testAsyncPendingSpaceUsesLocalCommitFallback` and `testAsyncPendingPunctuationUsesLocalCommitFallback` verify pending async suggestions still commit local Chinese candidates.
 - `InputControllerCoordinatorTests/testAsyncPendingSpaceAppliesRemainingSegmentBeforeCommit`, `testAsyncPendingPunctuationAppliesRemainingSegmentBeforeCommit`, and `testFullyResolvedSegmentSelectionKeepsLocalContinuationsWithoutProvider` cover segmented pending commit regressions.
+- `InputControllerCoordinatorTests/testAsyncPendingTabUsesLocalContinuationFallback`, `testAsyncPendingPunctuationDoesNotApplyPartialFallbackSegment`, and `testAsyncPendingRawShortcutCommitsRawInput` cover the latest Codex review regressions around pending Tab, punctuation, and raw shortcuts.
 - `InputMethodLexiconRuntimeTests/testInitialEngineStatePreservesInstalledRuntimeLexicon` verifies the first controller engine state includes installed runtime resources.
 - `InputSessionControllerTests/testCommitPolicyCanAvoidSynchronousFallbackWhileSuggestionIsPending` verifies pending production suggestions do not force synchronous fallback generation.
 - Full gate: `swift test` and `git diff --check`.
