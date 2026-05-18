@@ -851,6 +851,64 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁第二推荐")
     }
 
+    @MainActor
+    func testSpaceCommitsHighlightedReadyAIRecommendation() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "第二推荐")
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFirstSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            } == true
+        }
+        XCTAssertTrue(hasFirstSegment)
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        let hasSecondSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "是谁" && $0.rawRange == KnowTypeCore.TextRange(start: 2, length: 7)
+            } == true
+        }
+        XCTAssertTrue(hasSecondSegment)
+        try selectCandidate(
+            text: "是谁",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 7),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你是谁第二推荐"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F701}", keyCode: 125),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .aiRecommendation)
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁第二推荐")
+    }
+
     func testPunctuationAfterPartialSegmentSelectionCommitsDisplayedComposition() throws {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)

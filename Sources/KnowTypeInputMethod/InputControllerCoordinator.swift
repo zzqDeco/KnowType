@@ -918,6 +918,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if action == .tab {
             return .noAction
         }
+        if action == .space,
+           let selectedNativeCandidate,
+           case .aiRecommendation = selectedNativeCandidate.kind {
+            return aiRecommendationCommitResult()
+        }
         if compositionBuffer.hasResolvedSegments,
            compositionBuffer.isFullyResolved {
             if let selectedNativeCandidate,

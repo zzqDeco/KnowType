@@ -147,6 +147,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
               let provider else {
             return
         }
+        digestInFlight = true
+        defer { digestInFlight = false }
+
         let snapshot: (rawContent: String, events: [AITypingEvent])
         do {
             snapshot = try await eventStore.pendingSnapshot()
@@ -179,8 +182,6 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         }
 
-        digestInFlight = true
-        defer { digestInFlight = false }
         do {
             let rawEvents = snapshot.rawContent
             guard !rawEvents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -202,6 +203,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             guard let generated = response.candidates.first?.text
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                 !generated.isEmpty else {
+                lastDigestFailureAt = now
                 return
             }
             _ = try environmentStore.replaceGeneratedSection(with: generated)

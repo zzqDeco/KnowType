@@ -249,6 +249,89 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(requests, 1)
         XCTAssertEqual(pendingEvents.map(\.rawInput), ["nihao", "zaijian"])
     }
+
+    func testEmptyDigestResponseIsThrottledUntilMinimumInterval() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events", isDirectory: true)
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "   ")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "nihao",
+                committedText: "你好",
+                commitKind: .traditional,
+                candidateSource: "traditional"
+            )
+        )
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "zaijian",
+                committedText: "再见",
+                commitKind: .traditional,
+                candidateSource: "traditional"
+            )
+        )
+
+        let requests = await provider.requests
+        let pendingEvents = try await eventStore.pendingEvents()
+
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(pendingEvents.map(\.rawInput), ["nihao", "zaijian"])
+    }
+
+    func testConcurrentDigestAttemptsOnlyIssueOneProviderRequest() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events", isDirectory: true)
+        )
+        let provider = DelayedDigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- Concurrent digest.",
+            delayNanoseconds: 80_000_000
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await runtime.record(
+                    AITypingEvent(
+                        rawInput: "nihao",
+                        committedText: "你好",
+                        commitKind: .traditional,
+                        candidateSource: "traditional"
+                    )
+                )
+            }
+            group.addTask {
+                await runtime.record(
+                    AITypingEvent(
+                        rawInput: "zaijian",
+                        committedText: "再见",
+                        commitKind: .traditional,
+                        candidateSource: "traditional"
+                    )
+                )
+            }
+        }
+
+        let requests = await provider.requests
+
+        XCTAssertEqual(requests.count, 1)
+    }
 }
 
 private actor DigestLLMProvider: LLMProvider {
@@ -309,6 +392,30 @@ private actor FailingDigestLLMProvider: LLMProvider {
 
     var requestCount: Int {
         count
+    }
+}
+
+private actor DelayedDigestLLMProvider: LLMProvider {
+    nonisolated let providerName = "delayed-digest"
+    private let generatedMarkdown: String
+    private let delayNanoseconds: UInt64
+    private var recordedRequests: [LLMRequest] = []
+
+    init(generatedMarkdown: String, delayNanoseconds: UInt64) {
+        self.generatedMarkdown = generatedMarkdown
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return LLMResponse(candidates: [
+            LLMCandidate(text: generatedMarkdown, confidence: 0.9)
+        ])
+    }
+
+    var requests: [LLMRequest] {
+        recordedRequests
     }
 }
 
