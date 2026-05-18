@@ -11,6 +11,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     private let coordinator: InputControllerCoordinator
     private let hostAdapter: IMKInputControllerHostAdapter
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
+    @MainActor private var preferencesWindowController: KnowTypePreferencesWindowController?
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
@@ -100,6 +101,15 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         preferencesItem.target = self
         menu.addItem(preferencesItem)
         return menu
+    }
+
+    public override func showPreferences(_ sender: Any!) {
+        MainActor.assumeIsolated {
+            if preferencesWindowController == nil {
+                preferencesWindowController = KnowTypePreferencesWindowController()
+            }
+            preferencesWindowController?.showWindow(nil)
+        }
     }
 
     public override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {

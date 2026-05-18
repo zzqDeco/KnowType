@@ -25,6 +25,12 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         let package = try String(contentsOf: rootURL.appendingPathComponent("Package.swift"), encoding: .utf8)
         let script = try String(contentsOf: rootURL.appendingPathComponent("scripts/build-preference-pane.sh"), encoding: .utf8)
+        let smokeScript = try String(contentsOf: rootURL.appendingPathComponent("scripts/smoke-inputmethod-install.sh"), encoding: .utf8)
+        let diagnosticScript = try String(contentsOf: rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh"), encoding: .utf8)
+        let inputControllerSource = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputController.swift"),
+            encoding: .utf8
+        )
         let source = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypePreferencePane/KnowTypePreferencePane.swift"),
             encoding: .utf8
@@ -38,6 +44,16 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(package.contains(#".linkedFramework("PreferencePanes", .when(platforms: [.macOS]))"#))
         XCTAssertTrue(script.contains("--product KnowTypePreferencePane"))
         XCTAssertTrue(script.contains("libKnowTypePreferencePane.dylib"))
+        XCTAssertTrue(script.contains("Frameworks"))
+        XCTAssertTrue(script.contains("xcrun clang -bundle"))
+        XCTAssertTrue(script.contains(#"-Wl,-rpath,@loader_path/../Frameworks"#))
+        XCTAssertTrue(smokeScript.contains("Contents/Frameworks/libKnowTypePreferencePane.dylib"))
+        XCTAssertTrue(smokeScript.contains("otool -hv"))
+        XCTAssertTrue(smokeScript.contains("BUNDLE"))
+        XCTAssertTrue(smokeScript.contains("bundle.principalClass"))
+        XCTAssertTrue(diagnosticScript.contains("PreferencePane executable is a loadable bundle"))
+        XCTAssertTrue(inputControllerSource.contains("override func showPreferences"))
+        XCTAssertTrue(inputControllerSource.contains("KnowTypePreferencesWindowController()"))
         XCTAssertTrue(script.contains("KnowType.prefPane"))
         XCTAssertTrue(source.contains("override func loadMainView() -> NSView"))
         XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.knowtype.preferencepane")

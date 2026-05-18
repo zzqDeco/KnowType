@@ -156,8 +156,20 @@ assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePan
 assert_dir "$prefpane_path"
 assert_file "$prefpane_path/Contents/Info.plist"
 assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
+assert_file "$prefpane_path/Contents/Frameworks/libKnowTypePreferencePane.dylib"
 [[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
   die "PreferencePane executable is not executable"
+if command -v otool >/dev/null 2>&1; then
+  otool -hv "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "BUNDLE" ||
+    die "PreferencePane executable is not an MH_BUNDLE"
+  otool -L "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "@rpath/libKnowTypePreferencePane.dylib" ||
+    die "PreferencePane executable does not load the SwiftPM preference pane library"
+fi
+principal_class="$(
+  PREFPANE_PATH="$prefpane_path" swift -e 'import Foundation; let path = ProcessInfo.processInfo.environment["PREFPANE_PATH"]!; guard let bundle = Bundle(url: URL(fileURLWithPath: path)), bundle.load() else { fatalError("PreferencePane bundle did not load") }; print(String(describing: bundle.principalClass))'
+)"
+[[ "$principal_class" == *"KnowTypePreferencePane"* ]] ||
+  die "PreferencePane principal class did not resolve"
 assert_equals "com.knowtype.preferencepane" \
   "$(plist_read ":CFBundleIdentifier" "$prefpane_path/Contents/Info.plist")" \
   "PreferencePane CFBundleIdentifier"

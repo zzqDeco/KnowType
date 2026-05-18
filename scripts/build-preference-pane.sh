@@ -7,6 +7,7 @@ DIST_DIR="$ROOT_DIR/dist"
 PANE_DIR="$DIST_DIR/KnowType.prefPane"
 CONTENTS_DIR="$PANE_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
 
 usage() {
   cat <<'EOF'
@@ -46,9 +47,14 @@ swift build --package-path "$ROOT_DIR" --configuration "$CONFIGURATION" --produc
 BIN_DIR="$(swift build --package-path "$ROOT_DIR" --configuration "$CONFIGURATION" --show-bin-path 2>/dev/null)"
 
 rm -rf "$PANE_DIR"
-mkdir -p "$MACOS_DIR" "$CONTENTS_DIR/Resources"
+mkdir -p "$MACOS_DIR" "$FRAMEWORKS_DIR" "$CONTENTS_DIR/Resources"
 cp "$ROOT_DIR/Resources/PreferencePane/Info.plist" "$CONTENTS_DIR/Info.plist"
-cp "$BIN_DIR/libKnowTypePreferencePane.dylib" "$MACOS_DIR/KnowTypePreferencePane"
+cp "$BIN_DIR/libKnowTypePreferencePane.dylib" "$FRAMEWORKS_DIR/"
+xcrun clang -bundle -x c /dev/null \
+  -o "$MACOS_DIR/KnowTypePreferencePane" \
+  -L"$FRAMEWORKS_DIR" \
+  -lKnowTypePreferencePane \
+  -Wl,-rpath,@loader_path/../Frameworks
 if [[ -f "$ROOT_DIR/Resources/InputMethod/KnowTypeInputMethodIcon.icns" ]]; then
   cp "$ROOT_DIR/Resources/InputMethod/KnowTypeInputMethodIcon.icns" "$CONTENTS_DIR/Resources/"
 fi
