@@ -64,6 +64,24 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .aiRecommendation)
     }
 
+    func testVisibleShortcutSkipsNonReadyAIStatusRows() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: suggestion(prefixTexts: ["你好", "你号"]),
+            aiRecommendation: .pending(requestID: UUID())
+        )
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", nil, "2"])
+        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .prefixCandidate(1))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
+    }
+
     func testVisibleShortcutIgnoresLegacyContinuationRowsWithoutNumberLabels() {
         var state = CandidatePanelState()
         state.update(

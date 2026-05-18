@@ -173,6 +173,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 rawBuffer.removeLast()
                 compositionBuffer.updateRawInput(rawBuffer)
                 if rawBuffer.isEmpty {
+                    deleteCountBeforeCommit = 0
                     resetAnchorState()
                 }
             }

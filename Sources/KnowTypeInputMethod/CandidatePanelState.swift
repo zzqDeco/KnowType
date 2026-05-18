@@ -156,7 +156,7 @@ public struct CandidatePanelState: Sendable, Equatable {
             return nil
         }
         let visibleRows = visibleSelectableRows()
-            .filter(\.hasVisibleNumberShortcut)
+            .filter { hasVisibleNumberShortcut($0, in: windowState.viewModel) }
         let shortcutIndex = number - 1
         guard visibleRows.indices.contains(shortcutIndex) else {
             return nil
@@ -181,7 +181,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         if !rawInput.isEmpty {
             return .rawInput
         }
-        if aiRecommendation.displayText != nil {
+        if aiRecommendation.isSelectableRecommendation {
             return .aiRecommendation
         }
         if !continuationCandidates.isEmpty {
@@ -239,7 +239,7 @@ public struct CandidatePanelState: Sendable, Equatable {
             return windowState.viewModel.continuationCandidates[index].text == viewModel.continuationCandidates[index].text
         case .aiRecommendation:
             return windowState.viewModel.aiRecommendation == viewModel.aiRecommendation
-                && viewModel.aiRecommendation.displayText != nil
+                && viewModel.aiRecommendation.isSelectableRecommendation
         }
     }
 
@@ -354,13 +354,16 @@ public struct CandidatePanelState: Sendable, Equatable {
             ? .fullCandidate(index)
             : .segmentCandidate(index)
     }
-}
 
-private extension CandidatePanelSelection {
-    var hasVisibleNumberShortcut: Bool {
-        switch self {
-        case .prefixCandidate, .fullCandidate, .segmentCandidate, .aiRecommendation:
+    private func hasVisibleNumberShortcut(
+        _ selection: CandidatePanelSelection,
+        in viewModel: CandidatePanelViewModel
+    ) -> Bool {
+        switch selection {
+        case .prefixCandidate, .fullCandidate, .segmentCandidate:
             return true
+        case .aiRecommendation:
+            return viewModel.aiRecommendation.isSelectableRecommendation
         case .rawInput, .continuationCandidate:
             return false
         }

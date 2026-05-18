@@ -54,12 +54,20 @@ public actor TypingEventStore {
     }
 
     public func pendingEvents() throws -> [AITypingEvent] {
+        try pendingSnapshot().events
+    }
+
+    public func pendingRawContent() throws -> String {
+        try pendingSnapshot().rawContent
+    }
+
+    public func pendingSnapshot() throws -> (rawContent: String, events: [AITypingEvent]) {
         try withTypingEventFileLock {
             guard fileManager.fileExists(atPath: eventsFileURL.path) else {
-                return []
+                return ("", [])
             }
             let content = try String(contentsOf: eventsFileURL, encoding: .utf8)
-            return content
+            let events = content
                 .split(whereSeparator: \.isNewline)
                 .compactMap { line -> AITypingEvent? in
                     guard let data = String(line).data(using: .utf8) else {
@@ -67,15 +75,7 @@ public actor TypingEventStore {
                     }
                     return try? decoder.decode(AITypingEvent.self, from: data)
                 }
-        }
-    }
-
-    public func pendingRawContent() throws -> String {
-        try withTypingEventFileLock {
-            guard fileManager.fileExists(atPath: eventsFileURL.path) else {
-                return ""
-            }
-            return try String(contentsOf: eventsFileURL, encoding: .utf8)
+            return (content, events)
         }
     }
 
@@ -116,6 +116,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private let batchSize: Int
     private let minimumInterval: TimeInterval
     private var lastDigestAt: Date?
+    private var lastDigestFailureAt: Date?
     private var digestInFlight = false
 
     public init(
@@ -146,12 +147,13 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
               let provider else {
             return
         }
-        let events: [AITypingEvent]
+        let snapshot: (rawContent: String, events: [AITypingEvent])
         do {
-            events = try await eventStore.pendingEvents()
+            snapshot = try await eventStore.pendingSnapshot()
         } catch {
             return
         }
+        let events = snapshot.events
         guard !events.isEmpty else {
             return
         }
@@ -163,11 +165,28 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard events.count >= batchSize || intervalElapsed else {
             return
         }
+        if events.allSatisfy(Self.isProtectedOnlyEvent) {
+            do {
+                try await eventStore.archivePendingEvents(matchingRawContent: snapshot.rawContent)
+                lastDigestAt = now
+            } catch {
+                return
+            }
+            return
+        }
+        if let lastDigestFailureAt,
+           now.timeIntervalSince(lastDigestFailureAt) < minimumInterval {
+            return
+        }
 
         digestInFlight = true
         defer { digestInFlight = false }
         do {
-            let rawEvents = try await eventStore.pendingRawContent()
+            let rawEvents = snapshot.rawContent
+            guard !rawEvents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                lastDigestAt = now
+                return
+            }
             let currentEnvironment = try environmentStore.loadSnapshot()
             let request = LLMRequest(
                 task: .contextDigest,
@@ -188,9 +207,20 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             _ = try environmentStore.replaceGeneratedSection(with: generated)
             try await eventStore.archivePendingEvents(matchingRawContent: rawEvents)
             lastDigestAt = now
+            lastDigestFailureAt = nil
         } catch {
+            lastDigestFailureAt = now
             return
         }
+    }
+
+    private static func isProtectedOnlyEvent(_ event: AITypingEvent) -> Bool {
+        guard event.candidateSource == "protected" else {
+            return false
+        }
+        let protectedValues = [event.rawInput, event.committedText].compactMap { $0 }
+        return !protectedValues.isEmpty
+            && protectedValues.allSatisfy { $0.hasPrefix("protected:") }
     }
 
     private func sanitized(_ event: AITypingEvent) -> AITypingEvent {

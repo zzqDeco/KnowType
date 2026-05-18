@@ -65,6 +65,38 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requests[0].contextDocuments["CORRECTION.md"]?.contains("Preserve API tokens"), true)
     }
 
+    func testRecommendationCacheIncludesRawInput() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let candidate = CorrectionCandidate(
+            text: "你好",
+            source: "traditional",
+            confidence: 1,
+            correctionLevel: .contextual
+        )
+
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "ni hao",
+                traditionalCandidate: candidate,
+                compositionID: 2
+            )
+        )
+        let requests = await provider.requests
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map(\.rawInput), ["nihao", "ni hao"])
+    }
+
     func testLevelZeroInputDoesNotCallProvider() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: " should not be used")
@@ -113,6 +145,41 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(first, .unavailable(reason: "AI 暂不可用"))
         XCTAssertEqual(second, .unavailable(reason: "AI 暂不可用"))
         XCTAssertEqual(requestCount, 1)
+    }
+
+    func testEmptyRecommendationDoesNotEnterCooldown() async {
+        let provider = QueuedLLMProvider(responses: [
+            LLMResponse(candidates: []),
+            LLMResponse(candidates: [
+                LLMCandidate(text: "继续推进", confidence: 0.9)
+            ])
+        ])
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
+            debounceMilliseconds: 0
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            compositionID: 1
+        )
+
+        let first = await runtime.recommendation(for: request)
+        let second = await runtime.recommendation(for: request)
+        let requestCount = await provider.requestCount
+
+        XCTAssertEqual(first, .ineligible(reason: "AI 无推荐"))
+        guard case .ready(let candidate) = second else {
+            return XCTFail("expected second recommendation to bypass cooldown")
+        }
+        XCTAssertEqual(candidate.displayText, "你好继续推进")
+        XCTAssertEqual(requestCount, 2)
     }
 
     func testHardTimeoutReturnsWithoutWaitingForCancellationResistantProvider() async {
@@ -212,6 +279,28 @@ private actor FailingLLMProvider: LLMProvider {
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         count += 1
         throw error
+    }
+
+    var requestCount: Int {
+        count
+    }
+}
+
+private actor QueuedLLMProvider: LLMProvider {
+    nonisolated let providerName = "queued"
+    private var responses: [LLMResponse]
+    private var count = 0
+
+    init(responses: [LLMResponse]) {
+        self.responses = responses
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        count += 1
+        guard !responses.isEmpty else {
+            return LLMResponse(candidates: [])
+        }
+        return responses.removeFirst()
     }
 
     var requestCount: Int {

@@ -5,6 +5,7 @@ import KnowTypeProviders
 public actor AIRecommendationRuntime: AIRecommendationProviding {
     private struct CacheKey: Hashable {
         var lockedPrefix: String
+        var rawInput: String
         var appBundleID: String
         var localeRawValue: String
         var environmentHash: String
@@ -68,6 +69,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             let correction = try correctionStore.loadSnapshot()
             let key = CacheKey(
                 lockedPrefix: request.traditionalCandidate.text,
+                rawInput: request.rawInput,
                 appBundleID: request.appBundleID ?? "",
                 localeRawValue: request.locale.rawValue,
                 environmentHash: environment.sha256,
@@ -99,7 +101,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 providerName: provider.providerName,
                 contextVersion: "\(environment.sha256.prefix(12)):\(correction.sha256.prefix(12))"
             ) else {
-                throw ProviderError.invalidResponse("empty AI recommendation")
+                await healthMonitor.recordSuccess()
+                return .ineligible(reason: "AI 无推荐")
             }
             cache[key] = CacheEntry(candidate: candidate, expiresAt: Date().addingTimeInterval(cacheTTL))
             await healthMonitor.recordSuccess()

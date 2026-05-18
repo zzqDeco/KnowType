@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import KnowTypeAI
 import KnowTypeCore
+import KnowTypeProviders
 
 final class AIContextMemoryRuntimeTests: XCTestCase {
     func testRecordProcessesBatchAndUpdatesEnvironmentGeneratedSection() async throws {
@@ -181,6 +182,73 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertFalse(requests[0].rawInput?.contains("zaijian") == true)
         XCTAssertEqual(pendingEvents.map(\.rawInput), ["zaijian"])
     }
+
+    func testProtectedOnlyBatchIsArchivedWithoutProviderDigest() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- Should not be used.")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "https://example.com/api",
+                committedText: "https://example.com/api",
+                commitKind: .raw,
+                candidateSource: "raw"
+            )
+        )
+
+        let requests = await provider.requests
+        let pendingEvents = try await eventStore.pendingEvents()
+
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(pendingEvents.isEmpty)
+    }
+
+    func testDigestFailureIsThrottledUntilMinimumInterval() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events", isDirectory: true)
+        )
+        let provider = FailingDigestLLMProvider()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "nihao",
+                committedText: "你好",
+                commitKind: .traditional,
+                candidateSource: "traditional"
+            )
+        )
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "zaijian",
+                committedText: "再见",
+                commitKind: .traditional,
+                candidateSource: "traditional"
+            )
+        )
+
+        let requests = await provider.requestCount
+        let pendingEvents = try await eventStore.pendingEvents()
+
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(pendingEvents.map(\.rawInput), ["nihao", "zaijian"])
+    }
 }
 
 private actor DigestLLMProvider: LLMProvider {
@@ -227,6 +295,20 @@ private actor SuspendedDigestLLMProvider: LLMProvider {
 
     var requests: [LLMRequest] {
         recordedRequests
+    }
+}
+
+private actor FailingDigestLLMProvider: LLMProvider {
+    nonisolated let providerName = "failing-digest"
+    private var count = 0
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        count += 1
+        throw ProviderError.httpStatus(503, "unavailable")
+    }
+
+    var requestCount: Int {
+        count
     }
 }
 

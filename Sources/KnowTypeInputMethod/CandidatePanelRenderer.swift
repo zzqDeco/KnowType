@@ -74,13 +74,22 @@ public struct CandidatePanelRenderer: Sendable {
         let allRows = selectableRows(in: viewModel)
         let paging = explicitPaging ?? pagingState(containing: selection, in: allRows)
         let visibleRange = paging.visibleRange(totalRows: allRows.count)
-        let rows = allRows[visibleRange].enumerated().map { offset, item in
+        var nextNumberShortcut = 1
+        let rows = allRows[visibleRange].map { item in
             let shortcutLabel: String?
             switch item.selection {
             case .rawInput:
                 shortcutLabel = nil
-            case .prefixCandidate, .fullCandidate, .segmentCandidate, .aiRecommendation:
-                shortcutLabel = "\(offset + 1)"
+            case .prefixCandidate, .fullCandidate, .segmentCandidate:
+                shortcutLabel = "\(nextNumberShortcut)"
+                nextNumberShortcut += 1
+            case .aiRecommendation:
+                if viewModel.aiRecommendation.isSelectableRecommendation {
+                    shortcutLabel = "\(nextNumberShortcut)"
+                    nextNumberShortcut += 1
+                } else {
+                    shortcutLabel = nil
+                }
             case .continuationCandidate(let index):
                 shortcutLabel = continuationShortcutLabel(atGlobalIndex: index)
             }

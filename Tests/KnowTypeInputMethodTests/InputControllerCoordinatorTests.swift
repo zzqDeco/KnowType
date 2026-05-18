@@ -765,6 +765,37 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testBackspaceClearingCompositionResetsDeleteCountForNextCommit() async {
+        let client = FakeInputControllerClient()
+        let recorder = RecordingAIContextEventRecorder()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiContextEventRecorder: recorder
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 51),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\r", keyCode: 36),
+                client: client
+            )
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let events = await recorder.events
+        XCTAssertEqual(events.last?.rawInput, "ni")
+        XCTAssertEqual(events.last?.deleteCountBeforeCommit, 0)
+    }
+
+    @MainActor
     func testNumberTwoCommitsReadyAIRecommendationAfterSegmentResolution() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
