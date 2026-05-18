@@ -35,7 +35,7 @@ public struct CustomHTTPProvider: LLMProvider {
         let value = ResponseNormalizer.value(at: path.split(separator: ".").map(String.init), in: raw) ?? raw
 
         if let text = value as? String {
-            return try ResponseNormalizer.normalizeText(text)
+            return try ResponseNormalizer.normalizeText(text, preservePlainText: request.task == .contextDigest)
         }
         if let candidates = ResponseNormalizer.candidates(from: value) {
             return LLMResponse(candidates: candidates)

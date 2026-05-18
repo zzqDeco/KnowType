@@ -212,6 +212,38 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertTrue(pendingEvents.isEmpty)
     }
 
+    func testProtectedExternalDeleteIsArchivedWithoutProviderDigest() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- Should not be used.")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(
+            AITypingEvent(
+                appBundleID: "com.apple.Terminal",
+                appName: "Terminal",
+                rawInput: nil,
+                committedText: nil,
+                commitKind: .externalDelete,
+                candidateSource: "external-delete",
+                deleteCountBeforeCommit: 1
+            )
+        )
+
+        let requests = await provider.requests
+        let pendingEvents = try await eventStore.pendingEvents()
+
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(pendingEvents.isEmpty)
+    }
+
     func testDigestFailureIsThrottledUntilMinimumInterval() async throws {
         let directory = makeTemporaryDirectory()
         let eventStore = TypingEventStore(
@@ -286,6 +318,43 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
 
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(pendingEvents.map(\.rawInput), ["nihao", "zaijian"])
+    }
+
+    func testMultipartDigestResponsePreservesAllGeneratedLines() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events", isDirectory: true)
+        )
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let provider = MultipartDigestLLMProvider(parts: [
+            "## Global Style",
+            "- Uses concise text.",
+            "## App Habits",
+            "- TextEdit: writes short notes."
+        ])
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "nihao",
+                committedText: "你好",
+                commitKind: .traditional,
+                candidateSource: "traditional"
+            )
+        )
+
+        let environment = try String(contentsOf: environmentURL, encoding: .utf8)
+
+        XCTAssertTrue(environment.contains("## Global Style"))
+        XCTAssertTrue(environment.contains("- Uses concise text."))
+        XCTAssertTrue(environment.contains("## App Habits"))
+        XCTAssertTrue(environment.contains("- TextEdit: writes short notes."))
     }
 
     func testConcurrentDigestAttemptsOnlyIssueOneProviderRequest() async throws {
@@ -392,6 +461,19 @@ private actor FailingDigestLLMProvider: LLMProvider {
 
     var requestCount: Int {
         count
+    }
+}
+
+private actor MultipartDigestLLMProvider: LLMProvider {
+    nonisolated let providerName = "multipart-digest"
+    private let parts: [String]
+
+    init(parts: [String]) {
+        self.parts = parts
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        LLMResponse(candidates: parts.map { LLMCandidate(text: $0, confidence: 0.9) })
     }
 }
 

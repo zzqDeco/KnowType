@@ -780,6 +780,29 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
+    private func shouldSuppressTabCommitForPartialComposition() -> Bool {
+        if compositionBuffer.hasResolvedSegments && !compositionBuffer.isFullyResolved {
+            return true
+        }
+        guard SuggestionPublicationGuard.hasCurrentSuggestion(
+            suggestionRawInput: lastSuggestionRawInput,
+            currentRawInput: rawBuffer
+        ) else {
+            return false
+        }
+        return shouldSuppressContinuations(prefixCandidates: lastSuggestion?.prefixCandidates ?? [])
+    }
+
+    private func hasVisibleContinuationForCurrentSuggestion() -> Bool {
+        guard SuggestionPublicationGuard.hasCurrentSuggestion(
+            suggestionRawInput: lastSuggestionRawInput,
+            currentRawInput: rawBuffer
+        ) else {
+            return false
+        }
+        return lastSuggestion?.continuationCandidates.isEmpty == false
+    }
+
     private static func shouldSuppressContinuations(
         prefixCandidates: [CorrectionCandidate],
         compositionBuffer: CompositionBuffer
@@ -915,7 +938,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
            aiRecommendationState.isSelectableRecommendation {
             return aiRecommendationCommitResult()
         }
-        if action == .tab {
+        if action == .tab,
+           case .pending = aiRecommendationState {
+            return .noAction
+        }
+        if action == .tab,
+           let selectedNativeCandidate,
+           case .segmentCandidate = selectedNativeCandidate.kind {
+            return .noAction
+        }
+        if action == .tab,
+           shouldSuppressTabCommitForPartialComposition() {
+            return .noAction
+        }
+        if action == .tab,
+           enablesAsyncSuggestionRefresh,
+           !hasVisibleContinuationForCurrentSuggestion() {
             return .noAction
         }
         if action == .space,
@@ -1100,9 +1138,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
               runtimePreferences.cloudContinuationEnabled else {
             return
         }
+        let appBundleID = appBundleIdentifier(client: client)
         let event = AITypingEvent(
-            appBundleID: appBundleIdentifier(client: client),
-            appName: appBundleIdentifier(client: client),
+            appBundleID: appBundleID,
+            appName: appBundleID,
             rawInput: nil,
             committedText: nil,
             commitKind: .externalDelete,

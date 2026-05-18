@@ -40,6 +40,6 @@ public struct GeminiNativeProvider: LLMProvider {
         guard let content = ResponseNormalizer.string(at: ["candidates", "0", "content", "parts", "0", "text"], in: raw) else {
             throw ProviderError.invalidResponse("missing candidates[0].content.parts[0].text")
         }
-        return try ResponseNormalizer.normalizeText(content)
+        return try ResponseNormalizer.normalizeText(content, preservePlainText: request.task == .contextDigest)
     }
 }

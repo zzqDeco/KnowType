@@ -37,6 +37,6 @@ public struct AnthropicMessagesProvider: LLMProvider {
         guard let content = ResponseNormalizer.string(at: ["content", "0", "text"], in: raw) else {
             throw ProviderError.invalidResponse("missing content[0].text")
         }
-        return try ResponseNormalizer.normalizeText(content)
+        return try ResponseNormalizer.normalizeText(content, preservePlainText: request.task == .contextDigest)
     }
 }

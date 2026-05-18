@@ -38,10 +38,10 @@ public struct OpenAIResponsesProvider: LLMProvider {
         let raw = try JSONSerialization.jsonObject(with: data)
 
         if let outputText = ResponseNormalizer.string(at: ["output_text"], in: raw) {
-            return try ResponseNormalizer.normalizeText(outputText)
+            return try ResponseNormalizer.normalizeText(outputText, preservePlainText: request.task == .contextDigest)
         }
         if let outputText = ResponseNormalizer.string(at: ["output", "0", "content", "0", "text"], in: raw) {
-            return try ResponseNormalizer.normalizeText(outputText)
+            return try ResponseNormalizer.normalizeText(outputText, preservePlainText: request.task == .contextDigest)
         }
         throw ProviderError.invalidResponse("missing output_text")
     }

@@ -129,6 +129,21 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(request?.url?.absoluteString, "https://api.example.com/v1/chat/completions")
     }
 
+    func testPlainTextContextDigestPreservesFullMarkdownAsOneCandidate() throws {
+        let markdown = """
+        ## Global Style
+        - Uses concise text.
+
+        ## App Habits
+        - TextEdit: writes short notes.
+        """
+
+        let response = try ResponseNormalizer.normalizeText(markdown, preservePlainText: true)
+
+        XCTAssertEqual(response.candidates.count, 1)
+        XCTAssertEqual(response.candidates.first?.text, markdown)
+    }
+
     func testOpenAIChatDiscoversBlankModelBeforeCompletion() async throws {
         let content = #"{"candidates":[{"text":"本地模型返回的续写"}]}"#
         let client = SequencedMockHTTPClient(responses: [

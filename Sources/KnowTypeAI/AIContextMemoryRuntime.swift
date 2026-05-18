@@ -200,9 +200,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 ]
             )
             let response = try await provider.complete(request)
-            guard let generated = response.candidates.first?.text
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-                !generated.isEmpty else {
+            guard let generated = Self.generatedDigestText(from: response) else {
                 lastDigestFailureAt = now
                 return
             }
@@ -225,8 +223,27 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             && protectedValues.allSatisfy { $0.hasPrefix("protected:") }
     }
 
+    private static func generatedDigestText(from response: LLMResponse) -> String? {
+        let parts = response.candidates
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !parts.isEmpty else {
+            return nil
+        }
+        return parts.joined(separator: "\n")
+    }
+
     private func sanitized(_ event: AITypingEvent) -> AITypingEvent {
         var event = event
+        if event.commitKind == .externalDelete,
+           event.rawInput == nil,
+           event.committedText == nil,
+           TextProtection.requiresNoCorrection("knowtype", appBundleID: event.appBundleID) {
+            event.rawInput = "protected:delete"
+            event.committedText = "protected:delete"
+            event.candidateSource = "protected"
+            return event
+        }
         if let rawInput = event.rawInput,
            TextProtection.requiresNoCorrection(rawInput, appBundleID: event.appBundleID) {
             event.rawInput = protectedLabel(for: rawInput)

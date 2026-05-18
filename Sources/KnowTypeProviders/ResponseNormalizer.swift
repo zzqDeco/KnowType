@@ -2,7 +2,7 @@ import Foundation
 import KnowTypeCore
 
 enum ResponseNormalizer {
-    static func normalizeText(_ text: String) throws -> LLMResponse {
+    static func normalizeText(_ text: String, preservePlainText: Bool = false) throws -> LLMResponse {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw ProviderError.invalidResponse("empty text content")
@@ -17,6 +17,10 @@ enum ResponseNormalizer {
            let raw = try? JSONSerialization.jsonObject(with: data),
            let candidates = candidates(from: raw) {
             return LLMResponse(candidates: candidates)
+        }
+
+        if preservePlainText {
+            return LLMResponse(candidates: [LLMCandidate(text: trimmed)])
         }
 
         let lines = trimmed
