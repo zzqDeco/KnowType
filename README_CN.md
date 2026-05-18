@@ -179,7 +179,7 @@ AI Provider 设置页可以测试当前 draft profile 的连接。测试时输�
 
 ## 输入行为
 
-- `Space`：提交当前选中的完整前缀候选，或把当前分段候选应用到组合区。
+- `Space`：提交当前 raw input 对应的可见完整前缀候选，或把当前分段候选应用到组合区。
 - `Return` / `Enter`：提交原始 composition，例如 `nishishei`。
 - `Tab`：在前缀已完整解析时，提交当前前缀 + 第一条或当前选中的延续。
 - `0`：候选可见时提交原始 composition。
@@ -188,9 +188,9 @@ AI Provider 设置页可以测试当前 draft profile 的连接。测试时输�
 - `Option + 数字`：提交当前前缀 + 对应延续。`Option + 1` 对应第一条延续，候选窗中用 `⇥` 表示，因为 `Tab` 会直接提交第一条延续。
 - `Option + R`：主动润色，这是默认交互里唯一允许改写前缀的路径。
 
-Input 设置页会持久化普通 App 和代码类 App 的默认标点语言、符号宽度。Terminal、iTerm、Xcode、VS Code 和 Codex desktop 使用代码类 App 默认值，同时仍保留中文输入管线。
+Input 设置页会持久化普通 App 和代码类 App 的默认标点语言、符号宽度。Terminal、iTerm、Xcode、VS Code 和 Codex desktop 使用代码类 App 默认值，同时仍保留中文输入管线；内置的代码类 App 标点默认值是中文，用户仍可改成英文。
 
-候选窗先显示前缀候选，再显示延续候选。候选可以覆盖整个 raw buffer，也可以只覆盖当前分段；选择分段候选只更新 marked text，不会立刻上屏。候选按 9 行一页分页。候选窗会先测量候选文本再渲染，短候选优先使用 4-6 项横向布局，长词组切换为竖向布局，并做屏幕边缘避让。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。如果 provider 失败或没有返回可用延续，KnowType 会保留传统前缀候选，不再用固定本地 fallback 文本伪装成 AI 输出。
+候选窗先显示前缀候选，再显示延续候选。候选可以覆盖整个 raw buffer，也可以只覆盖当前分段；选择分段候选只更新 marked text，不会立刻上屏。候选按 9 行一页分页。候选窗会先测量候选文本再渲染，短候选优先使用 4-6 项横向布局，长词组切换为竖向布局，并做屏幕边缘避让。最近选择过的前缀候选会在输入法重启后继续影响本地排序。配置 provider 后，KnowType 会先发布本地前缀候选，再在 provider 返回后更新延续候选。如果 provider 失败或没有返回可用延续，KnowType 会保留传统前缀候选，不再用固定本地 fallback 文本伪装成 AI 输出。提交行为跟随当前可见快照：如果候选窗只显示 raw input，`Space` 不会提交隐藏中文 fallback。
 
 ## 隐私基线
 

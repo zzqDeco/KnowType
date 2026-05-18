@@ -5,6 +5,7 @@ import KnowTypeCore
 public struct CandidatePanelWindowState: Sendable, Equatable {
     public var isVisible: Bool
     public var anchorRect: CGRect
+    public var anchorSource: CandidateAnchorSource
     public var viewModel: CandidatePanelViewModel
     public var selection: CandidatePanelSelection?
     public var paging: CandidatePanelPagingState
@@ -13,6 +14,7 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
     public init(
         isVisible: Bool = false,
         anchorRect: CGRect = .zero,
+        anchorSource: CandidateAnchorSource = .none,
         viewModel: CandidatePanelViewModel = CandidatePanelViewModel(
             rawInput: "",
             prefixCandidates: [],
@@ -24,6 +26,7 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
     ) {
         self.isVisible = isVisible
         self.anchorRect = anchorRect
+        self.anchorSource = anchorSource
         self.viewModel = viewModel
         self.selection = selection
         self.paging = paging
@@ -71,6 +74,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         rawInput: String,
         suggestion: SuggestionResponse?,
         anchorRect: CGRect = .zero,
+        anchorSource: CandidateAnchorSource = .none,
         isDisplayable: Bool = true,
         pageSize: Int = CandidatePanelPagingState.defaultPageSize,
         layoutMode: CandidatePanelLayoutMode = .adaptive
@@ -94,6 +98,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         windowState = CandidatePanelWindowState(
             isVisible: isVisible,
             anchorRect: anchorRect,
+            anchorSource: anchorSource,
             viewModel: viewModel,
             selection: selection,
             paging: isVisible ? paging : CandidatePanelPagingState(pageSize: pageSize),

@@ -231,15 +231,52 @@ final class CandidateAnchorResolverTests: XCTestCase {
                 client: failedClient,
                 context: context(compositionID: 8, appBundleID: "com.example.one")
             ).source,
-            .none
+            .safeScreenFallback
         )
         XCTAssertEqual(
             resolver.resolve(
                 client: failedClient,
                 context: context(compositionID: 7, appBundleID: "com.example.two")
             ).source,
-            .none
+            .safeScreenFallback
         )
+    }
+
+    func testResolverUsesSafeScreenFallbackAfterAllAnchorSourcesFail() {
+        let client = FakeInputClientGeometry(
+            selectedRange: NSRange(location: 0, length: 0),
+            markedRange: nil,
+            firstRects: [
+                NSRange(location: 0, length: 0): .zero
+            ],
+            lineRects: [0: .zero]
+        )
+        let provider = screenProvider()
+        let resolver = CandidateAnchorResolver(screenProvider: provider)
+
+        let result = resolver.resolve(client: client, context: context())
+
+        XCTAssertEqual(result.source, .safeScreenFallback)
+        XCTAssertFalse(result.isFresh)
+        XCTAssertTrue(CandidateAnchorValidation.isUsable(result.rect, screenProvider: provider))
+    }
+
+    func testResolverReturnsNoneWhenNoScreenCanHostFallback() {
+        let client = FakeInputClientGeometry(
+            selectedRange: NSRange(location: 0, length: 0),
+            markedRange: nil,
+            firstRects: [
+                NSRange(location: 0, length: 0): .zero
+            ],
+            lineRects: [0: .zero]
+        )
+        let resolver = CandidateAnchorResolver(
+            screenProvider: FakeScreenGeometryProvider(screens: [])
+        )
+
+        let result = resolver.resolve(client: client, context: context())
+
+        XCTAssertEqual(result.source, .none)
     }
 
     func testDelayedAnchorRefreshRequiresSameRawInputAndComposition() {

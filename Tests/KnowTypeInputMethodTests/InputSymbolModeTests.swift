@@ -66,12 +66,12 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(transformer.text(for: "@", state: state), "＠")
     }
 
-    func testAppPolicyDefaultsCodeContextsToEnglishHalfWidthPunctuation() {
+    func testAppPolicyDefaultsCodeContextsToChineseHalfWidthPunctuation() {
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.apple.dt.Xcode"),
             InputModeState(
                 textMode: .chinese,
-                punctuationMode: .english,
+                punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
         )
@@ -79,7 +79,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.googlecode.iterm2"),
             InputModeState(
                 textMode: .chinese,
-                punctuationMode: .english,
+                punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
         )
@@ -87,7 +87,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex"),
             InputModeState(
                 textMode: .chinese,
-                punctuationMode: .english,
+                punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
         )

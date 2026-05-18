@@ -264,6 +264,7 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         container.alignment = .centerY
         container.spacing = 4
         container.edgeInsets = NSEdgeInsets(top: 1, left: 5, bottom: 1, right: 7)
+        container.translatesAutoresizingMaskIntoConstraints = false
         container.wantsLayer = true
         container.layer?.cornerRadius = 4
         container.layer?.cornerCurve = .continuous
@@ -315,6 +316,7 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
 
     private func baseLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
+        label.translatesAutoresizingMaskIntoConstraints = false
         label.maximumNumberOfLines = 1
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
