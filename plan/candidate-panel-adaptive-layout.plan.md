@@ -25,6 +25,7 @@ screen bounds before the panel is rendered.
 ## Layout Rules
 
 - Try horizontal layout first with 6 visible candidates, then 5, then 4.
+- Adaptive mode caps the effective page size at 6 so a saved 9-row preference does not force vertical layout.
 - Use horizontal layout only when at least 4 candidates fit without truncation within
   `220...min(720, availableScreenWidth)`.
 - Switch to vertical layout when long phrases would reduce a horizontal row to 1-3 complete candidates.

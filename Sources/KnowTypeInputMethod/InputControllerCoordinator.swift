@@ -1155,13 +1155,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
         let isDisplayable = anchorResult.source != .none
+        let effectivePageSize = runtimePreferences.effectiveCandidatePageSize
         candidatePanelState.update(
             rawInput: rawBuffer,
             suggestion: suggestion,
             anchorRect: anchorResult.rect,
             isDisplayable: isDisplayable,
-            pageSize: runtimePreferences.candidatePageSize,
+            pageSize: effectivePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode
+        )
+        traceCandidatePanelUpdate(
+            savedPageSize: runtimePreferences.candidatePageSize,
+            effectivePageSize: effectivePageSize
         )
         selectedNativeCandidate = candidatePanelState.windowState.isVisible
             ? inputCandidateSelection(
@@ -1177,6 +1182,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
         selectedNativeCandidate = nil
         anchorResolver.reset()
         host?.hideCandidatePanel()
+    }
+
+    private func traceCandidatePanelUpdate(savedPageSize: Int, effectivePageSize: Int) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+            return
+        }
+        let windowState = candidatePanelState.windowState
+        let rowCount = CandidatePanelRenderer(locale: locale)
+            .render(
+                windowState.viewModel,
+                selected: windowState.selection,
+                paging: windowState.paging
+            )
+            .rows
+            .count
+        fputs(
+            "KnowType panel: layoutMode=\(windowState.layoutMode.rawValue) savedPageSize=\(savedPageSize) effectivePageSize=\(effectivePageSize) renderRows=\(rowCount)\n",
+            stderr
+        )
     }
 
     private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {

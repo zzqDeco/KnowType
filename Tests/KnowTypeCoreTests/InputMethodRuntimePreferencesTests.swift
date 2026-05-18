@@ -2,6 +2,33 @@ import XCTest
 @testable import KnowTypeCore
 
 final class InputMethodRuntimePreferencesTests: XCTestCase {
+    func testDefaultPreferencesUseAdaptiveSixCandidatePage() {
+        let preferences = InputMethodRuntimePreferences.standard
+
+        XCTAssertEqual(preferences.candidateLayoutMode, .adaptive)
+        XCTAssertEqual(preferences.candidatePageSize, 6)
+        XCTAssertEqual(preferences.effectiveCandidatePageSize, 6)
+    }
+
+    func testAdaptiveEffectivePageSizeCapsSavedNineAtSix() {
+        let preferences = InputMethodRuntimePreferences(
+            candidatePageSize: 9,
+            candidateLayoutMode: .adaptive
+        )
+
+        XCTAssertEqual(preferences.candidatePageSize, 9)
+        XCTAssertEqual(preferences.effectiveCandidatePageSize, 6)
+    }
+
+    func testVerticalEffectivePageSizeUsesSavedPageSize() {
+        let preferences = InputMethodRuntimePreferences(
+            candidatePageSize: 9,
+            candidateLayoutMode: .verticalPreferred
+        )
+
+        XCTAssertEqual(preferences.effectiveCandidatePageSize, 9)
+    }
+
     func testUserDefaultsStorePersistsRuntimePreferences() throws {
         let store = makeStore()
         let preferences = InputMethodRuntimePreferences(

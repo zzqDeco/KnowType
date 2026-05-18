@@ -76,6 +76,7 @@ final class CandidatePanelWindowController {
             panel.orderOut(nil)
             return
         }
+        traceLayout(windowState: windowState, renderModel: renderModel, layoutPlan: layoutPlan)
         panel.setContentSize(layoutPlan.panelSize)
         contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.setFrameOrigin(layoutPlan.panelOrigin)
@@ -94,6 +95,20 @@ final class CandidatePanelWindowController {
         let panel = makePanel(contentView.appKitView)
         self.panel = panel
         return panel
+    }
+
+    private func traceLayout(
+        windowState: CandidatePanelWindowState,
+        renderModel: CandidatePanelRenderModel,
+        layoutPlan: CandidatePanelLayoutPlan
+    ) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+            return
+        }
+        fputs(
+            "KnowType panel layout: layoutMode=\(windowState.layoutMode.rawValue) pageSize=\(windowState.paging.pageSize) renderRows=\(renderModel.rows.count) orientation=\(layoutPlan.orientation)\n",
+            stderr
+        )
     }
 
     private static func makeAppKitPanel(contentView: NSView) -> CandidatePanelWindowOperating {

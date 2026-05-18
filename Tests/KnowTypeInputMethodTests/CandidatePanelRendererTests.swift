@@ -133,9 +133,9 @@ final class CandidatePanelRendererTests: XCTestCase {
         let rendered = CandidatePanelRenderer(locale: .mixed).render(viewModel)
 
         XCTAssertEqual(rendered.rows.filter { $0.kind == .prefixCandidate }.count, 4)
-        XCTAssertEqual(rendered.rows.filter { $0.kind == .continuationCandidate }.count, 4)
-        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3", "4", "⇥", "⌥2", "⌥3", "⌥4"])
-        XCTAssertEqual(rendered.rows.suffix(4).map(\.visualRole), [.continuation, .continuation, .continuation, .continuation])
+        XCTAssertEqual(rendered.rows.filter { $0.kind == .continuationCandidate }.count, 2)
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3", "4", "⇥", "⌥2"])
+        XCTAssertEqual(rendered.rows.suffix(2).map(\.visualRole), [.continuation, .continuation])
     }
 
     func testRendersOnlyVisiblePageRows() {
@@ -147,13 +147,13 @@ final class CandidatePanelRendererTests: XCTestCase {
 
         let rendered = CandidatePanelRenderer(locale: .zhCN).render(
             viewModel,
-            selected: .prefixCandidate(9),
+            selected: .prefixCandidate(6),
             paging: CandidatePanelPagingState(currentPage: 1)
         )
 
-        XCTAssertEqual(rendered.rows.count, 3)
-        XCTAssertEqual(rendered.rows.map(\.text), ["候选10", "候选11", "候选12"])
-        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3"])
+        XCTAssertEqual(rendered.rows.count, 6)
+        XCTAssertEqual(rendered.rows.map(\.text), ["候选7", "候选8", "候选9", "候选10", "候选11", "候选12"])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3", "4", "5", "6"])
         XCTAssertTrue(rendered.rows[0].isSelected)
     }
 
@@ -169,8 +169,8 @@ final class CandidatePanelRendererTests: XCTestCase {
             selected: .prefixCandidate(10)
         )
 
-        XCTAssertEqual(rendered.rows.map(\.text), ["候选10", "候选11", "候选12"])
-        XCTAssertTrue(rendered.rows[1].isSelected)
+        XCTAssertEqual(rendered.rows.map(\.text), ["候选7", "候选8", "候选9", "候选10", "候选11", "候选12"])
+        XCTAssertTrue(rendered.rows[4].isSelected)
     }
 
     func testContinuationShortcutLabelsStayGlobalAcrossPages() {
@@ -193,9 +193,9 @@ final class CandidatePanelRendererTests: XCTestCase {
             paging: CandidatePanelPagingState(currentPage: 1)
         )
 
-        XCTAssertEqual(rendered.rows.map(\.text), ["续写10", "续写11"])
-        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), [nil, nil])
-        XCTAssertTrue(rendered.rows[0].isSelected)
+        XCTAssertEqual(rendered.rows.map(\.text), ["续写7", "续写8", "续写9", "续写10", "续写11"])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["⌥7", "⌥8", "⌥9", nil, nil])
+        XCTAssertTrue(rendered.rows[3].isSelected)
     }
 
     func testOptionShortcutLabelsMatchCommitActions() {

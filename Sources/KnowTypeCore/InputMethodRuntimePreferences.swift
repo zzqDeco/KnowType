@@ -6,6 +6,9 @@ public enum CandidatePanelLayoutMode: String, Codable, Sendable, Equatable, Case
 }
 
 public struct InputMethodRuntimePreferences: Codable, Sendable, Equatable {
+    public static let adaptiveCandidatePageSize = 6
+    public static let maximumCandidatePageSize = 9
+
     public var inputScheme: TraditionalInputEngine.Scheme
     public var candidatePageSize: Int
     public var candidateLayoutMode: CandidatePanelLayoutMode
@@ -16,7 +19,7 @@ public struct InputMethodRuntimePreferences: Codable, Sendable, Equatable {
 
     public init(
         inputScheme: TraditionalInputEngine.Scheme = .fullPinyin,
-        candidatePageSize: Int = 9,
+        candidatePageSize: Int = InputMethodRuntimePreferences.adaptiveCandidatePageSize,
         candidateLayoutMode: CandidatePanelLayoutMode = .adaptive,
         cloudContinuationEnabled: Bool = true,
         localContinuationEnabledWhenNoProvider: Bool = true,
@@ -34,8 +37,17 @@ public struct InputMethodRuntimePreferences: Codable, Sendable, Equatable {
 
     public static let standard = InputMethodRuntimePreferences()
 
+    public var effectiveCandidatePageSize: Int {
+        switch candidateLayoutMode {
+        case .adaptive:
+            return min(candidatePageSize, Self.adaptiveCandidatePageSize)
+        case .verticalPreferred:
+            return candidatePageSize
+        }
+    }
+
     public static func clampedCandidatePageSize(_ value: Int) -> Int {
-        min(max(value, 1), 9)
+        min(max(value, 1), maximumCandidatePageSize)
     }
 
     public static func clampedContinuationCandidateCount(_ value: Int) -> Int {

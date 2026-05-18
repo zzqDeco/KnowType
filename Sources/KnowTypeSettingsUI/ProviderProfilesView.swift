@@ -178,9 +178,11 @@ private struct CandidateSettingsView: View {
                     Text("9").tag(9)
                 }
                 Picker("Panel layout", selection: candidateLayoutModeBinding) {
-                    Text("Adaptive").tag(CandidatePanelLayoutMode.adaptive)
-                    Text("Prefer Vertical").tag(CandidatePanelLayoutMode.verticalPreferred)
+                    Text("Adaptive horizontal").tag(CandidatePanelLayoutMode.adaptive)
+                    Text("Vertical list").tag(CandidatePanelLayoutMode.verticalPreferred)
                 }
+                LabeledContent("Adaptive page", value: "Up to 6 candidates")
+                LabeledContent("Vertical page", value: "Uses selected page size")
                 if let message = viewModel.lastErrorMessage {
                     Text(message)
                         .foregroundStyle(.red)

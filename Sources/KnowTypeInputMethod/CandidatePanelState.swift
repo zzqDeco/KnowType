@@ -32,7 +32,7 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
 }
 
 public struct CandidatePanelPagingState: Sendable, Equatable {
-    public static let defaultPageSize = 9
+    public static let defaultPageSize = InputMethodRuntimePreferences.adaptiveCandidatePageSize
 
     public var currentPage: Int
     public var pageSize: Int
