@@ -54,6 +54,30 @@ public struct InputMethodPipeline: Sendable {
         )
     }
 
+    public func prefixSuggestions(for context: InputContext) async -> SuggestionResponse {
+        let start = ContinuousClock.now
+        let prefixes = await correctionEngine.correct(
+            context,
+            queryOptions: Self.interactiveQueryOptions
+        )
+        let locked = prefixes.first.map {
+            LockedPrefix(
+                text: $0.text,
+                rawInput: context.rawInput,
+                candidateID: $0.source,
+                protectedRanges: $0.protectedRanges
+            )
+        }
+        let elapsed = start.duration(to: .now)
+        let milliseconds = Int(Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000)
+        return SuggestionResponse(
+            prefixCandidates: prefixes,
+            lockedPrefix: locked,
+            continuationCandidates: [],
+            latencyMs: milliseconds
+        )
+    }
+
     private func continuationCandidates(
         for locked: LockedPrefix?,
         context: InputContext

@@ -81,6 +81,38 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(pendingEvents[0].candidateSource, "protected")
     }
 
+    func testConcurrentStoresAppendWithoutDroppingEvents() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
+        let firstStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let secondStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<40 {
+                group.addTask {
+                    let store = index.isMultiple(of: 2) ? firstStore : secondStore
+                    try await store.append(
+                        AITypingEvent(
+                            rawInput: "raw-\(index)",
+                            committedText: "text-\(index)",
+                            commitKind: .traditional,
+                            candidateSource: "traditional"
+                        )
+                    )
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        let events = try await firstStore.pendingEvents()
+        let committedTexts = Set(events.compactMap(\.committedText))
+
+        XCTAssertEqual(events.count, 40)
+        XCTAssertEqual(committedTexts.count, 40)
+        XCTAssertTrue(committedTexts.contains("text-0"))
+        XCTAssertTrue(committedTexts.contains("text-39"))
+    }
+
     func testRecordBelowBatchDoesNotDigestImmediately() async throws {
         let directory = makeTemporaryDirectory()
         let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- Should not run yet.")

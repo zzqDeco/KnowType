@@ -712,6 +712,35 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(hasProviderCandidate)
         XCTAssertTrue(requests.contains { $0.task == .correction })
+        XCTAssertFalse(requests.contains { $0.task == .continuation })
+    }
+
+    @MainActor
+    func testDisabledCloudContinuationDoesNotRecordContextMemoryEvents() async {
+        let client = FakeInputControllerClient()
+        let recorder = RecordingAIContextEventRecorder()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiContextEventRecorder: recorder,
+            runtimePreferences: InputMethodRuntimePreferences(cloudContinuationEnabled: false)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\r", keyCode: 36),
+                client: client
+            )
+        )
+        _ = coordinator.handle(
+            stroke: InputKeyStroke(text: "", keyCode: 51),
+            client: client
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let events = await recorder.events
+        XCTAssertTrue(events.isEmpty)
     }
 
     @MainActor
@@ -1223,6 +1252,18 @@ private actor PendingAIRecommendationProvider: AIRecommendationProviding {
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private actor RecordingAIContextEventRecorder: AIContextEventRecording {
+    private var recordedEvents: [AITypingEvent] = []
+
+    func record(_ event: AITypingEvent) async {
+        recordedEvents.append(event)
+    }
+
+    var events: [AITypingEvent] {
+        recordedEvents
     }
 }
 

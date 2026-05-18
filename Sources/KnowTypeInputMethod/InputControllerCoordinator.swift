@@ -301,10 +301,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let compositionSnapshot = compositionBuffer
         let engineSnapshot = traditionalInputEngine
         let runtimePreferencesSnapshot = runtimePreferences
-        let sessionController = sessionController
+        let providerSnapshot = provider
         suggestionGeneration += 1
         let generation = suggestionGeneration
-        suggestionTask = Task { [weak self, sessionController, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
+        suggestionTask = Task { [weak self, providerSnapshot, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
             let context = InputContext(
                 rawInput: rawInput,
                 appBundleID: appBundleID,
@@ -319,12 +319,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     traditionalInputEngine: engineSnapshot,
                     runtimePreferences: runtimePreferencesSnapshot
                 )
+            } else if let providerSnapshot {
+                let pipeline = InputMethodPipeline(
+                    provider: providerSnapshot,
+                    traditionalInputEngine: engineSnapshot,
+                    runtimePreferences: runtimePreferencesSnapshot
+                )
+                suggestion = await pipeline.prefixSuggestions(for: context)
             } else {
-                suggestion = await sessionController.update(
-                    rawInput: rawInput,
-                    appBundleID: appBundleID,
-                    locale: currentLocale,
-                    userSelectionHistory: selectionHistory
+                suggestion = InputMethodPipeline.localSuggestions(
+                    for: context,
+                    includeFallbackContinuations: false,
+                    traditionalInputEngine: engineSnapshot,
+                    runtimePreferences: runtimePreferencesSnapshot
                 )
             }
             guard !Task.isCancelled else {
@@ -1064,6 +1071,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func recordTypingCommit(_ text: String, client: InputControllerClient?) {
         guard let aiContextEventRecorder,
+              runtimePreferences.cloudContinuationEnabled,
               !text.isEmpty else {
             return
         }
@@ -1082,7 +1090,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func recordExternalDelete(client: InputControllerClient?) {
-        guard let aiContextEventRecorder else {
+        guard let aiContextEventRecorder,
+              runtimePreferences.cloudContinuationEnabled else {
             return
         }
         let event = AITypingEvent(

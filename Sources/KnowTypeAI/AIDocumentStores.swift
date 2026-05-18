@@ -90,21 +90,23 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     public static func replacingGeneratedSection(in content: String, with generatedMarkdown: String) -> String {
+        let generated = generatedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let startRange = content.range(of: generatedStart),
               let endRange = content.range(of: generatedEnd),
               startRange.upperBound <= endRange.lowerBound else {
+            let preservedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
             return """
             # KnowType Environment
 
             \(generatedStart)
-            \(generatedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))
+            \(generated)
             \(generatedEnd)
 
-            ## User Notes
+            \(preservedContent)
             """
         }
         var next = content
-        let replacement = "\n\(generatedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+        let replacement = "\n\(generated)\n"
         next.replaceSubrange(startRange.upperBound..<endRange.lowerBound, with: replacement)
         return next
     }

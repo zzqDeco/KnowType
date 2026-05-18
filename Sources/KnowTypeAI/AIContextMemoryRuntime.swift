@@ -5,6 +5,14 @@ public enum TypingEventStoreError: Error, Equatable {
     case pendingContentChanged
 }
 
+private let typingEventFileLock = NSLock()
+
+private func withTypingEventFileLock<T>(_ body: () throws -> T) rethrows -> T {
+    typingEventFileLock.lock()
+    defer { typingEventFileLock.unlock() }
+    return try body()
+}
+
 public actor TypingEventStore {
     private let eventsFileURL: URL
     private let processedDirectoryURL: URL
@@ -26,43 +34,49 @@ public actor TypingEventStore {
     }
 
     public func append(_ event: AITypingEvent) throws {
-        try fileManager.createDirectory(
-            at: eventsFileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        let data = try encoder.encode(event)
-        var line = data
-        line.append(0x0A)
-        if fileManager.fileExists(atPath: eventsFileURL.path) {
-            let handle = try FileHandle(forWritingTo: eventsFileURL)
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: line)
-        } else {
-            try line.write(to: eventsFileURL, options: .atomic)
+        try withTypingEventFileLock {
+            try fileManager.createDirectory(
+                at: eventsFileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try encoder.encode(event)
+            var line = data
+            line.append(0x0A)
+            if fileManager.fileExists(atPath: eventsFileURL.path) {
+                let handle = try FileHandle(forWritingTo: eventsFileURL)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: line)
+            } else {
+                try line.write(to: eventsFileURL, options: .atomic)
+            }
         }
     }
 
     public func pendingEvents() throws -> [AITypingEvent] {
-        guard fileManager.fileExists(atPath: eventsFileURL.path) else {
-            return []
-        }
-        let content = try String(contentsOf: eventsFileURL, encoding: .utf8)
-        return content
-            .split(whereSeparator: \.isNewline)
-            .compactMap { line -> AITypingEvent? in
-                guard let data = String(line).data(using: .utf8) else {
-                    return nil
-                }
-                return try? decoder.decode(AITypingEvent.self, from: data)
+        try withTypingEventFileLock {
+            guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+                return []
             }
+            let content = try String(contentsOf: eventsFileURL, encoding: .utf8)
+            return content
+                .split(whereSeparator: \.isNewline)
+                .compactMap { line -> AITypingEvent? in
+                    guard let data = String(line).data(using: .utf8) else {
+                        return nil
+                    }
+                    return try? decoder.decode(AITypingEvent.self, from: data)
+                }
+        }
     }
 
     public func pendingRawContent() throws -> String {
-        guard fileManager.fileExists(atPath: eventsFileURL.path) else {
-            return ""
+        try withTypingEventFileLock {
+            guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+                return ""
+            }
+            return try String(contentsOf: eventsFileURL, encoding: .utf8)
         }
-        return try String(contentsOf: eventsFileURL, encoding: .utf8)
     }
 
     public func archivePendingEvents() throws {
@@ -70,25 +84,27 @@ public actor TypingEventStore {
     }
 
     public func archivePendingEvents(matchingRawContent rawContent: String) throws {
-        guard !rawContent.isEmpty,
-              fileManager.fileExists(atPath: eventsFileURL.path) else {
-            return
-        }
-        let currentContent = try String(contentsOf: eventsFileURL, encoding: .utf8)
-        guard currentContent.hasPrefix(rawContent) else {
-            throw TypingEventStoreError.pendingContentChanged
-        }
-        try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
-        let formatter = ISO8601DateFormatter()
-        let filename = "typing-events-\(formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
-        let destination = processedDirectoryURL.appendingPathComponent(filename)
-        try rawContent.write(to: destination, atomically: true, encoding: .utf8)
+        try withTypingEventFileLock {
+            guard !rawContent.isEmpty,
+                  fileManager.fileExists(atPath: eventsFileURL.path) else {
+                return
+            }
+            let currentContent = try String(contentsOf: eventsFileURL, encoding: .utf8)
+            guard currentContent.hasPrefix(rawContent) else {
+                throw TypingEventStoreError.pendingContentChanged
+            }
+            try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
+            let formatter = ISO8601DateFormatter()
+            let filename = "typing-events-\(formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
+            let destination = processedDirectoryURL.appendingPathComponent(filename)
+            try rawContent.write(to: destination, atomically: true, encoding: .utf8)
 
-        let remainingContent = String(currentContent.dropFirst(rawContent.count))
-        if remainingContent.isEmpty {
-            try fileManager.removeItem(at: eventsFileURL)
-        } else {
-            try remainingContent.write(to: eventsFileURL, atomically: true, encoding: .utf8)
+            let remainingContent = String(currentContent.dropFirst(rawContent.count))
+            if remainingContent.isEmpty {
+                try fileManager.removeItem(at: eventsFileURL)
+            } else {
+                try remainingContent.write(to: eventsFileURL, atomically: true, encoding: .utf8)
+            }
         }
     }
 }

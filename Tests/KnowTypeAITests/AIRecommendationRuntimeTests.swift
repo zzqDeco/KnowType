@@ -161,6 +161,24 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(updated.content.contains("## Global Style\n- Test style."))
         XCTAssertTrue(updated.content.contains("## User Notes"))
     }
+
+    func testEnvironmentReplacementPreservesExistingContentWhenMarkersAreMissing() {
+        let current = """
+        # KnowType Environment
+
+        ## User Notes
+        - Keep this manual note.
+        """
+
+        let updated = EnvironmentDocumentStore.replacingGeneratedSection(
+            in: current,
+            with: "## Global Style\n- Learned style."
+        )
+
+        XCTAssertTrue(updated.contains("## Global Style\n- Learned style."))
+        XCTAssertTrue(updated.contains("## User Notes"))
+        XCTAssertTrue(updated.contains("- Keep this manual note."))
+    }
 }
 
 private actor RecordingLLMProvider: LLMProvider {
