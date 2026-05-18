@@ -25,6 +25,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         let package = try String(contentsOf: rootURL.appendingPathComponent("Package.swift"), encoding: .utf8)
         let script = try String(contentsOf: rootURL.appendingPathComponent("scripts/build-preference-pane.sh"), encoding: .utf8)
+        let source = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypePreferencePane/KnowTypePreferencePane.swift"),
+            encoding: .utf8
+        )
         let plistData = try Data(contentsOf: rootURL.appendingPathComponent("Resources/PreferencePane/Info.plist"))
         let plist = try XCTUnwrap(
             PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any]
@@ -35,6 +39,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(script.contains("--product KnowTypePreferencePane"))
         XCTAssertTrue(script.contains("libKnowTypePreferencePane.dylib"))
         XCTAssertTrue(script.contains("KnowType.prefPane"))
+        XCTAssertTrue(source.contains("override func loadMainView() -> NSView"))
         XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.knowtype.preferencepane")
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "KnowTypePreferencePane")
         XCTAssertEqual(plist["NSPrincipalClass"] as? String, "KnowTypePreferencePane")

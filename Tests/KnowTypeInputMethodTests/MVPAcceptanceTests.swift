@@ -60,6 +60,37 @@ final class MVPAcceptanceTests: XCTestCase {
         XCTAssertTrue(response.continuationCandidates.isEmpty)
     }
 
+    func testAsyncPipelineKeepsLocalFallbackWhenCloudContinuationIsDisabledWithoutProvider() async {
+        let pipeline = InputMethodPipeline(
+            runtimePreferences: InputMethodRuntimePreferences(
+                cloudContinuationEnabled: false,
+                localContinuationEnabledWhenNoProvider: true
+            )
+        )
+
+        let response = await pipeline.suggestions(
+            for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN)
+        )
+
+        XCTAssertEqual(response.lockedPrefix?.text, "我觉得这个方案")
+        XCTAssertFalse(response.prefixCandidates.isEmpty)
+        XCTAssertEqual(response.continuationCandidates.first?.text, "还有进一步优化空间")
+    }
+
+    func testAsyncPipelineHonorsDisabledLocalFallbackWithoutProvider() async {
+        let pipeline = InputMethodPipeline(
+            runtimePreferences: InputMethodRuntimePreferences(localContinuationEnabledWhenNoProvider: false)
+        )
+
+        let response = await pipeline.suggestions(
+            for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN)
+        )
+
+        XCTAssertEqual(response.lockedPrefix?.text, "我觉得这个方案")
+        XCTAssertFalse(response.prefixCandidates.isEmpty)
+        XCTAssertTrue(response.continuationCandidates.isEmpty)
+    }
+
     func testRuntimePreferencesCanDisableCloudContinuations() async {
         let provider = RecordingMVPProvider()
         let pipeline = InputMethodPipeline(

@@ -370,18 +370,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: currentLocale,
             userSelectionHistory: userSelectionHistory
         )
-        guard runtimePreferences.cloudContinuationEnabled else {
-            let suggestion = resolvedCompositionSuggestion(
-                lockedPrefix: lockedPrefix,
-                continuations: [],
-                fallbackLatency: lastSuggestion?.latencyMs ?? 0
-            )
-            lastSuggestion = suggestion
-            lastSuggestionRawInput = rawInput
-            refreshComposition(client: client)
-            updateCandidatePanel(suggestion: suggestion, client: client)
-            return
-        }
         guard let provider else {
             let continuations = runtimePreferences.localContinuationEnabledWhenNoProvider
                 ? PrefixContinuationEngine().fallbackContinuations(
@@ -393,6 +381,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
             let suggestion = resolvedCompositionSuggestion(
                 lockedPrefix: lockedPrefix,
                 continuations: continuations,
+                fallbackLatency: lastSuggestion?.latencyMs ?? 0
+            )
+            lastSuggestion = suggestion
+            lastSuggestionRawInput = rawInput
+            refreshComposition(client: client)
+            updateCandidatePanel(suggestion: suggestion, client: client)
+            return
+        }
+        guard runtimePreferences.cloudContinuationEnabled else {
+            let suggestion = resolvedCompositionSuggestion(
+                lockedPrefix: lockedPrefix,
+                continuations: [],
                 fallbackLatency: lastSuggestion?.latencyMs ?? 0
             )
             lastSuggestion = suggestion

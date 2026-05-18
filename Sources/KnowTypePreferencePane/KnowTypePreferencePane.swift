@@ -10,13 +10,13 @@ import PreferencePanes
 public final class KnowTypePreferencePane: NSPreferencePane {
     private var hostingView: NSView?
 
-    public override func mainViewDidLoad() {
-        super.mainViewDidLoad()
+    public override func loadMainView() -> NSView {
         let view = MainActor.assumeIsolated {
             Self.makeSettingsView()
         }
         hostingView = view
         mainView = view
+        return view
     }
 
     @MainActor
