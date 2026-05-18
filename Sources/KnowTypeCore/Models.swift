@@ -3,6 +3,7 @@ import Foundation
 public enum LLMTask: String, Codable, Sendable, Equatable {
     case correction
     case continuation
+    case contextDigest
     case polish
 }
 
@@ -230,6 +231,7 @@ public struct LLMRequest: Codable, Sendable, Equatable {
     public var maxCandidates: Int
     public var lengthLevel: ContinuationLengthLevel?
     public var outputSchema: String
+    public var contextDocuments: [String: String]
 
     public init(
         task: LLMTask,
@@ -239,7 +241,8 @@ public struct LLMRequest: Codable, Sendable, Equatable {
         appContext: String? = nil,
         maxCandidates: Int = 3,
         lengthLevel: ContinuationLengthLevel? = nil,
-        outputSchema: String = "json"
+        outputSchema: String = "json",
+        contextDocuments: [String: String] = [:]
     ) {
         self.task = task
         self.lockedPrefix = lockedPrefix
@@ -249,6 +252,7 @@ public struct LLMRequest: Codable, Sendable, Equatable {
         self.maxCandidates = max(1, maxCandidates)
         self.lengthLevel = lengthLevel
         self.outputSchema = outputSchema
+        self.contextDocuments = contextDocuments
     }
 }
 

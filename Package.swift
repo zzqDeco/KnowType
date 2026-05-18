@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "KnowTypeCore", targets: ["KnowTypeCore"]),
         .library(name: "KnowTypeProviders", targets: ["KnowTypeProviders"]),
+        .library(name: "KnowTypeAI", targets: ["KnowTypeAI"]),
         .library(name: "KnowTypeSettingsUI", targets: ["KnowTypeSettingsUI"]),
         .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"]),
         .library(name: "KnowTypePreferencePane", type: .dynamic, targets: ["KnowTypePreferencePane"]),
@@ -37,8 +38,13 @@ let package = Package(
             ]
         ),
         .target(
+            name: "KnowTypeAI",
+            dependencies: ["KnowTypeCore", "KnowTypeProviders"],
+            path: "Sources/KnowTypeAI"
+        ),
+        .target(
             name: "KnowTypeInputMethod",
-            dependencies: ["KnowTypeCore", "KnowTypeProviders", "KnowTypeSettingsUI"],
+            dependencies: ["KnowTypeCore", "KnowTypeProviders", "KnowTypeAI", "KnowTypeSettingsUI"],
             path: "Sources/KnowTypeInputMethod",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
@@ -108,6 +114,11 @@ let package = Package(
             name: "KnowTypeProvidersTests",
             dependencies: ["KnowTypeCore", "KnowTypeProviders"],
             path: "Tests/KnowTypeProvidersTests"
+        ),
+        .testTarget(
+            name: "KnowTypeAITests",
+            dependencies: ["KnowTypeCore", "KnowTypeProviders", "KnowTypeAI"],
+            path: "Tests/KnowTypeAITests"
         ),
         .testTarget(
             name: "KnowTypeSettingsAppTests",

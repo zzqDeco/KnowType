@@ -34,6 +34,6 @@ public struct OllamaNativeProvider: LLMProvider {
         guard let content = ResponseNormalizer.string(at: ["message", "content"], in: raw) else {
             throw ProviderError.invalidResponse("missing message.content")
         }
-        return try ResponseNormalizer.normalizeText(content)
+        return try ResponseNormalizer.normalizeText(content, preservePlainText: request.task == .contextDigest)
     }
 }

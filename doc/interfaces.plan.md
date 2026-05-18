@@ -8,7 +8,7 @@ Internal request shape:
 
 ```text
 LLMRequest {
-  task: correction | continuation | polish
+  task: correction | continuation | contextDigest | polish
   lockedPrefix?: string
   rawInput?: string
   locale: zh-CN | en-US | mixed
@@ -16,6 +16,7 @@ LLMRequest {
   maxCandidates: number
   lengthLevel?: short | medium | long
   outputSchema: json
+  contextDocuments: { [name: string]: string }
 }
 ```
 
@@ -34,6 +35,8 @@ LLMResponse {
 ```
 
 Provider adapters must not expose native OpenAI, Anthropic, Gemini, Ollama, or custom HTTP response shapes outside `KnowTypeProviders`.
+
+Real-time AI recommendation requests use `task: continuation`, `lockedPrefix`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
 ## Provider Kinds
 
@@ -122,6 +125,9 @@ Core candidate types:
 - `InputMethodLexiconRuntime`: input-method runtime loader for user-owned local lexicon directories.
 - `LockedPrefix`: selected immutable prefix.
 - `ContinuationCandidate`: text after the locked prefix only.
+- `AIRecommendationCandidate`: ready AI slot payload with the locked prefix, optional continuation, display text, provider, confidence, and context version.
+- `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
+- `AITypingEvent`: committed typing event used by the background memory runtime.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 
 Raw input is tracked outside `SuggestionResponse` by the input-method session, for example through stale-result guards such as `latestSuggestionRawInput`. Protection metadata lives on correction candidates, locked prefixes, and protected ranges rather than on the top-level suggestion response.
@@ -153,13 +159,15 @@ Interactive correction calls use `TraditionalInputQueryOptions.interactive`. The
 Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 
 - raw input is shown only when no prefix or continuation suggestion exists
-- prefix candidates are first-class selectable rows
+- traditional prefix candidate 1 is the first selectable row
+- the AI recommendation slot is fixed as the second selectable row when it has a visible state
+- remaining traditional prefix candidates follow the AI slot
 - full candidates cover the entire raw buffer and commit as complete Chinese text
 - segment candidates cover part of the raw buffer and update the active composition without inserting committed text
-- continuation candidates commit as `locked prefix + continuation`
+- legacy continuation candidates commit as `locked prefix + continuation`; provider-backed IMK continuation uses the AI slot instead
 - rows are paged through `CandidatePanelPagingState`; adaptive layout uses up to 6 visible rows per page, while vertical-list mode may use up to 9
-- production IMK key handling first shows raw marked text plus an immediate local prefix-only candidate snapshot while provider continuations resolve asynchronously
-- when a provider is configured, local output omits fallback continuation rows until provider output arrives
+- production IMK key handling first shows raw marked text plus an immediate local prefix-only candidate snapshot while the AI slot resolves asynchronously
+- when a provider is configured, local output omits fallback continuation rows and never labels mock text as AI
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
 `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when
@@ -188,12 +196,14 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 ## Shortcut Contract
 
 - `Space` commits the selected visible prefix for the current raw input.
+- `1` commits the first traditional candidate when visible.
 - with a selected segment candidate, `Space` applies that segment and commits only after all non-whitespace raw input is resolved.
 - `Return` / `Enter` commits the original raw composition.
-- `Tab` commits selected prefix plus first or selected continuation.
-- `Tab` does not trigger continuation while the composition is only partially segmented.
+- `Tab` commits the AI recommendation only when the AI slot is ready; pending, unavailable, disabled, or ineligible AI keeps the composition.
+- `2` commits the ready AI recommendation when the AI slot is visible.
+- `Tab` does not trigger AI continuation while the composition is only partially segmented.
 - `0` commits raw composition when correction candidates are visible.
-- visible numeric prefix shortcuts commit rows on the current candidate page only.
+- visible numeric shortcuts commit rows on the current candidate page only; after the AI slot, traditional alternatives keep their visible row numbers.
 - unmatched digit keys continue composing as literal digits.
 - plain punctuation commits composition plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
@@ -203,6 +213,34 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries and preserves session-local toggles while preferences are unchanged.
 
 Runtime behavior is represented by `InputMethodRuntimePreferences`: input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation enablement, continuation length, and continuation count. These preferences use the same shared defaults domain and are read by the input method at startup and new composition boundaries. Defaults preserve the current production behavior: full pinyin, six adaptive candidates per page, adaptive horizontal panel layout, cloud continuation enabled, local fallback continuation enabled, medium continuation length, and six continuation candidates. If an older preference stores nine candidates per page, adaptive layout caps the effective page size at six; vertical-list mode uses the saved page size.
+
+## AI Runtime Contracts
+
+`KnowTypeAI` exposes:
+
+- `AIRecommendationProviding.recommendation(for:)`
+- `AIContextEventRecording.record(_:)`
+
+`InputControllerCoordinator` depends only on those protocols. Production uses `AIRecommendationRuntime` and `AIContextMemoryRuntime`; tests can inject fakes.
+
+`AIRecommendationRuntime`:
+
+- reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
+- creates default documents when missing
+- debounces before provider calls
+- hard-times out provider requests
+- caches by locked prefix, app bundle, locale, ENV hash, and CORRECTION hash
+- rejects stale results at the coordinator boundary
+- rejects provider output that repeats or rewrites the locked prefix through local sanitization
+
+`AIContextMemoryRuntime`:
+
+- records only committed text, not marked text
+- writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
+- archives processed event files under `~/.knowtype/events/processed/`
+- summarizes after a batch threshold or interval
+- updates only the generated section in `ENV.md`
+- sanitizes Level 0 protected content before writing logs
 
 KnowType-specific settings are hosted by three supported entry points: the standalone settings app, `KnowType.prefPane` in `~/Library/PreferencePanes`, and the InputMethodKit preferences window opened from the input-method menu. The macOS Keyboard/Input Sources page remains the enable/select surface and is not treated as a custom settings host.
 

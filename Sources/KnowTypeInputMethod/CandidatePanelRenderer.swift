@@ -1,14 +1,17 @@
 import Foundation
+import KnowTypeAI
 import KnowTypeCore
 
 public enum CandidatePanelRowKind: Sendable, Equatable {
     case rawInput
     case prefixCandidate
+    case aiRecommendation
     case continuationCandidate
 }
 
 public enum CandidatePanelVisualRole: Sendable, Equatable {
     case lockedPrefix
+    case aiRecommendation
     case continuation
     case rawInput
 }
@@ -18,6 +21,7 @@ public enum CandidatePanelSelection: Sendable, Equatable {
     case prefixCandidate(Int)
     case fullCandidate(Int)
     case segmentCandidate(Int)
+    case aiRecommendation
     case continuationCandidate(Int)
 }
 
@@ -70,13 +74,22 @@ public struct CandidatePanelRenderer: Sendable {
         let allRows = selectableRows(in: viewModel)
         let paging = explicitPaging ?? pagingState(containing: selection, in: allRows)
         let visibleRange = paging.visibleRange(totalRows: allRows.count)
-        let rows = allRows[visibleRange].enumerated().map { offset, item in
+        var nextNumberShortcut = 1
+        let rows = allRows[visibleRange].map { item in
             let shortcutLabel: String?
             switch item.selection {
             case .rawInput:
                 shortcutLabel = nil
             case .prefixCandidate, .fullCandidate, .segmentCandidate:
-                shortcutLabel = "\(offset + 1)"
+                shortcutLabel = "\(nextNumberShortcut)"
+                nextNumberShortcut += 1
+            case .aiRecommendation:
+                if viewModel.aiRecommendation.isSelectableRecommendation {
+                    shortcutLabel = "\(nextNumberShortcut)"
+                    nextNumberShortcut += 1
+                } else {
+                    shortcutLabel = nil
+                }
             case .continuationCandidate(let index):
                 shortcutLabel = continuationShortcutLabel(atGlobalIndex: index)
             }
@@ -98,7 +111,9 @@ public struct CandidatePanelRenderer: Sendable {
 
     private func selectableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRenderableRow] {
         var rows: [CandidatePanelRenderableRow] = []
-        let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
+        let hasSuggestions = !viewModel.prefixCandidates.isEmpty
+            || !viewModel.continuationCandidates.isEmpty
+            || viewModel.aiRecommendation.displayText != nil
 
         if !viewModel.rawInput.isEmpty && !hasSuggestions {
             rows.append(
@@ -120,6 +135,14 @@ public struct CandidatePanelRenderer: Sendable {
                     visualRole: .lockedPrefix
                 )
             )
+            if index == 0, let aiRow = aiRecommendationRow(viewModel.aiRecommendation) {
+                rows.append(aiRow)
+            }
+        }
+
+        if viewModel.prefixCandidates.isEmpty,
+           let aiRow = aiRecommendationRow(viewModel.aiRecommendation) {
+            rows.append(aiRow)
         }
 
         for (index, candidate) in viewModel.continuationCandidates.enumerated() {
@@ -134,6 +157,18 @@ public struct CandidatePanelRenderer: Sendable {
         }
 
         return rows
+    }
+
+    private func aiRecommendationRow(_ state: AIRecommendationState) -> CandidatePanelRenderableRow? {
+        guard let text = state.displayText else {
+            return nil
+        }
+        return CandidatePanelRenderableRow(
+            selection: .aiRecommendation,
+            kind: .aiRecommendation,
+            text: text,
+            visualRole: .aiRecommendation
+        )
     }
 
     private func prefixSelection(

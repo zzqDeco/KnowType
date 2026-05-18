@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import KnowTypeAI
 import KnowTypeCore
 
 public struct CandidatePanelWindowState: Sendable, Equatable {
@@ -77,16 +78,19 @@ public struct CandidatePanelState: Sendable, Equatable {
         anchorSource: CandidateAnchorSource = .none,
         isDisplayable: Bool = true,
         pageSize: Int = CandidatePanelPagingState.defaultPageSize,
-        layoutMode: CandidatePanelLayoutMode = .adaptive
+        layoutMode: CandidatePanelLayoutMode = .adaptive,
+        aiRecommendation: AIRecommendationState = .idle
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
         let continuationCandidates = suggestion?.continuationCandidates ?? []
         let viewModel = CandidatePanelViewModel(
             rawInput: rawInput,
             prefixCandidates: prefixCandidates,
-            continuationCandidates: continuationCandidates
+            continuationCandidates: continuationCandidates,
+            aiRecommendation: aiRecommendation
         )
-        let hasRows = !rawInput.isEmpty || !prefixCandidates.isEmpty || !continuationCandidates.isEmpty
+        let hasAIRow = aiRecommendation.displayText != nil
+        let hasRows = !rawInput.isEmpty || !prefixCandidates.isEmpty || !continuationCandidates.isEmpty || hasAIRow
         let isVisible = isDisplayable && hasRows
         let selection = isVisible ? selectionAfterUpdate(
             rawInput: rawInput,
@@ -152,17 +156,12 @@ public struct CandidatePanelState: Sendable, Equatable {
             return nil
         }
         let visibleRows = visibleSelectableRows()
-        let prefixRows = visibleRows.filter { selection in
-            if selection.isPrefixLike {
-                return true
-            }
-            return false
-        }
+            .filter { hasVisibleNumberShortcut($0, in: windowState.viewModel) }
         let shortcutIndex = number - 1
-        guard prefixRows.indices.contains(shortcutIndex) else {
+        guard visibleRows.indices.contains(shortcutIndex) else {
             return nil
         }
-        let selection = prefixRows[shortcutIndex]
+        let selection = visibleRows[shortcutIndex]
         windowState.selection = selection
         if let rowIndex = selectableRows().firstIndex(of: selection) {
             windowState.paging = pagingState(forRowIndex: rowIndex, pageSize: windowState.paging.pageSize)
@@ -173,13 +172,17 @@ public struct CandidatePanelState: Sendable, Equatable {
     private func defaultSelection(
         rawInput: String,
         prefixCandidates: [CorrectionCandidate],
-        continuationCandidates: [ContinuationCandidate]
+        continuationCandidates: [ContinuationCandidate],
+        aiRecommendation: AIRecommendationState
     ) -> CandidatePanelSelection? {
         if let firstPrefix = prefixCandidates.first {
             return prefixSelection(for: firstPrefix, rawInput: rawInput, index: 0)
         }
         if !rawInput.isEmpty {
             return .rawInput
+        }
+        if aiRecommendation.isSelectableRecommendation {
+            return .aiRecommendation
         }
         if !continuationCandidates.isEmpty {
             return .continuationCandidate(0)
@@ -201,7 +204,8 @@ public struct CandidatePanelState: Sendable, Equatable {
         return defaultSelection(
             rawInput: rawInput,
             prefixCandidates: prefixCandidates,
-            continuationCandidates: continuationCandidates
+            continuationCandidates: continuationCandidates,
+            aiRecommendation: viewModel.aiRecommendation
         )
     }
 
@@ -233,18 +237,32 @@ public struct CandidatePanelState: Sendable, Equatable {
                 return false
             }
             return windowState.viewModel.continuationCandidates[index].text == viewModel.continuationCandidates[index].text
+        case .aiRecommendation:
+            return windowState.viewModel.aiRecommendation == viewModel.aiRecommendation
+                && viewModel.aiRecommendation.isSelectableRecommendation
         }
     }
 
     private func selectableRows() -> [CandidatePanelSelection] {
         let viewModel = windowState.viewModel
-        let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
+        let hasSuggestions = !viewModel.prefixCandidates.isEmpty
+            || !viewModel.continuationCandidates.isEmpty
+            || viewModel.aiRecommendation.displayText != nil
         var rows: [CandidatePanelSelection] = []
 
         if !viewModel.rawInput.isEmpty && !hasSuggestions {
             rows.append(.rawInput)
         }
-        rows.append(contentsOf: prefixRows(in: viewModel))
+        let prefixRows = prefixRows(in: viewModel)
+        if let first = prefixRows.first {
+            rows.append(first)
+            if viewModel.aiRecommendation.displayText != nil {
+                rows.append(.aiRecommendation)
+            }
+            rows.append(contentsOf: prefixRows.dropFirst())
+        } else if viewModel.aiRecommendation.displayText != nil {
+            rows.append(.aiRecommendation)
+        }
         rows.append(
             contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
         )
@@ -294,13 +312,24 @@ public struct CandidatePanelState: Sendable, Equatable {
     }
 
     private func selectableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection] {
-        let hasSuggestions = !viewModel.prefixCandidates.isEmpty || !viewModel.continuationCandidates.isEmpty
+        let hasSuggestions = !viewModel.prefixCandidates.isEmpty
+            || !viewModel.continuationCandidates.isEmpty
+            || viewModel.aiRecommendation.displayText != nil
         var rows: [CandidatePanelSelection] = []
 
         if !viewModel.rawInput.isEmpty && !hasSuggestions {
             rows.append(.rawInput)
         }
-        rows.append(contentsOf: prefixRows(in: viewModel))
+        let prefixRows = prefixRows(in: viewModel)
+        if let first = prefixRows.first {
+            rows.append(first)
+            if viewModel.aiRecommendation.displayText != nil {
+                rows.append(.aiRecommendation)
+            }
+            rows.append(contentsOf: prefixRows.dropFirst())
+        } else if viewModel.aiRecommendation.displayText != nil {
+            rows.append(.aiRecommendation)
+        }
         rows.append(
             contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
         )
@@ -325,13 +354,16 @@ public struct CandidatePanelState: Sendable, Equatable {
             ? .fullCandidate(index)
             : .segmentCandidate(index)
     }
-}
 
-private extension CandidatePanelSelection {
-    var isPrefixLike: Bool {
-        switch self {
+    private func hasVisibleNumberShortcut(
+        _ selection: CandidatePanelSelection,
+        in viewModel: CandidatePanelViewModel
+    ) -> Bool {
+        switch selection {
         case .prefixCandidate, .fullCandidate, .segmentCandidate:
             return true
+        case .aiRecommendation:
+            return viewModel.aiRecommendation.isSelectableRecommendation
         case .rawInput, .continuationCandidate:
             return false
         }

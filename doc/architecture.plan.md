@@ -1,9 +1,10 @@
 # KnowType Architecture
 
-KnowType is split into three layers:
+KnowType is split into focused package layers:
 
 - `KnowTypeCore`: product rules, correction, protected-input detection, prefix locking, and continuation sanitization.
 - `KnowTypeProviders`: provider profile resolution, HTTP adapters, model discovery, and response normalization.
+- `KnowTypeAI`: non-blocking AI recommendation, context-memory, correction-instruction, and provider-health runtimes.
 - `KnowTypeInputMethod`: macOS input-method integration, marked text, key behavior, candidate state, and candidate-window presentation.
 - `KnowTypeSettingsUI`: reusable SwiftUI settings for provider profiles, runtime preferences, privacy, local install guidance, and local lexicon status.
 - `KnowTypeSettingsApp` / `KnowTypePreferencePane`: hosts for the shared settings UI.
@@ -17,10 +18,10 @@ raw input
   -> TextProtection
   -> CorrectionEngine
   -> CompositionBuffer / candidate spans
-  -> LockedPrefix
-  -> PrefixContinuationEngine
-  -> InputSessionController
-  -> IMK marked text / commit
+  -> local traditional candidates
+  -> IMK marked text / candidate panel
+  -> KnowTypeAI recommendation slot
+  -> commit
 ```
 
 Level 0 protected input exits through the no-provider path. It must not call cloud providers and must not publish cloud continuation candidates.
@@ -80,6 +81,18 @@ Profile JSON stores metadata and secret names only. It must not store API key va
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
+## AI Layer
+
+`KnowTypeAI` is the only layer that owns AI-specific input-method behavior:
+
+- `AIRecommendationRuntime` builds real-time prefix-locked recommendation requests from raw input, the traditional first candidate, app context, `ENV.md`, and `CORRECTION.md`.
+- `AIContextMemoryRuntime` records committed typing events and periodically summarizes them into the generated section of `~/.knowtype/ENV.md`.
+- `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, preserving the user's notes outside the generated section.
+- `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
+- `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
+
+The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. Stale AI results are dropped by composition id and raw input before they can update the panel.
+
 ## Settings Layer
 
 `KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view:
@@ -122,12 +135,12 @@ real host apps remains the evidence for IMK behavior.
 `KnowTypeInputMethod` is the macOS front end:
 
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
-- `InputSessionController` turns raw input and actions into suggestion and commit decisions.
+- `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses local prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
 - `CompositionBuffer` separates raw pinyin, resolved candidate segments, active raw range, marked-text display, and final commit text.
 - `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction, using the shared `TraditionalInputLexiconDirectoryResolver`.
 - Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
-- The IMK controller publishes raw marked text and immediate local prefix candidates on the keydown path, then refreshes provider-backed continuations asynchronously.
+- The IMK controller publishes raw marked text and immediate local prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
 - Runtime lexicon snapshot checks and engine rebuilds run in the background; active compositions are refreshed only after the new engine is ready and the composition is still current.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
@@ -147,8 +160,10 @@ KnowType uses a custom AppKit `NSPanel` as the primary candidate surface. It doe
 
 Candidate rows are flat and compact:
 
-- prefix candidates appear first
-- continuation candidates appear after prefix candidates
+- traditional prefix candidate 1 appears first
+- the AI recommendation slot appears second when AI state is pending, ready, disabled, or unavailable
+- remaining traditional prefix candidates appear after the AI slot
+- legacy continuation candidates may still be represented by core/session tests, but the production IMK panel uses the AI slot for provider-backed continuation
 - raw input appears only when no suggestion is available
 - rows are paged in 9-row windows
 
@@ -169,11 +184,11 @@ Candidate positioning is centralized in `CandidateAnchorResolver`. The resolver 
 
 Pointer location is not used as a moving candidate anchor.
 
-## Provider Timing
+## AI And Provider Timing
 
-When a provider is configured, KnowType publishes raw marked text and local prefix candidates immediately. Continuation rows are published after the provider-backed suggestion returns. If the provider fails, local correction still works and commit remains available, but KnowType does not show local mock continuation text as configured-provider output.
+When a provider is configured, KnowType publishes raw marked text and local prefix candidates immediately. The second slot enters a pending AI state and is updated only when `AIRecommendationRuntime` returns a current result. If the provider fails, local correction still works and commit remains available, but KnowType does not show local mock continuation text as AI output.
 
-No-provider paths may use local fallback continuations. Configured-provider failure paths return no continuation candidates until provider output becomes usable again. Level 0 paths clear continuation candidates.
+No-provider paths remain traditional-input usable. Production runtimes can show `AI 未配置`, disabled, pending, ready, or unavailable state in the second slot. Level 0 paths do not call providers and do not log raw protected text.
 
 ## Privacy And App Rules
 

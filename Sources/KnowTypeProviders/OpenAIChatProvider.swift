@@ -43,6 +43,6 @@ public struct OpenAIChatProvider: LLMProvider {
         guard let content = ResponseNormalizer.string(at: ["choices", "0", "message", "content"], in: raw) else {
             throw ProviderError.invalidResponse("missing choices[0].message.content")
         }
-        return try ResponseNormalizer.normalizeText(content)
+        return try ResponseNormalizer.normalizeText(content, preservePlainText: request.task == .contextDigest)
     }
 }

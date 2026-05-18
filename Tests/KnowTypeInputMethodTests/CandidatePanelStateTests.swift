@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import KnowTypeAI
 import KnowTypeCore
 @testable import KnowTypeInputMethod
 
@@ -40,6 +41,65 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(rendered.rows[2].visualRole, .continuation)
         XCTAssertTrue(rendered.rows[0].isSelected)
         XCTAssertFalse(rendered.rows[2].isSelected)
+    }
+
+    func testVisibleShortcutSelectsAIRecommendationAsSecondSlot() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: suggestion(prefixTexts: ["你好", "你号"]),
+            aiRecommendation: .ready(
+                AIRecommendationCandidate(
+                    prefixText: "你好",
+                    continuationText: "继续推进",
+                    displayText: "你好继续推进",
+                    confidence: 0.9,
+                    provider: "test",
+                    contextVersion: "v1"
+                )
+            )
+        )
+
+        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .aiRecommendation)
+        XCTAssertEqual(state.windowState.selection, .aiRecommendation)
+    }
+
+    func testVisibleShortcutSkipsNonReadyAIStatusRows() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: suggestion(prefixTexts: ["你好", "你号"]),
+            aiRecommendation: .pending(requestID: UUID())
+        )
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", nil, "2"])
+        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .prefixCandidate(1))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
+    }
+
+    func testVisibleShortcutIgnoresLegacyContinuationRowsWithoutNumberLabels() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "wo jue de",
+            suggestion: suggestion(
+                prefixTexts: ["我觉得", "我觉的"],
+                continuationTexts: ["还有进一步优化空间", "需要继续确认"]
+            )
+        )
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "⇥", "⌥2"])
+        XCTAssertNil(state.selectVisiblePrefixCandidate(shortcutNumber: 3))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
     }
 
     func testDefaultSelectionPrefersFirstPrefixOverRawAndContinuation() {

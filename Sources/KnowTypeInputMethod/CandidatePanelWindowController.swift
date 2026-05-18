@@ -162,6 +162,8 @@ private enum CandidatePanelTypography {
         switch role {
         case .lockedPrefix:
             return .systemFont(ofSize: 15, weight: .regular)
+        case .aiRecommendation:
+            return .systemFont(ofSize: 15, weight: .regular)
         case .continuation:
             return .systemFont(ofSize: 15, weight: .regular)
         case .rawInput:
@@ -329,6 +331,8 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         switch role {
         case .lockedPrefix:
             return .labelColor
+        case .aiRecommendation:
+            return .secondaryLabelColor
         case .continuation:
             return .secondaryLabelColor
         case .rawInput:
@@ -343,7 +347,7 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         switch role {
         case .lockedPrefix:
             return .secondaryLabelColor
-        case .continuation, .rawInput:
+        case .aiRecommendation, .continuation, .rawInput:
             return .tertiaryLabelColor
         }
     }
