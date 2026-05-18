@@ -54,6 +54,7 @@ public enum InputSessionCommitPolicy {
         appBundleID: String? = nil,
         locale: KnowTypeLocale = .mixed,
         traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        runtimePreferences: InputMethodRuntimePreferences = .standard,
         allowsSynchronousFallback: Bool = true
     ) -> InputCommitResult {
         if action == .commitRaw {
@@ -70,6 +71,7 @@ public enum InputSessionCommitPolicy {
                 appBundleID: appBundleID,
                 locale: locale,
                 traditionalInputEngine: traditionalInputEngine,
+                runtimePreferences: runtimePreferences,
                 allowsSynchronousFallback: allowsSynchronousFallback
             )
         }
@@ -127,6 +129,7 @@ public enum InputSessionCommitPolicy {
         appBundleID: String?,
         locale: KnowTypeLocale,
         traditionalInputEngine: TraditionalInputEngine,
+        runtimePreferences: InputMethodRuntimePreferences,
         allowsSynchronousFallback: Bool
     ) -> InputCommitResult {
         guard !rawInput.isEmpty else {
@@ -146,7 +149,8 @@ public enum InputSessionCommitPolicy {
             let suggestion = InputMethodPipeline.localSuggestions(
                 for: context,
                 includeFallbackContinuations: true,
-                traditionalInputEngine: traditionalInputEngine
+                traditionalInputEngine: traditionalInputEngine,
+                runtimePreferences: runtimePreferences
             )
             return InputCompositionController().handle(
                 action: action,
@@ -237,15 +241,18 @@ public actor InputSessionController {
 
     public init(
         provider: (any LLMProvider)? = nil,
-        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        runtimePreferences: InputMethodRuntimePreferences = .standard
     ) {
         let pipeline = InputMethodPipeline(
             provider: provider,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
         )
         let protectedPipeline = InputMethodPipeline(
             provider: nil,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
         )
         self.init(
             suggestionLoader: { context in

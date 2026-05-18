@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 @testable import KnowTypeProviders
-@testable import KnowTypeSettingsApp
+@testable import KnowTypeSettingsUI
 
 @MainActor
 final class ProviderProfilesViewModelTests: XCTestCase {

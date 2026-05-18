@@ -62,7 +62,9 @@ Sources/KnowTypeCore/          产品模型、保护规则、纠错、延续
 Sources/KnowTypeProviders/     Provider profile、运行时加载、adapter、HTTP 归一化
 Sources/KnowTypeInputMethod/   IMK controller、会话动作、候选窗、按键行为
 Sources/KnowTypeInputMethodApp 本地 macOS 输入法 app 入口
-Sources/KnowTypeSettingsApp/   SwiftUI 设置与 provider profile 编辑
+Sources/KnowTypeSettingsUI/    共享 SwiftUI 设置与 provider profile 编辑
+Sources/KnowTypeSettingsApp/   独立设置 App 宿主
+Sources/KnowTypePreferencePane/ 系统设置 PreferencePane 宿主
 Tests/                         core、provider、输入法逻辑单元测试
 doc/                           当前架构、接口、验收和源码说明
 plan/                          当前或近期完成的实施计划

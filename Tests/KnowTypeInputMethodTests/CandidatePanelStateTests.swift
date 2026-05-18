@@ -82,48 +82,65 @@ final class CandidatePanelStateTests: XCTestCase {
 
         XCTAssertTrue(state.moveSelection(.pageDown))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(9))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(6))
 
         XCTAssertTrue(state.moveSelection(.down))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(10))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(7))
 
         XCTAssertTrue(state.moveSelection(.pageUp))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 0))
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
     }
 
+    func testConfiguredPageSizeAndLayoutModeAreStoredInWindowState() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "candidate",
+            suggestion: multiPagePrefixSuggestion(count: 12),
+            pageSize: 6,
+            layoutMode: .verticalPreferred
+        )
+
+        XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 0, pageSize: 6))
+        XCTAssertEqual(state.windowState.layoutMode, .verticalPreferred)
+
+        XCTAssertTrue(state.moveSelection(.pageDown))
+        XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1, pageSize: 6))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(6))
+    }
+
     func testPageDownClampsPreservedOffsetOnShortLastPage() {
         var state = CandidatePanelState()
-        state.update(rawInput: "candidate", suggestion: multiPagePrefixSuggestion(count: 12))
+        state.update(rawInput: "candidate", suggestion: multiPagePrefixSuggestion(count: 10))
 
-        for _ in 0..<8 {
+        for _ in 0..<5 {
             XCTAssertTrue(state.moveSelection(.down))
         }
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(8))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(5))
 
         XCTAssertTrue(state.moveSelection(.pageDown))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(11))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(9))
     }
 
     func testArrowNavigationCrossesPageBoundariesOnlyAtPageEdges() {
         var state = CandidatePanelState()
         state.update(rawInput: "candidate", suggestion: multiPagePrefixSuggestion(count: 12))
 
-        for _ in 0..<8 {
+        for _ in 0..<5 {
             XCTAssertTrue(state.moveSelection(.down))
         }
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 0))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(8))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(5))
 
         XCTAssertTrue(state.moveSelection(.down))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(9))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(6))
 
         XCTAssertTrue(state.moveSelection(.up))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 0))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(8))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(5))
     }
 
     func testPageNavigationAtBoundsPreservesSelection() {
@@ -138,11 +155,11 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
 
         XCTAssertTrue(state.moveSelection(.pageDown))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(10))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(7))
 
         XCTAssertTrue(state.moveSelection(.pageDown))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(10))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(7))
     }
 
     func testSelectionAndPagePersistAcrossSameInputUpdateWhenRowStillExists() {
@@ -154,7 +171,7 @@ final class CandidatePanelStateTests: XCTestCase {
         state.update(rawInput: "candidate", suggestion: multiPagePrefixSuggestion(count: 12))
 
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(10))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(7))
     }
 
     func testSelectionResetsWhenSameRawInputPrefixAtIndexChanges() {
@@ -197,9 +214,9 @@ final class CandidatePanelStateTests: XCTestCase {
 
         XCTAssertEqual(
             state.selectVisiblePrefixCandidate(shortcutNumber: 2),
-            .prefixCandidate(10)
+            .prefixCandidate(7)
         )
-        XCTAssertEqual(state.windowState.selection, .prefixCandidate(10))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(7))
         XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1))
     }
 

@@ -6,27 +6,33 @@ public struct ProviderProfilesView: View {
     @ObservedObject private var viewModel: ProviderProfilesViewModel
     @StateObject private var lexiconViewModel: LexiconSettingsViewModel
     @StateObject private var inputModeViewModel: InputModePreferencesViewModel
+    @StateObject private var runtimePreferencesViewModel: RuntimePreferencesViewModel
     @State private var selectedSection: SettingsSection = .input
 
     public init(
         viewModel: ProviderProfilesViewModel,
         lexiconViewModel: LexiconSettingsViewModel = LexiconSettingsViewModel(),
-        inputModeViewModel: InputModePreferencesViewModel = InputModePreferencesViewModel()
+        inputModeViewModel: InputModePreferencesViewModel = InputModePreferencesViewModel(),
+        runtimePreferencesViewModel: RuntimePreferencesViewModel = RuntimePreferencesViewModel()
     ) {
         self.viewModel = viewModel
         _lexiconViewModel = StateObject(wrappedValue: lexiconViewModel)
         _inputModeViewModel = StateObject(wrappedValue: inputModeViewModel)
+        _runtimePreferencesViewModel = StateObject(wrappedValue: runtimePreferencesViewModel)
     }
 
     public var body: some View {
         TabView(selection: $selectedSection) {
-            InputSettingsView(viewModel: inputModeViewModel)
+            InputSettingsView(
+                inputModeViewModel: inputModeViewModel,
+                runtimePreferencesViewModel: runtimePreferencesViewModel
+            )
                 .tabItem {
                     Label("Input", systemImage: "keyboard")
                 }
                 .tag(SettingsSection.input)
 
-            CandidateSettingsView()
+            CandidateSettingsView(viewModel: runtimePreferencesViewModel)
                 .tabItem {
                     Label("Candidates", systemImage: "list.bullet.rectangle")
                 }
@@ -38,13 +44,16 @@ public struct ProviderProfilesView: View {
                 }
                 .tag(SettingsSection.lexicons)
 
-            AIProviderSettingsView(viewModel: viewModel)
+            AIProviderSettingsView(
+                viewModel: viewModel,
+                runtimePreferencesViewModel: runtimePreferencesViewModel
+            )
                 .tabItem {
                     Label("AI Provider", systemImage: "network")
                 }
                 .tag(SettingsSection.aiProvider)
 
-            PrivacySettingsView()
+            PrivacySettingsView(runtimePreferencesViewModel: runtimePreferencesViewModel)
                 .tabItem {
                     Label("Privacy", systemImage: "lock.shield")
                 }
@@ -69,7 +78,8 @@ private enum SettingsSection: Hashable {
 }
 
 private struct InputSettingsView: View {
-    @ObservedObject var viewModel: InputModePreferencesViewModel
+    @ObservedObject var inputModeViewModel: InputModePreferencesViewModel
+    @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
 
     var body: some View {
         SettingsForm {
@@ -78,6 +88,10 @@ private struct InputSettingsView: View {
                 LabeledContent("Composition mode", value: "Marked text before commit")
                 LabeledContent("Primary commit", value: "Space commits the corrected prefix")
                 LabeledContent("Continuation commit", value: "Tab commits prefix plus continuation")
+                Picker("Input scheme", selection: inputSchemeBinding) {
+                    Text("Full Pinyin").tag(TraditionalInputEngine.Scheme.fullPinyin)
+                    Text("Xiaohe Shuangpin").tag(TraditionalInputEngine.Scheme.xiaohe)
+                }
             }
 
             Section("Punctuation") {
@@ -99,11 +113,12 @@ private struct InputSettingsView: View {
                 }
                 LabeledContent("Toggle", value: "Option + .")
                 Button {
-                    viewModel.resetToDefaults()
+                    inputModeViewModel.resetToDefaults()
+                    runtimePreferencesViewModel.resetToDefaults()
                 } label: {
                     Label("Restore Defaults", systemImage: "arrow.counterclockwise")
                 }
-                if let message = viewModel.lastErrorMessage {
+                if let message = inputModeViewModel.lastErrorMessage ?? runtimePreferencesViewModel.lastErrorMessage {
                     Text(message)
                         .foregroundStyle(.red)
                 }
@@ -118,36 +133,62 @@ private struct InputSettingsView: View {
 
     private var defaultPunctuationBinding: Binding<InputSymbolMode> {
         Binding(
-            get: { viewModel.preferences.defaultState.punctuationMode },
-            set: { viewModel.setDefaultPunctuationMode($0) }
+            get: { inputModeViewModel.preferences.defaultState.punctuationMode },
+            set: { inputModeViewModel.setDefaultPunctuationMode($0) }
         )
     }
 
     private var defaultWidthBinding: Binding<InputSymbolWidth> {
         Binding(
-            get: { viewModel.preferences.defaultState.symbolWidth },
-            set: { viewModel.setDefaultSymbolWidth($0) }
+            get: { inputModeViewModel.preferences.defaultState.symbolWidth },
+            set: { inputModeViewModel.setDefaultSymbolWidth($0) }
         )
     }
 
     private var codeAppPunctuationBinding: Binding<InputSymbolMode> {
         Binding(
-            get: { viewModel.preferences.codeAppState.punctuationMode },
-            set: { viewModel.setCodeAppPunctuationMode($0) }
+            get: { inputModeViewModel.preferences.codeAppState.punctuationMode },
+            set: { inputModeViewModel.setCodeAppPunctuationMode($0) }
         )
     }
 
     private var codeAppWidthBinding: Binding<InputSymbolWidth> {
         Binding(
-            get: { viewModel.preferences.codeAppState.symbolWidth },
-            set: { viewModel.setCodeAppSymbolWidth($0) }
+            get: { inputModeViewModel.preferences.codeAppState.symbolWidth },
+            set: { inputModeViewModel.setCodeAppSymbolWidth($0) }
+        )
+    }
+
+    private var inputSchemeBinding: Binding<TraditionalInputEngine.Scheme> {
+        Binding(
+            get: { runtimePreferencesViewModel.preferences.inputScheme },
+            set: { runtimePreferencesViewModel.setInputScheme($0) }
         )
     }
 }
 
 private struct CandidateSettingsView: View {
+    @ObservedObject var viewModel: RuntimePreferencesViewModel
+
     var body: some View {
         SettingsForm {
+            Section("Display") {
+                Picker("Candidates per page", selection: candidatePageSizeBinding) {
+                    Text("6").tag(6)
+                    Text("9").tag(9)
+                }
+                Picker("Panel layout", selection: candidateLayoutModeBinding) {
+                    Text("Adaptive horizontal").tag(CandidatePanelLayoutMode.adaptive)
+                    Text("Vertical list").tag(CandidatePanelLayoutMode.verticalPreferred)
+                }
+                LabeledContent("Adaptive page", value: "Up to 6 candidates")
+                LabeledContent("Vertical page", value: "Uses selected page size")
+                if let message = viewModel.lastErrorMessage {
+                    Text(message)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Section("Candidate Order") {
                 LabeledContent("Prefix candidates", value: "Shown first")
                 LabeledContent("Continuation candidates", value: "Shown after prefix candidates")
@@ -160,6 +201,20 @@ private struct CandidateSettingsView: View {
                 LabeledContent("Option + R", value: "Explicit polish")
             }
         }
+    }
+
+    private var candidatePageSizeBinding: Binding<Int> {
+        Binding(
+            get: { viewModel.preferences.candidatePageSize },
+            set: { viewModel.setCandidatePageSize($0) }
+        )
+    }
+
+    private var candidateLayoutModeBinding: Binding<CandidatePanelLayoutMode> {
+        Binding(
+            get: { viewModel.preferences.candidateLayoutMode },
+            set: { viewModel.setCandidateLayoutMode($0) }
+        )
     }
 }
 
@@ -257,6 +312,7 @@ private struct LexiconSettingsView: View {
 
 private struct AIProviderSettingsView: View {
     @ObservedObject var viewModel: ProviderProfilesViewModel
+    @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
 
     var body: some View {
         let draftPresentation = ProviderProfileDraftPresentation(draft: viewModel.draft)
@@ -297,6 +353,23 @@ private struct AIProviderSettingsView: View {
             }
         } detail: {
             Form {
+                Section("Continuation") {
+                    Toggle("Enable cloud continuation", isOn: cloudContinuationEnabledBinding)
+                    Toggle("Show local continuations without a provider", isOn: localContinuationEnabledBinding)
+                    Picker("Length", selection: continuationLengthLevelBinding) {
+                        Text("Short").tag(ContinuationLengthLevel.short)
+                        Text("Medium").tag(ContinuationLengthLevel.medium)
+                        Text("Long").tag(ContinuationLengthLevel.long)
+                    }
+                    Stepper(value: maxContinuationCandidatesBinding, in: 1...6, step: 1) {
+                        Text("Max continuation candidates: \(runtimePreferencesViewModel.preferences.maxContinuationCandidates)")
+                    }
+                    if let message = runtimePreferencesViewModel.lastErrorMessage {
+                        Text(message)
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 Section("Provider") {
                     TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
                     Picker(
@@ -385,6 +458,34 @@ private struct AIProviderSettingsView: View {
         }
     }
 
+    private var cloudContinuationEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { runtimePreferencesViewModel.preferences.cloudContinuationEnabled },
+            set: { runtimePreferencesViewModel.setCloudContinuationEnabled($0) }
+        )
+    }
+
+    private var localContinuationEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider },
+            set: { runtimePreferencesViewModel.setLocalContinuationEnabledWhenNoProvider($0) }
+        )
+    }
+
+    private var continuationLengthLevelBinding: Binding<ContinuationLengthLevel> {
+        Binding(
+            get: { runtimePreferencesViewModel.preferences.continuationLengthLevel },
+            set: { runtimePreferencesViewModel.setContinuationLengthLevel($0) }
+        )
+    }
+
+    private var maxContinuationCandidatesBinding: Binding<Int> {
+        Binding(
+            get: { runtimePreferencesViewModel.preferences.maxContinuationCandidates },
+            set: { runtimePreferencesViewModel.setMaxContinuationCandidates($0) }
+        )
+    }
+
     @ViewBuilder
     private func connectionStatusMessage(_ message: ProviderStatusMessagePresentation) -> some View {
         switch message.tone {
@@ -399,8 +500,21 @@ private struct AIProviderSettingsView: View {
 }
 
 private struct PrivacySettingsView: View {
+    @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
+
     var body: some View {
         SettingsForm {
+            Section("Cloud Continuation") {
+                LabeledContent(
+                    "Provider calls",
+                    value: runtimePreferencesViewModel.preferences.cloudContinuationEnabled ? "Enabled for continuation" : "Disabled"
+                )
+                LabeledContent(
+                    "Local fallback",
+                    value: runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider ? "Enabled when no provider is configured" : "Disabled"
+                )
+            }
+
             Section("Level 0 Local Path") {
                 LabeledContent("URLs and emails", value: "No provider call")
                 LabeledContent("Paths and commands", value: "No provider call")

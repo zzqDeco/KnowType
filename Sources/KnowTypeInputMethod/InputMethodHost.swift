@@ -9,11 +9,16 @@ public struct InputMethodPipeline: Sendable {
 
     private let correctionEngine: CorrectionEngine
     private let continuationEngine: PrefixContinuationEngine
+    private let runtimePreferences: InputMethodRuntimePreferences
+    private let hasProvider: Bool
 
     public init(
         provider: (any LLMProvider)? = nil,
-        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        runtimePreferences: InputMethodRuntimePreferences = .standard
     ) {
+        self.runtimePreferences = runtimePreferences
+        self.hasProvider = provider != nil
         self.correctionEngine = CorrectionEngine(
             cloudProvider: provider,
             traditionalInputEngine: traditionalInputEngine
@@ -35,17 +40,10 @@ public struct InputMethodPipeline: Sendable {
                 protectedRanges: $0.protectedRanges
             )
         }
-        let continuations: [ContinuationCandidate]
-        if let locked {
-            continuations = await continuationEngine.continuations(
-                for: locked,
-                context: context,
-                lengthLevel: .medium,
-                maxCandidates: Self.defaultMaxContinuationCandidates
-            )
-        } else {
-            continuations = []
-        }
+        let continuations = await continuationCandidates(
+            for: locked,
+            context: context
+        )
         let elapsed = start.duration(to: .now)
         let milliseconds = Int(Double(elapsed.components.seconds) * 1000 + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000)
         return SuggestionResponse(
@@ -56,10 +54,43 @@ public struct InputMethodPipeline: Sendable {
         )
     }
 
+    private func continuationCandidates(
+        for locked: LockedPrefix?,
+        context: InputContext
+    ) async -> [ContinuationCandidate] {
+        guard let locked,
+              !TextProtection.requiresNoCorrection(locked.text, appBundleID: context.appBundleID),
+              !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) else {
+            return []
+        }
+
+        if hasProvider {
+            guard runtimePreferences.cloudContinuationEnabled else {
+                return []
+            }
+            return await continuationEngine.continuations(
+                for: locked,
+                context: context,
+                lengthLevel: runtimePreferences.continuationLengthLevel,
+                maxCandidates: runtimePreferences.maxContinuationCandidates
+            )
+        }
+
+        guard runtimePreferences.localContinuationEnabledWhenNoProvider else {
+            return []
+        }
+        return continuationEngine.fallbackContinuations(
+            for: locked.text,
+            lengthLevel: runtimePreferences.continuationLengthLevel,
+            maxCandidates: runtimePreferences.maxContinuationCandidates
+        )
+    }
+
     public static func localSuggestions(
         for context: InputContext,
         includeFallbackContinuations: Bool = true,
-        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        runtimePreferences: InputMethodRuntimePreferences = .standard
     ) -> SuggestionResponse {
         let correctionEngine = CorrectionEngine(traditionalInputEngine: traditionalInputEngine)
         let continuationEngine = PrefixContinuationEngine()
@@ -77,13 +108,14 @@ public struct InputMethodPipeline: Sendable {
         }
         let continuations: [ContinuationCandidate]
         if includeFallbackContinuations,
+           runtimePreferences.localContinuationEnabledWhenNoProvider,
            let locked,
            !TextProtection.requiresNoCorrection(locked.text, appBundleID: context.appBundleID),
            !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             continuations = continuationEngine.fallbackContinuations(
                 for: locked.text,
-                lengthLevel: .medium,
-                maxCandidates: Self.defaultMaxContinuationCandidates
+                lengthLevel: runtimePreferences.continuationLengthLevel,
+                maxCandidates: runtimePreferences.maxContinuationCandidates
             )
         } else {
             continuations = []

@@ -10,7 +10,7 @@ Implementation:
 - support common standalone syllables, phrase entries, initial abbreviations, and trailing partial syllables such as `nih`, `niw`, `xianz`, `sm`, and `zmb`
 - memoize recursive parse states so compact pinyin such as `nishishei` stays responsive
 - preserve mixed Chinese/English technical-token passthrough
-- page candidate rows through `CandidatePanelPagingState` with 9 visible rows per page
+- page candidate rows through `CandidatePanelPagingState`; adaptive layout shows up to 6 visible rows per page, while vertical-list mode may show up to 9
 
 Validation:
 

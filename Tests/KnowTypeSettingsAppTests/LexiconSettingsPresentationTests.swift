@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 import KnowTypeCore
-@testable import KnowTypeSettingsApp
+@testable import KnowTypeSettingsUI
 
 final class LexiconSettingsPresentationTests: XCTestCase {
     func testPresentationShowsMissingDirectoryActionAndStatusRows() throws {

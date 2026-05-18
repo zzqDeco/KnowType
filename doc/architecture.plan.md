@@ -5,7 +5,8 @@ KnowType is split into three layers:
 - `KnowTypeCore`: product rules, correction, protected-input detection, prefix locking, and continuation sanitization.
 - `KnowTypeProviders`: provider profile resolution, HTTP adapters, model discovery, and response normalization.
 - `KnowTypeInputMethod`: macOS input-method integration, marked text, key behavior, candidate state, and candidate-window presentation.
-- `KnowTypeSettingsApp`: SwiftUI settings for provider profiles, privacy, local install guidance, and local lexicon status.
+- `KnowTypeSettingsUI`: reusable SwiftUI settings for provider profiles, runtime preferences, privacy, local install guidance, and local lexicon status.
+- `KnowTypeSettingsApp` / `KnowTypePreferencePane`: hosts for the shared settings UI.
 
 The product boundary is strict: correction may refine the prefix, but continuation may only append text after the locked prefix. Explicit polish is the only rewrite path.
 
@@ -81,15 +82,16 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 
 ## Settings Layer
 
-`KnowTypeSettingsApp` owns user-facing configuration and status surfaces:
+`KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view:
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
 - `InputModePreferencesViewModel` edits punctuation language and symbol-width defaults stored in the shared `com.knowtype.preferences` defaults domain.
+- `RuntimePreferencesViewModel` edits input scheme, candidate paging/layout, and AI continuation behavior through the same shared defaults domain.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 - Lexicon settings can create missing directories, create a non-overwriting sample TSV file, install the recommended managed lexicon pack, and display installed pack metadata.
 
-Settings status does not import the IMK frontend and does not own dictionary licensing.
+Settings status does not import the IMK frontend and does not own dictionary licensing. The macOS Keyboard/Input Sources page still only enables/selects the input method; KnowType-specific controls live in the PreferencePane or IMK preferences window.
 
 ## Input Method Layer
 
@@ -99,6 +101,7 @@ Settings status does not import the IMK frontend and does not own dictionary lic
 - `InputSessionController` turns raw input and actions into suggestion and commit decisions.
 - `CompositionBuffer` separates raw pinyin, resolved candidate segments, active raw range, marked-text display, and final commit text.
 - `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction, using the shared `TraditionalInputLexiconDirectoryResolver`.
+- Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
 - The IMK controller publishes raw marked text on the keydown path, then refreshes correction candidates asynchronously.
 - Runtime lexicon snapshot checks and engine rebuilds run in the background; active compositions are refreshed only after the new engine is ready and the composition is still current.

@@ -8,6 +8,7 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
     public var viewModel: CandidatePanelViewModel
     public var selection: CandidatePanelSelection?
     public var paging: CandidatePanelPagingState
+    public var layoutMode: CandidatePanelLayoutMode
 
     public init(
         isVisible: Bool = false,
@@ -18,18 +19,20 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
             continuationCandidates: []
         ),
         selection: CandidatePanelSelection? = nil,
-        paging: CandidatePanelPagingState = CandidatePanelPagingState()
+        paging: CandidatePanelPagingState = CandidatePanelPagingState(),
+        layoutMode: CandidatePanelLayoutMode = .adaptive
     ) {
         self.isVisible = isVisible
         self.anchorRect = anchorRect
         self.viewModel = viewModel
         self.selection = selection
         self.paging = paging
+        self.layoutMode = layoutMode
     }
 }
 
 public struct CandidatePanelPagingState: Sendable, Equatable {
-    public static let defaultPageSize = 9
+    public static let defaultPageSize = InputMethodRuntimePreferences.adaptiveCandidatePageSize
 
     public var currentPage: Int
     public var pageSize: Int
@@ -68,7 +71,9 @@ public struct CandidatePanelState: Sendable, Equatable {
         rawInput: String,
         suggestion: SuggestionResponse?,
         anchorRect: CGRect = .zero,
-        isDisplayable: Bool = true
+        isDisplayable: Bool = true,
+        pageSize: Int = CandidatePanelPagingState.defaultPageSize,
+        layoutMode: CandidatePanelLayoutMode = .adaptive
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
         let continuationCandidates = suggestion?.continuationCandidates ?? []
@@ -85,13 +90,14 @@ public struct CandidatePanelState: Sendable, Equatable {
             continuationCandidates: continuationCandidates,
             viewModel: viewModel
         ) : nil
-        let paging = pagingState(for: selection, in: viewModel)
+        let paging = pagingState(for: selection, in: viewModel, pageSize: pageSize)
         windowState = CandidatePanelWindowState(
             isVisible: isVisible,
             anchorRect: anchorRect,
             viewModel: viewModel,
             selection: selection,
-            paging: isVisible ? paging : CandidatePanelPagingState()
+            paging: isVisible ? paging : CandidatePanelPagingState(pageSize: pageSize),
+            layoutMode: layoutMode
         )
     }
 
@@ -130,7 +136,7 @@ public struct CandidatePanelState: Sendable, Equatable {
             nextIndex = clampedIndex(currentIndex - 1, upperBound: rows.count - 1)
         }
         windowState.selection = rows[nextIndex]
-        windowState.paging = pagingState(forRowIndex: nextIndex)
+        windowState.paging = pagingState(forRowIndex: nextIndex, pageSize: windowState.paging.pageSize)
         return true
     }
 
@@ -154,7 +160,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         let selection = prefixRows[shortcutIndex]
         windowState.selection = selection
         if let rowIndex = selectableRows().firstIndex(of: selection) {
-            windowState.paging = pagingState(forRowIndex: rowIndex)
+            windowState.paging = pagingState(forRowIndex: rowIndex, pageSize: windowState.paging.pageSize)
         }
         return selection
     }
@@ -264,19 +270,21 @@ public struct CandidatePanelState: Sendable, Equatable {
 
     private func pagingState(
         for selection: CandidatePanelSelection?,
-        in viewModel: CandidatePanelViewModel
+        in viewModel: CandidatePanelViewModel,
+        pageSize: Int
     ) -> CandidatePanelPagingState {
         let rows = selectableRows(in: viewModel)
         guard let selection,
               let rowIndex = rows.firstIndex(of: selection) else {
-            return CandidatePanelPagingState()
+            return CandidatePanelPagingState(pageSize: pageSize)
         }
-        return pagingState(forRowIndex: rowIndex)
+        return pagingState(forRowIndex: rowIndex, pageSize: pageSize)
     }
 
-    private func pagingState(forRowIndex rowIndex: Int) -> CandidatePanelPagingState {
+    private func pagingState(forRowIndex rowIndex: Int, pageSize: Int) -> CandidatePanelPagingState {
         CandidatePanelPagingState(
-            currentPage: rowIndex / CandidatePanelPagingState.defaultPageSize
+            currentPage: rowIndex / max(1, pageSize),
+            pageSize: pageSize
         )
     }
 

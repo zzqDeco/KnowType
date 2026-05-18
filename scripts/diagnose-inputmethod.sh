@@ -3,6 +3,8 @@ set -u -o pipefail
 
 DEFAULT_BUNDLE_PATH="$HOME/Library/Input Methods/KnowType.app"
 BUNDLE_PATH="${KNOWTYPE_BUNDLE_PATH:-$DEFAULT_BUNDLE_PATH}"
+DEFAULT_PREFPANE_PATH="$HOME/Library/PreferencePanes/KnowType.prefPane"
+PREFPANE_PATH="${KNOWTYPE_PREFPANE_PATH:-$DEFAULT_PREFPANE_PATH}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 STRICT=0
@@ -148,6 +150,7 @@ expect_plist_value() {
 
 echo "KnowType input-method diagnostics"
 echo "Bundle: $BUNDLE_PATH"
+echo "PreferencePane: $PREFPANE_PATH"
 echo
 
 if [[ -d "$BUNDLE_PATH" ]]; then
@@ -273,6 +276,55 @@ if command -v spctl >/dev/null 2>&1; then
   fi
 else
   warn "spctl command is unavailable"
+fi
+
+echo
+echo "System Settings pane"
+
+PREFPANE_INFO_PLIST="$PREFPANE_PATH/Contents/Info.plist"
+PREFPANE_EXECUTABLE="$PREFPANE_PATH/Contents/MacOS/KnowTypePreferencePane"
+PREFPANE_LIBRARY="$PREFPANE_PATH/Contents/Frameworks/libKnowTypePreferencePane.dylib"
+
+if [[ -d "$PREFPANE_PATH" ]]; then
+  ok "KnowType.prefPane is installed"
+else
+  warn "KnowType.prefPane is missing; run ./scripts/install-inputmethod.sh to install the System Settings pane"
+fi
+
+if [[ -f "$PREFPANE_INFO_PLIST" ]]; then
+  ok "PreferencePane Info.plist exists"
+  expect_plist_value "CFBundleIdentifier" "com.knowtype.preferencepane" "$PREFPANE_INFO_PLIST"
+  expect_plist_value "CFBundleExecutable" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
+  expect_plist_value "NSPrincipalClass" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
+else
+  warn "PreferencePane Info.plist is missing"
+fi
+
+if [[ -x "$PREFPANE_EXECUTABLE" ]]; then
+  ok "PreferencePane executable exists and is executable"
+  if command -v otool >/dev/null 2>&1; then
+    if otool -hv "$PREFPANE_EXECUTABLE" | grep -q "BUNDLE"; then
+      ok "PreferencePane executable is a loadable bundle"
+    else
+      warn "PreferencePane executable is not an MH_BUNDLE; rebuild with scripts/build-preference-pane.sh"
+    fi
+  fi
+else
+  warn "PreferencePane executable is missing or not executable"
+fi
+
+if [[ -f "$PREFPANE_LIBRARY" ]]; then
+  ok "PreferencePane SwiftPM library is packaged"
+else
+  warn "PreferencePane SwiftPM library is missing"
+fi
+
+if [[ -d "$PREFPANE_PATH" ]] && command -v codesign >/dev/null 2>&1; then
+  if codesign --verify --deep --strict "$PREFPANE_PATH" >/dev/null 2>&1; then
+    ok "PreferencePane codesign verification passes"
+  else
+    warn "PreferencePane codesign verification failed"
+  fi
 fi
 
 echo

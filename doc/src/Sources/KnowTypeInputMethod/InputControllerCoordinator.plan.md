@@ -14,7 +14,7 @@ Current behavior:
 - applies the best local remaining segment before pending Space or punctuation commits when the user has already resolved part of the composition
 - rolls back pending punctuation fallback when the remaining local segment cannot fully resolve the composition, preserving the visible partially resolved marked text
 - lets Tab and raw-input shortcuts use local pending snapshots while async candidates are still loading
-- keeps local fallback continuations available after a fully resolved segmented composition when no cloud provider is configured
+- keeps local fallback continuations available after a fully resolved segmented composition when no cloud provider is configured, even if cloud continuation is disabled
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
 - warms or refreshes runtime lexicon engines in the background with generation checks; synchronous lexicon reload remains available only for deterministic test/offline paths
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`

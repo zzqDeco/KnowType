@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 @testable import KnowTypeProviders
-@testable import KnowTypeSettingsApp
+@testable import KnowTypeSettingsUI
 
 final class ProviderProfilesPresentationTests: XCTestCase {
     func testListItemUsesSavedDisplayNameAndProviderKind() {

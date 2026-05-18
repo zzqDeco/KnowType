@@ -1,5 +1,5 @@
 import XCTest
-@testable import KnowTypeSettingsApp
+@testable import KnowTypeSettingsUI
 
 final class DebugInstallGuidanceTests: XCTestCase {
     func testGuidanceIncludesSeparateDiagnosticAndSelectionSteps() {

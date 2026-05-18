@@ -240,6 +240,60 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testAdaptivePagedStateUsesSixVisibleRowsAndKeepsShortCandidatesHorizontal() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(defaultTextWidth: 32),
+            makePanel: { _ in window }
+        )
+        let candidates = (1...9).map { "候选\($0)" }
+
+        controller.update(
+            state: visibleState(
+                anchor: CGRect(x: 100, y: 400, width: 0, height: 18),
+                prefixTexts: candidates,
+                paging: CandidatePanelPagingState(pageSize: 6),
+                layoutMode: .adaptive
+            ),
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(contentView.models.first?.rows.map(\.text), Array(candidates[0..<6]))
+        XCTAssertEqual(contentView.layoutPlans.first?.items.count, 6)
+        XCTAssertEqual(contentView.layoutPlans.first?.orientation, .horizontal)
+    }
+
+    @MainActor
+    func testVerticalPreferredPagedStateKeepsNineRowsVertical() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(defaultTextWidth: 32),
+            makePanel: { _ in window }
+        )
+        let candidates = (1...9).map { "候选\($0)" }
+
+        controller.update(
+            state: visibleState(
+                anchor: CGRect(x: 100, y: 400, width: 0, height: 18),
+                prefixTexts: candidates,
+                paging: CandidatePanelPagingState(pageSize: 9),
+                layoutMode: .verticalPreferred
+            ),
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(contentView.models.first?.rows.map(\.text), candidates)
+        XCTAssertEqual(contentView.layoutPlans.first?.items.count, 9)
+        XCTAssertEqual(contentView.layoutPlans.first?.orientation, .vertical)
+    }
+
+    @MainActor
     func testWindowResizesBeforeContentViewLaysOutMeasuredRows() {
         let operationLog = CandidatePanelWindowOperationLog()
         let contentView = FakeCandidatePanelContentRenderer(operationLog: operationLog)
@@ -277,7 +331,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
     private func visibleState(
         anchor: CGRect,
         prefixTexts: [String] = [],
-        paging: CandidatePanelPagingState = CandidatePanelPagingState()
+        paging: CandidatePanelPagingState = CandidatePanelPagingState(),
+        layoutMode: CandidatePanelLayoutMode = .adaptive
     ) -> CandidatePanelState {
         CandidatePanelState(
             windowState: CandidatePanelWindowState(
@@ -295,7 +350,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                     },
                     continuationCandidates: []
                 ),
-                paging: paging
+                paging: paging,
+                layoutMode: layoutMode
             )
         )
     }

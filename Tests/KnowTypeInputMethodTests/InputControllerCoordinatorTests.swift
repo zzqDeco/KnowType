@@ -105,24 +105,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "nishishei" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
-        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
-        let segmentIndex = try XCTUnwrap(
-            viewModel.prefixCandidates.firstIndex {
-                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
-            }
-        )
-        XCTAssertLessThan(segmentIndex, 9)
-
-        let shortcutNumber = segmentIndex + 1
-        let handled = coordinator.handle(
-            stroke: InputKeyStroke(
-                text: String(shortcutNumber),
-                keyCode: keyCode(forNumber: shortcutNumber)
-            ),
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
             client: client
         )
-
-        XCTAssertTrue(handled)
         XCTAssertEqual(client.markedTextWrites.last?.text, "你shishei")
         XCTAssertEqual(client.insertTextWrites.count, 0)
 
@@ -474,7 +463,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
             client: client,
-            enablesAsyncSuggestionRefresh: true
+            enablesAsyncSuggestionRefresh: true,
+            runtimePreferences: InputMethodRuntimePreferences(cloudContinuationEnabled: false)
         )
 
         for character in "nishishei" {
@@ -520,6 +510,51 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁还有进一步优化空间")
+    }
+
+    @MainActor
+    func testFullyResolvedSegmentSelectionHonorsDisabledLocalContinuationsWithoutProvider() async throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true,
+            runtimePreferences: InputMethodRuntimePreferences(localContinuationEnabledWhenNoProvider: false)
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFirstSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            } == true
+        }
+        XCTAssertTrue(hasFirstSegment)
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        let hasSecondSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "是谁" && $0.rawRange == KnowTypeCore.TextRange(start: 2, length: 7)
+            } == true
+        }
+        XCTAssertTrue(hasSecondSegment)
+        try selectCandidate(
+            text: "是谁",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 7),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "你是谁")
+        XCTAssertTrue(
+            host.panelStates.last?.windowState.viewModel.continuationCandidates.isEmpty == true
+        )
     }
 
     @MainActor
@@ -756,12 +791,45 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
     #endif
 
+    func testAdaptiveRuntimePreferencesCapCandidatePanelPageSizeAtSix() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            runtimePreferences: InputMethodRuntimePreferences(
+                candidatePageSize: 9,
+                candidateLayoutMode: .adaptive
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.paging.pageSize, 6)
+        XCTAssertEqual(host.panelStates.last?.windowState.layoutMode, .adaptive)
+    }
+
+    func testVerticalRuntimePreferencesKeepConfiguredCandidatePanelPageSize() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            runtimePreferences: InputMethodRuntimePreferences(
+                candidatePageSize: 9,
+                candidateLayoutMode: .verticalPreferred
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.paging.pageSize, 9)
+        XCTAssertEqual(host.panelStates.last?.windowState.layoutMode, .verticalPreferred)
+    }
+
     private func makeCoordinator(
         client: FakeInputControllerClient,
         persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence(),
         provider: (any LLMProvider)? = nil,
         enablesAsyncSuggestionRefresh: Bool = false,
-        lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: [])
+        lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
+        runtimePreferences: InputMethodRuntimePreferences = .standard
     ) -> (
         InputControllerCoordinator,
         FakeInputControllerHost,
@@ -775,6 +843,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
             lexiconRuntimeSnapshot: lexiconRuntime.snapshot(),
             lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: FixedInputModePreferenceStore(),
+            runtimePreferenceStore: FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
+            initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: client.bundleIdentifier,
             userSelectionHistoryPersistence: persistence,
             host: host,
@@ -801,8 +871,18 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 $0.text == text && $0.rawRange == rawRange
             }
         )
-        XCTAssertLessThan(index, 9)
-        let shortcutNumber = index + 1
+        let pageSize = try XCTUnwrap(host.panelStates.last?.windowState.paging.pageSize)
+        let targetPage = index / pageSize
+        while (host.panelStates.last?.windowState.paging.currentPage ?? 0) < targetPage {
+            XCTAssertTrue(
+                coordinator.handle(
+                    stroke: InputKeyStroke(text: "", keyCode: 121),
+                    client: client
+                )
+            )
+        }
+        let shortcutNumber = index - targetPage * pageSize + 1
+        XCTAssertLessThanOrEqual(shortcutNumber, pageSize)
         XCTAssertTrue(
             coordinator.handle(
                 stroke: InputKeyStroke(
@@ -854,6 +934,16 @@ private struct FixedInputModePreferenceStore: InputModePreferenceStore {
     }
 
     func savePreferences(_ preferences: InputModePreferences) throws {}
+}
+
+private struct FixedInputMethodRuntimePreferenceStore: InputMethodRuntimePreferenceStore {
+    var preferences = InputMethodRuntimePreferences.standard
+
+    func loadPreferences() -> InputMethodRuntimePreferences {
+        preferences
+    }
+
+    func savePreferences(_ preferences: InputMethodRuntimePreferences) throws {}
 }
 
 private actor RecordingContinuationProvider: LLMProvider {
