@@ -58,7 +58,9 @@ Sources/KnowTypeCore/          Product models, protection rules, correction, con
 Sources/KnowTypeProviders/     Provider profiles, runtime loading, adapters, HTTP normalization
 Sources/KnowTypeInputMethod/   IMK controller, session actions, candidate panel, key behavior
 Sources/KnowTypeInputMethodApp Local macOS input-method app entry point
-Sources/KnowTypeSettingsApp/   SwiftUI settings and provider profile editing
+Sources/KnowTypeSettingsUI/    Shared SwiftUI settings and provider profile editing
+Sources/KnowTypeSettingsApp/   Standalone settings app host
+Sources/KnowTypePreferencePane/ System Settings preference pane host
 Tests/                         Unit tests for core behavior, providers, and input method logic
 doc/                           Current architecture, interface, acceptance, and source notes
 plan/                          Active or recently delivered implementation plans

@@ -15,7 +15,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
         let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
-        let initialLexiconState = lexiconRuntime.initialEngineState()
+        let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
+        let runtimePreferences = runtimePreferenceStore.loadPreferences()
+        let initialLexiconState = lexiconRuntime.initialEngineState(scheme: runtimePreferences.inputScheme)
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
@@ -29,6 +31,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             lexiconRuntimeSnapshot: initialLexiconState.snapshot,
             lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: inputModePreferenceStore,
+            runtimePreferenceStore: runtimePreferenceStore,
+            initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: initialClient?.bundleIdentifier,
             userSelectionHistoryPersistence: historyPersistence,
             host: hostAdapter,
@@ -84,6 +88,18 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 | NSEvent.EventTypeMask.keyUp.rawValue
                 | NSEvent.EventTypeMask.flagsChanged.rawValue
         )
+    }
+
+    public override func menu() -> NSMenu! {
+        let menu = NSMenu(title: "KnowType")
+        let preferencesItem = NSMenuItem(
+            title: "KnowType Settings...",
+            action: #selector(showPreferences(_:)),
+            keyEquivalent: ","
+        )
+        preferencesItem.target = self
+        menu.addItem(preferencesItem)
+        return menu
     }
 
     public override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {

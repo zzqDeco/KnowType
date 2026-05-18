@@ -33,7 +33,9 @@ git diff --check
 - `Sources/KnowTypeProviders/`: provider configuration, HTTP client abstraction, response normalization, and protocol adapters.
 - `Sources/KnowTypeInputMethod/`: IMK controller, input actions, candidate state, candidate panel, and key behavior.
 - `Sources/KnowTypeInputMethodApp/`: local input method app entry point.
-- `Sources/KnowTypeSettingsApp/`: SwiftUI settings and provider profile editing.
+- `Sources/KnowTypeSettingsUI/`: shared SwiftUI settings and provider profile editing.
+- `Sources/KnowTypeSettingsApp/`: standalone settings app host.
+- `Sources/KnowTypePreferencePane/`: System Settings preference pane host.
 - `Tests/`: unit tests for product behavior, providers, and input-method logic.
 - `doc/`: current architecture, interface, source notes, and acceptance docs.
 - `plan/`: active or recently delivered implementation plans.

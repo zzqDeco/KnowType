@@ -64,7 +64,11 @@ final class CandidatePanelWindowController {
         )
 
         let panel = candidatePanel()
-        guard let layoutPlan = layoutEngine.layout(
+        let effectiveLayoutEngine = CandidatePanelLayoutEngine(
+            configuration: CandidatePanelLayoutConfiguration(layoutMode: windowState.layoutMode),
+            textMeasurer: layoutEngine.textMeasurer
+        )
+        guard let layoutPlan = effectiveLayoutEngine.layout(
             model: renderModel,
             anchorRect: windowState.anchorRect,
             screenProvider: screenProvider

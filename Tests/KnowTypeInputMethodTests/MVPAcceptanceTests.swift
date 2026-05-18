@@ -48,6 +48,36 @@ final class MVPAcceptanceTests: XCTestCase {
         XCTAssertTrue(response.continuationCandidates.isEmpty)
     }
 
+    func testRuntimePreferencesCanDisableLocalFallbackContinuations() {
+        let response = InputMethodPipeline.localSuggestions(
+            for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN),
+            includeFallbackContinuations: true,
+            runtimePreferences: InputMethodRuntimePreferences(localContinuationEnabledWhenNoProvider: false)
+        )
+
+        XCTAssertEqual(response.lockedPrefix?.text, "我觉得这个方案")
+        XCTAssertFalse(response.prefixCandidates.isEmpty)
+        XCTAssertTrue(response.continuationCandidates.isEmpty)
+    }
+
+    func testRuntimePreferencesCanDisableCloudContinuations() async {
+        let provider = RecordingMVPProvider()
+        let pipeline = InputMethodPipeline(
+            provider: provider,
+            runtimePreferences: InputMethodRuntimePreferences(cloudContinuationEnabled: false)
+        )
+
+        let response = await pipeline.suggestions(
+            for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN)
+        )
+
+        XCTAssertEqual(response.lockedPrefix?.text, "我觉得这个方案")
+        XCTAssertFalse(response.prefixCandidates.isEmpty)
+        XCTAssertTrue(response.continuationCandidates.isEmpty)
+        let tasks = await provider.currentTasks()
+        XCTAssertFalse(tasks.contains(.continuation))
+    }
+
     func testMixedInputKeepsTechnicalTokensAndCommitsContinuation() async {
         let pipeline = InputMethodPipeline()
         let response = await pipeline.suggestions(
@@ -121,5 +151,21 @@ final class MVPAcceptanceTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .polishRequested("我觉得这个接口慢"))
+    }
+}
+
+private actor RecordingMVPProvider: LLMProvider {
+    nonisolated let providerName = "recording-mvp"
+    private var tasks: [LLMTask] = []
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        tasks.append(request.task)
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "provider continuation")
+        ])
+    }
+
+    func currentTasks() -> [LLMTask] {
+        tasks
     }
 }

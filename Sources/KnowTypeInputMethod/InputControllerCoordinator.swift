@@ -23,6 +23,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var locale: KnowTypeLocale = .mixed
     private let inputModePreferenceStore: any InputModePreferenceStore
     private var inputModeRuntime: InputModePreferenceRuntime
+    private let runtimePreferenceStore: any InputMethodRuntimePreferenceStore
+    private var runtimePreferences: InputMethodRuntimePreferences
     private var suggestionTask: Task<Void, Never>?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
@@ -40,6 +42,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot,
         lexiconRuntime: InputMethodLexiconRuntime = .defaultRuntime(),
         inputModePreferenceStore: any InputModePreferenceStore,
+        runtimePreferenceStore: any InputMethodRuntimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore(),
+        initialRuntimePreferences: InputMethodRuntimePreferences? = nil,
         initialAppBundleID: String?,
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         host: InputControllerHost,
@@ -47,6 +51,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         enablesAsyncSuggestionRefresh: Bool = true
     ) {
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
+        let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
         self.provider = provider
         self.hasProvider = provider != nil
         self.traditionalInputEngine = traditionalInputEngine
@@ -54,9 +59,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.lexiconRuntime = lexiconRuntime
         self.sessionController = InputSessionController(
             provider: provider,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
         )
         self.inputModePreferenceStore = inputModePreferenceStore
+        self.runtimePreferenceStore = runtimePreferenceStore
+        self.runtimePreferences = runtimePreferences
         self.inputModeRuntime = InputModePreferenceRuntime(
             preferences: inputModePreferences,
             appBundleID: initialAppBundleID
@@ -277,10 +285,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let currentCompositionID = compositionID
         let compositionSnapshot = compositionBuffer
         let engineSnapshot = traditionalInputEngine
+        let runtimePreferencesSnapshot = runtimePreferences
         let sessionController = sessionController
         suggestionGeneration += 1
         let generation = suggestionGeneration
-        suggestionTask = Task { [weak self, sessionController, engineSnapshot, compositionSnapshot] in
+        suggestionTask = Task { [weak self, sessionController, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
             let context = InputContext(
                 rawInput: rawInput,
                 appBundleID: appBundleID,
@@ -292,7 +301,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 suggestion = InputMethodPipeline.localSuggestions(
                     for: context,
                     includeFallbackContinuations: false,
-                    traditionalInputEngine: engineSnapshot
+                    traditionalInputEngine: engineSnapshot,
+                    runtimePreferences: runtimePreferencesSnapshot
                 )
             } else {
                 suggestion = await sessionController.update(
@@ -360,12 +370,26 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: currentLocale,
             userSelectionHistory: userSelectionHistory
         )
-        guard let provider else {
-            let continuations = PrefixContinuationEngine().fallbackContinuations(
-                for: lockedPrefixText,
-                lengthLevel: .medium,
-                maxCandidates: InputMethodPipeline.defaultMaxContinuationCandidates
+        guard runtimePreferences.cloudContinuationEnabled else {
+            let suggestion = resolvedCompositionSuggestion(
+                lockedPrefix: lockedPrefix,
+                continuations: [],
+                fallbackLatency: lastSuggestion?.latencyMs ?? 0
             )
+            lastSuggestion = suggestion
+            lastSuggestionRawInput = rawInput
+            refreshComposition(client: client)
+            updateCandidatePanel(suggestion: suggestion, client: client)
+            return
+        }
+        guard let provider else {
+            let continuations = runtimePreferences.localContinuationEnabledWhenNoProvider
+                ? PrefixContinuationEngine().fallbackContinuations(
+                    for: lockedPrefixText,
+                    lengthLevel: runtimePreferences.continuationLengthLevel,
+                    maxCandidates: runtimePreferences.maxContinuationCandidates
+                )
+                : []
             let suggestion = resolvedCompositionSuggestion(
                 lockedPrefix: lockedPrefix,
                 continuations: continuations,
@@ -384,8 +408,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             let continuations = await PrefixContinuationEngine(provider: provider).continuations(
                 for: lockedPrefix,
                 context: context,
-                lengthLevel: .medium,
-                maxCandidates: InputMethodPipeline.defaultMaxContinuationCandidates
+                lengthLevel: self.runtimePreferences.continuationLengthLevel,
+                maxCandidates: self.runtimePreferences.maxContinuationCandidates
             )
             guard !Task.isCancelled else {
                 return
@@ -498,7 +522,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let suggestion = InputMethodPipeline.localSuggestions(
             for: context,
             includeFallbackContinuations: !hasProvider,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
         )
         let augmentedSuggestion = augmentedSuggestion(suggestion)
         lastSuggestion = augmentedSuggestion
@@ -908,6 +933,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             appBundleID: appBundleIdentifier(client: client),
             locale: locale,
             traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences,
             allowsSynchronousFallback: !enablesAsyncSuggestionRefresh
         )
     }
@@ -937,7 +963,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let suggestion = InputMethodPipeline.localSuggestions(
             for: context,
             includeFallbackContinuations: action == .tab,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
         )
         return (augmentedSuggestion(suggestion), rawBuffer, true)
     }
@@ -1013,6 +1040,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
         if rawBuffer.isEmpty {
             reloadInputModeDefaultsIfNeeded(client: client)
+            reloadRuntimePreferencesIfNeeded()
             reloadRuntimeLexiconEngineIfNeeded()
             compositionBuffer = CompositionBuffer()
             compositionID += 1
@@ -1027,21 +1055,36 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
+    private func reloadRuntimePreferencesIfNeeded() {
+        let preferences = runtimePreferenceStore.loadPreferences()
+        guard preferences != runtimePreferences else {
+            return
+        }
+        runtimePreferences = preferences
+        sessionController = InputSessionController(
+            provider: provider,
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
+        )
+        invalidateSuggestion()
+    }
+
     private func reloadRuntimeLexiconEngineIfNeeded() {
         guard !enablesAsyncSuggestionRefresh else {
             scheduleRuntimeLexiconReloadIfNeeded()
             return
         }
-        let snapshot = lexiconRuntime.snapshot()
+        let snapshot = lexiconRuntime.snapshot(scheme: runtimePreferences.inputScheme)
         guard snapshot != lexiconRuntimeSnapshot else {
             return
         }
 
-        traditionalInputEngine = lexiconRuntime.makeEngine()
+        traditionalInputEngine = lexiconRuntime.makeEngine(scheme: runtimePreferences.inputScheme)
         lexiconRuntimeSnapshot = snapshot
         sessionController = InputSessionController(
             provider: provider,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
         )
         invalidateSuggestion()
     }
@@ -1049,15 +1092,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func scheduleRuntimeLexiconReloadIfNeeded() {
         let currentSnapshot = lexiconRuntimeSnapshot
         let lexiconRuntime = lexiconRuntime
+        let scheme = runtimePreferences.inputScheme
+        let runtimePreferences = runtimePreferences
         runtimeReloadGeneration += 1
         let generation = runtimeReloadGeneration
         runtimeReloadTask?.cancel()
-        runtimeReloadTask = Task { [weak self, lexiconRuntime, currentSnapshot, generation] in
-            let snapshot = lexiconRuntime.snapshot()
+        runtimeReloadTask = Task { [weak self, lexiconRuntime, currentSnapshot, scheme, runtimePreferences, generation] in
+            let snapshot = lexiconRuntime.snapshot(scheme: scheme)
             guard snapshot != currentSnapshot, !Task.isCancelled else {
                 return
             }
-            let engine = lexiconRuntime.makeEngine()
+            let engine = lexiconRuntime.makeEngine(scheme: scheme)
             guard !Task.isCancelled else {
                 return
             }
@@ -1073,7 +1118,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 InputMethodLexiconRuntime.cacheEngine(engine, snapshot: snapshot)
                 self.sessionController = InputSessionController(
                     provider: self.provider,
-                    traditionalInputEngine: engine
+                    traditionalInputEngine: engine,
+                    runtimePreferences: runtimePreferences
                 )
                 self.invalidateSuggestion()
                 if !self.rawBuffer.isEmpty {
@@ -1113,7 +1159,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawInput: rawBuffer,
             suggestion: suggestion,
             anchorRect: anchorResult.rect,
-            isDisplayable: isDisplayable
+            isDisplayable: isDisplayable,
+            pageSize: runtimePreferences.candidatePageSize,
+            layoutMode: runtimePreferences.candidateLayoutMode
         )
         selectedNativeCandidate = candidatePanelState.windowState.isVisible
             ? inputCandidateSelection(

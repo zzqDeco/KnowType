@@ -11,7 +11,9 @@ let package = Package(
     products: [
         .library(name: "KnowTypeCore", targets: ["KnowTypeCore"]),
         .library(name: "KnowTypeProviders", targets: ["KnowTypeProviders"]),
+        .library(name: "KnowTypeSettingsUI", targets: ["KnowTypeSettingsUI"]),
         .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"]),
+        .library(name: "KnowTypePreferencePane", type: .dynamic, targets: ["KnowTypePreferencePane"]),
         .executable(name: "KnowTypeSettingsApp", targets: ["KnowTypeSettingsApp"]),
         .executable(name: "KnowTypeInputMethodApp", targets: ["KnowTypeInputMethodApp"]),
         .executable(name: "knowtype-inputsource-tool", targets: ["KnowTypeInputSourceTool"]),
@@ -36,7 +38,7 @@ let package = Package(
         ),
         .target(
             name: "KnowTypeInputMethod",
-            dependencies: ["KnowTypeCore", "KnowTypeProviders"],
+            dependencies: ["KnowTypeCore", "KnowTypeProviders", "KnowTypeSettingsUI"],
             path: "Sources/KnowTypeInputMethod",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
@@ -46,15 +48,33 @@ let package = Package(
         ),
         .executableTarget(
             name: "KnowTypeSettingsApp",
-            dependencies: ["KnowTypeCore", "KnowTypeProviders"],
+            dependencies: ["KnowTypeSettingsUI"],
             path: "Sources/KnowTypeSettingsApp",
             linkerSettings: [
                 .linkedFramework("SwiftUI", .when(platforms: [.macOS]))
             ]
         ),
+        .target(
+            name: "KnowTypeSettingsUI",
+            dependencies: ["KnowTypeCore", "KnowTypeProviders"],
+            path: "Sources/KnowTypeSettingsUI",
+            linkerSettings: [
+                .linkedFramework("SwiftUI", .when(platforms: [.macOS]))
+            ]
+        ),
+        .target(
+            name: "KnowTypePreferencePane",
+            dependencies: ["KnowTypeSettingsUI"],
+            path: "Sources/KnowTypePreferencePane",
+            linkerSettings: [
+                .linkedFramework("AppKit", .when(platforms: [.macOS])),
+                .linkedFramework("PreferencePanes", .when(platforms: [.macOS])),
+                .linkedFramework("SwiftUI", .when(platforms: [.macOS]))
+            ]
+        ),
         .executableTarget(
             name: "KnowTypeInputMethodApp",
-            dependencies: ["KnowTypeInputMethod"],
+            dependencies: ["KnowTypeCore", "KnowTypeInputMethod"],
             path: "Sources/KnowTypeInputMethodApp",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
@@ -91,7 +111,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KnowTypeSettingsAppTests",
-            dependencies: ["KnowTypeCore", "KnowTypeSettingsApp", "KnowTypeProviders"],
+            dependencies: ["KnowTypeCore", "KnowTypeSettingsUI", "KnowTypeProviders"],
             path: "Tests/KnowTypeSettingsAppTests"
         ),
         .testTarget(

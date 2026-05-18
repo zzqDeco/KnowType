@@ -95,7 +95,7 @@ public struct PinyinInputAnalysis: Codable, Sendable, Equatable {
 }
 
 public struct TraditionalInputEngine: Sendable {
-    public enum Scheme: String, Codable, Sendable, Equatable {
+    public enum Scheme: String, Codable, Sendable, Equatable, CaseIterable {
         case fullPinyin
         case xiaohe
     }

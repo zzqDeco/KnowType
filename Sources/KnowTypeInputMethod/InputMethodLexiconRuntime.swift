@@ -3,9 +3,14 @@ import KnowTypeCore
 
 public struct InputMethodLexiconRuntimeSnapshot: Sendable, Equatable {
     public var directories: [InputMethodLexiconDirectorySnapshot]
+    public var scheme: TraditionalInputEngine.Scheme
 
-    public init(directories: [InputMethodLexiconDirectorySnapshot]) {
+    public init(
+        directories: [InputMethodLexiconDirectorySnapshot],
+        scheme: TraditionalInputEngine.Scheme = .fullPinyin
+    ) {
         self.directories = directories
+        self.scheme = scheme
     }
 
     public var hasLexiconResources: Bool {
@@ -93,27 +98,36 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
         return TraditionalInputLexiconCatalog(entries: entries, diagnostics: diagnostics)
     }
 
-    public func makeEngine(fileManager: FileManager = .default) -> TraditionalInputEngine {
-        loadCatalog(fileManager: fileManager).makeEngine()
+    public func makeEngine(
+        scheme: TraditionalInputEngine.Scheme = .fullPinyin,
+        fileManager: FileManager = .default
+    ) -> TraditionalInputEngine {
+        loadCatalog(fileManager: fileManager).makeEngine(scheme: scheme)
     }
 
-    public func initialEngineState(fileManager: FileManager = .default) -> InputMethodLexiconRuntimeEngineState {
-        let snapshot = snapshot(fileManager: fileManager)
+    public func initialEngineState(
+        scheme: TraditionalInputEngine.Scheme = .fullPinyin,
+        fileManager: FileManager = .default
+    ) -> InputMethodLexiconRuntimeEngineState {
+        let snapshot = snapshot(scheme: scheme, fileManager: fileManager)
         if let cachedEngine = InputMethodLexiconRuntimeEngineCache.shared.engine(for: snapshot) {
             return InputMethodLexiconRuntimeEngineState(engine: cachedEngine, snapshot: snapshot)
         }
         guard snapshot.hasLexiconResources else {
-            let engine = TraditionalInputEngine()
+            let engine = TraditionalInputEngine(scheme: scheme)
             InputMethodLexiconRuntimeEngineCache.shared.store(engine: engine, snapshot: snapshot)
             return InputMethodLexiconRuntimeEngineState(engine: engine, snapshot: snapshot)
         }
 
-        let engine = makeEngine(fileManager: fileManager)
+        let engine = makeEngine(scheme: scheme, fileManager: fileManager)
         InputMethodLexiconRuntimeEngineCache.shared.store(engine: engine, snapshot: snapshot)
         return InputMethodLexiconRuntimeEngineState(engine: engine, snapshot: snapshot)
     }
 
-    public func snapshot(fileManager: FileManager = .default) -> InputMethodLexiconRuntimeSnapshot {
+    public func snapshot(
+        scheme: TraditionalInputEngine.Scheme = .fullPinyin,
+        fileManager: FileManager = .default
+    ) -> InputMethodLexiconRuntimeSnapshot {
         InputMethodLexiconRuntimeSnapshot(
             directories: directories.map { directory in
                 guard isDirectory(directory, fileManager: fileManager) else {
@@ -131,7 +145,8 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
                         resourceSnapshot(for: file)
                     }
                 )
-            }
+            },
+            scheme: scheme
         )
     }
 
@@ -145,23 +160,24 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
     public static func defaultEngine(
         environment: [String: String],
         homeDirectory: URL,
+        scheme: TraditionalInputEngine.Scheme = .fullPinyin,
         fileManager: FileManager = .default
     ) -> TraditionalInputEngine {
         defaultRuntime(
             environment: environment,
             homeDirectory: homeDirectory
         )
-        .makeEngine(fileManager: fileManager)
+        .makeEngine(scheme: scheme, fileManager: fileManager)
     }
 
-    public static func prewarmDefaultEngine() {
+    public static func prewarmDefaultEngine(scheme: TraditionalInputEngine.Scheme = .fullPinyin) {
         let runtime = defaultRuntime()
-        let snapshot = runtime.snapshot()
+        let snapshot = runtime.snapshot(scheme: scheme)
         guard snapshot.hasLexiconResources,
               InputMethodLexiconRuntimeEngineCache.shared.engine(for: snapshot) == nil else {
             return
         }
-        let engine = runtime.makeEngine()
+        let engine = runtime.makeEngine(scheme: scheme)
         InputMethodLexiconRuntimeEngineCache.shared.store(engine: engine, snapshot: snapshot)
     }
 

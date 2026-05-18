@@ -2,6 +2,7 @@
 import AppKit
 import Carbon
 import InputMethodKit
+import KnowTypeCore
 import KnowTypeInputMethod
 import OSLog
 
@@ -173,7 +174,8 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
             "KnowTypeInputMethodApp launched bundle=\(bundleIdentifier, privacy: .public) connection=\(connectionName, privacy: .public)"
         )
         Task.detached(priority: .utility) {
-            InputMethodLexiconRuntime.prewarmDefaultEngine()
+            let preferences = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore().loadPreferences()
+            InputMethodLexiconRuntime.prewarmDefaultEngine(scheme: preferences.inputScheme)
         }
         let shouldSelectMode = CommandLine.arguments.contains("--knowtype-install-activate")
         if shouldSelectMode {

@@ -116,6 +116,7 @@ done < <(find "$ROOT_DIR/scripts" -type f -name '*.sh' | sort)
 help_scripts=(
   "$ROOT_DIR/scripts/accept-inputmethod-local.sh"
   "$ROOT_DIR/scripts/build-inputmethod-bundle.sh"
+  "$ROOT_DIR/scripts/build-preference-pane.sh"
   "$ROOT_DIR/scripts/create-local-system-policy-profile.sh"
   "$ROOT_DIR/scripts/diagnose-inputmethod.sh"
   "$ROOT_DIR/scripts/install-inputmethod.sh"
@@ -149,6 +150,23 @@ assert_equals "com.knowtype.inputmethod.KnowType" \
 assert_equals "KnowTypeInputMethodApp" \
   "$(plist_read ":CFBundleExecutable" "$bundle_path/Contents/Info.plist")" \
   "CFBundleExecutable"
+
+prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"
+assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"
+assert_dir "$prefpane_path"
+assert_file "$prefpane_path/Contents/Info.plist"
+assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
+[[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
+  die "PreferencePane executable is not executable"
+assert_equals "com.knowtype.preferencepane" \
+  "$(plist_read ":CFBundleIdentifier" "$prefpane_path/Contents/Info.plist")" \
+  "PreferencePane CFBundleIdentifier"
+assert_equals "KnowTypePreferencePane" \
+  "$(plist_read ":CFBundleExecutable" "$prefpane_path/Contents/Info.plist")" \
+  "PreferencePane CFBundleExecutable"
+assert_equals "KnowTypePreferencePane" \
+  "$(plist_read ":NSPrincipalClass" "$prefpane_path/Contents/Info.plist")" \
+  "PreferencePane NSPrincipalClass"
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-profile-smoke.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT

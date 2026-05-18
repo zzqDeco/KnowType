@@ -9,11 +9,14 @@ public struct InputMethodPipeline: Sendable {
 
     private let correctionEngine: CorrectionEngine
     private let continuationEngine: PrefixContinuationEngine
+    private let runtimePreferences: InputMethodRuntimePreferences
 
     public init(
         provider: (any LLMProvider)? = nil,
-        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        runtimePreferences: InputMethodRuntimePreferences = .standard
     ) {
+        self.runtimePreferences = runtimePreferences
         self.correctionEngine = CorrectionEngine(
             cloudProvider: provider,
             traditionalInputEngine: traditionalInputEngine
@@ -36,12 +39,13 @@ public struct InputMethodPipeline: Sendable {
             )
         }
         let continuations: [ContinuationCandidate]
-        if let locked {
+        if let locked,
+           runtimePreferences.cloudContinuationEnabled {
             continuations = await continuationEngine.continuations(
                 for: locked,
                 context: context,
-                lengthLevel: .medium,
-                maxCandidates: Self.defaultMaxContinuationCandidates
+                lengthLevel: runtimePreferences.continuationLengthLevel,
+                maxCandidates: runtimePreferences.maxContinuationCandidates
             )
         } else {
             continuations = []
@@ -59,7 +63,8 @@ public struct InputMethodPipeline: Sendable {
     public static func localSuggestions(
         for context: InputContext,
         includeFallbackContinuations: Bool = true,
-        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        runtimePreferences: InputMethodRuntimePreferences = .standard
     ) -> SuggestionResponse {
         let correctionEngine = CorrectionEngine(traditionalInputEngine: traditionalInputEngine)
         let continuationEngine = PrefixContinuationEngine()
@@ -77,13 +82,14 @@ public struct InputMethodPipeline: Sendable {
         }
         let continuations: [ContinuationCandidate]
         if includeFallbackContinuations,
+           runtimePreferences.localContinuationEnabledWhenNoProvider,
            let locked,
            !TextProtection.requiresNoCorrection(locked.text, appBundleID: context.appBundleID),
            !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             continuations = continuationEngine.fallbackContinuations(
                 for: locked.text,
-                lengthLevel: .medium,
-                maxCandidates: Self.defaultMaxContinuationCandidates
+                lengthLevel: runtimePreferences.continuationLengthLevel,
+                maxCandidates: runtimePreferences.maxContinuationCandidates
             )
         } else {
             continuations = []

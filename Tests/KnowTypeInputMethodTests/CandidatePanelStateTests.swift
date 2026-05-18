@@ -93,6 +93,23 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
     }
 
+    func testConfiguredPageSizeAndLayoutModeAreStoredInWindowState() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "candidate",
+            suggestion: multiPagePrefixSuggestion(count: 12),
+            pageSize: 6,
+            layoutMode: .verticalPreferred
+        )
+
+        XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 0, pageSize: 6))
+        XCTAssertEqual(state.windowState.layoutMode, .verticalPreferred)
+
+        XCTAssertTrue(state.moveSelection(.pageDown))
+        XCTAssertEqual(state.windowState.paging, CandidatePanelPagingState(currentPage: 1, pageSize: 6))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(6))
+    }
+
     func testPageDownClampsPreservedOffsetOnShortLastPage() {
         var state = CandidatePanelState()
         state.update(rawInput: "candidate", suggestion: multiPagePrefixSuggestion(count: 12))

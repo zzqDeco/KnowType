@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import KnowTypeCore
 
 enum CandidatePanelLayoutOrientation: Sendable, Equatable {
     case horizontal
@@ -46,6 +47,13 @@ struct CandidatePanelLayoutConfiguration: Sendable, Equatable {
     var verticalAnchorSpacing: CGFloat = 6
     var minimumHorizontalCandidateCount: Int = 4
     var maximumHorizontalCandidateCount: Int = 6
+
+    init(layoutMode: CandidatePanelLayoutMode = .adaptive) {
+        if layoutMode == .verticalPreferred {
+            minimumHorizontalCandidateCount = Int.max
+            maximumHorizontalCandidateCount = Int.max
+        }
+    }
 }
 
 protocol CandidatePanelTextMeasuring {

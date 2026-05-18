@@ -1,6 +1,6 @@
 import XCTest
 import KnowTypeCore
-@testable import KnowTypeSettingsApp
+@testable import KnowTypeSettingsUI
 
 final class InputModePreferencesViewModelTests: XCTestCase {
     @MainActor

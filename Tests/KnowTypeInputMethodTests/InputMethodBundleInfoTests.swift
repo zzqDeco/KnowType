@@ -17,6 +17,30 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(script.contains("/Apple Development/"))
     }
 
+    func testPreferencePaneBuildScriptPackagesSystemSettingsPane() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let package = try String(contentsOf: rootURL.appendingPathComponent("Package.swift"), encoding: .utf8)
+        let script = try String(contentsOf: rootURL.appendingPathComponent("scripts/build-preference-pane.sh"), encoding: .utf8)
+        let plistData = try Data(contentsOf: rootURL.appendingPathComponent("Resources/PreferencePane/Info.plist"))
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any]
+        )
+
+        XCTAssertTrue(package.contains(#".library(name: "KnowTypePreferencePane", type: .dynamic"#))
+        XCTAssertTrue(package.contains(#".linkedFramework("PreferencePanes", .when(platforms: [.macOS]))"#))
+        XCTAssertTrue(script.contains("--product KnowTypePreferencePane"))
+        XCTAssertTrue(script.contains("libKnowTypePreferencePane.dylib"))
+        XCTAssertTrue(script.contains("KnowType.prefPane"))
+        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.knowtype.preferencepane")
+        XCTAssertEqual(plist["CFBundleExecutable"] as? String, "KnowTypePreferencePane")
+        XCTAssertEqual(plist["NSPrincipalClass"] as? String, "KnowTypePreferencePane")
+        XCTAssertEqual(plist["CFBundlePackageType"] as? String, "BNDL")
+    }
+
     func testInputSourceScriptsUseDedicatedHelperExecutable() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -30,6 +54,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         let scriptPaths = [
             "scripts/install-inputmethod.sh",
+            "scripts/build-preference-pane.sh",
             "scripts/select-inputmethod.sh",
             "scripts/diagnose-inputmethod.sh",
             "scripts/repair-inputmethod-selection.sh",
@@ -42,6 +67,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
             .joined(separator: "\n")
 
         XCTAssertTrue(scripts.contains("knowtype-inputsource-tool"))
+        XCTAssertTrue(scripts.contains("KnowType.prefPane"))
+        XCTAssertTrue(scripts.contains("~/Library/PreferencePanes"))
         XCTAssertTrue(scripts.contains("--no-diagnostic"))
         XCTAssertTrue(scripts.contains("--logs"))
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
@@ -75,6 +102,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         )
 
         XCTAssertTrue(smokeScript.contains("create-local-system-policy-profile.sh"))
+        XCTAssertTrue(smokeScript.contains("build-preference-pane.sh"))
+        XCTAssertTrue(smokeScript.contains(":NSPrincipalClass"))
         XCTAssertTrue(smokeScript.contains(":PayloadIdentifier"))
         XCTAssertTrue(smokeScript.contains(":PayloadContent:0:PayloadIdentifier"))
         XCTAssertTrue(smokeScript.contains(":PayloadContent:0:PayloadType"))
@@ -160,6 +189,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["InputMethodConnectionName"] as? String, "com.knowtype.inputmethod.KnowType_Connection")
         XCTAssertEqual(plist["InputMethodServerControllerClass"] as? String, "KnowTypeInputController")
         XCTAssertEqual(plist["InputMethodServerDelegateClass"] as? String, "KnowTypeInputController")
+        XCTAssertEqual(plist["InputMethodServerPreferencesWindowControllerClass"] as? String, "KnowTypePreferencesWindowController")
         XCTAssertEqual(plist["LSBackgroundOnly"] as? Bool, false)
         XCTAssertEqual(plist["LSHasLocalizedDisplayName"] as? Bool, true)
         XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
