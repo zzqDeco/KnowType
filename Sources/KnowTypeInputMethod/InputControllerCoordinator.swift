@@ -31,6 +31,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var userSelectionHistory: [String]
     private let enablesAsyncSuggestionRefresh: Bool
     private var suggestionGeneration = 0
+    private var runtimeReloadGeneration = 0
     private var runtimeReloadTask: Task<Void, Never>?
 
     init(
@@ -125,6 +126,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
+        runtimeReloadGeneration += 1
         runtimeReloadTask?.cancel()
         hideCandidatePanel()
     }
@@ -844,17 +846,50 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return .noAction
         }
 
+        let commitSuggestion = commitSuggestionSnapshot(for: action, client: client)
         return InputSessionCommitPolicy.result(
             for: action,
             rawInput: rawBuffer,
-            suggestion: lastSuggestion,
-            suggestionRawInput: lastSuggestionRawInput,
-            selectedCandidate: sessionSelection(from: selectedNativeCandidate),
+            suggestion: commitSuggestion.suggestion,
+            suggestionRawInput: commitSuggestion.rawInput,
+            selectedCandidate: commitSuggestion.usesPendingFallback
+                ? nil
+                : sessionSelection(from: selectedNativeCandidate),
             appBundleID: appBundleIdentifier(client: client),
             locale: locale,
             traditionalInputEngine: traditionalInputEngine,
             allowsSynchronousFallback: !enablesAsyncSuggestionRefresh
         )
+    }
+
+    private func commitSuggestionSnapshot(
+        for action: InputAction,
+        client: InputControllerClient?
+    ) -> (suggestion: SuggestionResponse?, rawInput: String?, usesPendingFallback: Bool) {
+        if SuggestionPublicationGuard.hasCurrentSuggestion(
+            suggestionRawInput: lastSuggestionRawInput,
+            currentRawInput: rawBuffer
+        ) {
+            return (lastSuggestion, lastSuggestionRawInput, false)
+        }
+        guard enablesAsyncSuggestionRefresh,
+              action == .space,
+              SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
+            return (lastSuggestion, lastSuggestionRawInput, false)
+        }
+
+        let context = InputContext(
+            rawInput: rawBuffer,
+            appBundleID: appBundleIdentifier(client: client),
+            locale: locale,
+            userSelectionHistory: userSelectionHistory
+        )
+        let suggestion = InputMethodPipeline.localSuggestions(
+            for: context,
+            includeFallbackContinuations: false,
+            traditionalInputEngine: traditionalInputEngine
+        )
+        return (augmentedSuggestion(suggestion), rawBuffer, true)
     }
 
     private func applySegmentCandidate(
@@ -933,8 +968,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func scheduleRuntimeLexiconReloadIfNeeded() {
         let currentSnapshot = lexiconRuntimeSnapshot
         let lexiconRuntime = lexiconRuntime
+        runtimeReloadGeneration += 1
+        let generation = runtimeReloadGeneration
         runtimeReloadTask?.cancel()
-        runtimeReloadTask = Task { [weak self, lexiconRuntime, currentSnapshot] in
+        runtimeReloadTask = Task { [weak self, lexiconRuntime, currentSnapshot, generation] in
             let snapshot = lexiconRuntime.snapshot()
             guard snapshot != currentSnapshot, !Task.isCancelled else {
                 return
@@ -943,8 +980,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             guard !Task.isCancelled else {
                 return
             }
-            Task { @MainActor [weak self, engine, snapshot, currentSnapshot] in
+            Task { @MainActor [weak self, engine, snapshot, currentSnapshot, generation] in
                 guard let self,
+                      self.runtimeReloadGeneration == generation,
                       self.lexiconRuntimeSnapshot == currentSnapshot,
                       snapshot != self.lexiconRuntimeSnapshot else {
                     return
