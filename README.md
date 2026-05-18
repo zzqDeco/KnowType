@@ -175,7 +175,7 @@ Local OpenAI-compatible runtimes may leave the model blank so KnowType can disco
 
 ## Input Behavior
 
-- `Space`: commit the selected full prefix candidate, or apply the selected segment inside the active composition.
+- `Space`: commit the selected visible full prefix candidate for the current raw input, or apply the selected segment inside the active composition.
 - `Return` / `Enter`: commit the original raw composition, for example `nishishei`.
 - `Tab`: commit the selected prefix plus the first or selected continuation when the prefix is fully resolved.
 - `0`: commit the raw composition when correction candidates are visible.
@@ -184,9 +184,9 @@ Local OpenAI-compatible runtimes may leave the model blank so KnowType can disco
 - `Option + number`: commit the selected prefix plus the mapped continuation. `Option + 1` matches the first continuation and is displayed as `⇥` because `Tab` commits it directly.
 - `Option + R`: request polish; this is the explicit rewrite path.
 
-The Input settings tab persists default punctuation language and symbol width for normal apps and code-style apps. Terminal, iTerm, Xcode, VS Code, and Codex desktop start with the code-app defaults while keeping the Chinese text pipeline available.
+The Input settings tab persists default punctuation language and symbol width for normal apps and code-style apps. Terminal, iTerm, Xcode, VS Code, and Codex desktop start with the code-app defaults while keeping the Chinese text pipeline available; the built-in code-app punctuation default is Chinese unless the user changes it.
 
-The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows may cover the whole raw buffer or just the active segment; selecting a segment updates marked text without inserting committed text. Candidate rows are paged in 9-row windows. The panel measures candidate text before rendering, uses horizontal layout for compact 4-6 row pages, switches to vertical layout for long phrases, and avoids screen edges. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives. If that provider fails or returns no usable continuation, KnowType keeps the traditional prefix candidates and does not substitute fixed local fallback text as AI output.
+The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows may cover the whole raw buffer or just the active segment; selecting a segment updates marked text without inserting committed text. Candidate rows are paged in 9-row windows. The panel measures candidate text before rendering, uses horizontal layout for compact 4-6 row pages, switches to vertical layout for long phrases, and avoids screen edges. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives. If that provider fails or returns no usable continuation, KnowType keeps the traditional prefix candidates and does not substitute fixed local fallback text as AI output. Commit behavior follows the visible snapshot: if only raw input is visible, `Space` does not commit a hidden Chinese fallback.
 
 ## Privacy Baseline
 

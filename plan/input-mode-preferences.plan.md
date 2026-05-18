@@ -18,6 +18,7 @@ Persist KnowType punctuation preferences so Chinese punctuation, English punctua
 - The input-method controller reads preferences at controller startup and refreshes them when a new composition or direct symbol input begins:
   - normal apps use `defaultState`
   - code/terminal-style apps use `codeAppState`
+- The built-in `codeAppState` punctuation mode is Chinese; saved user preferences can still override it to English.
 - The SwiftUI Input settings tab can edit:
   - default punctuation language
   - default symbol width

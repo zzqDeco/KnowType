@@ -9,8 +9,8 @@ Current behavior:
 - writes marked text through `InputControllerClient.setMarkedText`, using raw pinyin plus resolved segment display text rather than eagerly replacing the composition with the first Chinese candidate
 - commits through `InputControllerClient.insertText` using the active marked range when available
 - maps Return/Enter to raw commit and keeps segment selection inside the marked composition until a full commit action is reached
-- publishes raw marked text and a raw candidate panel state synchronously, then refreshes correction candidates asynchronously in production
-- uses a bounded local commit fallback for Space and punctuation while async candidates are still pending, so commit keys do not insert raw pinyin just because a background suggestion has not published yet
+- publishes raw marked text and an immediate local prefix-only candidate snapshot synchronously, then refreshes provider-backed continuations asynchronously in production
+- keeps `Space` tied to the visible candidate snapshot for the current raw input, so hidden local fallback candidates cannot be committed while the panel shows only raw input
 - applies the best local remaining segment before pending Space or punctuation commits when the user has already resolved part of the composition
 - rolls back pending punctuation fallback when the remaining local segment cannot fully resolve the composition, preserving the visible partially resolved marked text
 - lets Tab and raw-input shortcuts use local pending snapshots while async candidates are still loading

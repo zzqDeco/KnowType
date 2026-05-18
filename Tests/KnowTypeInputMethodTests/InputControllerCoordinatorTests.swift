@@ -153,7 +153,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncAppendPublishesRawCompositionBeforeCandidatesArrive() async {
+    func testAsyncAppendPublishesMarkedTextAndImmediateLocalCandidates() async {
         let client = FakeInputControllerClient()
         let lexiconRuntime = InputMethodLexiconRuntime(directories: [])
         let (coordinator, host, _) = makeCoordinator(
@@ -174,12 +174,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertLessThan(milliseconds, 250)
         XCTAssertEqual(client.markedTextWrites.last?.text, "zhegeapi")
-        XCTAssertTrue(
-            host.panelStates.contains { state in
-                state.windowState.viewModel.rawInput == "zhegeapi"
-                    && state.windowState.viewModel.prefixCandidates.isEmpty
-            }
-        )
+        XCTAssertTrue(host.panelStates.contains { $0.windowState.viewModel.rawInput == "zhegeapi" })
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty ?? true)
 
         let hasCandidates = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.rawInput == "zhegeapi"
@@ -189,7 +185,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingSpaceUsesLocalCommitFallback() {
+    func testAsyncPendingSpaceCommitsVisibleLocalPrefix() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -203,6 +199,105 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(client.insertTextWrites.last?.text, "你")
         XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testAsyncPendingPublishesLocalPrefixCandidatesBeforeSpaceCommit() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "wsm" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+
+        let visiblePrefix = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
+        XCTAssertNotNil(visiblePrefix)
+        XCTAssertTrue(host.panelStates.last?.windowState.isVisible == true)
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, visiblePrefix)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testAsyncPendingProviderPathShowsLocalPrefixesWithoutFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "wsm" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertFalse(viewModel?.prefixCandidates.isEmpty ?? true)
+        XCTAssertTrue(viewModel?.continuationCandidates.isEmpty == true)
+    }
+
+    @MainActor
+    func testAsyncRawIdentityVisibleSpaceDoesNotCommitHiddenAlternative() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "vxqz" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+
+        let visiblePrefix = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
+        XCTAssertEqual(visiblePrefix, "vxqz")
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, visiblePrefix)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCodeAppDefaultsToChinesePunctuation() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
+    }
+
+    func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let preferences = InputModePreferences(
+            codeAppState: InputModeState(punctuationMode: .english, symbolWidth: .halfWidth)
+        )
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            inputModePreferences: preferences
+        )
+
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+    }
+
+    func testOptionPeriodTogglesCurrentSessionPunctuationMode() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, ".")
     }
 
     @MainActor
@@ -223,7 +318,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingTabUsesLocalContinuationFallback() {
+    func testAsyncPendingTabCommitsVisiblePrefixWithoutHiddenContinuation() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -240,7 +335,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你还有进一步优化空间")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -348,7 +443,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
-        XCTAssertEqual(host.panelStates.last?.windowState.selection, .rawInput)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.rawInput, "zhegeapi")
         XCTAssertTrue(
             coordinator.handle(
                 stroke: InputKeyStroke(text: "0", keyCode: keyCode(forNumber: 0)),
@@ -395,7 +490,11 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(hasSecondSegment)
         let requestsAfterSegment = await provider.requests
-        XCTAssertEqual(requestsAfterSegment.count, requestsBeforeSegment.count)
+        XCTAssertGreaterThanOrEqual(requestsAfterSegment.count, requestsBeforeSegment.count)
+        XCTAssertFalse(requestsAfterSegment.contains { request in
+            request.task == .continuation
+                && (request.lockedPrefix == "你" || request.lockedPrefix == "你shishei")
+        })
     }
 
     @MainActor
@@ -656,6 +755,18 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testAnchorFailureFallsBackToSafeScreenCandidatePanelLocation() {
+        let client = FakeInputControllerClient()
+        client.firstRectValue = .zero
+        client.lineHeightRectValue = .zero
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.anchorSource, .safeScreenFallback)
+        XCTAssertTrue(host.panelStates.last?.windowState.isVisible == true)
+    }
+
     func testDelayedReanchorAppliesOnlyForCurrentComposition() {
         let client = FakeInputControllerClient()
         client.firstRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
@@ -829,6 +940,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         provider: (any LLMProvider)? = nil,
         enablesAsyncSuggestionRefresh: Bool = false,
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
+        inputModePreferences: InputModePreferences = .standard,
         runtimePreferences: InputMethodRuntimePreferences = .standard
     ) -> (
         InputControllerCoordinator,
@@ -842,7 +954,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             traditionalInputEngine: lexiconRuntime.makeEngine(),
             lexiconRuntimeSnapshot: lexiconRuntime.snapshot(),
             lexiconRuntime: lexiconRuntime,
-            inputModePreferenceStore: FixedInputModePreferenceStore(),
+            inputModePreferenceStore: FixedInputModePreferenceStore(preferences: inputModePreferences),
             runtimePreferenceStore: FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: client.bundleIdentifier,

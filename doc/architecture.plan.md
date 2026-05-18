@@ -103,7 +103,7 @@ Settings status does not import the IMK frontend and does not own dictionary lic
 - `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction, using the shared `TraditionalInputLexiconDirectoryResolver`.
 - Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
-- The IMK controller publishes raw marked text on the keydown path, then refreshes correction candidates asynchronously.
+- The IMK controller publishes raw marked text and immediate local prefix candidates on the keydown path, then refreshes provider-backed continuations asynchronously.
 - Runtime lexicon snapshot checks and engine rebuilds run in the background; active compositions are refreshed only after the new engine is ready and the composition is still current.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
@@ -141,12 +141,13 @@ Candidate positioning is centralized in `CandidateAnchorResolver`. The resolver 
 3. line-height rectangles with bounded backtracking
 4. Accessibility focused-range bounds when permission is already granted
 5. same-composition last usable anchor scoped by composition, bundle, and screen
+6. stable safe point inside the screen visible frame
 
 Pointer location is not used as a moving candidate anchor.
 
 ## Provider Timing
 
-When a provider is configured, KnowType publishes raw marked text immediately and resolves local prefix candidates asynchronously. Continuation rows are published after the provider-backed suggestion returns. If the provider fails, local correction still works and commit remains available, but KnowType does not show local mock continuation text as configured-provider output.
+When a provider is configured, KnowType publishes raw marked text and local prefix candidates immediately. Continuation rows are published after the provider-backed suggestion returns. If the provider fails, local correction still works and commit remains available, but KnowType does not show local mock continuation text as configured-provider output.
 
 No-provider paths may use local fallback continuations. Configured-provider failure paths return no continuation candidates until provider output becomes usable again. Level 0 paths clear continuation candidates.
 

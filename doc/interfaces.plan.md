@@ -158,7 +158,7 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 - segment candidates cover part of the raw buffer and update the active composition without inserting committed text
 - continuation candidates commit as `locked prefix + continuation`
 - rows are paged through `CandidatePanelPagingState`; adaptive layout uses up to 6 visible rows per page, while vertical-list mode may use up to 9
-- production IMK key handling first shows raw input while local/provider suggestions resolve asynchronously
+- production IMK key handling first shows raw marked text plus an immediate local prefix-only candidate snapshot while provider continuations resolve asynchronously
 - when a provider is configured, local output omits fallback continuation rows until provider output arrives
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
@@ -181,12 +181,13 @@ Resolver source priority:
 3. line-height rectangles
 4. Accessibility focused-range bounds when available
 5. same-composition scoped last usable anchor
+6. safe screen fallback inside the visible frame
 
 The resolver accepts zero-width caret rects with valid height and rejects zero-height, non-finite, offscreen, or stale cross-composition anchors.
 
 ## Shortcut Contract
 
-- `Space` commits the selected prefix.
+- `Space` commits the selected visible prefix for the current raw input.
 - with a selected segment candidate, `Space` applies that segment and commits only after all non-whitespace raw input is resolved.
 - `Return` / `Enter` commits the original raw composition.
 - `Tab` commits selected prefix plus first or selected continuation.
@@ -199,7 +200,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - `Option + number` commits prefix plus the globally mapped continuation.
 - `Option + R` requests polish and may rewrite the prefix.
 
-Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries and preserves session-local toggles while preferences are unchanged.
+Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries and preserves session-local toggles while preferences are unchanged.
 
 Runtime behavior is represented by `InputMethodRuntimePreferences`: input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation enablement, continuation length, and continuation count. These preferences use the same shared defaults domain and are read by the input method at startup and new composition boundaries. Defaults preserve the current production behavior: full pinyin, six adaptive candidates per page, adaptive horizontal panel layout, cloud continuation enabled, local fallback continuation enabled, medium continuation length, and six continuation candidates. If an older preference stores nine candidates per page, adaptive layout caps the effective page size at six; vertical-list mode uses the saved page size.
 

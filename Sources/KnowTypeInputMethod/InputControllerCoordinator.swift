@@ -497,11 +497,24 @@ final class InputControllerCoordinator: @unchecked Sendable {
             updateCandidatePanel(suggestion: nil, client: client)
             return
         }
-        lastSuggestion = nil
-        lastSuggestionRawInput = nil
+        let context = InputContext(
+            rawInput: rawBuffer,
+            appBundleID: appBundleIdentifier(client: client),
+            locale: locale,
+            userSelectionHistory: userSelectionHistory
+        )
+        let suggestion = InputMethodPipeline.localSuggestions(
+            for: context,
+            includeFallbackContinuations: false,
+            traditionalInputEngine: traditionalInputEngine,
+            runtimePreferences: runtimePreferences
+        )
+        let augmentedSuggestion = augmentedSuggestion(suggestion)
+        lastSuggestion = augmentedSuggestion
+        lastSuggestionRawInput = rawBuffer
         selectedNativeCandidate = nil
         refreshComposition(client: client)
-        updateCandidatePanel(suggestion: nil, client: client)
+        updateCandidatePanel(suggestion: augmentedSuggestion, client: client)
     }
 
     private func publishLocalSuggestionSynchronously(client: InputControllerClient?) {
@@ -949,7 +962,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return (lastSuggestion, lastSuggestionRawInput, false)
         }
         guard enablesAsyncSuggestionRefresh,
-              action == .space || action == .tab,
+              action == .tab,
               SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
             return (lastSuggestion, lastSuggestionRawInput, false)
         }
@@ -1160,6 +1173,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawInput: rawBuffer,
             suggestion: suggestion,
             anchorRect: anchorResult.rect,
+            anchorSource: anchorResult.source,
             isDisplayable: isDisplayable,
             pageSize: effectivePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode
@@ -1198,7 +1212,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             .rows
             .count
         fputs(
-            "KnowType panel: layoutMode=\(windowState.layoutMode.rawValue) savedPageSize=\(savedPageSize) effectivePageSize=\(effectivePageSize) renderRows=\(rowCount)\n",
+            "KnowType panel: layoutMode=\(windowState.layoutMode.rawValue) savedPageSize=\(savedPageSize) effectivePageSize=\(effectivePageSize) anchorSource=\(windowState.anchorSource.rawValue) visible=\(windowState.isVisible) renderRows=\(rowCount)\n",
             stderr
         )
     }

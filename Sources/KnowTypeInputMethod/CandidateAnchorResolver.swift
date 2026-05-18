@@ -10,6 +10,7 @@ public enum CandidateAnchorSource: String, Sendable, Equatable {
     case lineHeightRect
     case accessibilityFocusedRange
     case lastUsableScoped
+    case safeScreenFallback
     case none
 }
 
@@ -283,6 +284,10 @@ public final class CandidateAnchorResolver {
             return result
         }
 
+        if let result = safeScreenFallbackResult(context: context) {
+            return result
+        }
+
         trace(source: .none, rect: .zero, accepted: false, reason: "no-anchor", context: context)
         return .none
     }
@@ -325,6 +330,39 @@ public final class CandidateAnchorResolver {
         }
         trace(source: .lastUsableScoped, rect: lastUsable.rect, accepted: true, reason: nil, context: context)
         return CandidateAnchorResult(rect: lastUsable.rect, source: .lastUsableScoped, isFresh: false)
+    }
+
+    private func safeScreenFallbackResult(context: CandidateAnchorContext) -> CandidateAnchorResult? {
+        guard let screen = screenProvider.screens.first else {
+            return nil
+        }
+        let visibleFrame = screen.visibleFrame
+        guard visibleFrame.width.isFinite,
+              visibleFrame.height.isFinite,
+              visibleFrame.width > 0,
+              visibleFrame.height > CandidateAnchorValidation.minimumCaretHeight else {
+            return nil
+        }
+
+        let rect = CGRect(
+            x: visibleFrame.minX + min(max(visibleFrame.width * 0.15, 16), 96),
+            y: visibleFrame.maxY - min(max(visibleFrame.height * 0.12, 40), 96),
+            width: 0,
+            height: max(18, CandidateAnchorValidation.minimumCaretHeight + 1)
+        )
+        guard CandidateAnchorValidation.isUsable(rect, screenProvider: screenProvider) else {
+            trace(
+                source: .safeScreenFallback,
+                rect: rect,
+                accepted: false,
+                reason: CandidateAnchorValidation.rejectionReason(for: rect, screenProvider: screenProvider)?.rawValue,
+                context: context
+            )
+            return nil
+        }
+
+        trace(source: .safeScreenFallback, rect: rect, accepted: true, reason: nil, context: context)
+        return CandidateAnchorResult(rect: rect, source: .safeScreenFallback, isFresh: false)
     }
 
     private func trace(
