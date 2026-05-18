@@ -24,8 +24,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         self.hostAdapter = hostAdapter
         self.coordinator = InputControllerCoordinator(
             provider: provider,
-            traditionalInputEngine: lexiconRuntime.makeEngine(),
-            lexiconRuntimeSnapshot: lexiconRuntime.snapshot(),
+            traditionalInputEngine: TraditionalInputEngine(),
+            lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot(directories: []),
+            lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: inputModePreferenceStore,
             initialAppBundleID: initialClient?.bundleIdentifier,
             userSelectionHistoryPersistence: historyPersistence,

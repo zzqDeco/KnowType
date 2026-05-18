@@ -5,6 +5,7 @@ import KnowTypeProviders
 public struct InputMethodPipeline: Sendable {
     public static let defaultMaxPrefixCandidates = 6
     public static let defaultMaxContinuationCandidates = 6
+    public static let interactiveQueryOptions = TraditionalInputQueryOptions.interactive
 
     private let correctionEngine: CorrectionEngine
     private let continuationEngine: PrefixContinuationEngine
@@ -22,7 +23,10 @@ public struct InputMethodPipeline: Sendable {
 
     public func suggestions(for context: InputContext) async -> SuggestionResponse {
         let start = ContinuousClock.now
-        let prefixes = await correctionEngine.correct(context)
+        let prefixes = await correctionEngine.correct(
+            context,
+            queryOptions: Self.interactiveQueryOptions
+        )
         let locked = prefixes.first.map {
             LockedPrefix(
                 text: $0.text,
@@ -59,7 +63,10 @@ public struct InputMethodPipeline: Sendable {
     ) -> SuggestionResponse {
         let correctionEngine = CorrectionEngine(traditionalInputEngine: traditionalInputEngine)
         let continuationEngine = PrefixContinuationEngine()
-        let prefixes = correctionEngine.localCorrect(context)
+        let prefixes = correctionEngine.localCorrect(
+            context,
+            queryOptions: Self.interactiveQueryOptions
+        )
         let locked = prefixes.first.map {
             LockedPrefix(
                 text: $0.text,

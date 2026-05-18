@@ -42,6 +42,36 @@ public struct TraditionalInputLexiconOutput: Codable, Sendable, Equatable {
     }
 }
 
+public struct TraditionalInputQueryOptions: Sendable, Equatable {
+    public var maxTokenizationPaths: Int
+    public var maxParseStates: Int
+    public var maxCandidates: Int
+    public var maxSegmentCandidates: Int
+    public var maxPartialMatches: Int
+
+    public init(
+        maxTokenizationPaths: Int = 16,
+        maxParseStates: Int = 12_000,
+        maxCandidates: Int = 120,
+        maxSegmentCandidates: Int = 120,
+        maxPartialMatches: Int = 64
+    ) {
+        self.maxTokenizationPaths = max(1, maxTokenizationPaths)
+        self.maxParseStates = max(1, maxParseStates)
+        self.maxCandidates = max(1, maxCandidates)
+        self.maxSegmentCandidates = max(1, maxSegmentCandidates)
+        self.maxPartialMatches = max(1, maxPartialMatches)
+    }
+
+    public static let interactive = TraditionalInputQueryOptions(
+        maxTokenizationPaths: 8,
+        maxParseStates: 1_600,
+        maxCandidates: 36,
+        maxSegmentCandidates: 48,
+        maxPartialMatches: 24
+    )
+}
+
 public struct PinyinInputAnalysis: Codable, Sendable, Equatable {
     public var tokenCount: Int
     public var hasPartialToken: Bool
@@ -101,19 +131,27 @@ public struct TraditionalInputEngine: Sendable {
 
     public func candidates(
         for rawInput: String,
-        preserveCapitalizedPinyin: Bool = true
+        preserveCapitalizedPinyin: Bool = true,
+        options: TraditionalInputQueryOptions? = nil
     ) -> [TraditionalInputCandidate] {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return []
         }
 
-        let parsed = tokenizations(for: trimmed).flatMap { tokens in
+        let queryOptions = options ?? TraditionalInputQueryOptions()
+        var budget = ParseBudget(remainingSteps: queryOptions.maxParseStates)
+        let parsed = tokenizations(
+            for: trimmed,
+            maxPaths: queryOptions.maxTokenizationPaths
+        ).flatMap { tokens in
             var memo: [Int: [ParseState]] = [:]
             return parse(
                 tokens: tokens,
                 from: 0,
                 preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                maxPartialMatches: queryOptions.maxPartialMatches,
+                budget: &budget,
                 memo: &memo
             )
                 .filter { $0.translatedCount > 0 }
@@ -128,24 +166,30 @@ public struct TraditionalInputEngine: Sendable {
                 }
         }
 
-        return uniqueSorted(parsed)
+        return Array(uniqueSorted(parsed).prefix(queryOptions.maxCandidates))
     }
 
     public func segmentCandidates(
         for rawInput: String,
         activeRange: TextRange,
-        preserveCapitalizedPinyin: Bool = true
+        preserveCapitalizedPinyin: Bool = true,
+        options: TraditionalInputQueryOptions? = nil
     ) -> [TraditionalInputCandidate] {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !activeRange.isEmpty else {
             return []
         }
 
-        let candidates = tokenizations(for: trimmed).flatMap { tokens -> [TraditionalInputCandidate] in
+        let queryOptions = options ?? TraditionalInputQueryOptions()
+        var allCandidates: [TraditionalInputCandidate] = []
+        for tokens in tokenizations(
+            for: trimmed,
+            maxPaths: queryOptions.maxTokenizationPaths
+        ) {
             guard let startIndex = tokens.firstIndex(where: { token in
                 token.rawRange.intersects(activeRange) || token.rawRange.start == activeRange.start
             }) else {
-                return []
+                continue
             }
 
             var candidates: [TraditionalInputCandidate] = []
@@ -165,7 +209,10 @@ public struct TraditionalInputEngine: Sendable {
                 }
 
                 let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
-                let entries = lexiconIndex.matchingEntries(for: tokenSlice)
+                let entries = lexiconIndex.matchingEntries(
+                    for: tokenSlice,
+                    maxPartialMatches: queryOptions.maxPartialMatches
+                )
                 if length == 1,
                    let token = tokenSlice.first,
                    let passthrough = passthroughText(
@@ -189,6 +236,9 @@ public struct TraditionalInputEngine: Sendable {
                         )
                     )
                 }
+                if candidates.count >= queryOptions.maxSegmentCandidates {
+                    break
+                }
                 for entry in entries {
                     let matchPenalty = typoPenalty + partialMatchPenalty(entry: entry, tokens: tokenSlice)
                     let reading = tokenSlice.map(\.normalized).joined(separator: " ")
@@ -210,17 +260,27 @@ public struct TraditionalInputEngine: Sendable {
                             )
                         )
                     }
+                    if candidates.count >= queryOptions.maxSegmentCandidates {
+                        break
+                    }
+                }
+                if candidates.count >= queryOptions.maxSegmentCandidates {
+                    break
                 }
             }
-            return candidates
+            allCandidates.append(contentsOf: candidates)
+            if allCandidates.count >= queryOptions.maxSegmentCandidates {
+                break
+            }
         }
 
-        return uniqueSorted(candidates)
+        return Array(uniqueSorted(allCandidates).prefix(queryOptions.maxSegmentCandidates))
     }
 
     public func analyzePinyinInput(
         _ rawInput: String,
-        preserveCapitalizedPinyin: Bool = true
+        preserveCapitalizedPinyin: Bool = true,
+        options: TraditionalInputQueryOptions? = nil
     ) -> PinyinInputAnalysis {
         let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isPassthroughToken(trimmed) else {
@@ -233,10 +293,12 @@ public struct TraditionalInputEngine: Sendable {
             )
         }
 
-        let tokenPaths = tokenizations(for: trimmed)
+        let queryOptions = options ?? TraditionalInputQueryOptions()
+        let tokenPaths = tokenizations(for: trimmed, maxPaths: queryOptions.maxTokenizationPaths)
         let localCandidates = candidates(
             for: trimmed,
-            preserveCapitalizedPinyin: preserveCapitalizedPinyin
+            preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+            options: queryOptions
         )
         let tokenCount = max(
             tokenPaths.map(\.count).max() ?? 0,
@@ -260,7 +322,7 @@ public struct TraditionalInputEngine: Sendable {
         )
     }
 
-    private func tokenizations(for rawInput: String) -> [[InputToken]] {
+    private func tokenizations(for rawInput: String, maxPaths: Int = 16) -> [[InputToken]] {
         let separated = rawComponents(in: rawInput)
 
         if separated.count > 1 {
@@ -269,12 +331,13 @@ public struct TraditionalInputEngine: Sendable {
                 let componentPaths = tokenizations(
                     forComponent: component.surface,
                     rawRange: component.rawRange,
-                    allowCompactSegmentation: false
+                    allowCompactSegmentation: false,
+                    maxPaths: maxPaths
                 )
                 guard !componentPaths.isEmpty else {
                     return []
                 }
-                paths = combine(paths, with: componentPaths, limit: 16)
+                paths = combine(paths, with: componentPaths, limit: maxPaths)
             }
             return paths
         }
@@ -296,14 +359,16 @@ public struct TraditionalInputEngine: Sendable {
         return tokenizations(
             forComponent: token.surface,
             rawRange: token.rawRange,
-            allowCompactSegmentation: true
+            allowCompactSegmentation: true,
+            maxPaths: maxPaths
         )
     }
 
     private func tokenizations(
         forComponent token: String,
         rawRange: TextRange,
-        allowCompactSegmentation: Bool
+        allowCompactSegmentation: Bool,
+        maxPaths: Int
     ) -> [[InputToken]] {
         if isPassthroughToken(token) {
             return [[InputToken(
@@ -326,10 +391,10 @@ public struct TraditionalInputEngine: Sendable {
             )]]
         }
 
-        return segmentCompact(token, baseOffset: rawRange.start)
+        return segmentCompact(token, baseOffset: rawRange.start, maxPaths: maxPaths)
     }
 
-    private func segmentCompact(_ token: String, baseOffset: Int) -> [[InputToken]] {
+    private func segmentCompact(_ token: String, baseOffset: Int, maxPaths: Int) -> [[InputToken]] {
         let lower = token.lowercased()
         let end = lower.endIndex
         var memo: [String.Index: [[InputToken]]] = [:]
@@ -386,11 +451,11 @@ public struct TraditionalInputEngine: Sendable {
                 )
                 for path in paths(from: next) {
                     results.append([token] + path)
-                    if results.count >= 16 {
+                    if results.count >= maxPaths {
                         break
                     }
                 }
-                if results.count >= 16 {
+                if results.count >= maxPaths {
                     break
                 }
             }
@@ -423,8 +488,13 @@ public struct TraditionalInputEngine: Sendable {
         tokens: [InputToken],
         from index: Int,
         preserveCapitalizedPinyin: Bool,
+        maxPartialMatches: Int,
+        budget: inout ParseBudget,
         memo: inout [Int: [ParseState]]
     ) -> [ParseState] {
+        guard budget.consume(), !Task.isCancelled else {
+            return []
+        }
         if index >= tokens.count {
             return [ParseState(segments: [], confidence: 1.0, translatedCount: 0)]
         }
@@ -450,7 +520,10 @@ public struct TraditionalInputEngine: Sendable {
                 }
             }
 
-            let entries = lexiconIndex.matchingEntries(for: tokenSlice)
+            let entries = lexiconIndex.matchingEntries(
+                for: tokenSlice,
+                maxPartialMatches: maxPartialMatches
+            )
 
             let typoPenalty = tokenSlice.contains { $0.isTypoNormalized } ? 0.03 : 0
             for entry in entries {
@@ -460,6 +533,8 @@ public struct TraditionalInputEngine: Sendable {
                         tokens: tokens,
                         from: index + length,
                         preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                        maxPartialMatches: maxPartialMatches,
+                        budget: &budget,
                         memo: &memo
                     ) {
                         let rawRange = TextRange.covering(tokenSlice.map(\.rawRange))
@@ -495,6 +570,8 @@ public struct TraditionalInputEngine: Sendable {
                 tokens: tokens,
                 from: index + 1,
                 preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                maxPartialMatches: maxPartialMatches,
+                budget: &budget,
                 memo: &memo
             ) {
                 let segment = CandidateSegment(
@@ -649,6 +726,18 @@ private struct ParseState: Sendable, Equatable {
     var translatedCount: Int
 }
 
+private struct ParseBudget {
+    var remainingSteps: Int
+
+    mutating func consume() -> Bool {
+        guard remainingSteps > 0 else {
+            return false
+        }
+        remainingSteps -= 1
+        return true
+    }
+}
+
 private struct RawInputComponent: Sendable, Equatable {
     var surface: String
     var rawRange: TextRange
@@ -747,7 +836,7 @@ private struct LexiconIndex: Sendable {
         self.partialMatchLimit = partialMatchLimit
     }
 
-    func matchingEntries(for tokens: ArraySlice<InputToken>) -> [LexiconEntry] {
+    func matchingEntries(for tokens: ArraySlice<InputToken>, maxPartialMatches: Int? = nil) -> [LexiconEntry] {
         let tokenArray = Array(tokens)
         let normalized = tokenArray.map(\.normalized)
         if !tokenArray.contains(where: \.isPartial),
@@ -755,10 +844,11 @@ private struct LexiconIndex: Sendable {
             return [entry]
         }
 
+        let limit = maxPartialMatches ?? partialMatchLimit
         return candidateEntries(for: tokenArray)
             .lazy
             .filter { entry in matches(entry, tokens: tokenArray) }
-            .prefix(partialMatchLimit)
+            .prefix(limit)
             .map { $0 }
     }
 
@@ -767,7 +857,13 @@ private struct LexiconIndex: Sendable {
             return []
         }
         if firstToken.isPartial {
-            return entriesByLength[tokens.count] ?? []
+            guard let buckets = entriesByLengthAndFirstToken[tokens.count] else {
+                return []
+            }
+            return buckets.keys
+                .filter { $0.hasPrefix(firstToken.normalized) }
+                .sorted()
+                .flatMap { buckets[$0] ?? [] }
         }
         return entriesByLengthAndFirstToken[tokens.count]?[firstToken.normalized] ?? []
     }

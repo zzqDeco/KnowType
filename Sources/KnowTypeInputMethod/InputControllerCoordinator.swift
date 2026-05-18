@@ -9,6 +9,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let hasProvider: Bool
     private var traditionalInputEngine: TraditionalInputEngine
     private var lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot
+    private let lexiconRuntime: InputMethodLexiconRuntime
     private let keyMapper = InputKeyCommandMapper()
     private let symbolTransformer = InputSymbolTransformer()
     private let candidateListBuilder = InputCandidateListBuilder()
@@ -29,11 +30,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?
     private var userSelectionHistory: [String]
     private let enablesAsyncSuggestionRefresh: Bool
+    private var suggestionGeneration = 0
+    private var runtimeReloadTask: Task<Void, Never>?
 
     init(
         provider: (any LLMProvider)?,
         traditionalInputEngine: TraditionalInputEngine,
         lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot,
+        lexiconRuntime: InputMethodLexiconRuntime = .defaultRuntime(),
         inputModePreferenceStore: any InputModePreferenceStore,
         initialAppBundleID: String?,
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
@@ -46,6 +50,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.hasProvider = provider != nil
         self.traditionalInputEngine = traditionalInputEngine
         self.lexiconRuntimeSnapshot = lexiconRuntimeSnapshot
+        self.lexiconRuntime = lexiconRuntime
         self.sessionController = InputSessionController(
             provider: provider,
             traditionalInputEngine: traditionalInputEngine
@@ -61,6 +66,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.host = host
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
+        if enablesAsyncSuggestionRefresh {
+            scheduleRuntimeLexiconReloadIfNeeded()
+        }
     }
 
     func handleText(_ string: String?, client: InputControllerClient?) -> Bool {
@@ -117,6 +125,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
+        runtimeReloadTask?.cancel()
         hideCandidatePanel()
     }
 
@@ -244,34 +253,68 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawInput) else {
             return
         }
-        guard !compositionBuffer.hasResolvedSegments else {
+        guard !compositionBuffer.isFullyResolved else {
             return
         }
         let appBundleID = appBundleIdentifier(client: client)
         let selectionHistory = userSelectionHistory
-        suggestionTask = Task { [weak self] in
-            guard let self else {
-                return
-            }
-            let suggestion = await self.sessionController.update(
+        let currentLocale = locale
+        let currentCompositionID = compositionID
+        let compositionSnapshot = compositionBuffer
+        let engineSnapshot = traditionalInputEngine
+        let sessionController = sessionController
+        suggestionGeneration += 1
+        let generation = suggestionGeneration
+        suggestionTask = Task { [weak self, sessionController, engineSnapshot, compositionSnapshot] in
+            let context = InputContext(
                 rawInput: rawInput,
                 appBundleID: appBundleID,
-                locale: self.locale,
+                locale: currentLocale,
                 userSelectionHistory: selectionHistory
+            )
+            let suggestion: SuggestionResponse
+            if compositionSnapshot.hasResolvedSegments {
+                suggestion = InputMethodPipeline.localSuggestions(
+                    for: context,
+                    includeFallbackContinuations: false,
+                    traditionalInputEngine: engineSnapshot
+                )
+            } else {
+                suggestion = await sessionController.update(
+                    rawInput: rawInput,
+                    appBundleID: appBundleID,
+                    locale: currentLocale,
+                    userSelectionHistory: selectionHistory
+                )
+            }
+            guard !Task.isCancelled else {
+                return
+            }
+            let augmentedSuggestion = Self.augmentedSuggestion(
+                suggestion,
+                compositionBuffer: compositionSnapshot,
+                rawBuffer: rawInput,
+                locale: currentLocale,
+                traditionalInputEngine: engineSnapshot
             )
             guard !Task.isCancelled else {
                 return
             }
-            await MainActor.run {
+            Task { @MainActor [weak self, augmentedSuggestion] in
+                guard let self else {
+                    return
+                }
                 let currentClient = self.host?.currentClient
                 guard SuggestionPublicationGuard.shouldPublish(
                     requestedRawInput: rawInput,
                     currentRawInput: self.rawBuffer,
                     isCancelled: Task.isCancelled
-                ) else {
+                ),
+                    self.compositionID == currentCompositionID,
+                    self.compositionBuffer == compositionSnapshot,
+                    self.suggestionGeneration == generation else {
                     return
                 }
-                let augmentedSuggestion = self.augmentedSuggestion(suggestion)
                 self.lastSuggestion = augmentedSuggestion
                 self.lastSuggestionRawInput = rawInput
                 self.refreshComposition(client: currentClient)
@@ -370,6 +413,32 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func publishLocalSuggestion(client: InputControllerClient?) {
+        guard !enablesAsyncSuggestionRefresh else {
+            publishPendingSuggestion(client: client)
+            return
+        }
+        publishLocalSuggestionSynchronously(client: client)
+    }
+
+    private func publishPendingSuggestion(client: InputControllerClient?) {
+        suggestionGeneration += 1
+        suggestionTask?.cancel()
+        suggestionTask = nil
+        guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
+            lastSuggestion = nil
+            lastSuggestionRawInput = nil
+            refreshComposition(client: client)
+            updateCandidatePanel(suggestion: nil, client: client)
+            return
+        }
+        lastSuggestion = nil
+        lastSuggestionRawInput = nil
+        selectedNativeCandidate = nil
+        refreshComposition(client: client)
+        updateCandidatePanel(suggestion: nil, client: client)
+    }
+
+    private func publishLocalSuggestionSynchronously(client: InputControllerClient?) {
         guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
             lastSuggestion = nil
             lastSuggestionRawInput = nil
@@ -397,17 +466,39 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
+        Self.augmentedSuggestion(
+            suggestion,
+            compositionBuffer: compositionBuffer,
+            rawBuffer: rawBuffer,
+            locale: locale,
+            traditionalInputEngine: traditionalInputEngine
+        )
+    }
+
+    private static func augmentedSuggestion(
+        _ suggestion: SuggestionResponse,
+        compositionBuffer: CompositionBuffer,
+        rawBuffer: String,
+        locale: KnowTypeLocale,
+        traditionalInputEngine: TraditionalInputEngine
+    ) -> SuggestionResponse {
         var prefixCandidates: [CorrectionCandidate]
         if compositionBuffer.isFullyResolved {
-            prefixCandidates = [resolvedCompositionCandidate()]
+            prefixCandidates = [resolvedCompositionCandidate(compositionBuffer: compositionBuffer, rawBuffer: rawBuffer)]
         } else if compositionBuffer.hasResolvedSegments {
             prefixCandidates = []
         } else {
             prefixCandidates = suggestion.prefixCandidates
         }
         if let activeRange = compositionBuffer.activeRange {
-            let segmentCandidates = prioritizedSegmentCandidates(for: activeRange)
-                .filter { canApplyOrCommit(candidate: $0) }
+            let segmentCandidates = prioritizedSegmentCandidates(
+                for: activeRange,
+                compositionBuffer: compositionBuffer,
+                rawBuffer: rawBuffer,
+                locale: locale,
+                traditionalInputEngine: traditionalInputEngine
+            )
+                .filter { canApplyOrCommit(candidate: $0, compositionBuffer: compositionBuffer) }
             if compositionBuffer.hasResolvedSegments {
                 prefixCandidates = segmentCandidates
             } else {
@@ -417,7 +508,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 prefixCandidates = mergedPrefixCandidates(leadingMerged, with: remainingFullCandidates)
             }
         }
-        let continuations = shouldSuppressContinuations(prefixCandidates: prefixCandidates)
+        let continuations = shouldSuppressContinuations(
+            prefixCandidates: prefixCandidates,
+            compositionBuffer: compositionBuffer
+        )
             ? []
             : suggestion.continuationCandidates
         let lockedPrefix: LockedPrefix?
@@ -439,6 +533,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func resolvedCompositionCandidate() -> CorrectionCandidate {
+        Self.resolvedCompositionCandidate(
+            compositionBuffer: compositionBuffer,
+            rawBuffer: rawBuffer
+        )
+    }
+
+    private static func resolvedCompositionCandidate(
+        compositionBuffer: CompositionBuffer,
+        rawBuffer: String
+    ) -> CorrectionCandidate {
         CorrectionCandidate(
             text: compositionBuffer.commitText,
             source: "composition-buffer",
@@ -450,12 +554,29 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func prioritizedSegmentCandidates(for activeRange: KnowTypeCore.TextRange) -> [CorrectionCandidate] {
+        Self.prioritizedSegmentCandidates(
+            for: activeRange,
+            compositionBuffer: compositionBuffer,
+            rawBuffer: rawBuffer,
+            locale: locale,
+            traditionalInputEngine: traditionalInputEngine
+        )
+    }
+
+    private static func prioritizedSegmentCandidates(
+        for activeRange: KnowTypeCore.TextRange,
+        compositionBuffer: CompositionBuffer,
+        rawBuffer: String,
+        locale: KnowTypeLocale,
+        traditionalInputEngine: TraditionalInputEngine
+    ) -> [CorrectionCandidate] {
         let preserveCapitalizedPinyin = locale != .zhCN
         let candidates = traditionalInputEngine
             .segmentCandidates(
                 for: rawBuffer,
                 activeRange: activeRange,
-                preserveCapitalizedPinyin: preserveCapitalizedPinyin
+                preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                options: InputMethodPipeline.interactiveQueryOptions
             )
             .map { candidate in
                 CorrectionCandidate(
@@ -499,6 +620,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ existingCandidates: [CorrectionCandidate],
         with additionalCandidates: [CorrectionCandidate]
     ) -> [CorrectionCandidate] {
+        Self.mergedPrefixCandidates(existingCandidates, with: additionalCandidates)
+    }
+
+    private static func mergedPrefixCandidates(
+        _ existingCandidates: [CorrectionCandidate],
+        with additionalCandidates: [CorrectionCandidate]
+    ) -> [CorrectionCandidate] {
         var merged = existingCandidates
         for candidate in additionalCandidates {
             guard !merged.contains(where: { existing in
@@ -512,6 +640,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func canApplyOrCommit(candidate: CorrectionCandidate) -> Bool {
+        Self.canApplyOrCommit(candidate: candidate, compositionBuffer: compositionBuffer)
+    }
+
+    private static func canApplyOrCommit(
+        candidate: CorrectionCandidate,
+        compositionBuffer: CompositionBuffer
+    ) -> Bool {
         guard candidate.rawRange != compositionBuffer.rawRange else {
             return true
         }
@@ -520,6 +655,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func shouldSuppressContinuations(prefixCandidates: [CorrectionCandidate]) -> Bool {
+        Self.shouldSuppressContinuations(
+            prefixCandidates: prefixCandidates,
+            compositionBuffer: compositionBuffer
+        )
+    }
+
+    private static func shouldSuppressContinuations(
+        prefixCandidates: [CorrectionCandidate],
+        compositionBuffer: CompositionBuffer
+    ) -> Bool {
         if compositionBuffer.hasResolvedSegments && !compositionBuffer.isFullyResolved {
             return true
         }
@@ -527,10 +672,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
               let firstPrefix = prefixCandidates.first else {
             return false
         }
-        return isPartialSegmentCandidate(firstPrefix)
+        return isPartialSegmentCandidate(firstPrefix, compositionBuffer: compositionBuffer)
     }
 
     private func isPartialSegmentCandidate(_ candidate: CorrectionCandidate) -> Bool {
+        Self.isPartialSegmentCandidate(candidate, compositionBuffer: compositionBuffer)
+    }
+
+    private static func isPartialSegmentCandidate(
+        _ candidate: CorrectionCandidate,
+        compositionBuffer: CompositionBuffer
+    ) -> Bool {
         guard let rawRange = candidate.rawRange else {
             return false
         }
@@ -700,7 +852,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             selectedCandidate: sessionSelection(from: selectedNativeCandidate),
             appBundleID: appBundleIdentifier(client: client),
             locale: locale,
-            traditionalInputEngine: traditionalInputEngine
+            traditionalInputEngine: traditionalInputEngine,
+            allowsSynchronousFallback: !enablesAsyncSuggestionRefresh
         )
     }
 
@@ -720,6 +873,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         publishLocalSuggestion(client: client)
         if isFullyResolvedAfterApply {
             refreshResolvedCompositionContinuations(client: client)
+        } else {
+            refreshSuggestion(client: client)
         }
         if commitIfFullyResolved, isFullyResolvedAfterApply {
             return .commit(compositionBuffer.commitText)
@@ -757,7 +912,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func reloadRuntimeLexiconEngineIfNeeded() {
-        let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
+        guard !enablesAsyncSuggestionRefresh else {
+            scheduleRuntimeLexiconReloadIfNeeded()
+            return
+        }
         let snapshot = lexiconRuntime.snapshot()
         guard snapshot != lexiconRuntimeSnapshot else {
             return
@@ -772,12 +930,48 @@ final class InputControllerCoordinator: @unchecked Sendable {
         invalidateSuggestion()
     }
 
+    private func scheduleRuntimeLexiconReloadIfNeeded() {
+        let currentSnapshot = lexiconRuntimeSnapshot
+        let lexiconRuntime = lexiconRuntime
+        runtimeReloadTask?.cancel()
+        runtimeReloadTask = Task { [weak self, lexiconRuntime, currentSnapshot] in
+            let snapshot = lexiconRuntime.snapshot()
+            guard snapshot != currentSnapshot, !Task.isCancelled else {
+                return
+            }
+            let engine = lexiconRuntime.makeEngine()
+            guard !Task.isCancelled else {
+                return
+            }
+            Task { @MainActor [weak self, engine, snapshot, currentSnapshot] in
+                guard let self,
+                      self.lexiconRuntimeSnapshot == currentSnapshot,
+                      snapshot != self.lexiconRuntimeSnapshot else {
+                    return
+                }
+                self.traditionalInputEngine = engine
+                self.lexiconRuntimeSnapshot = snapshot
+                self.sessionController = InputSessionController(
+                    provider: self.provider,
+                    traditionalInputEngine: engine
+                )
+                self.invalidateSuggestion()
+                if !self.rawBuffer.isEmpty {
+                    let currentClient = self.host?.currentClient
+                    self.publishLocalSuggestion(client: currentClient)
+                    self.refreshSuggestion(client: currentClient)
+                }
+            }
+        }
+    }
+
     private func resetAnchorState() {
         compositionID += 1
         anchorResolver.reset()
     }
 
     private func invalidateSuggestion() {
+        suggestionGeneration += 1
         lastSuggestion = nil
         lastSuggestionRawInput = nil
         selectedNativeCandidate = nil

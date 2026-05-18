@@ -26,6 +26,7 @@
 | [lexicon-sample-resource-action.plan.md](lexicon-sample-resource-action.plan.md) | Settings action for creating a known-good sample TSV lexicon | Active reference |
 | [managed-lexicon-pack-installer.plan.md](managed-lexicon-pack-installer.plan.md) | License-aware recommended lexicon pack download, conversion, and settings install action | Active reference |
 | [segmented-candidate-selection.plan.md](segmented-candidate-selection.plan.md) | Candidate rows carry raw spans; marked text stays raw until full or segmented confirmation | Active reference |
+| [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive by moving large-lexicon loading and candidate generation off the main path | Active reference |
 | [provider-runtime-seeded-defaults.plan.md](provider-runtime-seeded-defaults.plan.md) | Shared seeded provider defaults for settings and runtime loading | Active reference |
 | [provider-connection-diagnostics.plan.md](provider-connection-diagnostics.plan.md) | Settings-side provider connection testing without persisting draft secrets | Active reference |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Keep provider-backed continuation honest by not replacing failures with local fallback text | Active reference |

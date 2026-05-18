@@ -189,6 +189,20 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(optionRResult, .noAction)
     }
 
+    func testCommitPolicyCanAvoidSynchronousFallbackWhileSuggestionIsPending() {
+        let result = InputSessionCommitPolicy.result(
+            for: .space,
+            rawInput: "wojue",
+            suggestion: nil,
+            suggestionRawInput: nil,
+            locale: .zhCN,
+            traditionalInputEngine: TraditionalInputEngine(),
+            allowsSynchronousFallback: false
+        )
+
+        XCTAssertEqual(result, .noAction)
+    }
+
     func testExplicitPolishRequestMarksStateWithoutCommitting() async {
         let controller = InputSessionController { _ in
             Self.makeSuggestion()

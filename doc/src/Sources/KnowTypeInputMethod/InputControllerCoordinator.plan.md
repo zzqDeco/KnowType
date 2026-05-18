@@ -9,6 +9,9 @@ Current behavior:
 - writes marked text through `InputControllerClient.setMarkedText`, using raw pinyin plus resolved segment display text rather than eagerly replacing the composition with the first Chinese candidate
 - commits through `InputControllerClient.insertText` using the active marked range when available
 - maps Return/Enter to raw commit and keeps segment selection inside the marked composition until a full commit action is reached
+- publishes raw marked text and a raw candidate panel state synchronously, then refreshes correction candidates asynchronously in production
+- rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
+- warms or refreshes runtime lexicon engines in the background; synchronous lexicon reload remains available only for deterministic test/offline paths
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
 - flushes user selection history on deactivate and close; close also hides the panel
 - schedules delayed candidate re-anchor through `InputControllerHost` and applies it only when raw input and composition id still match
