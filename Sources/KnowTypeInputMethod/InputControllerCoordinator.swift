@@ -385,9 +385,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawInput: rawInput,
             candidateID: "composition-buffer"
         )
+        let continuations = resolvedCompositionFallbackContinuations(
+            lockedPrefixText: lockedPrefixText,
+            rawInput: rawInput,
+            client: client
+        )
         let suggestion = resolvedCompositionSuggestion(
             lockedPrefix: lockedPrefix,
-            continuations: [],
+            continuations: continuations,
             fallbackLatency: lastSuggestion?.latencyMs ?? 0
         )
         lastSuggestion = suggestion
@@ -410,6 +415,24 @@ final class InputControllerCoordinator: @unchecked Sendable {
             lockedPrefix: lockedPrefix,
             continuationCandidates: continuations,
             latencyMs: fallbackLatency
+        )
+    }
+
+    private func resolvedCompositionFallbackContinuations(
+        lockedPrefixText: String,
+        rawInput: String,
+        client: InputControllerClient?
+    ) -> [ContinuationCandidate] {
+        guard !hasProvider,
+              runtimePreferences.localContinuationEnabledWhenNoProvider,
+              !TextProtection.requiresNoCorrection(lockedPrefixText, appBundleID: appBundleIdentifier(client: client)),
+              !TextProtection.requiresNoCorrection(rawInput, appBundleID: appBundleIdentifier(client: client)) else {
+            return []
+        }
+        return PrefixContinuationEngine().fallbackContinuations(
+            for: lockedPrefixText,
+            lengthLevel: runtimePreferences.continuationLengthLevel,
+            maxCandidates: runtimePreferences.maxContinuationCandidates
         )
     }
 
@@ -978,7 +1001,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             case .space:
                 return .commit(compositionBuffer.commitText)
             case .tab:
-                return .noAction
+                guard lastSuggestion?.continuationCandidates.isEmpty == false else {
+                    return .noAction
+                }
+                return InputCompositionController().handle(
+                    action: .tab,
+                    prefixCandidates: [resolvedCompositionCandidate()],
+                    continuationCandidates: lastSuggestion?.continuationCandidates ?? [],
+                    originalText: rawBuffer
+                )
             case .optionR:
                 return .polishRequested(compositionBuffer.commitText)
             case .optionNumber, .toggleSymbolMode, .commitRaw:
@@ -1115,6 +1146,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func recordTypingCommit(_ text: String, client: InputControllerClient?) {
         guard let aiContextEventRecorder,
+              hasProvider,
               runtimePreferences.cloudContinuationEnabled,
               !text.isEmpty else {
             return
@@ -1135,6 +1167,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func recordExternalDelete(client: InputControllerClient?) {
         guard let aiContextEventRecorder,
+              hasProvider,
               runtimePreferences.cloudContinuationEnabled else {
             return
         }

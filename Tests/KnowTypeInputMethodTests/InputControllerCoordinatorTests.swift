@@ -743,6 +743,60 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testFullyResolvedSegmentSelectionKeepsNoProviderFallbackContinuations() async throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFirstSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            } == true
+        }
+        XCTAssertTrue(hasFirstSegment)
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        let hasSecondSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "是谁" && $0.rawRange == KnowTypeCore.TextRange(start: 2, length: 7)
+            } == true
+        }
+        XCTAssertTrue(hasSecondSegment)
+        try selectCandidate(
+            text: "是谁",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 7),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        let hasContinuation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.continuationCandidates.isEmpty == false
+        }
+        XCTAssertTrue(hasContinuation)
+        let prefix = coordinator.composedString() as? String
+        let continuation = try XCTUnwrap(host.panelStates.last?.windowState.viewModel.continuationCandidates.first?.text)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+        XCTAssertEqual(client.insertTextWrites.last?.text, "\(prefix ?? "")\(continuation)")
+    }
+
+    @MainActor
     func testAsyncSuggestionRefreshPreservesProviderCorrectionFallback() async {
         let client = FakeInputControllerClient()
         let provider = CorrectionFallbackProvider()
@@ -802,6 +856,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let recorder = RecordingAIContextEventRecorder()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
+            provider: RecordingContinuationProvider(),
             aiContextEventRecorder: recorder
         )
 
@@ -825,6 +880,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let events = await recorder.events
         XCTAssertEqual(events.last?.rawInput, "ni")
         XCTAssertEqual(events.last?.deleteCountBeforeCommit, 0)
+    }
+
+    @MainActor
+    func testNoProviderDoesNotRecordContextMemoryEvents() async {
+        let client = FakeInputControllerClient()
+        let recorder = RecordingAIContextEventRecorder()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiContextEventRecorder: recorder
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\r", keyCode: 36),
+                client: client
+            )
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let events = await recorder.events
+        XCTAssertTrue(events.isEmpty)
     }
 
     @MainActor
