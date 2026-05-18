@@ -206,6 +206,48 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: input scheme
 
 KnowType-specific settings are hosted by three supported entry points: the standalone settings app, `KnowType.prefPane` in `~/Library/PreferencePanes`, and the InputMethodKit preferences window opened from the input-method menu. The macOS Keyboard/Input Sources page remains the enable/select surface and is not treated as a custom settings host.
 
+## CLI And Script Contracts
+
+`knowtype-demo` is a package-level executable for exercising correction and
+commit behavior without installing the input method. It is useful for smoke
+checks, but it does not prove IMK host-app behavior.
+
+`knowtype-lexicon-tool install [pack-id] [--directory PATH] [--force]`
+installs managed local lexicon packs. The default pack is `rime-pinyin-simp`.
+The tool delegates download, SHA256 verification, conversion, atomic writes,
+and metadata generation to `ManagedLexiconPackInstaller`. It must not commit
+third-party dictionary data to the repository.
+
+`knowtype-inputsource-tool` is the only local helper that should perform direct
+macOS TIS operations for KnowType scripts:
+
+- `status` emits read-only registration, enabled, selected, and HIToolbox
+  preference status.
+- `switch-away` moves the active input source away from KnowType before bundle
+  replacement.
+- `dedupe-preferences` removes duplicate KnowType rows without changing
+  unrelated input sources.
+- `register --path ... [--select]` manually registers and optionally selects the
+  installed bundle.
+- `select [--require-selected]` requests KnowType selection and verifies the
+  helper-local TIS context.
+
+Script contracts:
+
+- `scripts/build-inputmethod-bundle.sh` creates `dist/KnowType.app` and must
+  package SwiftPM resource bundles required by the local engine.
+- `scripts/install-inputmethod.sh` copies the local development bundle to
+  `~/Library/Input Methods/KnowType.app`.
+- `scripts/diagnose-inputmethod.sh` is the read-only install status and recent
+  log diagnostic path.
+- `scripts/select-inputmethod.sh` can request selection, but selection remains
+  scoped to the active macOS input context and is not proof of typing behavior.
+- `scripts/accept-inputmethod-local.sh` generates the local acceptance report
+  template and only mutates install or selection state when explicit flags are
+  passed.
+- `scripts/smoke-inputmethod-install.sh` is CI-safe and must not mutate Text
+  Input Source state.
+
 ## Level 0 Contract
 
 Level 0 input must not call cloud providers. The session controller routes protected input through a no-provider pipeline, clears continuation candidates, and preserves protected text for commit.

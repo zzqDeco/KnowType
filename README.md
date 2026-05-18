@@ -1,112 +1,90 @@
 # KnowType
 
+[![CI](https://github.com/zzqDeco/KnowType/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/zzqDeco/KnowType/actions/workflows/ci.yml)
+
 [中文](README_CN.md)
 
-KnowType is a macOS Chinese/English input method with an AI layer built around one product rule: it can correct what you are typing, but continuation must not rewrite the prefix you have already confirmed.
+KnowType, Chinese name 知键, is a macOS Chinese/English input method with
+AI-assisted continuation. It is written in Swift and built around a strict
+product rule: correction may improve the prefix you are typing, but
+continuation must not rewrite the locked prefix you have already accepted.
 
-In practical terms, KnowType tries to make the first half more accurate and the second half smoother. It decodes imperfect pinyin or mixed Chinese/English input into a locked prefix, then asks the local engine or a configured provider for continuation text that starts after that prefix.
+| Area | Current state |
+|---|---|
+| Language | Swift 6.2 |
+| Platform | macOS 13+ |
+| Core package | Swift Package Manager |
+| Input method host | AppKit + InputMethodKit |
+| Settings UI | SwiftUI |
+| Integration branch | `dev` |
 
-Chinese name: 知键.
+## Why KnowType
 
-## What It Does
-
-- **Chinese input first**: pinyin decoding, compact pinyin segmentation, typo normalization, same-pinyin candidates, common initial abbreviations such as `sm`/`zmb`/`wsm`, and partial-syllable input.
-- **Local candidate learning**: recent prefix choices can boost candidate ranking across input-method restarts without being sent to providers.
-- **Prefix-locked AI continuation**: continuation candidates append after the locked prefix; explicit polish is the only path that may rewrite existing text.
-- **Native macOS input flow**: marked text, candidate selection, paging, punctuation handling, and an adaptive AppKit candidate panel anchored near the text caret.
-- **Provider-compatible by design**: OpenAI-compatible chat, OpenAI Responses, Anthropic Messages, Gemini native, Ollama native, and custom HTTP profiles all normalize into one provider interface.
-- **Local privacy guardrails**: URLs, emails, paths, commands, code-like text, and protected app contexts use the no-provider path.
-
-## Product Rule
-
-KnowType follows this pipeline:
+KnowType separates "make what I typed correct" from "continue after what I
+accepted".
 
 ```text
 raw input -> correction -> locked prefix -> continuation -> commit
 ```
 
-For example:
+Example:
 
 ```text
 raw input:        wo jue de zhege fagnan
 locked prefix:    我觉得这个方案
 continuation:     还有进一步优化空间
-commit with Tab:  我觉得这个方案还有进一步优化空间
+Tab commit:       我觉得这个方案还有进一步优化空间
 ```
 
-The AI candidate is only `还有进一步优化空间`. It is not allowed to turn the prefix into a different sentence such as `我认为当前方案...` unless the user explicitly triggers polish.
+The AI continuation is only `还有进一步优化空间`. It is not allowed to turn
+the locked prefix into another sentence unless the user explicitly triggers
+polish.
 
-## Current MVP Scope
+## Features
 
-KnowType is currently a local MVP for development and manual testing. It includes:
+- Chinese input first: pinyin decoding, compact pinyin segmentation, typo
+  normalization, same-pinyin candidates, common initial abbreviations, and
+  partial-syllable input.
+- Local candidate learning: recent prefix choices can boost local ranking across
+  input-method restarts without being sent to providers.
+- Prefix-locked AI continuation: continuations append after the locked prefix;
+  explicit polish is the only rewrite path.
+- macOS input method flow: marked text, candidate selection, paging,
+  punctuation handling, and a custom AppKit candidate panel anchored near the
+  caret.
+- Provider compatibility: OpenAI-compatible chat, OpenAI Responses, Anthropic
+  Messages, Gemini native, Ollama native, and custom HTTP profiles normalize
+  into one provider interface.
+- Privacy guardrails: URLs, emails, paths, commands, code-like text, and
+  protected app contexts use the no-provider Level 0 path.
+- Local lexicons: bundled seed lexicon plus user-owned JSON/TSV resources and a
+  managed Rime Pinyin Simplified install path.
 
-- a Swift package with core correction, provider adapters, and input-method interaction logic
-- a local InputMethodKit app bundle built into `dist/KnowType.app`
-- a compact custom candidate panel with measured horizontal/vertical layout instead of relying on `IMKCandidates` as the main UI
-- a clean-room pinyin engine for MVP Chinese input coverage
-- SwiftUI settings for provider profiles, local lexicon status, privacy summary, input/candidate behavior, and debug install notes
-- a Debug Install settings tab that mirrors the local build, install, diagnose, selection, and logging commands
-- Keychain-backed API key storage for provider profiles
-- local candidate-learning history stored separately from provider configuration
+## Status
 
-It is not yet a signed installer, notarized release, or App Store package.
+KnowType is currently a local MVP for development and manual testing. It
+includes a Swift package, unit tests, a local InputMethodKit app bundle,
+SwiftUI settings hosts, provider profile storage, Keychain-backed API keys, and
+local dictionary tooling.
 
-## Repository Layout
+It is not yet a signed installer, notarized release, auto-updater, or App Store
+package.
 
-```text
-Sources/KnowTypeCore/          Product models, protection rules, correction, continuation
-Sources/KnowTypeProviders/     Provider profiles, runtime loading, adapters, HTTP normalization
-Sources/KnowTypeInputMethod/   IMK controller, session actions, candidate panel, key behavior
-Sources/KnowTypeInputMethodApp Local macOS input-method app entry point
-Sources/KnowTypeSettingsUI/    Shared SwiftUI settings and provider profile editing
-Sources/KnowTypeSettingsApp/   Standalone settings app host
-Sources/KnowTypePreferencePane/ System Settings preference pane host
-Tests/                         Unit tests for core behavior, providers, and input method logic
-doc/                           Current architecture, interface, acceptance, and source notes
-plan/                          Active or recently delivered implementation plans
-Resources/                     Dictionaries, schema notes, and future bundled assets
-```
-
-See [doc/README.md](doc/README.md) for the documentation map.
-
-## Build And Local Install
+## Quick Start
 
 Requirements:
 
-- macOS 13 or newer for the local InputMethodKit bundle
+- macOS 13 or newer
 - Swift 6.2 toolchain
 
-Run package checks:
+Build and test:
 
 ```bash
 swift build
 swift test
 ```
 
-Build and install the local input-method bundle:
-
-```bash
-./scripts/build-inputmethod-bundle.sh
-./scripts/install-inputmethod.sh
-```
-
-Run the installed-bundle diagnostic before manual typing checks:
-
-```bash
-./scripts/diagnose-inputmethod.sh
-```
-
-Detailed install, signing, Text Input Source, and troubleshooting notes live in [doc/src/scripts/inputmethod-diagnostics.plan.md](doc/src/scripts/inputmethod-diagnostics.plan.md).
-
-To remove the local bundle:
-
-```bash
-./scripts/uninstall-inputmethod.sh
-```
-
-## Demo Without Installing
-
-You can run the package-level flow before installing the input method:
+Try the package-level flow without installing the input method:
 
 ```bash
 swift run knowtype-demo --locale zh-CN --action tab wo jue de zhege fagnan
@@ -114,83 +92,95 @@ swift run knowtype-demo --locale mixed --action tab zhege api latnecy youdian ga
 swift run knowtype-demo --locale en-US --action tab I thikn this approch
 ```
 
-## Provider Configuration
+## Install Local IME
 
-KnowType loads model providers through `ProviderProfile` and `ProviderFactory`. Profiles are stored as JSON metadata; API keys are stored separately.
+Build and install the local development bundle:
 
-Default profile file:
+```bash
+./scripts/build-inputmethod-bundle.sh
+./scripts/install-inputmethod.sh
+./scripts/diagnose-inputmethod.sh
+```
+
+Select KnowType in the active target app when needed:
+
+```bash
+./scripts/select-inputmethod.sh --require-selected
+```
+
+Remove the local bundle:
+
+```bash
+./scripts/uninstall-inputmethod.sh
+```
+
+Local IME behavior must still be verified by typing in real host apps. See
+[Local Input Method Testing](doc/local-inputmethod-testing.plan.md) and
+[MVP Acceptance](doc/mvp-acceptance.plan.md) for the macOS policy, selection,
+and manual acceptance flow.
+
+## Configuration
+
+Provider profiles are stored as JSON metadata; API keys are stored separately.
 
 ```text
 ~/Library/Application Support/KnowType/providers.json
 ```
 
-Local candidate-learning history is stored at:
+Local candidate-learning history:
 
 ```text
 ~/Library/Application Support/KnowType/user-selection-history.json
 ```
 
-Local JSON/TSV lexicons are read from:
+Local JSON/TSV lexicons:
 
 ```text
 ~/Library/Application Support/KnowType/Lexicons
 ```
 
-The settings app shows whether this directory exists, how many lexicon entries loaded, installed managed lexicon packs, and any resource diagnostics. It can create missing directories, create a sample TSV, or install the recommended Rime Pinyin Simplified lexicon pack. Missing directories are allowed; KnowType falls back to the bundled seed lexicon.
-For development, `KNOWTYPE_LEXICON_DIR` and colon-separated `KNOWTYPE_LEXICON_DIRS` are also recognized before the default directory.
+`KNOWTYPE_LEXICON_DIR` and colon-separated `KNOWTYPE_LEXICON_DIRS` can add
+development lexicon directories before the default directory.
 
-The same recommended lexicon can be installed from the command line:
+Install the recommended managed lexicon pack:
 
 ```bash
 scripts/install-lexicon-pack.sh rime-pinyin-simp
 ```
 
-The installer downloads a pinned Apache-2.0 Rime dictionary, verifies SHA256, converts it into KnowType TSV, and writes local metadata beside the TSV. Third-party bulk dictionary data is not committed to this repository.
+The installer downloads a pinned Apache-2.0 Rime dictionary, verifies SHA256,
+converts it into KnowType TSV, and writes local metadata beside the TSV.
+Third-party bulk dictionary data is not committed to this repository.
 
-Profile fields:
-
-```text
-id, displayName, kind, baseURL, model, timeoutSeconds, headers,
-secretName, customBodyTemplate, customResponsePath, isDefault
-```
-
-`secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys in Keychain under the `KnowType` service. Provider JSON stores the secret name, not the secret value.
-
-Custom `headers` are saved in provider JSON exactly as configured. Do not put bearer tokens, API keys, or other secrets in custom headers for the MVP; use the profile API key field and Keychain-backed secret storage instead.
-
-When `providers.json` is missing or empty, KnowType seeds a local OpenAI-compatible default at `http://127.0.0.1:8317/v1`. The model may stay blank for `/v1/models` discovery. No API key is embedded in source or profile JSON; save one in settings if your local runtime requires it.
-
-The AI Provider tab includes a connection test for the current draft profile. It uses a typed draft API key only for that test request, or reuses an existing Keychain secret when the key field is blank. It does not save profile JSON or mutate Keychain.
-
-Supported provider kinds:
-
-- `openai_chat`: `/v1/chat/completions`
-- `openai_responses`: `/v1/responses`
-- `anthropic_messages`: `/v1/messages`
-- `gemini_native`: Gemini `models.generateContent`
-- `ollama_native`: Ollama `/api/chat`
-- `custom_http`: templated request body plus response path extraction
-
-Local OpenAI-compatible runtimes may leave the model blank so KnowType can discover models from `/v1/models`. Remote OpenAI-compatible profiles require an explicit model ID. Custom HTTP profiles can omit the API key for local proxy endpoints.
+When `providers.json` is missing or empty, KnowType seeds a local
+OpenAI-compatible profile at `http://127.0.0.1:8317/v1` with no embedded API
+key. Remote OpenAI-compatible profiles require an explicit model ID; local
+OpenAI-compatible profiles may leave the model blank for `/v1/models`
+discovery.
 
 ## Input Behavior
 
-- `Space`: commit the selected visible full prefix candidate for the current raw input, or apply the selected segment inside the active composition.
-- `Return` / `Enter`: commit the original raw composition, for example `nishishei`.
-- `Tab`: commit the selected prefix plus the first or selected continuation when the prefix is fully resolved.
-- `0`: commit the raw composition when correction candidates are visible.
-- plain punctuation: commit composition plus punctuation, or insert punctuation directly when there is no composition.
-- `Option + .`: toggle Chinese/English punctuation for the active input session.
-- `Option + number`: commit the selected prefix plus the mapped continuation. `Option + 1` matches the first continuation and is displayed as `⇥` because `Tab` commits it directly.
-- `Option + R`: request polish; this is the explicit rewrite path.
+| Shortcut | Behavior |
+|---|---|
+| `Space` | Commit the selected visible full prefix candidate, or apply the selected segment inside the active composition. |
+| `Return` / `Enter` | Commit the original raw composition. |
+| `Tab` | Commit the selected prefix plus the first or selected continuation when the prefix is fully resolved. |
+| `0` | Commit the raw composition when correction candidates are visible. |
+| Plain punctuation | Commit composition plus punctuation, or insert punctuation directly with no composition. |
+| `Option + .` | Toggle Chinese/English punctuation for the active input session. |
+| `Option + number` | Commit the selected prefix plus the mapped continuation. |
+| `Option + R` | Request explicit polish, the default rewrite path. |
 
-The Input settings tab persists default punctuation language and symbol width for normal apps and code-style apps. Terminal, iTerm, Xcode, VS Code, and Codex desktop start with the code-app defaults while keeping the Chinese text pipeline available; the built-in code-app punctuation default is Chinese unless the user changes it.
+The candidate panel shows prefix candidates first, continuation candidates after
+them, and raw input only when no suggestion is available. When a provider is
+configured, local prefix candidates appear immediately and provider-backed
+continuations update asynchronously. Provider failures do not show fixed local
+fallback text as if it were AI output.
 
-The candidate panel shows prefix candidates first and continuation candidates after them. Candidate rows may cover the whole raw buffer or just the active segment; selecting a segment updates marked text without inserting committed text. Candidate rows are paged in 9-row windows. The panel measures candidate text before rendering, uses horizontal layout for compact 4-6 row pages, switches to vertical layout for long phrases, and avoids screen edges. Recent prefix selections can influence local candidate order across input-method restarts. When a provider is configured, KnowType publishes local prefix candidates immediately and updates continuation rows when the provider response arrives. If that provider fails or returns no usable continuation, KnowType keeps the traditional prefix candidates and does not substitute fixed local fallback text as AI output. Commit behavior follows the visible snapshot: if only raw input is visible, `Space` does not commit a hidden Chinese fallback.
+## Privacy
 
-## Privacy Baseline
-
-Level 0 input must not call cloud providers. It uses the no-provider path and clears cloud continuation candidates.
+Level 0 input must not call cloud providers. It uses the no-provider path and
+clears continuation candidates.
 
 Protected examples include:
 
@@ -201,36 +191,57 @@ Protected examples include:
 - code-like snippets containing braces, semicolons, or `=>`
 - Terminal, iTerm, and Xcode sessions by bundle identifier
 
-Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, `InputMethodKit`, `snake_case`, and `camelCase` are preserved or canonicalized.
+Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`,
+`InputMethodKit`, `snake_case`, and `camelCase` are preserved or canonicalized.
 
-## Manual MVP Acceptance
+## Documentation
 
-Before tagging an MVP build, run:
+- [Documentation map](doc/README.md)
+- [Architecture](doc/architecture.plan.md)
+- [Interfaces](doc/interfaces.plan.md)
+- [MVP acceptance](doc/mvp-acceptance.plan.md)
+- [Source notes](doc/src/README.md)
+- [Implementation plans](plan/README.md)
 
-```bash
-swift build
-swift test
-./scripts/install-inputmethod.sh
-./scripts/diagnose-inputmethod.sh --strict
-./scripts/select-inputmethod.sh --require-selected
+## Development
+
+Repository layout:
+
+```text
+Sources/KnowTypeCore/           Product models, protection, correction, continuation
+Sources/KnowTypeProviders/      Provider profiles, runtime loading, adapters
+Sources/KnowTypeInputMethod/    IMK controller, session actions, candidate panel
+Sources/KnowTypeInputMethodApp/ Local macOS input-method app entry point
+Sources/KnowTypeSettingsUI/     Shared SwiftUI settings UI
+Sources/KnowTypeSettingsApp/    Standalone settings app host
+Sources/KnowTypePreferencePane/ System Settings PreferencePane host
+Tests/                          Unit tests
+doc/                            Current engineering documentation
+plan/                           Active and recently delivered implementation plans
+Resources/                      macOS bundle resources
 ```
 
-Then manually type a real probe in each target app:
+Branch workflow:
 
-- TextEdit: candidate window appears near the caret; `Space` commits prefix only.
-- Safari and Chrome: text fields accept `Tab` for prefix plus first continuation.
-- Xcode: technical tokens and code-like identifiers are preserved.
-- Terminal: paths and commands stay Level 0 and do not call providers.
-- WeChat and Feishu: candidate window remains visible and usable in chat inputs.
-- Provider failure: local correction still works and commit is not blocked.
-- Keychain: API keys are resolved from Keychain, not persisted in provider JSON.
+- `main`: stable branch
+- `dev`: integration branch
+- topic branches: `feature/<desc>`, `fix/<desc>`, `docs/<desc>`,
+  `refactor/<desc>`, `test/<desc>`, `release/<version>`
 
-The full checklist is in [doc/mvp-acceptance.plan.md](doc/mvp-acceptance.plan.md).
+Use Conventional Commits and open topic PRs into `dev` first. For code changes,
+run `swift test`. For documentation-only changes, run at least
+`git diff --check` and keep indexes in `doc/` and `plan/` synchronized.
 
-## Branch Workflow
+## Roadmap / Non-Goals
 
-- `main`: stable branch.
-- `dev`: integration branch.
-- topic branches: `feature/<desc>`, `fix/<desc>`, `docs/<desc>`, `refactor/<desc>`, `test/<desc>`, `release/<version>`.
+Current non-goals:
 
-Use Conventional Commits and open topic PRs into `dev` first. Keep documentation-only changes separate from runtime code changes when possible.
+- signed installer, notarization, auto-update, or App Store distribution
+- complete real-world pinyin dictionary coverage without licensed local lexicons
+- universal compatibility claims for every macOS host app
+- using local fallback continuation as fake configured-provider output
+- rewriting locked prefixes except through explicit polish
+
+## License
+
+License not declared yet.

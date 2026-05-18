@@ -1,63 +1,97 @@
 # KnowType Plan Index
 
-`plan/` stores active or recently delivered implementation plans. It is intentionally smaller than a project wiki: once a plan is obsolete and its behavior is documented in `doc/`, it can be retired through a docs cleanup PR.
+`plan/` stores active implementation plans and short records for recently
+delivered work. Current system behavior belongs in [doc/](../doc/README.md);
+plans should stay implementation-oriented and retire once stable behavior is
+absorbed into current-state documentation.
 
-## Active MVP Work
+Use [the implementation plan template](templates/implementation-plan.template.md)
+for new work and [the delivered plan template](templates/delivered-plan.template.md)
+when converting a shipped plan into a short record.
 
-| Document | Purpose | Status |
-|---|---|---|
-| [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and project workflow | Active reference |
-| [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active reference |
-| [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Mature candidate-window geometry resolver | Active reference |
-| [privacy-app-rules-mvp.plan.md](privacy-app-rules-mvp.plan.md) | Level 0 no-provider routing and protected app rules | Active reference |
-| [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Local candidate learning persisted across IMK restarts | Active reference |
-| [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | Candidate PageDown/PageUp offset-preserving behavior | Active reference |
-| [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive horizontal/vertical candidate panel layout | Active reference |
-| [traditional-lexicon-extension.plan.md](traditional-lexicon-extension.plan.md) | Authorized local lexicon extension path for the Chinese engine | Active reference |
-| [traditional-lexicon-resource-loader.plan.md](traditional-lexicon-resource-loader.plan.md) | JSON/TSV resource loader for authorized local lexicons | Active reference |
-| [traditional-lexicon-catalog.plan.md](traditional-lexicon-catalog.plan.md) | Multi-resource catalog and diagnostics for local lexicons | Active reference |
-| [traditional-lexicon-file-source.plan.md](traditional-lexicon-file-source.plan.md) | File and directory loading for authorized local lexicon resources | Active reference |
-| [bundled-seed-lexicon-resource.plan.md](bundled-seed-lexicon-resource.plan.md) | Package-resource seed lexicon loaded through the local resource path | Active reference |
-| [runtime-lexicon-directory.plan.md](runtime-lexicon-directory.plan.md) | Runtime directory loading for user-owned local lexicons | Active reference |
-| [lexicon-settings-status.plan.md](lexicon-settings-status.plan.md) | Settings status for local lexicon directories and diagnostics | Active reference |
-| [lexicon-directory-resolver.plan.md](lexicon-directory-resolver.plan.md) | Shared directory discovery for runtime and settings local lexicons | Active reference |
-| [runtime-lexicon-default-refresh.plan.md](runtime-lexicon-default-refresh.plan.md) | Avoid stale default-engine caches for local lexicon iteration | Active reference |
-| [runtime-lexicon-session-refresh.plan.md](runtime-lexicon-session-refresh.plan.md) | Refresh running IMK sessions when local lexicon resources change | Active reference |
-| [lexicon-sample-resource-action.plan.md](lexicon-sample-resource-action.plan.md) | Settings action for creating a known-good sample TSV lexicon | Active reference |
-| [managed-lexicon-pack-installer.plan.md](managed-lexicon-pack-installer.plan.md) | License-aware recommended lexicon pack download, conversion, and settings install action | Active reference |
-| [segmented-candidate-selection.plan.md](segmented-candidate-selection.plan.md) | Candidate rows carry raw spans; marked text stays raw until full or segmented confirmation | Active reference |
-| [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive by moving large-lexicon loading and candidate generation off the main path | Active reference |
-| [provider-runtime-seeded-defaults.plan.md](provider-runtime-seeded-defaults.plan.md) | Shared seeded provider defaults for settings and runtime loading | Active reference |
-| [provider-connection-diagnostics.plan.md](provider-connection-diagnostics.plan.md) | Settings-side provider connection testing without persisting draft secrets | Active reference |
-| [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Keep provider-backed continuation honest by not replacing failures with local fallback text | Active reference |
-| [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persist punctuation language and symbol width preferences shared by settings and IMK runtime | Active reference |
-| [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Align Chinese punctuation defaults, visible candidates, Space commit behavior, and safe candidate anchoring | Active reference |
-| [macos-ime-smoke-diagnostics.plan.md](macos-ime-smoke-diagnostics.plan.md) | Local installed-bundle and Text Input Source diagnostics before manual IMK acceptance | Active reference |
-| [install-selection-status.plan.md](install-selection-status.plan.md) | Report local install selection requests and defer system status to diagnostics | Active reference |
-| [input-source-selection-helper.plan.md](input-source-selection-helper.plan.md) | Standalone helper for retrying KnowType input-source selection before manual typing acceptance | Active reference |
-| [input-source-selection-persistence.plan.md](input-source-selection-persistence.plan.md) | Context-aware local Text Input Source selection verification | Active reference |
-| [input-source-display-name.plan.md](input-source-display-name.plan.md) | Localized macOS input-source display name and stale TIS cache diagnostics | Active reference |
-| [input-source-selection-activation.plan.md](input-source-selection-activation.plan.md) | Installed-app activation path and local selection-chain diagnostics | Active reference |
-| [local-input-source-system-policy.plan.md](local-input-source-system-policy.plan.md) | macOS 15 local SystemPolicyRule generation for Apple Development input-method testing | Active reference |
-| [local-input-source-switching-repair.plan.md](local-input-source-switching-repair.plan.md) | Repair stale local TIS/LaunchServices state and input-method authorization guidance | Active reference |
-| [inputmethod-script-ci-smoke.plan.md](inputmethod-script-ci-smoke.plan.md) | CI coverage for local IMK helper scripts and bundle packaging smoke checks | Active reference |
-| [macos-ime-acceptance-harness.plan.md](macos-ime-acceptance-harness.plan.md) | Repeatable local IME acceptance harness and report template | Active reference |
-| [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual typing gates | Active reference |
-| [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active reference |
+## Status Definitions
 
-## Delivered MVP Slices
+- `Active`: work is still being designed, implemented, or used as a live
+  decision source.
+- `Delivered`: work has shipped, but the record is still useful for release
+  notes, review context, or recent branch archaeology.
+- `Absorbed`: stable behavior has moved into `doc/`; the plan can usually be
+  removed in a docs cleanup.
+- `Retire Candidate`: old or duplicated plan that should be deleted once links
+  and docs are checked.
+
+## Active References
 
 | Document | Purpose | Status |
 |---|---|---|
-| [imk-session-architecture.plan.md](imk-session-architecture.plan.md) | Thin IMK controller and session separation | Delivered, keep until architecture docs fully absorb it |
-| [inputmethod-native-candidates-fix.plan.md](inputmethod-native-candidates-fix.plan.md) | Native-style candidate panel behavior | Delivered, keep as UI reference |
-| [native-candidate-panel-style.plan.md](native-candidate-panel-style.plan.md) | Compact macOS candidate panel styling | Delivered, keep as UI reference |
-| [preferences-install-debug.plan.md](preferences-install-debug.plan.md) | Settings and local install/debug workflow | Delivered, keep as settings reference |
-| [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Delivered, pending follow-up input-mode state work |
+| [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and workflow | Active |
+| [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active |
+| [chinese-lexicon-index.plan.md](chinese-lexicon-index.plan.md) | Larger-lexicon indexing path for `TraditionalInputEngine` | Active |
+| [pr23-chinese-prefix-completions.plan.md](pr23-chinese-prefix-completions.plan.md) | Cleanup of useful Chinese prefix completion gaps from stale PR work | Active |
+| [pinyin-cloud-fallback-policy.plan.md](pinyin-cloud-fallback-policy.plan.md) | Provider fallback policy for unknown pinyin-shaped input | Active |
+| [privacy-app-rules-mvp.plan.md](privacy-app-rules-mvp.plan.md) | Level 0 no-provider routing and protected app rules | Active |
+| [user-selection-ranking.plan.md](user-selection-ranking.plan.md) | Local ranking boost from recent prefix selections | Active |
+| [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Persist local candidate learning across IMK restarts | Active |
+| [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Candidate-window geometry resolver behavior | Active |
+| [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | PageDown/PageUp offset-preserving candidate paging | Active |
+| [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive candidate panel layout | Active |
+| [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Visible candidate, punctuation, Space commit, and anchoring alignment | Active |
+| [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
+| [segmented-candidate-selection.plan.md](segmented-candidate-selection.plan.md) | Raw-span candidate rows and segmented confirmation behavior | Active |
+| [traditional-lexicon-extension.plan.md](traditional-lexicon-extension.plan.md) | Authorized local lexicon extension path | Active |
+| [traditional-lexicon-resource-loader.plan.md](traditional-lexicon-resource-loader.plan.md) | JSON/TSV resource loader for local lexicons | Active |
+| [traditional-lexicon-catalog.plan.md](traditional-lexicon-catalog.plan.md) | Multi-resource local lexicon catalog and diagnostics | Active |
+| [traditional-lexicon-file-source.plan.md](traditional-lexicon-file-source.plan.md) | File and directory loading for local lexicon resources | Active |
+| [bundled-seed-lexicon-resource.plan.md](bundled-seed-lexicon-resource.plan.md) | Bundled TSV seed lexicon resource path | Active |
+| [runtime-lexicon-directory.plan.md](runtime-lexicon-directory.plan.md) | Runtime directory loading for user-owned local lexicons | Active |
+| [runtime-lexicon-default-refresh.plan.md](runtime-lexicon-default-refresh.plan.md) | Avoid stale default-engine caches for lexicon iteration | Active |
+| [runtime-lexicon-session-refresh.plan.md](runtime-lexicon-session-refresh.plan.md) | Refresh running IMK sessions when local lexicon resources change | Active |
+| [lexicon-directory-resolver.plan.md](lexicon-directory-resolver.plan.md) | Shared directory discovery for runtime and settings lexicons | Active |
+| [lexicon-settings-status.plan.md](lexicon-settings-status.plan.md) | Settings status for local lexicon directories and diagnostics | Active |
+| [lexicon-sample-resource-action.plan.md](lexicon-sample-resource-action.plan.md) | Settings action for creating a sample TSV lexicon | Active |
+| [managed-lexicon-pack-installer.plan.md](managed-lexicon-pack-installer.plan.md) | License-aware recommended lexicon pack install path | Active |
+| [provider-runtime-seeded-defaults.plan.md](provider-runtime-seeded-defaults.plan.md) | Shared seeded provider defaults for settings and runtime | Active |
+| [provider-connection-diagnostics.plan.md](provider-connection-diagnostics.plan.md) | Settings-side provider connection tests without saving draft secrets | Active |
+| [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Avoid replacing provider failures with local mock continuation text | Active |
+| [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
+| [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persisted punctuation and symbol-width preferences | Active |
+| [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Active |
+| [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual gates | Active |
+| [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active |
+
+## Local IME And Tooling References
+
+| Document | Purpose | Status |
+|---|---|---|
+| [macos-ime-smoke-diagnostics.plan.md](macos-ime-smoke-diagnostics.plan.md) | Installed-bundle and Text Input Source diagnostics before manual acceptance | Active |
+| [macos-ime-acceptance-harness.plan.md](macos-ime-acceptance-harness.plan.md) | Repeatable local IME acceptance harness and report template | Active |
+| [inputmethod-script-ci-smoke.plan.md](inputmethod-script-ci-smoke.plan.md) | CI coverage for local IMK helper scripts and bundle packaging smoke checks | Active |
+| [install-selection-status.plan.md](install-selection-status.plan.md) | Report local install selection requests while deferring status to diagnostics | Active |
+| [input-source-selection-helper.plan.md](input-source-selection-helper.plan.md) | Standalone helper for retrying KnowType input-source selection | Active |
+| [input-source-selection-persistence.plan.md](input-source-selection-persistence.plan.md) | Context-aware local Text Input Source selection verification | Active |
+| [input-source-display-name.plan.md](input-source-display-name.plan.md) | Localized macOS input-source display name and TIS cache diagnostics | Active |
+| [input-source-selection-activation.plan.md](input-source-selection-activation.plan.md) | Installed-app activation path and selection-chain diagnostics | Active |
+| [local-input-source-system-policy.plan.md](local-input-source-system-policy.plan.md) | macOS 15 local SystemPolicyRule generation for Apple Development testing | Active |
+| [local-input-source-switching-repair.plan.md](local-input-source-switching-repair.plan.md) | Repair stale local TIS/LaunchServices state and authorization guidance | Active |
+
+## Delivered Or Recently Absorbed Work
+
+| Document | Purpose | Status |
+|---|---|---|
+| [imk-session-architecture.plan.md](imk-session-architecture.plan.md) | Thin IMK controller and explicit session separation | Delivered |
+| [inputmethod-native-candidates-fix.plan.md](inputmethod-native-candidates-fix.plan.md) | Native-style candidate panel behavior | Delivered |
+| [native-candidate-panel-style.plan.md](native-candidate-panel-style.plan.md) | Compact macOS candidate panel styling | Delivered |
+| [preferences-install-debug.plan.md](preferences-install-debug.plan.md) | Settings and local install/debug workflow | Delivered |
+| [system-settings-preference-pane.plan.md](system-settings-preference-pane.plan.md) | PreferencePane and IMK preferences settings hosts | Delivered |
 
 ## Maintenance Rules
 
-- Keep `plan/` focused on implementable work and recently merged decisions.
-- Move stable behavior summaries into [doc/](../doc/README.md).
-- Update this index whenever adding, merging, or retiring a plan.
-- Do not duplicate long architecture explanations here; link to the relevant doc instead.
+- Add or update a plan before implementing feature, fix, refactor, or behavior
+  changes that need design review.
+- Update this index in the same change that adds, absorbs, or retires a plan.
+- Move stable behavior summaries into `doc/` and source notes after a plan
+  ships.
+- Mark old plans `Absorbed` or `Retire Candidate` before deleting them, unless
+  the deletion is part of a dedicated docs cleanup.
+- Do not duplicate long architecture explanations here; link to the relevant
+  current-state document instead.

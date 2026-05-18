@@ -90,6 +90,22 @@ For feature, fix, or refactor work:
 
 For docs-only cleanup, keep prose concise and current-state focused. Do not turn `README.md` into a full design history.
 
+## Documentation Standards
+
+- Use `plan/templates/implementation-plan.template.md` for new active work plans.
+- Use `plan/templates/delivered-plan.template.md` when converting shipped work into a short delivered record.
+- Use `doc/templates/documentation.template.md` for new current-state docs under `doc/`.
+- Use `doc/templates/source-note.template.md` for new source notes under `doc/src/`.
+- Keep `README.md` and `README_CN.md` shaped like GitHub project entry pages: what the project is, current status, quick start, local install, configuration, privacy, docs, development, and known non-goals.
+- Keep stable behavior in `doc/`; keep implementation intent, sequencing, and branch-local decisions in `plan/`.
+- Source notes are required for public contracts, cross-module boundaries, provider adapters, IMK/AppKit seams, persistence formats, local scripts, and files with non-obvious privacy or prefix-lock behavior. They are not required for every test file.
+- Update indexes in the same change that adds, absorbs, or retires docs:
+  - `doc/README.md` for top-level docs and templates.
+  - `doc/src/README.md` for source notes.
+  - `plan/README.md` for implementation plans and delivered records.
+- Plan statuses are `Active`, `Delivered`, `Absorbed`, and `Retire Candidate`. Retire a plan only after stable behavior is documented in `doc/` or no longer relevant.
+- For documentation-only changes, run `git diff --check` and check that README/index links point at existing files. Run `swift test` only when Swift code or script behavior changes.
+
 ## Review Checklist
 
 - Prefix candidates and continuation candidates remain separate.
