@@ -53,7 +53,8 @@ public enum InputSessionCommitPolicy {
         selectedCandidate: InputSessionCandidateSelection? = nil,
         appBundleID: String? = nil,
         locale: KnowTypeLocale = .mixed,
-        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine()
+        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        allowsSynchronousFallback: Bool = true
     ) -> InputCommitResult {
         if action == .commitRaw {
             return rawInput.isEmpty ? .noAction : .commit(rawInput)
@@ -68,7 +69,8 @@ public enum InputSessionCommitPolicy {
                 rawInput: rawInput,
                 appBundleID: appBundleID,
                 locale: locale,
-                traditionalInputEngine: traditionalInputEngine
+                traditionalInputEngine: traditionalInputEngine,
+                allowsSynchronousFallback: allowsSynchronousFallback
             )
         }
 
@@ -124,7 +126,8 @@ public enum InputSessionCommitPolicy {
         rawInput: String,
         appBundleID: String?,
         locale: KnowTypeLocale,
-        traditionalInputEngine: TraditionalInputEngine
+        traditionalInputEngine: TraditionalInputEngine,
+        allowsSynchronousFallback: Bool
     ) -> InputCommitResult {
         guard !rawInput.isEmpty else {
             return .noAction
@@ -132,6 +135,9 @@ public enum InputSessionCommitPolicy {
 
         switch action {
         case .space, .tab:
+            guard allowsSynchronousFallback else {
+                return .noAction
+            }
             let context = InputContext(
                 rawInput: rawInput,
                 appBundleID: appBundleID,

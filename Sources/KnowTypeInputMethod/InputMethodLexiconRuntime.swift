@@ -7,6 +7,20 @@ public struct InputMethodLexiconRuntimeSnapshot: Sendable, Equatable {
     public init(directories: [InputMethodLexiconDirectorySnapshot]) {
         self.directories = directories
     }
+
+    public var hasLexiconResources: Bool {
+        directories.contains { !$0.resources.isEmpty }
+    }
+}
+
+public struct InputMethodLexiconRuntimeEngineState: Sendable {
+    public var engine: TraditionalInputEngine
+    public var snapshot: InputMethodLexiconRuntimeSnapshot
+
+    public init(engine: TraditionalInputEngine, snapshot: InputMethodLexiconRuntimeSnapshot) {
+        self.engine = engine
+        self.snapshot = snapshot
+    }
 }
 
 public struct InputMethodLexiconDirectorySnapshot: Sendable, Equatable {
@@ -83,6 +97,22 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
         loadCatalog(fileManager: fileManager).makeEngine()
     }
 
+    public func initialEngineState(fileManager: FileManager = .default) -> InputMethodLexiconRuntimeEngineState {
+        let snapshot = snapshot(fileManager: fileManager)
+        if let cachedEngine = InputMethodLexiconRuntimeEngineCache.shared.engine(for: snapshot) {
+            return InputMethodLexiconRuntimeEngineState(engine: cachedEngine, snapshot: snapshot)
+        }
+        guard snapshot.hasLexiconResources else {
+            let engine = TraditionalInputEngine()
+            InputMethodLexiconRuntimeEngineCache.shared.store(engine: engine, snapshot: snapshot)
+            return InputMethodLexiconRuntimeEngineState(engine: engine, snapshot: snapshot)
+        }
+
+        let engine = makeEngine(fileManager: fileManager)
+        InputMethodLexiconRuntimeEngineCache.shared.store(engine: engine, snapshot: snapshot)
+        return InputMethodLexiconRuntimeEngineState(engine: engine, snapshot: snapshot)
+    }
+
     public func snapshot(fileManager: FileManager = .default) -> InputMethodLexiconRuntimeSnapshot {
         InputMethodLexiconRuntimeSnapshot(
             directories: directories.map { directory in
@@ -124,6 +154,21 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
         .makeEngine(fileManager: fileManager)
     }
 
+    public static func prewarmDefaultEngine() {
+        let runtime = defaultRuntime()
+        let snapshot = runtime.snapshot()
+        guard snapshot.hasLexiconResources,
+              InputMethodLexiconRuntimeEngineCache.shared.engine(for: snapshot) == nil else {
+            return
+        }
+        let engine = runtime.makeEngine()
+        InputMethodLexiconRuntimeEngineCache.shared.store(engine: engine, snapshot: snapshot)
+    }
+
+    public static func cacheEngine(_ engine: TraditionalInputEngine, snapshot: InputMethodLexiconRuntimeSnapshot) {
+        InputMethodLexiconRuntimeEngineCache.shared.store(engine: engine, snapshot: snapshot)
+    }
+
     private func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {
         var isDirectory: ObjCBool = false
         return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory)
@@ -158,5 +203,29 @@ public struct InputMethodLexiconRuntime: Sendable, Equatable {
             modificationDate: values?.contentModificationDate,
             fileSize: values?.fileSize.map(Int64.init)
         )
+    }
+}
+
+private final class InputMethodLexiconRuntimeEngineCache: @unchecked Sendable {
+    static let shared = InputMethodLexiconRuntimeEngineCache()
+
+    private let lock = NSLock()
+    private var snapshot: InputMethodLexiconRuntimeSnapshot?
+    private var engine: TraditionalInputEngine?
+
+    func engine(for snapshot: InputMethodLexiconRuntimeSnapshot) -> TraditionalInputEngine? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.snapshot == snapshot else {
+            return nil
+        }
+        return engine
+    }
+
+    func store(engine: TraditionalInputEngine, snapshot: InputMethodLexiconRuntimeSnapshot) {
+        lock.lock()
+        self.engine = engine
+        self.snapshot = snapshot
+        lock.unlock()
     }
 }

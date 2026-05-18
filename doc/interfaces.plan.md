@@ -142,7 +142,9 @@ Correction and traditional-input candidates may also carry `rawRange` and `segme
 
 `InputMethodLexiconRuntime` uses the shared resolver, then creates the `TraditionalInputEngine` used by the input-method pipeline. Missing directories are ignored so a fresh install keeps using only the bundled seed lexicon. `defaultEngine()` rebuilds from the currently resolved directories on each request rather than returning a process-wide stale snapshot.
 
-`InputMethodLexiconRuntime.snapshot()` reports each configured directory's existence and supported JSON/TSV resource files with modification metadata. The IMK frontend uses that snapshot to refresh its runtime engine at the start of a new composition when local lexicon resources changed, without changing active marked text mid-composition.
+`InputMethodLexiconRuntime.snapshot()` reports each configured directory's existence and supported JSON/TSV resource files with modification metadata. The IMK frontend uses that snapshot to refresh its runtime engine in the background when local lexicon resources changed, without blocking key handling or changing active marked text with stale candidates.
+
+Interactive correction calls use `TraditionalInputQueryOptions.interactive`. The budget caps tokenization paths, recursive parse states, candidate output count, segment candidate output count, and partial-match fanout. Offline or test callers may omit the options for broader exhaustive parsing.
 
 `ManagedLexiconPackInstaller` currently supports the recommended `rime-pinyin-simp` pack. It downloads the pinned Rime source dictionary, verifies the expected SHA256, converts Rime rows shaped as `text<TAB>pinyin<TAB>weight?` into KnowType TSV, writes the TSV atomically, and writes metadata containing source, version, checksum, license, entry count, and install date. It refuses to overwrite an existing output file unless `force` is true.
 
@@ -156,7 +158,8 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 - segment candidates cover part of the raw buffer and update the active composition without inserting committed text
 - continuation candidates commit as `locked prefix + continuation`
 - rows are paged through `CandidatePanelPagingState`, currently 9 visible rows per page
-- when a provider is configured, immediate local output may omit fallback continuation rows until provider output arrives
+- production IMK key handling first shows raw input while local/provider suggestions resolve asynchronously
+- when a provider is configured, local output omits fallback continuation rows until provider output arrives
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
 `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when

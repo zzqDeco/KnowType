@@ -33,6 +33,30 @@ final class InputMethodLexiconRuntimeTests: XCTestCase {
         XCTAssertEqual(engine.candidates(for: "ceshici").first?.text, "测试词")
     }
 
+    func testInitialEngineStatePreservesInstalledRuntimeLexicon() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("shou ci ci ku\t首次词库\t0.995\n".utf8)
+            .write(to: directory.appendingPathComponent("user.tsv"))
+        let runtime = InputMethodLexiconRuntime(directories: [directory])
+
+        let state = runtime.initialEngineState()
+
+        XCTAssertTrue(state.snapshot.hasLexiconResources)
+        XCTAssertEqual(state.engine.candidates(for: "shouciciku").first?.text, "首次词库")
+    }
+
+    func testInitialEngineStateUsesSeedEngineWhenRuntimeHasNoResources() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let runtime = InputMethodLexiconRuntime(directories: [directory])
+
+        let state = runtime.initialEngineState()
+
+        XCTAssertFalse(state.snapshot.hasLexiconResources)
+        XCTAssertEqual(state.engine.candidates(for: "ni").first?.text, "你")
+    }
+
     func testRuntimeSkipsMissingDirectoriesWithoutDiagnostics() {
         let runtime = InputMethodLexiconRuntime(
             directories: [URL(fileURLWithPath: "/tmp/knowtype-missing-\(UUID().uuidString)")]

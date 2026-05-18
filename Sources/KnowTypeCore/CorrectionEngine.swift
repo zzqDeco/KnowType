@@ -12,7 +12,10 @@ public final class CorrectionEngine: Sendable {
         self.traditionalInputEngine = traditionalInputEngine
     }
 
-    public func localCorrect(_ context: InputContext) -> [CorrectionCandidate] {
+    public func localCorrect(
+        _ context: InputContext,
+        queryOptions: TraditionalInputQueryOptions? = nil
+    ) -> [CorrectionCandidate] {
         let raw = context.rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let protectedRanges = TextProtection.detectProtectedRanges(in: raw)
 
@@ -31,20 +34,35 @@ public final class CorrectionEngine: Sendable {
         return uniqueSorted(
             applySelectionHistory(
                 context.userSelectionHistory,
-                to: localCandidates(for: raw, locale: context.locale, protectedRanges: protectedRanges)
+                to: localCandidates(
+                    for: raw,
+                    locale: context.locale,
+                    protectedRanges: protectedRanges,
+                    queryOptions: queryOptions
+                )
             )
         )
     }
 
-    public func correct(_ context: InputContext) async -> [CorrectionCandidate] {
+    public func correct(
+        _ context: InputContext,
+        queryOptions: TraditionalInputQueryOptions? = nil
+    ) async -> [CorrectionCandidate] {
         let raw = context.rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        var candidates = localCorrect(context)
-        let usesPinyinCompletionFallback = shouldAskCloudForPinyinCompletion(context: context)
+        var candidates = localCorrect(context, queryOptions: queryOptions)
+        let usesPinyinCompletionFallback = cloudProvider == nil
+            ? false
+            : shouldAskCloudForPinyinCompletion(
+                context: context,
+                queryOptions: queryOptions
+            )
 
-        if shouldAskCloud(
+        if let cloudProvider,
+           shouldAskCloud(
             context: context,
-            usesPinyinCompletionFallback: usesPinyinCompletionFallback
-        ), let cloudProvider {
+            usesPinyinCompletionFallback: usesPinyinCompletionFallback,
+            queryOptions: queryOptions
+        ) {
             let request = LLMRequest(
                 task: .correction,
                 rawInput: raw,
@@ -72,7 +90,8 @@ public final class CorrectionEngine: Sendable {
 
     private func shouldAskCloud(
         context: InputContext,
-        usesPinyinCompletionFallback: Bool
+        usesPinyinCompletionFallback: Bool,
+        queryOptions: TraditionalInputQueryOptions?
     ) -> Bool {
         if TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
             return false
@@ -80,11 +99,18 @@ public final class CorrectionEngine: Sendable {
         if usesPinyinCompletionFallback {
             return true
         }
-        let tokenCount = correctionTokenCount(context.rawInput, locale: context.locale)
+        let tokenCount = correctionTokenCount(
+            context.rawInput,
+            locale: context.locale,
+            queryOptions: queryOptions
+        )
         return tokenCount >= 4 || context.locale == .mixed
     }
 
-    private func shouldAskCloudForPinyinCompletion(context: InputContext) -> Bool {
+    private func shouldAskCloudForPinyinCompletion(
+        context: InputContext,
+        queryOptions: TraditionalInputQueryOptions?
+    ) -> Bool {
         guard context.locale == .zhCN else {
             return false
         }
@@ -93,7 +119,8 @@ public final class CorrectionEngine: Sendable {
         }
         let analysis = traditionalInputEngine.analyzePinyinInput(
             context.rawInput,
-            preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: context.locale)
+            preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: context.locale),
+            options: queryOptions
         )
         if analysis.hasInitialAbbreviation && isEnglishLikeAllInitialWord(context.rawInput) {
             return false
@@ -103,7 +130,11 @@ public final class CorrectionEngine: Sendable {
             && analysis.hasInitialAbbreviation
     }
 
-    private func correctionTokenCount(_ rawInput: String, locale: KnowTypeLocale) -> Int {
+    private func correctionTokenCount(
+        _ rawInput: String,
+        locale: KnowTypeLocale,
+        queryOptions: TraditionalInputQueryOptions?
+    ) -> Int {
         let words = tokenizeWords(rawInput)
         if words.count != 1 || !usesTraditionalInput(locale: locale) {
             return words.count
@@ -112,7 +143,8 @@ public final class CorrectionEngine: Sendable {
         return traditionalInputEngine
             .candidates(
                 for: rawInput,
-                preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: locale)
+                preserveCapitalizedPinyin: preservesCapitalizedPinyin(locale: locale),
+                options: queryOptions
             )
             .map(\.inputTokens.count)
             .max() ?? words.count
@@ -121,7 +153,8 @@ public final class CorrectionEngine: Sendable {
     private func localCandidates(
         for raw: String,
         locale: KnowTypeLocale,
-        protectedRanges: [ProtectedRange]
+        protectedRanges: [ProtectedRange],
+        queryOptions: TraditionalInputQueryOptions?
     ) -> [CorrectionCandidate] {
         let tokens = tokenizeWords(raw)
         guard !tokens.isEmpty else {
@@ -132,6 +165,22 @@ public final class CorrectionEngine: Sendable {
 
         let normalizedTokens = tokens.map { normalizeToken($0, locale: locale) }
         let normalizedInput = normalizedTokens.joined(separator: " ")
+        if normalizedInput != raw,
+           hasDirectSpellingCorrection(tokens),
+           (locale == .enUS || tokens.count == 1),
+           isLikelyEnglish(raw) {
+            candidates.append(
+                CorrectionCandidate(
+                    text: normalizedInput,
+                    source: "local-spellcheck",
+                    confidence: 0.88,
+                    correctionLevel: .light,
+                    protectedRanges: protectedRanges
+                )
+            )
+            return candidates
+        }
+
         if usesTraditionalInput(locale: locale) {
             let preserveCapitalizedPinyin = preservesCapitalizedPinyin(locale: locale)
             let traditionalInputs = [normalizedInput, raw]
@@ -147,7 +196,8 @@ public final class CorrectionEngine: Sendable {
                 let usesRawInputCoordinates = input == raw
                 for candidate in traditionalInputEngine.candidates(
                     for: input,
-                    preserveCapitalizedPinyin: preserveCapitalizedPinyin
+                    preserveCapitalizedPinyin: preserveCapitalizedPinyin,
+                    options: queryOptions
                 ) where candidate.text != raw {
                     candidates.append(
                         CorrectionCandidate(
@@ -349,6 +399,12 @@ private func normalizeToken(_ token: String, locale: KnowTypeLocale) -> String {
         return token
     }
     return lower
+}
+
+private func hasDirectSpellingCorrection(_ tokens: [String]) -> Bool {
+    tokens.contains { token in
+        spellingCorrections[token.lowercased()] != nil
+    }
 }
 
 private func preservesCodeLikeToken(_ token: String) -> Bool {
