@@ -222,6 +222,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
         if compositionBuffer.hasResolvedSegments,
            !compositionBuffer.isFullyResolved {
+            if enablesAsyncSuggestionRefresh {
+                let segmentResult = applyPendingSegmentFallback(commitIfFullyResolved: true, client: client)
+                if case .commit(let text) = segmentResult {
+                    return applyCommitResult(.commit(text + symbol), client: client)
+                }
+            }
             return applyCommitResult(
                 .commit(compositionBuffer.commitText + symbol),
                 client: client
@@ -327,7 +333,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func refreshResolvedCompositionContinuations(client: InputControllerClient?) {
         guard enablesAsyncSuggestionRefresh,
-              let provider,
               compositionBuffer.isFullyResolved else {
             return
         }
@@ -348,6 +353,23 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: currentLocale,
             userSelectionHistory: userSelectionHistory
         )
+        guard let provider else {
+            let continuations = PrefixContinuationEngine().fallbackContinuations(
+                for: lockedPrefixText,
+                lengthLevel: .medium,
+                maxCandidates: InputMethodPipeline.defaultMaxContinuationCandidates
+            )
+            let suggestion = resolvedCompositionSuggestion(
+                lockedPrefix: lockedPrefix,
+                continuations: continuations,
+                fallbackLatency: lastSuggestion?.latencyMs ?? 0
+            )
+            lastSuggestion = suggestion
+            lastSuggestionRawInput = rawInput
+            refreshComposition(client: client)
+            updateCandidatePanel(suggestion: suggestion, client: client)
+            return
+        }
         suggestionTask = Task { @MainActor [weak self, provider] in
             guard let self else {
                 return
@@ -368,21 +390,32 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 return
             }
             let currentClient = self.host?.currentClient
-            let currentSuggestion = self.lastSuggestion
-            let prefixCandidates = currentSuggestion?.prefixCandidates.isEmpty == false
-                ? currentSuggestion?.prefixCandidates ?? []
-                : [self.resolvedCompositionCandidate()]
-            let suggestion = SuggestionResponse(
-                prefixCandidates: prefixCandidates,
+            let suggestion = self.resolvedCompositionSuggestion(
                 lockedPrefix: lockedPrefix,
-                continuationCandidates: continuations,
-                latencyMs: currentSuggestion?.latencyMs ?? 0
+                continuations: continuations,
+                fallbackLatency: self.lastSuggestion?.latencyMs ?? 0
             )
             self.lastSuggestion = suggestion
             self.lastSuggestionRawInput = rawInput
             self.refreshComposition(client: currentClient)
             self.updateCandidatePanel(suggestion: suggestion, client: currentClient)
         }
+    }
+
+    private func resolvedCompositionSuggestion(
+        lockedPrefix: LockedPrefix,
+        continuations: [ContinuationCandidate],
+        fallbackLatency: Int
+    ) -> SuggestionResponse {
+        let prefixCandidates = lastSuggestion?.prefixCandidates.isEmpty == false
+            ? lastSuggestion?.prefixCandidates ?? []
+            : [resolvedCompositionCandidate()]
+        return SuggestionResponse(
+            prefixCandidates: prefixCandidates,
+            lockedPrefix: lockedPrefix,
+            continuationCandidates: continuations,
+            latencyMs: fallbackLatency
+        )
     }
 
     private func resultForNumberSelection(
@@ -845,6 +878,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
            !candidatePanelState.windowState.isVisible {
             return .noAction
         }
+        if action == .space,
+           enablesAsyncSuggestionRefresh,
+           compositionBuffer.hasResolvedSegments,
+           !compositionBuffer.isFullyResolved,
+           !SuggestionPublicationGuard.hasCurrentSuggestion(
+                suggestionRawInput: lastSuggestionRawInput,
+                currentRawInput: rawBuffer
+           ) {
+            return applyPendingSegmentFallback(commitIfFullyResolved: true, client: client)
+        }
 
         let commitSuggestion = commitSuggestionSnapshot(for: action, client: client)
         return InputSessionCommitPolicy.result(
@@ -890,6 +933,37 @@ final class InputControllerCoordinator: @unchecked Sendable {
             traditionalInputEngine: traditionalInputEngine
         )
         return (augmentedSuggestion(suggestion), rawBuffer, true)
+    }
+
+    private func applyPendingSegmentFallback(
+        commitIfFullyResolved: Bool,
+        client: InputControllerClient?
+    ) -> InputCommitResult {
+        guard let activeRange = compositionBuffer.activeRange else {
+            return .noAction
+        }
+        guard let candidate = prioritizedSegmentCandidates(for: activeRange)
+            .first(where: { candidate in
+                candidate.rawRange != compositionBuffer.rawRange
+                    && canApplyOrCommit(candidate: candidate)
+            }) else {
+            return .noAction
+        }
+        guard compositionBuffer.apply(candidate) else {
+            return .noAction
+        }
+
+        let isFullyResolvedAfterApply = compositionBuffer.isFullyResolved
+        publishLocalSuggestion(client: client)
+        if isFullyResolvedAfterApply {
+            refreshResolvedCompositionContinuations(client: client)
+        } else {
+            refreshSuggestion(client: client)
+        }
+        if commitIfFullyResolved, isFullyResolvedAfterApply {
+            return .commit(compositionBuffer.commitText)
+        }
+        return .noAction
     }
 
     private func applySegmentCandidate(
@@ -989,6 +1063,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 }
                 self.traditionalInputEngine = engine
                 self.lexiconRuntimeSnapshot = snapshot
+                InputMethodLexiconRuntime.cacheEngine(engine, snapshot: snapshot)
                 self.sessionController = InputSessionController(
                     provider: self.provider,
                     traditionalInputEngine: engine

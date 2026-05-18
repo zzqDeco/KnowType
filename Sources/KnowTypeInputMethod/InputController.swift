@@ -15,6 +15,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
         let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
+        let initialLexiconState = lexiconRuntime.initialEngineState()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
@@ -24,8 +25,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         self.hostAdapter = hostAdapter
         self.coordinator = InputControllerCoordinator(
             provider: provider,
-            traditionalInputEngine: TraditionalInputEngine(),
-            lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot(directories: []),
+            traditionalInputEngine: initialLexiconState.engine,
+            lexiconRuntimeSnapshot: initialLexiconState.snapshot,
             lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: inputModePreferenceStore,
             initialAppBundleID: initialClient?.bundleIdentifier,

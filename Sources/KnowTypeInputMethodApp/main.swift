@@ -172,6 +172,9 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
         inputMethodLogger.notice(
             "KnowTypeInputMethodApp launched bundle=\(bundleIdentifier, privacy: .public) connection=\(connectionName, privacy: .public)"
         )
+        Task.detached(priority: .utility) {
+            InputMethodLexiconRuntime.prewarmDefaultEngine()
+        }
         let shouldSelectMode = CommandLine.arguments.contains("--knowtype-install-activate")
         if shouldSelectMode {
             NSApp.activate(ignoringOtherApps: true)

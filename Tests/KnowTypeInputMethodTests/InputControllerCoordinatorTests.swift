@@ -234,6 +234,68 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAsyncPendingSpaceAppliesRemainingSegmentBeforeCommit() async throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFirstSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            } == true
+        }
+        XCTAssertTrue(hasFirstSegment)
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testAsyncPendingPunctuationAppliesRemainingSegmentBeforeCommit() async throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFirstSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            } == true
+        }
+        XCTAssertTrue(hasFirstSegment)
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertTrue(coordinator.handleText(",", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁，")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
     func testPartialSegmentRefreshDoesNotAskProvider() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
@@ -329,6 +391,59 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁继续推进")
+    }
+
+    @MainActor
+    func testFullyResolvedSegmentSelectionKeepsLocalContinuationsWithoutProvider() async throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFirstSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            } == true
+        }
+        XCTAssertTrue(hasFirstSegment)
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        let hasSecondSegment = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "是谁" && $0.rawRange == KnowTypeCore.TextRange(start: 2, length: 7)
+            } == true
+        }
+        XCTAssertTrue(hasSecondSegment)
+        try selectCandidate(
+            text: "是谁",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 7),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "你是谁")
+        XCTAssertTrue(
+            host.panelStates.last?.windowState.viewModel.continuationCandidates.contains {
+                $0.text == "还有进一步优化空间"
+            } == true
+        )
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁还有进一步优化空间")
     }
 
     @MainActor
