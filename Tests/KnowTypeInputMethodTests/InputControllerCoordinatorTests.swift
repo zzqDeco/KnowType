@@ -242,6 +242,27 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAsyncNoProviderRefreshPublishesLocalFallbackContinuations() async {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "wo jue de zhege fagnan" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+
+        let hasFallbackContinuation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.continuationCandidates.contains {
+                $0.text == "还有进一步优化空间"
+            } == true
+        }
+
+        XCTAssertTrue(hasFallbackContinuation)
+    }
+
+    @MainActor
     func testPendingAIRecommendationKeepsSecondSlotAndTabDoesNotCommit() {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()

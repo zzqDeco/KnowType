@@ -329,7 +329,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             } else {
                 suggestion = InputMethodPipeline.localSuggestions(
                     for: context,
-                    includeFallbackContinuations: false,
+                    includeFallbackContinuations: true,
                     traditionalInputEngine: engineSnapshot,
                     runtimePreferences: runtimePreferencesSnapshot
                 )
