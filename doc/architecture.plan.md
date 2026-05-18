@@ -93,6 +93,30 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 
 Settings status does not import the IMK frontend and does not own dictionary licensing. The macOS Keyboard/Input Sources page still only enables/selects the input method; KnowType-specific controls live in the PreferencePane or IMK preferences window.
 
+## CLI And Local Tooling
+
+KnowType includes small executable and shell-tooling targets for local
+development, diagnostics, and lexicon management:
+
+- `knowtype-demo` exercises the package-level correction, continuation, and
+  commit flow without installing the input method.
+- `knowtype-inputsource-tool` owns macOS Text Input Source status, registration,
+  dedupe, and selection calls used by local scripts.
+- `knowtype-lexicon-tool` installs managed local lexicon packs through
+  `ManagedLexiconPackInstaller`.
+- `scripts/build-inputmethod-bundle.sh` packages the local InputMethodKit app
+  bundle into `dist/KnowType.app`.
+- `scripts/install-inputmethod.sh`, `scripts/diagnose-inputmethod.sh`,
+  `scripts/select-inputmethod.sh`, `scripts/repair-inputmethod-selection.sh`,
+  and `scripts/uninstall-inputmethod.sh` form the local install and acceptance
+  workflow.
+- `scripts/smoke-inputmethod-install.sh` is the CI-safe script smoke path; it
+  does not mutate Text Input Source state or prove target-app typing behavior.
+
+Tooling is intentionally separate from product behavior. Scripts may prepare,
+diagnose, or repair a local development installation, but manual acceptance in
+real host apps remains the evidence for IMK behavior.
+
 ## Input Method Layer
 
 `KnowTypeInputMethod` is the macOS front end:
