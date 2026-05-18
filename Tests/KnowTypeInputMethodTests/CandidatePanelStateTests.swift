@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import KnowTypeAI
 import KnowTypeCore
 @testable import KnowTypeInputMethod
 
@@ -40,6 +41,27 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(rendered.rows[2].visualRole, .continuation)
         XCTAssertTrue(rendered.rows[0].isSelected)
         XCTAssertFalse(rendered.rows[2].isSelected)
+    }
+
+    func testVisibleShortcutSelectsAIRecommendationAsSecondSlot() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: suggestion(prefixTexts: ["你好", "你号"]),
+            aiRecommendation: .ready(
+                AIRecommendationCandidate(
+                    prefixText: "你好",
+                    continuationText: "继续推进",
+                    displayText: "你好继续推进",
+                    confidence: 0.9,
+                    provider: "test",
+                    contextVersion: "v1"
+                )
+            )
+        )
+
+        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .aiRecommendation)
+        XCTAssertEqual(state.windowState.selection, .aiRecommendation)
     }
 
     func testDefaultSelectionPrefersFirstPrefixOverRawAndContinuation() {

@@ -47,8 +47,9 @@ polish.
   partial-syllable input.
 - Local candidate learning: recent prefix choices can boost local ranking across
   input-method restarts without being sent to providers.
-- Prefix-locked AI continuation: continuations append after the locked prefix;
-  explicit polish is the only rewrite path.
+- Prefix-locked AI recommendation: the first candidate stays traditional input,
+  the second slot is reserved for AI, and explicit polish is the only rewrite
+  path.
 - macOS input method flow: marked text, candidate selection, paging,
   punctuation handling, and a custom AppKit candidate panel anchored near the
   caret.
@@ -158,13 +159,17 @@ key. Remote OpenAI-compatible profiles require an explicit model ID; local
 OpenAI-compatible profiles may leave the model blank for `/v1/models`
 discovery.
 
+AI context files live under `~/.knowtype/`. `ENV.md` stores local context
+memory for the AI recommendation slot, and `CORRECTION.md` stores user-editable
+AI correction instructions. Traditional input does not depend on either file.
+
 ## Input Behavior
 
 | Shortcut | Behavior |
 |---|---|
 | `Space` | Commit the selected visible full prefix candidate, or apply the selected segment inside the active composition. |
 | `Return` / `Enter` | Commit the original raw composition. |
-| `Tab` | Commit the selected prefix plus the first or selected continuation when the prefix is fully resolved. |
+| `Tab` / `2` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible. |
 | Plain punctuation | Commit composition plus punctuation, or insert punctuation directly with no composition. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
@@ -176,6 +181,10 @@ them, and raw input only when no suggestion is available. When a provider is
 configured, local prefix candidates appear immediately and provider-backed
 continuations update asynchronously. Provider failures do not show fixed local
 fallback text as if it were AI output.
+
+The first candidate slot is reserved for traditional input. The second slot is
+reserved for AI recommendation state, so async provider results update that slot
+without reordering the local candidate list.
 
 ## Privacy
 
@@ -210,6 +219,7 @@ Repository layout:
 ```text
 Sources/KnowTypeCore/           Product models, protection, correction, continuation
 Sources/KnowTypeProviders/      Provider profiles, runtime loading, adapters
+Sources/KnowTypeAI/             AI recommendation, context memory, correction instructions
 Sources/KnowTypeInputMethod/    IMK controller, session actions, candidate panel
 Sources/KnowTypeInputMethodApp/ Local macOS input-method app entry point
 Sources/KnowTypeSettingsUI/     Shared SwiftUI settings UI

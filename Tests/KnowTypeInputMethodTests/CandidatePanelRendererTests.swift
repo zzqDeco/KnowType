@@ -1,4 +1,5 @@
 import XCTest
+import KnowTypeAI
 import KnowTypeCore
 @testable import KnowTypeInputMethod
 
@@ -60,6 +61,33 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows[1].shortcutLabel, "2")
         XCTAssertEqual(rendered.rows[2].shortcutLabel, "⇥")
         XCTAssertEqual(rendered.rows[3].shortcutLabel, "⌥2")
+    }
+
+    func testAIRecommendationOccupiesSecondCandidateSlot() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "wo jue de zhege fangan",
+            prefixCandidates: prefixCandidates,
+            continuationCandidates: [],
+            aiRecommendation: .ready(
+                AIRecommendationCandidate(
+                    prefixText: "我觉得这个方案",
+                    continuationText: "需要先验证核心假设",
+                    displayText: "我觉得这个方案需要先验证核心假设",
+                    confidence: 0.9,
+                    provider: "test",
+                    contextVersion: "v1"
+                )
+            )
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(viewModel)
+
+        XCTAssertEqual(
+            rendered.rows.map(\.kind),
+            [.prefixCandidate, .aiRecommendation, .prefixCandidate]
+        )
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3"])
+        XCTAssertEqual(rendered.rows[1].visualRole, .aiRecommendation)
     }
 
     func testRendersRawInputOnlyWhenNoSuggestionsExist() {

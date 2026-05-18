@@ -43,7 +43,8 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
   常用声母缩写和尾部半音节输入。
 - 本地候选学习：最近选择过的前缀会在输入法重启后继续影响本地排序，
   不发送给 provider。
-- 前缀锁定的 AI 延续：延续只追加在锁定前缀后面；显式 polish 才是改写路径。
+- 前缀锁定的 AI 推荐：第一候选固定为传统输入，第二候选固定为 AI 推荐；
+  显式 polish 才是改写路径。
 - macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及跟随光标的
   自绘 AppKit 候选窗。
 - 多 provider 兼容：OpenAI-compatible chat、OpenAI Responses、
@@ -147,13 +148,17 @@ KnowType TSV，并在 TSV 旁写入本地 metadata。第三方大词库数据不
 OpenAI-compatible profile 必须显式填写 model ID；本地 OpenAI-compatible
 profile 可以留空 model，并通过 `/v1/models` 发现。
 
+AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
+记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明。传统输入引擎不依赖
+这两个文件。
+
 ## 输入行为
 
 | 快捷键 | 行为 |
 |---|---|
 | `Space` | 提交当前可见的完整前缀候选，或把选中的分段候选应用到 composition。 |
 | `Return` / `Enter` | 提交原始 composition。 |
-| `Tab` | 当前前缀完整解析时，提交前缀加第一条或当前选中的延续。 |
+| `Tab` / `2` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时，提交原始 composition。 |
 | 普通标点 | 提交 composition 加标点；没有 composition 时直接插入标点。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
@@ -163,6 +168,9 @@ profile 可以留空 model，并通过 `/v1/models` 发现。
 候选窗先显示前缀候选，再显示延续候选；没有建议时才显示 raw input。配置
 provider 后，KnowType 会先发布本地前缀候选，再异步更新 provider-backed
 延续。Provider 失败时，不会把固定本地 fallback 文本伪装成 AI 输出。
+
+候选窗第一项固定为传统输入推荐，第二项固定为 AI 推荐状态。Provider 返回后
+只更新第二项，不重排本地候选列表。
 
 ## 隐私
 
@@ -196,6 +204,7 @@ Level 0 输入不能调用云端 provider。它会走 no-provider 路径，并�
 ```text
 Sources/KnowTypeCore/           产品模型、保护规则、纠错、延续
 Sources/KnowTypeProviders/      Provider profile、运行时加载、adapter
+Sources/KnowTypeAI/             AI 推荐、上下文记忆、纠错说明
 Sources/KnowTypeInputMethod/    IMK controller、会话动作、候选窗
 Sources/KnowTypeInputMethodApp/ 本地 macOS 输入法 app 入口
 Sources/KnowTypeSettingsUI/     共享 SwiftUI 设置 UI

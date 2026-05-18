@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeAI
 import KnowTypeCore
 import KnowTypeProviders
 
@@ -15,6 +16,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let provider = ProviderRuntimeLoader.loadDefaultProvider()
+        let aiRecommendationRuntime = AIRecommendationRuntime(provider: provider)
+        let aiContextMemoryRuntime = AIContextMemoryRuntime(provider: provider)
         let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
@@ -36,6 +39,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: initialClient?.bundleIdentifier,
             userSelectionHistoryPersistence: historyPersistence,
+            aiRecommendationProvider: aiRecommendationRuntime,
+            aiContextEventRecorder: aiContextMemoryRuntime,
             host: hostAdapter,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: AppKitScreenGeometryProvider(),

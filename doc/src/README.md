@@ -53,6 +53,10 @@ required for every test file.
 - [ProviderRuntimeLoader](Sources/KnowTypeProviders/ProviderRuntimeLoader.plan.md)
 - [ResponseNormalizer](Sources/KnowTypeProviders/ResponseNormalizer.plan.md)
 
+## Sources/KnowTypeAI
+
+- [Overview](Sources/KnowTypeAI/README.plan.md)
+
 ## Sources/KnowTypeInputMethod
 
 - [Overview](Sources/KnowTypeInputMethod/README.plan.md)

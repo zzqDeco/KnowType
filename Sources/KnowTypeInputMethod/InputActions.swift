@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeAI
 import KnowTypeCore
 
 public enum InputAction: Sendable, Equatable {
@@ -21,17 +22,20 @@ public struct CandidatePanelViewModel: Sendable, Equatable {
     public var rawInput: String
     public var prefixCandidates: [CorrectionCandidate]
     public var continuationCandidates: [ContinuationCandidate]
+    public var aiRecommendation: AIRecommendationState
 
     public init(
         title: String = "KnowType",
         rawInput: String,
         prefixCandidates: [CorrectionCandidate],
-        continuationCandidates: [ContinuationCandidate]
+        continuationCandidates: [ContinuationCandidate],
+        aiRecommendation: AIRecommendationState = .idle
     ) {
         self.title = title
         self.rawInput = rawInput
         self.prefixCandidates = prefixCandidates
         self.continuationCandidates = continuationCandidates
+        self.aiRecommendation = aiRecommendation
     }
 
     public var lockedPreview: String? {
