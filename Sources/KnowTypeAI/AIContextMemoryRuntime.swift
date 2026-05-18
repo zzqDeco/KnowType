@@ -1,6 +1,10 @@
 import Foundation
 import KnowTypeCore
 
+public enum TypingEventStoreError: Error, Equatable {
+    case pendingContentChanged
+}
+
 public actor TypingEventStore {
     private let eventsFileURL: URL
     private let processedDirectoryURL: URL
@@ -62,14 +66,30 @@ public actor TypingEventStore {
     }
 
     public func archivePendingEvents() throws {
-        guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+        try archivePendingEvents(matchingRawContent: pendingRawContent())
+    }
+
+    public func archivePendingEvents(matchingRawContent rawContent: String) throws {
+        guard !rawContent.isEmpty,
+              fileManager.fileExists(atPath: eventsFileURL.path) else {
             return
+        }
+        let currentContent = try String(contentsOf: eventsFileURL, encoding: .utf8)
+        guard currentContent.hasPrefix(rawContent) else {
+            throw TypingEventStoreError.pendingContentChanged
         }
         try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
         let formatter = ISO8601DateFormatter()
         let filename = "typing-events-\(formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
         let destination = processedDirectoryURL.appendingPathComponent(filename)
-        try fileManager.moveItem(at: eventsFileURL, to: destination)
+        try rawContent.write(to: destination, atomically: true, encoding: .utf8)
+
+        let remainingContent = String(currentContent.dropFirst(rawContent.count))
+        if remainingContent.isEmpty {
+            try fileManager.removeItem(at: eventsFileURL)
+        } else {
+            try remainingContent.write(to: eventsFileURL, atomically: true, encoding: .utf8)
+        }
     }
 }
 
@@ -150,7 +170,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 return
             }
             _ = try environmentStore.replaceGeneratedSection(with: generated)
-            try await eventStore.archivePendingEvents()
+            try await eventStore.archivePendingEvents(matchingRawContent: rawEvents)
             lastDigestAt = now
         } catch {
             return

@@ -690,6 +690,31 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAsyncSuggestionRefreshPreservesProviderCorrectionFallback() async {
+        let client = FakeInputControllerClient()
+        let provider = CorrectionFallbackProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "zz" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+
+        let hasProviderCandidate = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
+                $0.text == "云端纠错" && $0.source == "cloud-correction"
+            } == true
+        }
+        let requests = await provider.requests
+
+        XCTAssertTrue(hasProviderCandidate)
+        XCTAssertTrue(requests.contains { $0.task == .correction })
+    }
+
+    @MainActor
     func testNumberTwoCommitsReadyAIRecommendationAfterSegmentResolution() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
@@ -1134,6 +1159,25 @@ private actor RecordingContinuationProvider: LLMProvider {
         return LLMResponse(candidates: [
             LLMCandidate(text: "继续推进", confidence: 0.9),
             LLMCandidate(text: "第二延续", confidence: 0.8)
+        ])
+    }
+
+    var requests: [LLMRequest] {
+        recordedRequests
+    }
+}
+
+private actor CorrectionFallbackProvider: LLMProvider {
+    nonisolated let providerName = "cloud-correction"
+    private var recordedRequests: [LLMRequest] = []
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        guard request.task == .correction else {
+            return LLMResponse(candidates: [])
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "云端纠错", confidence: 0.95)
         ])
     }
 

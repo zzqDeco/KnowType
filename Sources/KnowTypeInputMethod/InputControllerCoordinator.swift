@@ -301,21 +301,32 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let compositionSnapshot = compositionBuffer
         let engineSnapshot = traditionalInputEngine
         let runtimePreferencesSnapshot = runtimePreferences
+        let sessionController = sessionController
         suggestionGeneration += 1
         let generation = suggestionGeneration
-        suggestionTask = Task { [weak self, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
+        suggestionTask = Task { [weak self, sessionController, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
             let context = InputContext(
                 rawInput: rawInput,
                 appBundleID: appBundleID,
                 locale: currentLocale,
                 userSelectionHistory: selectionHistory
             )
-            let suggestion = InputMethodPipeline.localSuggestions(
-                for: context,
-                includeFallbackContinuations: false,
-                traditionalInputEngine: engineSnapshot,
-                runtimePreferences: runtimePreferencesSnapshot
-            )
+            let suggestion: SuggestionResponse
+            if compositionSnapshot.hasResolvedSegments {
+                suggestion = InputMethodPipeline.localSuggestions(
+                    for: context,
+                    includeFallbackContinuations: false,
+                    traditionalInputEngine: engineSnapshot,
+                    runtimePreferences: runtimePreferencesSnapshot
+                )
+            } else {
+                suggestion = await sessionController.update(
+                    rawInput: rawInput,
+                    appBundleID: appBundleID,
+                    locale: currentLocale,
+                    userSelectionHistory: selectionHistory
+                )
+            }
             guard !Task.isCancelled else {
                 return
             }

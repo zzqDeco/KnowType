@@ -161,18 +161,82 @@ private func withTimeout<T: Sendable>(
     nanoseconds: UInt64,
     operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
+    let race = TimeoutRace<T>()
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+            guard race.setContinuation(continuation) else {
+                return
+            }
+            let operationTask = Task {
+                do {
+                    let value = try await operation()
+                    race.complete(.success(value))
+                } catch {
+                    race.complete(.failure(error))
+                }
+            }
+            let timeoutTask = Task {
+                do {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                    race.complete(.failure(TimeoutError()))
+                } catch {
+                    return
+                }
+            }
+            race.setTasks([operationTask, timeoutTask])
         }
-        group.addTask {
-            try await Task.sleep(nanoseconds: nanoseconds)
-            throw TimeoutError()
+    } onCancel: {
+        race.cancel()
+    }
+}
+
+private final class TimeoutRace<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var tasks: [Task<Void, Never>] = []
+    private var completed = false
+
+    func setContinuation(_ continuation: CheckedContinuation<T, Error>) -> Bool {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return false
         }
-        guard let result = try await group.next() else {
-            throw TimeoutError()
+        self.continuation = continuation
+        lock.unlock()
+        return true
+    }
+
+    func setTasks(_ tasks: [Task<Void, Never>]) {
+        lock.lock()
+        if completed {
+            lock.unlock()
+            tasks.forEach { $0.cancel() }
+            return
         }
-        group.cancelAll()
-        return result
+        self.tasks = tasks
+        lock.unlock()
+    }
+
+    func complete(_ result: Result<T, Error>) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        let tasks = tasks
+        self.tasks = []
+        lock.unlock()
+
+        tasks.forEach { $0.cancel() }
+        continuation?.resume(with: result)
+    }
+
+    func cancel() {
+        complete(.failure(CancellationError()))
     }
 }

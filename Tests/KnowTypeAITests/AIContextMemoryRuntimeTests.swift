@@ -104,6 +104,51 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let requests = await provider.requests
         XCTAssertTrue(requests.isEmpty)
     }
+
+    func testDigestArchivesOnlyEventsIncludedInProviderRequest() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let provider = SuspendedDigestLLMProvider()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        let firstRecord = Task {
+            await runtime.record(
+                AITypingEvent(
+                    rawInput: "nihao",
+                    committedText: "你好",
+                    commitKind: .traditional,
+                    candidateSource: "traditional"
+                )
+            )
+        }
+        try await waitUntilProviderReceivesRequest(provider)
+
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "zaijian",
+                committedText: "再见",
+                commitKind: .traditional,
+                candidateSource: "traditional"
+            )
+        )
+        await provider.finish(generatedMarkdown: "## Global Style\n- Finished digest.")
+        await firstRecord.value
+
+        let pendingEvents = try await eventStore.pendingEvents()
+        let requests = await provider.requests
+
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertTrue(requests[0].rawInput?.contains("nihao") == true)
+        XCTAssertFalse(requests[0].rawInput?.contains("zaijian") == true)
+        XCTAssertEqual(pendingEvents.map(\.rawInput), ["zaijian"])
+    }
 }
 
 private actor DigestLLMProvider: LLMProvider {
@@ -125,6 +170,46 @@ private actor DigestLLMProvider: LLMProvider {
     var requests: [LLMRequest] {
         recordedRequests
     }
+}
+
+private actor SuspendedDigestLLMProvider: LLMProvider {
+    nonisolated let providerName = "suspended-digest"
+    private var recordedRequests: [LLMRequest] = []
+    private var continuation: CheckedContinuation<LLMResponse, Error>?
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func finish(generatedMarkdown: String) {
+        continuation?.resume(
+            returning: LLMResponse(candidates: [
+                LLMCandidate(text: generatedMarkdown, confidence: 0.9)
+            ])
+        )
+        continuation = nil
+    }
+
+    var requests: [LLMRequest] {
+        recordedRequests
+    }
+}
+
+private func waitUntilProviderReceivesRequest(
+    _ provider: SuspendedDigestLLMProvider,
+    timeout: TimeInterval = 2
+) async throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if await !provider.requests.isEmpty {
+            return
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+    }
+    XCTFail("provider did not receive a digest request")
 }
 
 private func makeTemporaryDirectory() -> URL {

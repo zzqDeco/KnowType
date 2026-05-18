@@ -115,6 +115,33 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
     }
 
+    func testHardTimeoutReturnsWithoutWaitingForCancellationResistantProvider() async {
+        let provider = SlowCancellationResistantLLMProvider()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 20
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            compositionID: 1
+        )
+        let start = Date()
+
+        let state = await runtime.recommendation(for: request)
+        let requestCount = await provider.requestCount
+
+        XCTAssertEqual(state, .unavailable(reason: "AI 请求超时"))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.5)
+        XCTAssertEqual(requestCount, 1)
+    }
+
     func testDocumentStoresCreateDefaultsAndPreserveUserNotes() throws {
         let directory = temporaryDirectory()
         let environmentStore = EnvironmentDocumentStore(
@@ -167,6 +194,30 @@ private actor FailingLLMProvider: LLMProvider {
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         count += 1
         throw error
+    }
+
+    var requestCount: Int {
+        count
+    }
+}
+
+private actor SlowCancellationResistantLLMProvider: LLMProvider {
+    nonisolated let providerName = "slow"
+    private var count = 0
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        count += 1
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline {
+            do {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            } catch {
+                continue
+            }
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.9)
+        ])
     }
 
     var requestCount: Int {

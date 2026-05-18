@@ -156,6 +156,7 @@ public struct CandidatePanelState: Sendable, Equatable {
             return nil
         }
         let visibleRows = visibleSelectableRows()
+            .filter(\.hasVisibleNumberShortcut)
         let shortcutIndex = number - 1
         guard visibleRows.indices.contains(shortcutIndex) else {
             return nil
@@ -352,5 +353,16 @@ public struct CandidatePanelState: Sendable, Equatable {
         return range == KnowTypeCore.TextRange(start: 0, length: rawInput.count)
             ? .fullCandidate(index)
             : .segmentCandidate(index)
+    }
+}
+
+private extension CandidatePanelSelection {
+    var hasVisibleNumberShortcut: Bool {
+        switch self {
+        case .prefixCandidate, .fullCandidate, .segmentCandidate, .aiRecommendation:
+            return true
+        case .rawInput, .continuationCandidate:
+            return false
+        }
     }
 }
