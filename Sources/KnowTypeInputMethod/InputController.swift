@@ -2,16 +2,10 @@ import Foundation
 import KnowTypeAI
 import KnowTypeCore
 import KnowTypeProviders
-import OSLog
 
 #if canImport(InputMethodKit)
 import AppKit
 @preconcurrency import InputMethodKit
-
-private let inputControllerLogger = Logger(
-    subsystem: "com.knowtype.inputmethod.KnowType",
-    category: "input-controller"
-)
 
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
@@ -57,7 +51,6 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         )
         super.init(server: server, delegate: delegate, client: inputClient)
         hostAdapter.controller = self
-        inputControllerLogger.notice("KnowTypeInputController initialized client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)")
     }
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
@@ -67,9 +60,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: flags)
         )
 
-        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
-        inputControllerLogger.debug("inputText key=\(keyCode, privacy: .public) handled=\(handled, privacy: .public)")
-        return handled
+        return coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
@@ -142,9 +133,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue)),
             eventKind: eventKind
         )
-        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
-        inputControllerLogger.debug("handle event key=\(event.keyCode, privacy: .public) handled=\(handled, privacy: .public)")
-        return handled
+        return coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
     }
 
     public override func commitComposition(_ sender: Any!) {

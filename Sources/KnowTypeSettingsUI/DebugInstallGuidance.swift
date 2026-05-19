@@ -15,7 +15,7 @@ enum DebugInstallGuidance {
         ),
         DebugInstallStep(
             title: "Install bundle",
-            detail: "Copy KnowType.app into ~/Library/Input Methods. The install script purges stale .Mode development state, then launches the installed app so registration, enabling, and selection run from the app context."
+            detail: "Copy KnowType.app into ~/Library/Input Methods. The install script launches the installed app with an activation flag so registration, enabling, and selection happen from the app context."
         ),
         DebugInstallStep(
             title: "Diagnose installation",
@@ -23,7 +23,7 @@ enum DebugInstallGuidance {
         ),
         DebugInstallStep(
             title: "Request selection",
-            detail: "Activate the text app you want to test, then use the selection script as a preflight. It requests selection through the installed KnowType app; final acceptance still requires typing a real probe in that app."
+            detail: "Activate the text app you want to test, then use the selection helper only as a preflight. Final acceptance still requires typing a real probe in that app."
         ),
         DebugInstallStep(
             title: "Enable input source",
@@ -31,7 +31,7 @@ enum DebugInstallGuidance {
         ),
         DebugInstallStep(
             title: "Refresh registrar",
-            detail: "If macOS keeps an old registration, run the repair script. It uses the installed input method app to remove stale LaunchServices records, disable legacy .Mode registrations, restore the third-party parent anchor plus .Hans mode, and retest selection."
+            detail: "If macOS keeps an old registration, run the repair helper to remove stale LaunchServices records, deduplicate KnowType preference entries, and relaunch the installed input method app before retesting."
         ),
         DebugInstallStep(
             title: "Inspect logs",

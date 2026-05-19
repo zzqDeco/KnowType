@@ -13,11 +13,9 @@ development input method bundle.
 
 ## Behavior Notes
 
-- The script replaces only scoped KnowType rows in Text Input Source preferences
-  through `knowtype-inputsource-tool repair-preferences`: HIToolbox/history keep
-  `.Hans`, `com.apple.inputsources` keeps the System Settings-compatible parent
-  anchor plus `.Hans`, and unrelated sources are preserved. It also unregisters
-  stale bundle records, restarts menu agents, and relaunches the installed app.
+- The script backs up Text Input Source preferences, removes duplicate KnowType
+  rows, unregisters stale bundle records, restarts menu agents, and relaunches
+  the installed app.
 - It is used after diagnostics indicate stale local state, before falling back
   to logout.
 

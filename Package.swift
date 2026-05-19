@@ -14,7 +14,6 @@ let package = Package(
         .library(name: "KnowTypeAI", targets: ["KnowTypeAI"]),
         .library(name: "KnowTypeSettingsUI", targets: ["KnowTypeSettingsUI"]),
         .library(name: "KnowTypeInputMethod", targets: ["KnowTypeInputMethod"]),
-        .library(name: "KnowTypeInputSourceSupport", targets: ["KnowTypeInputSourceSupport"]),
         .library(name: "KnowTypePreferencePane", type: .dynamic, targets: ["KnowTypePreferencePane"]),
         .executable(name: "KnowTypeSettingsApp", targets: ["KnowTypeSettingsApp"]),
         .executable(name: "KnowTypeInputMethodApp", targets: ["KnowTypeInputMethodApp"]),
@@ -79,13 +78,9 @@ let package = Package(
                 .linkedFramework("SwiftUI", .when(platforms: [.macOS]))
             ]
         ),
-        .target(
-            name: "KnowTypeInputSourceSupport",
-            path: "Sources/KnowTypeInputSourceSupport"
-        ),
         .executableTarget(
             name: "KnowTypeInputMethodApp",
-            dependencies: ["KnowTypeCore", "KnowTypeInputMethod", "KnowTypeInputSourceSupport"],
+            dependencies: ["KnowTypeCore", "KnowTypeInputMethod"],
             path: "Sources/KnowTypeInputMethodApp",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
@@ -95,7 +90,6 @@ let package = Package(
         ),
         .executableTarget(
             name: "KnowTypeInputSourceTool",
-            dependencies: ["KnowTypeInputSourceSupport"],
             path: "Sources/KnowTypeInputSourceTool",
             linkerSettings: [
                 .linkedFramework("Carbon", .when(platforms: [.macOS]))
@@ -133,7 +127,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KnowTypeInputMethodTests",
-            dependencies: ["KnowTypeCore", "KnowTypeInputMethod", "KnowTypeInputSourceSupport"],
+            dependencies: ["KnowTypeCore", "KnowTypeInputMethod"],
             path: "Tests/KnowTypeInputMethodTests"
         )
     ]

@@ -100,19 +100,6 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 ./scripts/diagnose-inputmethod.sh
 ```
 
-本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Mode`
-开发状态，补齐系统设置需要的第三方 parent anchor 和可见 `.Hans` mode，并启动已安装的
-app，让注册和 best-effort 选择从 macOS 输入法切换使用的 app 上下文中执行。KnowType 采用
-Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode 形态：parent id 是
-`com.knowtype.inputmethod.KnowType`，系统可见输入源是
-`com.knowtype.inputmethod.KnowType.Hans`。
-
-首次安装或 mode id 迁移后，macOS 仍可能要求通过系统设置完成第三方输入源授权。
-打开“系统设置 > 键盘 > 输入源”，移除过期的 KnowType/知键条目，重新添加
-`知键` / `KnowType`，如果系统弹出允许提示则点击允许。如果菜单仍显示旧条目，注销再登录以清理
-Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流程使用 TIS 注册和启用，
-受保护的第三方输入源授权行由系统设置写入。
-
 需要时，在当前目标 app 上选择 KnowType：
 
 ```bash

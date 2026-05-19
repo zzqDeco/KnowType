@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLIST_BUDDY="/usr/libexec/PlistBuddy"
-source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
 
 usage() {
   cat <<'EOF'
@@ -149,22 +148,6 @@ assert_file "$bundle_path/Contents/Resources/KnowTypeInputMethodIcon.tiff"
 assert_equals "com.knowtype.inputmethod.KnowType" \
   "$(plist_read ":CFBundleIdentifier" "$bundle_path/Contents/Info.plist")" \
   "CFBundleIdentifier"
-assert_equals "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  "$(plist_read ":TISInputSourceID" "$bundle_path/Contents/Info.plist")" \
-  "parent TISInputSourceID"
-assert_equals "com.knowtype.inputmethod.KnowType.Hans" "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" "active input mode id"
-assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:TISInputSourceID" "$bundle_path/Contents/Info.plist")" \
-  "active component mode TISInputSourceID"
-assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  "$(plist_read ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$bundle_path/Contents/Info.plist")" \
-  "visible component mode order"
-assert_equals "K" \
-  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:tsInputModeKeyEquivalentKey" "$bundle_path/Contents/Info.plist")" \
-  "component mode shortcut key"
-assert_equals "4608" \
-  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:tsInputModeKeyEquivalentModifiersKey" "$bundle_path/Contents/Info.plist")" \
-  "component mode shortcut modifiers"
 assert_equals "KnowTypeInputMethodApp" \
   "$(plist_read ":CFBundleExecutable" "$bundle_path/Contents/Info.plist")" \
   "CFBundleExecutable"

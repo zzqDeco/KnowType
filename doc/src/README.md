@@ -87,7 +87,6 @@ required for every test file.
 
 - [KnowTypeDemo](Sources/KnowTypeDemo/README.plan.md)
 - [KnowTypeInputMethodApp](Sources/KnowTypeInputMethodApp/README.plan.md)
-- [KnowTypeInputSourceSupport](Sources/KnowTypeInputSourceSupport/README.plan.md)
 - [KnowTypeInputSourceTool](Sources/KnowTypeInputSourceTool/README.plan.md)
 - [KnowTypeLexiconTool](Sources/KnowTypeLexiconTool/README.plan.md)
 - [KnowTypePreferencePane](Sources/KnowTypePreferencePane/README.plan.md)
@@ -118,7 +117,7 @@ required for every test file.
 - [Input Method Installer](scripts/install-inputmethod.plan.md)
 - [Managed Lexicon Pack Installer](scripts/install-lexicon-pack.plan.md)
 - [Release Packager](scripts/package-release.plan.md)
-- [Input Source Tool Shell Helpers And IDs](scripts/lib/inputsource-tool.plan.md)
+- [Input Source Tool Shell Helpers](scripts/lib/inputsource-tool.plan.md)
 - [Input Method Selection Repair](scripts/repair-inputmethod-selection.plan.md)
 - [Input Method Selector](scripts/select-inputmethod.plan.md)
 - [Input Method Script Smoke](scripts/smoke-inputmethod-install.plan.md)
