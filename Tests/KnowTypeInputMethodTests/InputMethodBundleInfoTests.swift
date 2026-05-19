@@ -221,6 +221,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("KnowTypeInputSourceIDs.activeMode"))
         XCTAssertTrue(appMain.contains("sourceIsBetterActivationTarget"))
         XCTAssertTrue(appMain.contains("bestActivationTarget"))
+        XCTAssertTrue(appMain.contains("sourceIsBetterSelectionTarget"))
+        XCTAssertTrue(appMain.contains("bestSelectionTarget"))
         XCTAssertTrue(appMain.contains("inputSources(id: modeInputSourceID)"))
         XCTAssertTrue(appMain.contains("disableModesBeforeParent"))
         XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsEnableCapable"))
@@ -231,8 +233,12 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(appMain.contains("AppleEnabledInputSources"))
         XCTAssertFalse(appMain.contains("AppleEnabledThirdPartyInputSources"))
         XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-switch-away"#))
+        XCTAssertTrue(installScript.contains("switch_away_before_replace"))
+        XCTAssertTrue(installScript.contains("repair_preferences_best_effort"))
+        XCTAssertTrue(installScript.contains("falling back to helper"))
+        XCTAssertTrue(installScript.contains("continuing so installed app activation and diagnostics can run"))
         XCTAssertLessThan(
-            try XCTUnwrap(installScript.range(of: #"--knowtype-switch-away"#)?.lowerBound),
+            try XCTUnwrap(installScript.range(of: #"switch_away_before_replace"#, options: .backwards)?.lowerBound),
             try XCTUnwrap(installScript.range(of: #"killall KnowTypeInputMethodApp"#)?.lowerBound)
         )
         XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-install-activate"#))

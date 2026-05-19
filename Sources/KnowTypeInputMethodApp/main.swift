@@ -286,7 +286,7 @@ private enum TextInputSourceActivation {
 
     @discardableResult
     private static func selectVisibleMode() -> Bool {
-        guard let mode = bestActivationTarget(deduplicatedSources(inputSources(id: modeInputSourceID))) else {
+        guard let mode = bestSelectionTarget(deduplicatedSources(inputSources(id: modeInputSourceID))) else {
             inputMethodLogger.warning("Cannot select KnowType because mode source is missing")
             fputs("select.error=mode-missing\n", stderr)
             return false
@@ -307,6 +307,37 @@ private enum TextInputSourceActivation {
         print("select.status=\(status)")
         print("select.current=\(currentID)")
         return status == noErr
+    }
+
+    private static func bestSelectionTarget(_ sources: [TISInputSource]) -> TISInputSource? {
+        sources.reduce(nil) { best, source in
+            guard let best else {
+                return source
+            }
+            return sourceIsBetterSelectionTarget(source, than: best) ? source : best
+        }
+    }
+
+    private static func sourceIsBetterSelectionTarget(_ candidate: TISInputSource, than existing: TISInputSource) -> Bool {
+        let candidateSelectCapable = boolProperty(candidate, kTISPropertyInputSourceIsSelectCapable)
+        let existingSelectCapable = boolProperty(existing, kTISPropertyInputSourceIsSelectCapable)
+        if candidateSelectCapable != existingSelectCapable {
+            return candidateSelectCapable
+        }
+
+        let candidateEnabled = boolProperty(candidate, kTISPropertyInputSourceIsEnabled)
+        let existingEnabled = boolProperty(existing, kTISPropertyInputSourceIsEnabled)
+        if candidateEnabled != existingEnabled {
+            return candidateEnabled
+        }
+
+        let candidateEnableCapable = boolProperty(candidate, kTISPropertyInputSourceIsEnableCapable)
+        let existingEnableCapable = boolProperty(existing, kTISPropertyInputSourceIsEnableCapable)
+        if candidateEnableCapable != existingEnableCapable {
+            return candidateEnableCapable
+        }
+
+        return false
     }
 
     private static func bestActivationTarget(_ sources: [TISInputSource]) -> TISInputSource? {

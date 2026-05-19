@@ -42,17 +42,62 @@ PREFPANE_TARGET_PATH="$PREFPANE_TARGET_DIR/KnowType.prefPane"
 INSTALLED_EXECUTABLE="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
+INPUTSOURCE_TOOL=""
+
+inputsource_tool_path() {
+  if [[ -z "$INPUTSOURCE_TOOL" ]]; then
+    INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
+  fi
+  printf '%s\n' "$INPUTSOURCE_TOOL"
+}
+
+switch_away_before_replace() {
+  local switched=1
+  if [[ -x "$INSTALLED_EXECUTABLE" ]]; then
+    "$INSTALLED_EXECUTABLE" --knowtype-switch-away >/dev/null 2>&1 &
+    local switch_pid=$!
+    for _ in {1..20}; do
+      if ! kill -0 "$switch_pid" >/dev/null 2>&1; then
+        wait "$switch_pid" || true
+        switched=0
+        break
+      fi
+      sleep 0.1
+    done
+    if [[ "$switched" -ne 0 ]]; then
+      kill "$switch_pid" >/dev/null 2>&1 || true
+      wait "$switch_pid" 2>/dev/null || true
+      echo "warning: installed app did not finish switch-away request; falling back to helper" >&2
+    fi
+  fi
+  if [[ "$switched" -ne 0 ]]; then
+    local tool
+    tool="$(inputsource_tool_path)" || return 0
+    "$tool" switch-away \
+      --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+      --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID" >/dev/null 2>&1 || true
+  fi
+}
+
+repair_preferences_best_effort() {
+  local tool
+  if ! tool="$(inputsource_tool_path)"; then
+    echo "warning: input-source helper is unavailable; continuing so installed app activation and diagnostics can run" >&2
+    return 0
+  fi
+  if ! "$tool" repair-preferences \
+    --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
+    --include-history \
+    --add-active; then
+    echo "warning: input-source preference repair failed; continuing so installed app activation and diagnostics can run" >&2
+  fi
+}
+
 mkdir -p "$TARGET_DIR"
 mkdir -p "$PREFPANE_TARGET_DIR"
 
-if [[ -x "$INSTALLED_EXECUTABLE" ]]; then
-  "$INSTALLED_EXECUTABLE" --knowtype-switch-away || true
-else
-  INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
-  "$INPUTSOURCE_TOOL" switch-away \
-    --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-    --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID" >/dev/null 2>&1 || true
-fi
+switch_away_before_replace
 sleep 0.2
 
 killall KnowTypeInputMethodApp 2>/dev/null || true
@@ -79,22 +124,13 @@ fi
 
 "$INSTALLED_EXECUTABLE" --knowtype-purge-legacy
 
-INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
-"$INPUTSOURCE_TOOL" repair-preferences \
-  --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  --include-history \
-  --add-active
+repair_preferences_best_effort
 
 if ! "$INSTALLED_EXECUTABLE" --knowtype-install-activate; then
   echo "warning: installed app could not select KnowType in this process context; continuing so diagnostics can report the persisted state" >&2
 fi
 
-"$INPUTSOURCE_TOOL" repair-preferences \
-  --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  --include-history \
-  --add-active
+repair_preferences_best_effort
 
 sleep 0.75
 killall cfprefsd 2>/dev/null || true
