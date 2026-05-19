@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeInputSourceSupport
 import XCTest
 
 final class InputMethodBundleInfoTests: XCTestCase {
@@ -71,6 +72,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         let package = try String(contentsOf: rootURL.appendingPathComponent("Package.swift"), encoding: .utf8)
         XCTAssertTrue(package.contains(#".executable(name: "knowtype-inputsource-tool""#))
         XCTAssertTrue(package.contains(#"name: "KnowTypeInputSourceTool""#))
+        XCTAssertTrue(package.contains(#".library(name: "KnowTypeInputSourceSupport""#))
+        XCTAssertTrue(package.contains(#"dependencies: ["KnowTypeInputSourceSupport"]"#))
         XCTAssertTrue(package.contains(#".linkedFramework("Carbon", .when(platforms: [.macOS]))"#))
 
         let scriptPaths = [
@@ -81,6 +84,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
             "scripts/repair-inputmethod-selection.sh",
             "scripts/create-local-system-policy-profile.sh",
             "scripts/smoke-inputmethod-install.sh",
+            "scripts/lib/inputsource-ids.sh",
             "scripts/lib/inputsource-tool.sh"
         ]
         let scripts = try scriptPaths
@@ -93,8 +97,12 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("--no-diagnostic"))
         XCTAssertTrue(scripts.contains("--logs"))
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
+        XCTAssertTrue(scripts.contains("com.apple.macl"))
+        XCTAssertTrue(scripts.contains("com.apple.quarantine"))
+        XCTAssertTrue(scripts.contains("Full Disk Access"))
         XCTAssertTrue(scripts.contains("lsregister"))
-        XCTAssertTrue(scripts.contains("dedupe-preferences"))
+        XCTAssertFalse(scripts.contains("bootstrap --path"))
+        XCTAssertTrue(scripts.contains("--knowtype-purge-legacy"))
         XCTAssertTrue(scripts.contains("strip_lsregister_suffix"))
         XCTAssertTrue(scripts.contains("expand_home_path"))
         XCTAssertTrue(scripts.contains(#"sub(/[[:space:]]*\(0x[[:xdigit:]]+\)$/, "", value)"#))
@@ -107,6 +115,11 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("Signing Identifier:"))
         XCTAssertTrue(scripts.contains("Team Identifier:"))
         XCTAssertTrue(scripts.contains("user-preference-write com.apple.inputsources"))
+        XCTAssertTrue(scripts.contains("KNOWTYPE_ACTIVE_INPUT_MODE_ID=\"com.knowtype.inputmethod.KnowType.Hans\""))
+        XCTAssertTrue(scripts.contains("KNOWTYPE_LEGACY_INPUT_MODE_IDS=(\"com.knowtype.inputmethod.KnowType.Mode\")"))
+        XCTAssertTrue(scripts.contains("repair-preferences"))
+        XCTAssertTrue(scripts.contains("KNOWTYPE_BUNDLE_BUILD_VERSION"))
+        XCTAssertTrue(scripts.contains("open -g"))
         XCTAssertFalse(scripts.contains("swift - <<'SWIFT'"))
         XCTAssertFalse(scripts.contains("swift - <<"))
     }
@@ -156,13 +169,27 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         XCTAssertTrue(helperSource.contains("AppleSelectedInputSources"))
         XCTAssertTrue(helperSource.contains("AppleEnabledInputSources"))
+        XCTAssertTrue(helperSource.contains("AppleInputSourceHistory"))
         XCTAssertTrue(helperSource.contains("preference.selected.knowtype"))
         XCTAssertTrue(helperSource.contains("preference.enabled.knowtype"))
+        XCTAssertTrue(helperSource.contains("preference.enabled.legacy.knowtype"))
+        XCTAssertTrue(helperSource.contains("preference.history.knowtype"))
+        XCTAssertTrue(helperSource.contains("preference.writes=skipped"))
+        XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool repair-preferences"#))
+        XCTAssertTrue(helperSource.contains("preference.repair.active.mode.id"))
+        XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool inspect-preferences"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool dump"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool disable"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool dedupe-preferences"#))
+        XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool bootstrap"#))
+        XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool purge-legacy"#))
         XCTAssertTrue(helperSource.contains("AppleEnabledThirdPartyInputSources"))
         XCTAssertTrue(helperSource.contains("mode.selectCapable"))
+        XCTAssertTrue(helperSource.contains("active.mode.count"))
+        XCTAssertTrue(helperSource.contains("legacy.mode.count"))
+        XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.knowtype"))
+        XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.legacy.knowtype"))
+        XCTAssertTrue(helperSource.contains("TISRegisterInputSource"))
     }
 
     func testInputMethodAppSelfEnablesFromInstalledAppContext() throws {
@@ -185,11 +212,44 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("TISEnableInputSource"))
         XCTAssertTrue(appMain.contains("TISSelectInputSource"))
         XCTAssertTrue(appMain.contains("--knowtype-install-activate"))
+        XCTAssertTrue(appMain.contains("--knowtype-switch-away"))
+        XCTAssertTrue(appMain.contains("--knowtype-purge-legacy"))
+        XCTAssertTrue(appMain.contains("--knowtype-disable-input-source"))
+        XCTAssertTrue(appMain.contains("let explicitSelect"))
+        XCTAssertTrue(appMain.contains("|| explicitSelect"))
         XCTAssertTrue(appMain.contains("input-method-app"))
+        XCTAssertTrue(appMain.contains("KnowTypeInputSourceIDs.activeMode"))
         XCTAssertTrue(appMain.contains("sourceIsBetterActivationTarget"))
+        XCTAssertTrue(appMain.contains("bestActivationTarget"))
+        XCTAssertTrue(appMain.contains("sourceIsBetterSelectionTarget"))
+        XCTAssertTrue(appMain.contains("bestSelectionTarget"))
+        XCTAssertTrue(appMain.contains("bestSelectionTarget(inputSources(id: modeInputSourceID))"))
+        XCTAssertTrue(appMain.contains("waitForCurrentInputSourceID(modeInputSourceID, timeout: 2.0)"))
+        XCTAssertTrue(appMain.contains("inputSources(id: modeInputSourceID)"))
+        XCTAssertTrue(appMain.contains("disableModesBeforeParent"))
         XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsEnableCapable"))
-        XCTAssertTrue(installScript.contains(#"open -n "$TARGET_PATH" --args --knowtype-install-activate"#))
+        XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsSelectCapable"))
+        XCTAssertTrue(appMain.contains("enable.preference.writes=skipped"))
+        XCTAssertTrue(appMain.contains("purge.legacy.preference.writes=skipped"))
+        XCTAssertFalse(appMain.contains("CFPreferencesSetAppValue"))
+        XCTAssertFalse(appMain.contains("AppleEnabledInputSources"))
+        XCTAssertFalse(appMain.contains("AppleEnabledThirdPartyInputSources"))
+        XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-switch-away"#))
+        XCTAssertTrue(installScript.contains("switch_away_before_replace"))
+        XCTAssertTrue(installScript.contains("repair_preferences_best_effort"))
+        XCTAssertTrue(installScript.contains("falling back to helper"))
+        XCTAssertTrue(installScript.contains("continuing so installed app activation and diagnostics can run"))
+        XCTAssertLessThan(
+            try XCTUnwrap(installScript.range(of: #"switch_away_before_replace"#, options: .backwards)?.lowerBound),
+            try XCTUnwrap(installScript.range(of: #"killall KnowTypeInputMethodApp"#)?.lowerBound)
+        )
+        XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-install-activate"#))
+        XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-purge-legacy"#))
         XCTAssertTrue(installScript.contains("pgrep -x KnowTypeInputMethodApp"))
+        XCTAssertTrue(installScript.contains("knowtype_inputsource_tool"))
+        XCTAssertTrue(installScript.contains("INPUTSOURCE_TOOL"))
+        XCTAssertTrue(installScript.contains("--add-active"))
+        XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" bootstrap --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" register --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" disable"#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" select"#))
@@ -206,8 +266,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
             PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
         )
 
-        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.knowtype.inputmethod.KnowType")
-        XCTAssertEqual(plist["InputMethodConnectionName"] as? String, "com.knowtype.inputmethod.KnowType_Connection")
+        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, KnowTypeInputSourceIDs.parent)
+        XCTAssertEqual(plist["InputMethodConnectionName"] as? String, KnowTypeInputSourceIDs.connectionName)
         XCTAssertEqual(plist["InputMethodServerControllerClass"] as? String, "KnowTypeInputController")
         XCTAssertEqual(plist["InputMethodServerDelegateClass"] as? String, "KnowTypeInputController")
         XCTAssertEqual(plist["InputMethodServerPreferencesWindowControllerClass"] as? String, "KnowTypePreferencesWindowController")
@@ -217,30 +277,26 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["NSPrincipalClass"] as? String, "NSApplication")
         XCTAssertNil(plist["TISIconIsTemplate"])
         XCTAssertEqual(plist["TISIntendedLanguage"] as? String, "zh-Hans")
-        XCTAssertEqual(plist["TISInputSourceID"] as? String, "com.knowtype.inputmethod.KnowType")
+        XCTAssertEqual(plist["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.parent)
         XCTAssertEqual(plist["TICapsLockLanguageSwitchCapable"] as? Bool, true)
         XCTAssertEqual(plist["TISParticipatesInTouchBar"] as? Bool, true)
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "KnowTypeInputMethodIcon.icns")
         XCTAssertEqual(plist["tsInputMethodCharacterRepertoireKey"] as? [String], ["Hans", "Hant", "Hani", "Hanb", "Han"])
 
-        let componentDict = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
-        let modeList = try XCTUnwrap(componentDict["tsInputModeListKey"] as? [String: Any])
-        let visibleModes = try XCTUnwrap(componentDict["tsVisibleInputModeOrderedArrayKey"] as? [String])
-        let mode = try XCTUnwrap(modeList["com.knowtype.inputmethod.KnowType.Mode"] as? [String: Any])
-
-        XCTAssertEqual(visibleModes, ["com.knowtype.inputmethod.KnowType.Mode"])
-        XCTAssertEqual((mode["TISIconLabels"] as? [String: String])?["Primary"], "知")
-        XCTAssertEqual(mode["TISInputSourceID"] as? String, "com.knowtype.inputmethod.KnowType.Mode")
+        let component = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
+        let modeList = try XCTUnwrap(component["tsInputModeListKey"] as? [String: Any])
+        let mode = try XCTUnwrap(modeList[KnowTypeInputSourceIDs.activeMode] as? [String: Any])
+        XCTAssertEqual(mode["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.activeMode)
         XCTAssertEqual(mode["TISIntendedLanguage"] as? String, "zh-Hans")
         XCTAssertEqual(mode["tsInputModeCharacterRepertoireKey"] as? [String], ["Hans", "Hant", "Hani", "Hanb", "Han"])
-        XCTAssertEqual(mode["tsInputModeDefaultStateKey"] as? Bool, true)
         XCTAssertEqual(mode["tsInputModeIsVisibleKey"] as? Bool, true)
+        XCTAssertEqual(mode["tsInputModeDefaultStateKey"] as? Bool, true)
+        XCTAssertEqual(mode["tsInputModeKeyEquivalentKey"] as? String, "K")
         XCTAssertEqual(mode["tsInputModeKeyEquivalentModifiersKey"] as? Int, 4608)
-        XCTAssertEqual(mode["tsInputModeMenuIconFileKey"] as? String, "KnowTypeInputMethodIcon.tiff")
-        XCTAssertEqual(mode["tsInputModeAlternateMenuIconFileKey"] as? String, "KnowTypeInputMethodIcon.tiff")
-        XCTAssertEqual(mode["tsInputModePaletteIconFileKey"] as? String, "KnowTypeInputMethodIcon.tiff")
-        XCTAssertEqual(mode["tsInputModePrimaryInScriptKey"] as? Bool, true)
         XCTAssertEqual(mode["tsInputModeScriptKey"] as? String, "smUnicodeScript")
+        XCTAssertEqual(component["tsVisibleInputModeOrderedArrayKey"] as? [String], [KnowTypeInputSourceIDs.activeMode])
+        XCTAssertEqual((plist["TISIconLabels"] as? [String: String])?["Primary"], "知")
+        XCTAssertNotEqual(KnowTypeInputSourceIDs.activeMode, KnowTypeInputSourceIDs.parent)
     }
 
     func testInputMethodProvidesLocalizedDisplayNames() throws {
@@ -259,8 +315,37 @@ final class InputMethodBundleInfoTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType.Mode" = "KnowType";"#))
-        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType.Mode" = "知键";"#))
+        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType" = "KnowType";"#))
+        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType.Hans" = "KnowType";"#))
+        XCTAssertFalse(englishStrings.contains("com.knowtype.inputmethod.KnowType.Mode"))
+        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType" = "知键";"#))
+        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType.Hans" = "知键";"#))
+        XCTAssertFalse(chineseStrings.contains("com.knowtype.inputmethod.KnowType.Mode"))
         XCTAssertTrue(chineseStrings.contains(#""CFBundleDisplayName" = "知键";"#))
+    }
+
+    func testInputSourceIdentifiersStayConsistentAcrossSwiftShellAndPlist() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let shellConstants = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/lib/inputsource-ids.sh"),
+            encoding: .utf8
+        )
+        let plistData = try Data(contentsOf: rootURL.appendingPathComponent("Resources/InputMethod/Info.plist"))
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any]
+        )
+        XCTAssertTrue(shellConstants.contains("KNOWTYPE_PARENT_INPUT_SOURCE_ID=\"\(KnowTypeInputSourceIDs.parent)\""))
+        XCTAssertTrue(shellConstants.contains("KNOWTYPE_ACTIVE_INPUT_MODE_ID=\"\(KnowTypeInputSourceIDs.activeMode)\""))
+        XCTAssertTrue(shellConstants.contains("KNOWTYPE_INPUT_METHOD_CONNECTION_NAME=\"\(KnowTypeInputSourceIDs.connectionName)\""))
+        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, KnowTypeInputSourceIDs.parent)
+        XCTAssertEqual(plist["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.parent)
+        XCTAssertEqual(plist["InputMethodConnectionName"] as? String, KnowTypeInputSourceIDs.connectionName)
+        let component = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
+        let modeList = try XCTUnwrap(component["tsInputModeListKey"] as? [String: Any])
+        let mode = try XCTUnwrap(modeList[KnowTypeInputSourceIDs.activeMode] as? [String: Any])
+        XCTAssertEqual(mode["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.activeMode)
     }
 }

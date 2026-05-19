@@ -21,7 +21,9 @@ final class DebugInstallGuidanceTests: XCTestCase {
         XCTAssertTrue(DebugInstallGuidance.steps.contains {
             $0.title == "Refresh registrar"
                 && $0.detail.contains("LaunchServices")
-                && $0.detail.contains("deduplicate")
+                && $0.detail.contains("legacy .Mode")
+                && $0.detail.contains(".Hans")
+                && $0.detail.contains("third-party parent anchor")
         })
     }
 
