@@ -23,6 +23,8 @@
 - The release workflow rejects tag/plist version mismatches before building.
 - The published assets are `KnowType-vX.Y.Z-macos-local-mvp.zip`,
   its `.sha256`, and `release-manifest.json`.
+- The publish job sets `GH_REPO` explicitly because it downloads artifacts
+  without checking out the repository before calling `gh release create`.
 
 ## Test Plan
 
