@@ -166,7 +166,7 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 - segment candidates cover part of the raw buffer and update the active composition without inserting committed text
 - legacy continuation candidates commit as `locked prefix + continuation`; provider-backed IMK continuation uses the AI slot instead
 - rows are paged through `CandidatePanelPagingState`; adaptive layout uses up to 6 visible rows per page, while vertical-list mode may use up to 9
-- production IMK key handling first shows raw marked text plus an immediate local prefix-only candidate snapshot while the AI slot resolves asynchronously
+- production IMK key handling first shows raw marked text, then publishes local prefix/segment candidates asynchronously while the AI slot resolves separately
 - when a provider is configured, local output omits fallback continuation rows and never labels mock text as AI
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
@@ -196,6 +196,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 ## Shortcut Contract
 
 - `Space` commits the selected visible prefix for the current raw input.
+- while async candidates are still pending, `Space` commits the current raw/composition display rather than blocking to compute hidden local candidates.
 - `1` commits the first traditional candidate when visible.
 - with a selected segment candidate, `Space` applies that segment and commits only after all non-whitespace raw input is resolved.
 - `Return` / `Enter` commits the original raw composition.
@@ -205,7 +206,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - `0` commits raw composition when correction candidates are visible.
 - visible numeric shortcuts commit rows on the current candidate page only; after the AI slot, traditional alternatives keep their visible row numbers.
 - unmatched digit keys continue composing as literal digits.
-- plain punctuation commits composition plus punctuation, or inserts punctuation directly with no composition.
+- plain punctuation commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
 - `Option + number` commits prefix plus the globally mapped continuation.
 - `Option + R` requests polish and may rewrite the prefix.

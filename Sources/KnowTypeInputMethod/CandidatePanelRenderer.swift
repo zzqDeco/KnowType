@@ -9,7 +9,7 @@ public enum CandidatePanelRowKind: Sendable, Equatable {
     case continuationCandidate
 }
 
-public enum CandidatePanelVisualRole: Sendable, Equatable {
+public enum CandidatePanelVisualRole: Sendable, Equatable, Hashable {
     case lockedPrefix
     case aiRecommendation
     case continuation

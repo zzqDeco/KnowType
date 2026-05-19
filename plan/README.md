@@ -37,6 +37,7 @@ when converting a shipped plan into a short record.
 | [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive candidate panel layout | Active |
 | [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Visible candidate, punctuation, Space commit, and anchoring alignment | Active |
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
+| [inputmethod-async-keypath-supervisor.plan.md](inputmethod-async-keypath-supervisor.plan.md) | Fully asynchronous IMK key path with cancellable candidate, AI, anchor, and panel tasks | Active |
 | [segmented-candidate-selection.plan.md](segmented-candidate-selection.plan.md) | Raw-span candidate rows and segmented confirmation behavior | Active |
 | [ai-capability-runtime-layer.plan.md](ai-capability-runtime-layer.plan.md) | Separate AI recommendation, context memory, correction-instruction, and health layers from the IMK key path | Active |
 | [traditional-lexicon-extension.plan.md](traditional-lexicon-extension.plan.md) | Authorized local lexicon extension path | Active |
