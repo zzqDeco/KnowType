@@ -19,7 +19,7 @@ When this happens, Text Input Source selection can look inconsistent:
 
 - `knowtype-inputsource-tool` can see KnowType as registered, enabled, and
   select-capable.
-- `TISSelectInputSource` can report success in an app or diagnostic context.
+- `TISSelectInputSource` can report success inside a helper-local context.
 - `com.apple.HIToolbox` may still keep `AppleSelectedInputSources` on Apple
   Pinyin.
 - A real target app may continue typing through Apple Pinyin instead of
@@ -77,7 +77,7 @@ Useful evidence:
 
 - the input menu shows `KnowType`;
 - `AppleSelectedInputSources` contains
-  `com.knowtype.inputmethod.KnowType`;
+  `com.knowtype.inputmethod.KnowType.Mode`;
 - KnowType logs appear while typing, not only during installation;
 - `Gatekeeper assessment accepts the installed bundle` appears in diagnostics.
 
@@ -85,26 +85,22 @@ If macOS shows an authorization prompt asking whether to allow `知键` to enabl
 `KnowType`, click Allow before treating any typing probe as KnowType behavior.
 
 If the active app remains on Apple Pinyin after the profile is installed, run
-the local repair script before falling back to logout:
+the local repair helper before falling back to logout:
 
 ```bash
 ./scripts/repair-inputmethod-selection.sh
 ```
 
-The script asks the installed app to disable visible legacy `.Mode` TIS
-rows and unregister stale LaunchServices records for older KnowType build paths,
-rewrites only KnowType rows in protected input-source preferences so HIToolbox
-points at `.Hans` and `com.apple.inputsources` contains the parent anchor plus
-`.Hans`, restarts Text Input menu agents, relaunches the installed input method
-app, and requests `.Hans` selection through TIS. If diagnostics still show stale
-`.Mode` rows or a missing third-party parent anchor, remove and re-add KnowType in
-System Settings. If selection still falls back after repair, log out and back in to clear
-session-level Text Input Source state before repeating the install and
-selection checks.
+The helper backs up Text Input Source preferences, unregisters stale
+LaunchServices records for older KnowType build paths, deduplicates KnowType
+preference entries, restarts Text Input menu agents, and relaunches the
+installed input method app. If selection still falls back after repair, log out
+and back in to clear session-level Text Input Source state before repeating the
+install and selection checks.
 
 The bundle metadata should match mature IMK frontend shape: `LSUIElement=true`,
 `LSBackgroundOnly=false`, a compact `TISIconLabels` primary label, and Chinese
 script repertoire values such as `Hans`, `Hant`, `Hani`, `Hanb`, and `Han`.
-Do not advertise `Latn` in the visible Chinese input source; KnowType can still
+Do not advertise `Latn` in the visible Chinese input mode; KnowType can still
 pass through English keystrokes internally, but the system input source should
 not be classified as an ASCII-capable keyboard layout.

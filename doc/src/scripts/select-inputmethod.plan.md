@@ -2,9 +2,8 @@
 
 ## Responsibility
 
-Requests selection of the KnowType input source through the installed
-`KnowTypeInputMethodApp` command-line activation path, then optionally runs the
-read-only diagnostic.
+Requests selection of the KnowType input source through
+`knowtype-inputsource-tool` and optionally verifies helper-local selection.
 
 ## Boundaries
 
@@ -15,9 +14,8 @@ read-only diagnostic.
 ## Behavior Notes
 
 - Use after activating the target app when selection should apply there.
-- `--require-selected` makes the follow-up diagnostic's selected-source check a
-  hard gate.
-- A successful selection preflight still requires a manual typing probe.
+- `--require-selected` makes helper-local selection a hard gate.
+- A successful helper selection still requires a manual typing probe.
 
 ## Tests
 

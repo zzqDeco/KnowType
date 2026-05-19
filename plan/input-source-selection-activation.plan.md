@@ -41,9 +41,8 @@ keeps the menu item disabled, so it cannot be selected in the active text app.
 - `knowtype-inputsource-tool disable` disables existing KnowType TIS records
   for manual cleanup when stale enabled rows remain in HIToolbox preferences.
 - `scripts/install-inputmethod.sh` copies the built bundle, launches the
-  installed app with `--knowtype-purge-legacy` and
-  `--knowtype-install-activate`, and does not route registration, cleanup, or
-  selection through a sandboxed helper.
+  installed app with `--knowtype-install-activate`, then reads helper status
+  without routing registration or selection through a sandboxed helper.
 - The app registers through `TISRegisterInputSource` only when no KnowType
   sources exist, then enables existing records on every launch. Repeated local
   installs must not create more stale duplicate mode records.
