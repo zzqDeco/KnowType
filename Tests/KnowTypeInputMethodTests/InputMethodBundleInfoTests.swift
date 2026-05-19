@@ -223,6 +223,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("bestActivationTarget"))
         XCTAssertTrue(appMain.contains("sourceIsBetterSelectionTarget"))
         XCTAssertTrue(appMain.contains("bestSelectionTarget"))
+        XCTAssertTrue(appMain.contains("bestSelectionTarget(inputSources(id: modeInputSourceID))"))
+        XCTAssertTrue(appMain.contains("waitForCurrentInputSourceID(modeInputSourceID, timeout: 2.0)"))
         XCTAssertTrue(appMain.contains("inputSources(id: modeInputSourceID)"))
         XCTAssertTrue(appMain.contains("disableModesBeforeParent"))
         XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsEnableCapable"))

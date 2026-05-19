@@ -286,7 +286,7 @@ private enum TextInputSourceActivation {
 
     @discardableResult
     private static func selectVisibleMode() -> Bool {
-        guard let mode = bestSelectionTarget(deduplicatedSources(inputSources(id: modeInputSourceID))) else {
+        guard let mode = bestSelectionTarget(inputSources(id: modeInputSourceID)) else {
             inputMethodLogger.warning("Cannot select KnowType because mode source is missing")
             fputs("select.error=mode-missing\n", stderr)
             return false
@@ -302,7 +302,7 @@ private enum TextInputSourceActivation {
         if status == noErr {
             postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
         }
-        let currentID = currentInputSourceID() ?? "<unknown>"
+        let currentID = waitForCurrentInputSourceID(modeInputSourceID, timeout: 2.0) ?? "<unknown>"
         inputMethodLogger.notice("Selected KnowType mode from app context status=\(status, privacy: .public) current=\(currentID, privacy: .public)")
         print("select.status=\(status)")
         print("select.current=\(currentID)")
@@ -316,6 +316,16 @@ private enum TextInputSourceActivation {
             }
             return sourceIsBetterSelectionTarget(source, than: best) ? source : best
         }
+    }
+
+    private static func waitForCurrentInputSourceID(_ id: String, timeout: TimeInterval) -> String? {
+        let deadline = Date().addingTimeInterval(timeout)
+        var currentID = currentInputSourceID()
+        while currentID != id && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+            currentID = currentInputSourceID()
+        }
+        return currentID
     }
 
     private static func sourceIsBetterSelectionTarget(_ candidate: TISInputSource, than existing: TISInputSource) -> Bool {
