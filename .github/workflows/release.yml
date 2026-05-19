@@ -17,7 +17,7 @@ jobs:
       release_commit: ${{ steps.validate.outputs.release_commit }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Validate tag, branch ancestry, and bundle versions
@@ -65,7 +65,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Show Swift version
@@ -83,7 +83,7 @@ jobs:
             --build "$GITHUB_RUN_NUMBER" \
             --configuration release
       - name: Upload release assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-assets
           if-no-files-found: error
@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-assets
           path: release-assets
