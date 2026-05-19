@@ -71,6 +71,11 @@ local dictionary tooling.
 It is not yet a signed installer, notarized release, auto-updater, or App Store
 package.
 
+GitHub Releases may provide a local MVP zip named
+`KnowType-vX.Y.Z-macos-local-mvp.zip`. That archive contains the ad-hoc signed
+`KnowType.app` input method bundle and `KnowType.prefPane`, plus a SHA256 file
+and release manifest. It is still local MVP packaging, not a notarized installer.
+
 ## Quick Start
 
 Requirements:
@@ -119,6 +124,12 @@ Local IME behavior must still be verified by typing in real host apps. See
 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md) and
 [MVP Acceptance](doc/mvp-acceptance.plan.md) for the macOS policy, selection,
 and manual acceptance flow.
+
+For a GitHub Release zip, verify the downloaded archive with the published
+`.sha256` file first. Then expand it, copy `KnowType.app` to
+`~/Library/Input Methods/` and `KnowType.prefPane` to
+`~/Library/PreferencePanes/`, and run the same local diagnostics/manual typing
+acceptance from a source checkout when available.
 
 ## Configuration
 

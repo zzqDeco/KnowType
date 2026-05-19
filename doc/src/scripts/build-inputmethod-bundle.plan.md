@@ -16,6 +16,9 @@ products and repository resources.
   `KnowType_KnowTypeCore.bundle`.
 - Bundle metadata should match the IMK frontend shape documented in local
   acceptance docs.
+- `--version` and `--build` override the copied `Info.plist` before signing so
+  release artifacts can carry tag and CI build metadata without mutating source
+  plists.
 - CI smoke checks this script without installing the bundle.
 
 ## Tests

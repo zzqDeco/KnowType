@@ -60,6 +60,7 @@ when converting a shipped plan into a short record.
 | [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Active |
 | [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual gates | Active |
 | [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active |
+| [main-tag-release-ci.plan.md](main-tag-release-ci.plan.md) | Main branch bootstrap and tag-triggered local MVP release packages | Active |
 
 ## Local IME And Tooling References
 
