@@ -19,6 +19,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var rawBuffer = ""
     private var compositionBuffer = CompositionBuffer()
     private var compositionID = 0
+    private var rawRevision = 0
     private var lastSuggestion: SuggestionResponse?
     private var lastSuggestionRawInput: String?
     private var locale: KnowTypeLocale = .mixed
@@ -36,12 +37,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var suggestionGeneration = 0
     private var runtimeReloadGeneration = 0
     private var runtimeReloadTask: Task<Void, Never>?
+    private var panelUpdateGeneration = 0
+    private var panelUpdateTask: Task<Void, Never>?
+    private var delayedReanchorGeneration = 0
     private let aiRecommendationProvider: (any AIRecommendationProviding)?
     private let aiContextEventRecorder: (any AIContextEventRecording)?
     private var aiRecommendationTask: Task<Void, Never>?
     private var aiRecommendationState: AIRecommendationState = .idle
     private var aiRecommendationGeneration = 0
     private var deleteCountBeforeCommit = 0
+    private let taskSupervisor = InputTaskSupervisor()
+    private let latencyTracer = InputLatencyTracer()
+    private var lastInputModePreferenceReload = Date.distantPast
+    private var lastRuntimePreferenceReload = Date.distantPast
 
     init(
         provider: (any LLMProvider)?,
@@ -100,7 +108,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func handle(stroke: InputKeyStroke, client: InputControllerClient?) -> Bool {
-        handle(intent: keyMapper.intent(for: stroke), client: client)
+        latencyTracer.trace("handle-key") {
+            handle(intent: keyMapper.intent(for: stroke), client: client)
+        }
     }
 
     func composedString() -> Any {
@@ -148,6 +158,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         runtimeReloadGeneration += 1
         runtimeReloadTask?.cancel()
         aiRecommendationTask?.cancel()
+        panelUpdateTask?.cancel()
+        taskSupervisor.cancelAll()
         hideCandidatePanel()
     }
 
@@ -171,6 +183,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             deleteCountBeforeCommit += 1
             if !compositionBuffer.undoLastResolvedSegment() {
                 rawBuffer.removeLast()
+                rawRevision += 1
                 compositionBuffer.updateRawInput(rawBuffer)
                 if rawBuffer.isEmpty {
                     deleteCountBeforeCommit = 0
@@ -235,6 +248,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func appendComposition(_ text: String, client: InputControllerClient?) -> Bool {
         beginCompositionIfNeeded(client: client)
         rawBuffer.append(text)
+        rawRevision += 1
         compositionBuffer.updateRawInput(rawBuffer)
         aiRecommendationState = .idle
         invalidateSuggestion()
@@ -251,14 +265,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
         if compositionBuffer.hasResolvedSegments,
            !compositionBuffer.isFullyResolved {
-            if enablesAsyncSuggestionRefresh {
-                let snapshot = compositionBuffer
-                let segmentResult = applyPendingSegmentFallback(commitIfFullyResolved: true, client: client)
-                if case .commit(let text) = segmentResult {
-                    return applyCommitResult(.commit(text + symbol), client: client)
-                }
-                compositionBuffer = snapshot
-            }
             return applyCommitResult(
                 .commit(compositionBuffer.commitText + symbol),
                 client: client
@@ -285,6 +291,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func refreshSuggestion(client: InputControllerClient?) {
         suggestionTask?.cancel()
+        taskSupervisor.cancel(.localCandidates)
         guard enablesAsyncSuggestionRefresh else {
             return
         }
@@ -302,10 +309,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let compositionSnapshot = compositionBuffer
         let engineSnapshot = traditionalInputEngine
         let runtimePreferencesSnapshot = runtimePreferences
-        let providerSnapshot = provider
+        let includeLocalFallbackContinuations = !hasProvider
+            && runtimePreferencesSnapshot.localContinuationEnabledWhenNoProvider
         suggestionGeneration += 1
         let generation = suggestionGeneration
-        suggestionTask = Task { [weak self, providerSnapshot, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
+        let task = Task.detached(priority: .userInitiated) { [weak self, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
             let context = InputContext(
                 rawInput: rawInput,
                 appBundleID: appBundleID,
@@ -320,17 +328,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     traditionalInputEngine: engineSnapshot,
                     runtimePreferences: runtimePreferencesSnapshot
                 )
-            } else if let providerSnapshot {
-                let pipeline = InputMethodPipeline(
-                    provider: providerSnapshot,
-                    traditionalInputEngine: engineSnapshot,
-                    runtimePreferences: runtimePreferencesSnapshot
-                )
-                suggestion = await pipeline.prefixSuggestions(for: context)
             } else {
                 suggestion = InputMethodPipeline.localSuggestions(
                     for: context,
-                    includeFallbackContinuations: true,
+                    includeFallbackContinuations: includeLocalFallbackContinuations,
                     traditionalInputEngine: engineSnapshot,
                     runtimePreferences: runtimePreferencesSnapshot
                 )
@@ -370,6 +371,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 self.scheduleAIRecommendation(for: augmentedSuggestion, client: currentClient)
             }
         }
+        suggestionTask = task
+        taskSupervisor.replace(.localCandidates, with: task)
     }
 
     private func refreshResolvedCompositionContinuations(client: InputControllerClient?) {
@@ -485,6 +488,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func publishPendingSuggestion(client: InputControllerClient?) {
         suggestionGeneration += 1
         suggestionTask?.cancel()
+        taskSupervisor.cancel(.localCandidates)
         suggestionTask = nil
         guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
             lastSuggestion = nil
@@ -493,25 +497,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             updateCandidatePanel(suggestion: nil, client: client)
             return
         }
-        let context = InputContext(
-            rawInput: rawBuffer,
-            appBundleID: appBundleIdentifier(client: client),
-            locale: locale,
-            userSelectionHistory: userSelectionHistory
-        )
-        let suggestion = InputMethodPipeline.localSuggestions(
-            for: context,
-            includeFallbackContinuations: false,
-            traditionalInputEngine: traditionalInputEngine,
-            runtimePreferences: runtimePreferences
-        )
-        let augmentedSuggestion = augmentedSuggestion(suggestion)
-        lastSuggestion = augmentedSuggestion
-        lastSuggestionRawInput = rawBuffer
+        lastSuggestion = nil
+        lastSuggestionRawInput = nil
         selectedNativeCandidate = nil
         refreshComposition(client: client)
-        updateCandidatePanel(suggestion: augmentedSuggestion, client: client)
-        scheduleAIRecommendation(for: augmentedSuggestion, client: client)
+        updateCandidatePanel(suggestion: nil, client: client)
     }
 
     private func publishLocalSuggestionSynchronously(client: InputControllerClient?) {
@@ -545,6 +535,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
         aiRecommendationTask?.cancel()
+        taskSupervisor.cancel(.aiRecommendation)
         aiRecommendationGeneration += 1
         let generation = aiRecommendationGeneration
 
@@ -589,7 +580,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
         aiRecommendationState = .pending(requestID: requestID)
         updateCandidatePanel(suggestion: suggestion, client: client)
-        aiRecommendationTask = Task { [weak self, aiRecommendationProvider] in
+        let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider] in
             let state = await aiRecommendationProvider.recommendation(for: request)
             guard !Task.isCancelled else {
                 return
@@ -605,6 +596,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 self.updateCandidatePanel(suggestion: self.lastSuggestion, client: self.host?.currentClient)
             }
         }
+        aiRecommendationTask = task
+        taskSupervisor.replace(.aiRecommendation, with: task)
     }
 
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
@@ -1021,19 +1014,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
            action == .space {
             return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
         }
-        if case .optionNumber = action,
-           !candidatePanelState.windowState.isVisible {
-            return .noAction
-        }
         if action == .space,
            enablesAsyncSuggestionRefresh,
-           compositionBuffer.hasResolvedSegments,
-           !compositionBuffer.isFullyResolved,
            !SuggestionPublicationGuard.hasCurrentSuggestion(
                 suggestionRawInput: lastSuggestionRawInput,
                 currentRawInput: rawBuffer
            ) {
-            return applyPendingSegmentFallback(commitIfFullyResolved: true, client: client)
+            let visibleText = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
+            return visibleText.isEmpty ? .noAction : .commit(visibleText)
+        }
+        if case .optionNumber = action,
+           !candidatePanelState.windowState.isVisible {
+            return .noAction
         }
 
         let commitSuggestion = commitSuggestionSnapshot(for: action, client: client)
@@ -1068,51 +1060,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
               SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
             return (lastSuggestion, lastSuggestionRawInput, false)
         }
-
-        let context = InputContext(
-            rawInput: rawBuffer,
-            appBundleID: appBundleIdentifier(client: client),
-            locale: locale,
-            userSelectionHistory: userSelectionHistory
-        )
-        let suggestion = InputMethodPipeline.localSuggestions(
-            for: context,
-            includeFallbackContinuations: false,
-            traditionalInputEngine: traditionalInputEngine,
-            runtimePreferences: runtimePreferences
-        )
-        return (augmentedSuggestion(suggestion), rawBuffer, true)
-    }
-
-    private func applyPendingSegmentFallback(
-        commitIfFullyResolved: Bool,
-        client: InputControllerClient?
-    ) -> InputCommitResult {
-        guard let activeRange = compositionBuffer.activeRange else {
-            return .noAction
-        }
-        guard let candidate = prioritizedSegmentCandidates(for: activeRange)
-            .first(where: { candidate in
-                candidate.rawRange != compositionBuffer.rawRange
-                    && canApplyOrCommit(candidate: candidate)
-            }) else {
-            return .noAction
-        }
-        guard compositionBuffer.apply(candidate) else {
-            return .noAction
-        }
-
-        let isFullyResolvedAfterApply = compositionBuffer.isFullyResolved
-        publishLocalSuggestion(client: client)
-        if isFullyResolvedAfterApply {
-            refreshResolvedCompositionContinuations(client: client)
-        } else {
-            refreshSuggestion(client: client)
-        }
-        if commitIfFullyResolved, isFullyResolvedAfterApply {
-            return .commit(compositionBuffer.commitText)
-        }
-        return .noAction
+        return (lastSuggestion, lastSuggestionRawInput, false)
     }
 
     private func applySegmentCandidate(
@@ -1160,7 +1108,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             candidateSource: typingCandidateSource(for: text),
             deleteCountBeforeCommit: deleteCountBeforeCommit
         )
-        Task { [aiContextEventRecorder] in
+        Task.detached(priority: .utility) { [aiContextEventRecorder] in
             await aiContextEventRecorder.record(event)
         }
     }
@@ -1181,7 +1129,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             candidateSource: "external-delete",
             deleteCountBeforeCommit: 1
         )
-        Task { [aiContextEventRecorder] in
+        Task.detached(priority: .utility) { [aiContextEventRecorder] in
             await aiContextEventRecorder.record(event)
         }
     }
@@ -1220,6 +1168,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func resetComposition() {
         rawBuffer = ""
         compositionBuffer = CompositionBuffer()
+        rawRevision += 1
         deleteCountBeforeCommit = 0
         resetAnchorState()
         invalidateSuggestion()
@@ -1238,6 +1187,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func reloadInputModeDefaultsIfNeeded(client: InputControllerClient?) {
+        let now = Date()
+        guard now.timeIntervalSince(lastInputModePreferenceReload) >= Self.preferenceReloadInterval else {
+            return
+        }
+        lastInputModePreferenceReload = now
         inputModeRuntime.reloadIfChanged(
             preferences: inputModePreferenceStore.loadPreferences(),
             appBundleID: appBundleIdentifier(client: client)
@@ -1245,6 +1199,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func reloadRuntimePreferencesIfNeeded() {
+        let now = Date()
+        guard now.timeIntervalSince(lastRuntimePreferenceReload) >= Self.preferenceReloadInterval else {
+            return
+        }
+        lastRuntimePreferenceReload = now
         let preferences = runtimePreferenceStore.loadPreferences()
         guard preferences != runtimePreferences else {
             return
@@ -1286,7 +1245,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         runtimeReloadGeneration += 1
         let generation = runtimeReloadGeneration
         runtimeReloadTask?.cancel()
-        runtimeReloadTask = Task { [weak self, lexiconRuntime, currentSnapshot, scheme, runtimePreferences, generation] in
+        taskSupervisor.cancel(.runtimeLexiconReload)
+        let task = Task.detached(priority: .utility) { [weak self, lexiconRuntime, currentSnapshot, scheme, runtimePreferences, generation] in
             let snapshot = lexiconRuntime.snapshot(scheme: scheme)
             guard snapshot != currentSnapshot, !Task.isCancelled else {
                 return
@@ -1318,6 +1278,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 }
             }
         }
+        runtimeReloadTask = task
+        taskSupervisor.replace(.runtimeLexiconReload, with: task)
     }
 
     private func resetAnchorState() {
@@ -1332,9 +1294,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         selectedNativeCandidate = nil
         suggestionTask?.cancel()
         suggestionTask = nil
+        taskSupervisor.cancel(.localCandidates)
         aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
+        taskSupervisor.cancel(.aiRecommendation)
         aiRecommendationState = .idle
     }
 
@@ -1343,7 +1307,38 @@ final class InputControllerCoordinator: @unchecked Sendable {
             hideCandidatePanel()
             return
         }
-        updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: client))
+        guard enablesAsyncSuggestionRefresh else {
+            updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: client))
+            return
+        }
+        scheduleCandidatePanelUpdate(suggestion: suggestion, client: client)
+    }
+
+    private func scheduleCandidatePanelUpdate(suggestion: SuggestionResponse?, client: InputControllerClient?) {
+        panelUpdateGeneration += 1
+        let generation = panelUpdateGeneration
+        let rawInput = rawBuffer
+        let currentCompositionID = compositionID
+        let currentRawRevision = rawRevision
+        panelUpdateTask?.cancel()
+        taskSupervisor.cancel(.panelRender)
+        let task = Task { @MainActor [weak self, client, suggestion] in
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.panelUpdateGeneration == generation,
+                  self.rawBuffer == rawInput,
+                  self.rawRevision == currentRawRevision,
+                  self.compositionID == currentCompositionID else {
+                return
+            }
+            self.updateCandidatePanel(
+                suggestion: suggestion,
+                anchorResult: self.candidateAnchorResult(client: client)
+            )
+        }
+        panelUpdateTask = task
+        taskSupervisor.replace(.panelRender, with: task)
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
@@ -1373,6 +1368,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func hideCandidatePanel() {
+        panelUpdateGeneration += 1
+        panelUpdateTask?.cancel()
+        panelUpdateTask = nil
+        taskSupervisor.cancel(.panelRender)
         candidatePanelState.hide()
         selectedNativeCandidate = nil
         anchorResolver.reset()
@@ -1555,8 +1554,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         rawInput: String,
         compositionID: Int
     ) {
+        delayedReanchorGeneration += 1
+        let generation = delayedReanchorGeneration
         host?.scheduleDelayedReanchor { [weak self, client] in
             guard let self,
+                  self.delayedReanchorGeneration == generation,
                   CandidateAnchorRefreshPolicy.shouldApplyDelayedAnchor(
                       snapshotRawInput: rawInput,
                       currentRawInput: self.rawBuffer,
@@ -1576,6 +1578,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static let textOnlyKeyCode = -1
     private static let maxUserSelectionHistory = 64
     private static let leadingFullCandidateCount = 5
+    private static let preferenceReloadInterval: TimeInterval = 1
 }
 
 private extension Collection {

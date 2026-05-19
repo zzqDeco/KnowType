@@ -53,19 +53,21 @@ public struct InputCandidateListBuilder: Sendable {
         var candidates: [InputCandidateSelection] = rawInput.isEmpty || hasSuggestedCandidates
             ? []
             : [InputCandidateSelection(text: rawInput, kind: .rawInput)]
+        var seenTexts = Set(candidates.map(\.text))
 
         guard let suggestion else {
             return candidates
         }
 
         for (index, prefix) in suggestion.prefixCandidates.enumerated()
-            where !candidates.map(\.text).contains(prefix.text) {
+            where !seenTexts.contains(prefix.text) {
             candidates.append(
                 InputCandidateSelection(
                     text: prefix.text,
                     kind: prefixSelectionKind(for: prefix, rawInput: rawInput, index: index)
                 )
             )
+            seenTexts.insert(prefix.text)
             if index == 0 {
                 break
             }
@@ -73,18 +75,19 @@ public struct InputCandidateListBuilder: Sendable {
 
         // Native candidates only mirror traditional suggestions. The custom panel owns AI slot rendering.
         for (index, prefix) in suggestion.prefixCandidates.dropFirst().enumerated()
-            where !candidates.map(\.text).contains(prefix.text) {
+            where !seenTexts.contains(prefix.text) {
             candidates.append(
                 InputCandidateSelection(
                     text: prefix.text,
                     kind: prefixSelectionKind(for: prefix, rawInput: rawInput, index: index + 1)
                 )
             )
+            seenTexts.insert(prefix.text)
         }
 
         for (index, continuation) in suggestion.continuationCandidates.enumerated() {
             let text = continuation.text
-            guard !candidates.map(\.text).contains(text) else {
+            guard !seenTexts.contains(text) else {
                 continue
             }
             candidates.append(
@@ -93,6 +96,7 @@ public struct InputCandidateListBuilder: Sendable {
                     kind: .continuationCandidate(index: index)
                 )
             )
+            seenTexts.insert(text)
         }
         return candidates
     }

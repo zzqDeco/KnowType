@@ -12,6 +12,7 @@ Current behavior:
 - updates content through `CandidatePanelContentRendering`; the AppKit implementation consumes `CandidatePanelLayoutPlan`
 - creates and drives windows through `CandidatePanelWindowOperating`; the default implementation adapts `NSPanel`
 - measures shortcut/text widths through `CandidatePanelTextMeasuring` using the same font choices as rendering
+- caches measured text widths and skips identical panel presentations to avoid repeated AppKit layout work during rapid async state updates
 - chooses horizontal layout for complete 4-6 candidate rows when they fit, otherwise switches to vertical layout
 - computes final panel size, per-row text limits, and the screen-edge-avoiding origin before rendering rows
 - consumes the rect chosen by `CandidateAnchorResolver`, including the safe screen fallback when host caret geometry is unavailable

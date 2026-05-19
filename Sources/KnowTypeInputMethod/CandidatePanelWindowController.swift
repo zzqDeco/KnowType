@@ -28,12 +28,13 @@ final class CandidatePanelWindowController {
     private let screenProvider: ScreenGeometryProviding
     private let layoutEngine: CandidatePanelLayoutEngine
     private let makePanel: @MainActor (NSView) -> CandidatePanelWindowOperating
+    private var lastPresentationSignature: CandidatePanelPresentationSignature?
 
     convenience init() {
         self.init(
             screenProvider: AppKitScreenGeometryProvider(),
             contentView: CandidatePanelContentView(),
-            layoutEngine: CandidatePanelLayoutEngine(textMeasurer: AppKitCandidatePanelTextMeasurer()),
+            layoutEngine: CandidatePanelLayoutEngine(textMeasurer: CachingCandidatePanelTextMeasurer()),
             makePanel: Self.makeAppKitPanel
         )
     }
@@ -54,6 +55,15 @@ final class CandidatePanelWindowController {
         let windowState = state.windowState
         guard windowState.isVisible else {
             hide()
+            return
+        }
+        let presentationSignature = CandidatePanelPresentationSignature(
+            windowState: windowState,
+            locale: locale
+        )
+        if presentationSignature == lastPresentationSignature,
+           let panel {
+            panel.orderFrontRegardless()
             return
         }
 
@@ -81,10 +91,12 @@ final class CandidatePanelWindowController {
         contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.setFrameOrigin(layoutPlan.panelOrigin)
         panel.orderFrontRegardless()
+        lastPresentationSignature = presentationSignature
     }
 
     func hide() {
         panel?.orderOut(nil)
+        lastPresentationSignature = nil
     }
 
     private func candidatePanel() -> CandidatePanelWindowOperating {
@@ -129,6 +141,41 @@ final class CandidatePanelWindowController {
         return panel
     }
 
+}
+
+private struct CandidatePanelPresentationSignature: Equatable {
+    var windowState: CandidatePanelWindowState
+    var locale: KnowTypeLocale
+}
+
+private final class CachingCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
+    private let base = AppKitCandidatePanelTextMeasurer()
+    private var textWidthCache: [TextWidthKey: CGFloat] = [:]
+    private var shortcutWidthCache: [String: CGFloat] = [:]
+
+    func textWidth(for row: CandidatePanelRenderRow) -> CGFloat {
+        let key = TextWidthKey(text: row.text, role: row.visualRole)
+        if let width = textWidthCache[key] {
+            return width
+        }
+        let width = base.textWidth(for: row)
+        textWidthCache[key] = width
+        return width
+    }
+
+    func shortcutWidth(for label: String) -> CGFloat {
+        if let width = shortcutWidthCache[label] {
+            return width
+        }
+        let width = base.shortcutWidth(for: label)
+        shortcutWidthCache[label] = width
+        return width
+    }
+}
+
+private struct TextWidthKey: Hashable {
+    var text: String
+    var role: CandidatePanelVisualRole
 }
 
 private struct AppKitCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {

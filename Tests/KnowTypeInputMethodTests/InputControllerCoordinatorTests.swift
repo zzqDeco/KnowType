@@ -154,7 +154,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncAppendPublishesMarkedTextAndImmediateLocalCandidates() async {
+    func testAsyncAppendPublishesMarkedTextAndDefersLocalCandidates() async {
         let client = FakeInputControllerClient()
         let lexiconRuntime = InputMethodLexiconRuntime(directories: [])
         let (coordinator, host, _) = makeCoordinator(
@@ -175,8 +175,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertLessThan(milliseconds, 250)
         XCTAssertEqual(client.markedTextWrites.last?.text, "zhegeapi")
-        XCTAssertTrue(host.panelStates.contains { $0.windowState.viewModel.rawInput == "zhegeapi" })
-        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty ?? true)
+        XCTAssertTrue(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty ?? true,
+            "key handling should not synchronously publish local candidates"
+        )
 
         let hasCandidates = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.rawInput == "zhegeapi"
@@ -186,7 +188,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingSpaceCommitsVisibleLocalPrefix() {
+    func testAsyncPendingSpaceCommitsCurrentRawTextWithoutBlocking() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -198,12 +200,12 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "ni")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
     @MainActor
-    func testAsyncPendingPublishesLocalPrefixCandidatesBeforeSpaceCommit() {
+    func testAsyncReadyLocalPrefixCommitsAfterCandidatePublication() async {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
             client: client,
@@ -213,6 +215,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "wsm" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
+        let hasPrefix = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty == false
+        }
+        XCTAssertTrue(hasPrefix)
 
         let visiblePrefix = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(visiblePrefix)
@@ -223,7 +229,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingProviderPathShowsLocalPrefixesWithoutFallbackContinuations() {
+    func testAsyncProviderPathShowsLocalPrefixesWithoutFallbackContinuations() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let (coordinator, host, _) = makeCoordinator(
@@ -235,6 +241,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "wsm" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
+        let hasPrefix = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty == false
+        }
+        XCTAssertTrue(hasPrefix)
 
         let viewModel = host.panelStates.last?.windowState.viewModel
         XCTAssertFalse(viewModel?.prefixCandidates.isEmpty ?? true)
@@ -295,7 +305,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testPendingAIRecommendationKeepsSecondSlotAndTabDoesNotCommit() {
+    func testPendingAIRecommendationKeepsSecondSlotAndTabDoesNotCommit() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let aiProvider = PendingAIRecommendationProvider()
@@ -309,6 +319,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "ni" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
+        let hasPendingAI = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 推荐中..."
+        }
+        XCTAssertTrue(hasPendingAI)
         let viewModel = host.panelStates.last?.windowState.viewModel
         let rendered = CandidatePanelRenderer(locale: .zhCN).render(viewModel!)
 
@@ -325,7 +339,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncRawIdentityVisibleSpaceDoesNotCommitHiddenAlternative() {
+    func testAsyncRawIdentityVisibleSpaceDoesNotCommitHiddenAlternative() async {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
             client: client,
@@ -335,6 +349,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "vxqz" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
+        let hasPrefix = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty == false
+        }
+        XCTAssertTrue(hasPrefix)
 
         let visiblePrefix = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
         XCTAssertEqual(visiblePrefix, "vxqz")
@@ -385,7 +403,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingPunctuationUsesLocalCommitFallback() {
+    func testAsyncPendingPunctuationCommitsCurrentRawTextWithoutBlocking() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -397,7 +415,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(coordinator.handleText(",", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你，")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "ni，")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -450,7 +468,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你shishei")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -481,7 +499,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(",", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁，")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你shishei，")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -517,7 +535,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingRawShortcutCommitsRawInput() {
+    func testAsyncRawShortcutCommitsRawInputAfterCandidatePanelPublication() async {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
             client: client,
@@ -527,6 +545,11 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
+        let hasPanel = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.rawInput == "zhegeapi"
+                && host.panelStates.last?.windowState.isVisible == true
+        }
+        XCTAssertTrue(hasPanel)
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.rawInput, "zhegeapi")
         XCTAssertTrue(
             coordinator.handle(
@@ -685,6 +708,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(client.markedTextWrites.last?.text, "你是谁")
+        let hasDisabledAIState = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 已关闭"
+        }
+        XCTAssertTrue(hasDisabledAIState)
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText, "AI 已关闭")
         XCTAssertTrue(host.panelStates.last?.windowState.viewModel.continuationCandidates.isEmpty == true)
         XCTAssertTrue(
@@ -797,7 +824,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncSuggestionRefreshPreservesProviderCorrectionFallback() async {
+    func testAsyncSuggestionRefreshKeepsProviderCorrectionOffKeyPath() async {
         let client = FakeInputControllerClient()
         let provider = CorrectionFallbackProvider()
         let (coordinator, host, _) = makeCoordinator(
@@ -810,15 +837,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
 
-        let hasProviderCandidate = await waitUntilOnMainActor {
-            host.panelStates.last?.windowState.viewModel.prefixCandidates.contains {
-                $0.text == "云端纠错" && $0.source == "cloud-correction"
-            } == true
+        let hasLocalCandidate = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty == false
         }
         let requests = await provider.requests
 
-        XCTAssertTrue(hasProviderCandidate)
-        XCTAssertTrue(requests.contains { $0.task == .correction })
+        XCTAssertTrue(hasLocalCandidate)
+        XCTAssertFalse(requests.contains { $0.task == .correction })
         XCTAssertFalse(requests.contains { $0.task == .continuation })
     }
 
