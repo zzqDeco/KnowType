@@ -108,6 +108,24 @@ Build and install the local development bundle:
 ./scripts/diagnose-inputmethod.sh
 ```
 
+The local installer refreshes the traditional InputMethodKit app registration,
+purges stale `.Mode` development state, restores the System Settings
+third-party parent anchor plus the visible `.Hans` mode, and launches the
+installed app so registration and best-effort selection run from the app
+context macOS uses for input switching. KnowType follows the mature component
+mode shape used by Squirrel, McBopomofo, and macSKK: the parent id is
+`com.knowtype.inputmethod.KnowType`, and the visible input source is
+`com.knowtype.inputmethod.KnowType.Hans`.
+
+After the first install or a mode-id migration, macOS may still require the
+System Settings input-source approval path. Open System Settings > Keyboard >
+Input Sources, remove stale KnowType rows, add `知键` / `KnowType` again, and
+click Allow if macOS asks. If the menu still shows stale entries, log out and
+back in to clear the Text Input Source cache. This follows the same boundary
+used by mature IMK input methods: installation uses TIS registration and
+enablement, while System Settings writes the protected third-party input-source
+approval rows.
+
 Select KnowType in the active target app when needed:
 
 ```bash

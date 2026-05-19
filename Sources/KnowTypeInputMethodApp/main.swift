@@ -4,6 +4,7 @@ import Carbon
 import InputMethodKit
 import KnowTypeCore
 import KnowTypeInputMethod
+import KnowTypeInputSourceSupport
 import OSLog
 
 private let inputMethodLogger = Logger(
@@ -12,8 +13,58 @@ private let inputMethodLogger = Logger(
 )
 
 private enum TextInputSourceActivation {
-    private static let parentInputSourceID = "com.knowtype.inputmethod.KnowType"
-    private static let modeInputSourceID = "com.knowtype.inputmethod.KnowType.Mode"
+    private static let parentInputSourceID = KnowTypeInputSourceIDs.parent
+    private static let modeInputSourceID = KnowTypeInputSourceIDs.activeMode
+    private static let legacyModeInputSourceIDs = KnowTypeInputSourceIDs.legacyModes
+    private static let fallbackInputSourceID = KnowTypeInputSourceIDs.fallback
+    private static let lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+    static func handleCommandLineActivation(_ bundle: Bundle, arguments: [String]) -> Int32? {
+        let args = Set(arguments.dropFirst())
+        let shouldSwitchAway = args.contains("--knowtype-switch-away")
+        let shouldPurgeLegacy = args.contains("--knowtype-purge-legacy")
+        let shouldDisable = args.contains("--knowtype-disable-input-source")
+        let installActivate = args.contains("--knowtype-install-activate")
+        let shouldRegister = installActivate
+            || args.contains("--knowtype-register-input-source")
+            || args.contains("--register-input-source")
+        let shouldEnable = installActivate
+            || args.contains("--knowtype-enable-input-source")
+            || args.contains("--enable-input-source")
+        let shouldSelect = installActivate
+            || args.contains("--knowtype-select-input-source")
+            || args.contains("--select-input-source")
+
+        guard shouldSwitchAway || shouldPurgeLegacy || shouldDisable || shouldRegister || shouldEnable || shouldSelect else {
+            return nil
+        }
+        guard bundle.bundleIdentifier == parentInputSourceID else {
+            fputs("Unexpected bundle id: \(bundle.bundleIdentifier ?? "<missing>")\n", stderr)
+            return 1
+        }
+
+        if shouldSwitchAway {
+            switchAwayFromKnowType()
+        }
+        if shouldPurgeLegacy {
+            purgeLegacyState(installedBundlePath: bundle.bundleURL.path)
+        }
+        if shouldDisable {
+            disableInstalledInputSource()
+        }
+        if shouldRegister {
+            registerInstalledBundle(bundle)
+        }
+        if shouldEnable {
+            guard enableInstalledInputSource() else {
+                return 1
+            }
+        }
+        if shouldSelect {
+            return selectVisibleMode() ? 0 : 1
+        }
+        return 0
+    }
 
     static func registerAndEnableInstalledBundle(_ bundle: Bundle, selectMode: Bool) {
         guard bundle.bundleIdentifier == parentInputSourceID else {
@@ -21,16 +72,50 @@ private enum TextInputSourceActivation {
             return
         }
 
-        var sources = inputSources(bundleID: parentInputSourceID)
-        if sources.isEmpty {
+        registerInstalledBundle(bundle)
+        _ = enableInstalledInputSource()
+        if selectMode {
+            _ = selectVisibleMode()
+        }
+    }
+
+    private static func registerInstalledBundle(_ bundle: Bundle) {
+        if inputSource(id: parentInputSourceID) == nil || inputSource(id: modeInputSourceID) == nil {
             let status = TISRegisterInputSource(bundle.bundleURL as CFURL)
             inputMethodLogger.notice("Registered input source from app context with status \(status, privacy: .public)")
-            sources = inputSources(bundleID: parentInputSourceID)
+            print("register.status=\(status)")
         } else {
-            inputMethodLogger.notice("Using existing input source registration count=\(sources.count, privacy: .public)")
+            inputMethodLogger.notice("Using existing active input source registration")
+            print("register.status=skipped")
         }
+    }
 
-        let activationSources = deduplicatedSources(sources).sorted(by: enableParentBeforeModes)
+    private static func switchAwayFromKnowType() {
+        guard currentInputSourceID()?.hasPrefix(parentInputSourceID) == true else {
+            print("switch-away.status=skipped")
+            return
+        }
+        guard let fallback = inputSource(id: fallbackInputSourceID) else {
+            fputs("switch-away.error=fallback-missing\n", stderr)
+            return
+        }
+        let status = TISSelectInputSource(fallback)
+        if status == noErr {
+            postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
+        }
+        print("switch-away.status=\(status)")
+        print("switch-away.current=\(currentInputSourceID() ?? "<unknown>")")
+    }
+
+    @discardableResult
+    private static func enableInstalledInputSource() -> Bool {
+        let sources = inputSources(bundleID: parentInputSourceID)
+        let legacyModeCount = KnowTypeInputSourceIDs.legacyModes.reduce(0) { count, modeID in
+            count + inputSources(id: modeID).count
+        }
+        let activationSources = deduplicatedSources([
+            inputSource(id: modeInputSourceID)
+        ].compactMap { $0 })
         var enabledCount = 0
         var modeCount = 0
         for source in activationSources {
@@ -44,6 +129,10 @@ private enum TextInputSourceActivation {
                 inputMethodLogger.notice("Input source is not enable-capable id=\(id, privacy: .public) type=\(type, privacy: .public)")
                 continue
             }
+            if boolProperty(source, kTISPropertyInputSourceIsEnabled) {
+                inputMethodLogger.notice("Input source is already enabled id=\(id, privacy: .public) type=\(type, privacy: .public)")
+                continue
+            }
             let status = TISEnableInputSource(source)
             if status == noErr {
                 enabledCount += 1
@@ -53,12 +142,44 @@ private enum TextInputSourceActivation {
         }
 
         inputMethodLogger.notice(
-            "Input source activation complete sources=\(sources.count, privacy: .public) uniqueSources=\(activationSources.count, privacy: .public) modes=\(modeCount, privacy: .public) enabledRequests=\(enabledCount, privacy: .public)"
+            "Input source activation complete sources=\(sources.count, privacy: .public) uniqueSources=\(activationSources.count, privacy: .public) activeModes=\(modeCount, privacy: .public) legacyModes=\(legacyModeCount, privacy: .public) enabledRequests=\(enabledCount, privacy: .public)"
         )
-
-        if selectMode {
-            selectVisibleMode()
+        print("enable.sources=\(sources.count)")
+        print("enable.uniqueSources=\(activationSources.count)")
+        print("enable.activeModes=\(modeCount)")
+        print("enable.legacyModes=\(legacyModeCount)")
+        print("enable.requests=\(enabledCount)")
+        print("enable.preference.writes=skipped")
+        if enabledCount > 0 {
+            postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
         }
+        return modeCount >= 1
+    }
+
+    private static func disableInstalledInputSource() {
+        switchAwayFromKnowType()
+
+        let sources = deduplicatedSources(inputSources(bundleID: parentInputSourceID))
+            .sorted(by: disableModesBeforeParent)
+        var disabledCount = 0
+        for source in sources {
+            let id = stringProperty(source, kTISPropertyInputSourceID) ?? "<unknown>"
+            guard boolProperty(source, kTISPropertyInputSourceIsEnabled) else {
+                continue
+            }
+            let status = TISDisableInputSource(source)
+            if status == noErr {
+                disabledCount += 1
+            } else {
+                fputs("Warning: TISDisableInputSource(\(id)) returned \(status)\n", stderr)
+            }
+        }
+        if disabledCount > 0 {
+            postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
+        }
+        print("disable.sources=\(sources.count)")
+        print("disable.requests=\(disabledCount)")
+        print("disable.preference.writes=skipped")
     }
 
     private static func inputSources(bundleID: String) -> [TISInputSource] {
@@ -69,6 +190,20 @@ private enum TextInputSourceActivation {
     private static func inputSources(id: String) -> [TISInputSource] {
         let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
         return TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource] ?? []
+    }
+
+    private static func inputSource(id: String) -> TISInputSource? {
+        inputSources(id: id).first
+    }
+
+    private static func postTISNotification(_ name: CFString) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDistributedCenter(),
+            CFNotificationName(name),
+            nil,
+            nil,
+            true
+        )
     }
 
     private static func deduplicatedSources(_ sources: [TISInputSource]) -> [TISInputSource] {
@@ -119,6 +254,12 @@ private enum TextInputSourceActivation {
         return !lhsIsMode && rhsIsMode
     }
 
+    private static func disableModesBeforeParent(_ lhs: TISInputSource, _ rhs: TISInputSource) -> Bool {
+        let lhsIsMode = inputModeID(lhs) != nil
+        let rhsIsMode = inputModeID(rhs) != nil
+        return lhsIsMode && !rhsIsMode
+    }
+
     private static func stringProperty(_ source: TISInputSource, _ key: CFString) -> String? {
         guard let raw = TISGetInputSourceProperty(source, key) else {
             return nil
@@ -137,20 +278,29 @@ private enum TextInputSourceActivation {
         return CFBooleanGetValue(unsafeBitCast(raw, to: CFBoolean.self))
     }
 
-    private static func selectVisibleMode() {
+    @discardableResult
+    private static func selectVisibleMode() -> Bool {
         guard let mode = inputSources(id: modeInputSourceID).first else {
             inputMethodLogger.warning("Cannot select KnowType because mode source is missing")
-            return
+            fputs("select.error=mode-missing\n", stderr)
+            return false
         }
         guard boolProperty(mode, kTISPropertyInputSourceIsEnabled),
               boolProperty(mode, kTISPropertyInputSourceIsSelectCapable) else {
             inputMethodLogger.warning("Cannot select KnowType because mode is not enabled/select-capable")
-            return
+            fputs("select.error=mode-not-selectable\n", stderr)
+            return false
         }
 
         let status = TISSelectInputSource(mode)
+        if status == noErr {
+            postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
+        }
         let currentID = currentInputSourceID() ?? "<unknown>"
         inputMethodLogger.notice("Selected KnowType mode from app context status=\(status, privacy: .public) current=\(currentID, privacy: .public)")
+        print("select.status=\(status)")
+        print("select.current=\(currentID)")
+        return status == noErr
     }
 
     private static func currentInputSourceID() -> String? {
@@ -159,6 +309,148 @@ private enum TextInputSourceActivation {
         }
         return stringProperty(current, kTISPropertyInputSourceID)
     }
+
+    @discardableResult
+    private static func runProcess(_ executable: String, _ arguments: [String]) -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        do {
+            try process.run()
+        } catch {
+            return (1, "")
+        }
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    private static func stripLSRegisterSuffix(_ value: String) -> String {
+        value.replacingOccurrences(
+            of: #"\s+\(0x[0-9A-Fa-f]+\)$"#,
+            with: "",
+            options: .regularExpression
+        )
+    }
+
+    private static func expandedPath(_ path: String) -> String {
+        if path == "~" {
+            return NSHomeDirectory()
+        }
+        if path.hasPrefix("~/") {
+            return NSHomeDirectory() + "/" + path.dropFirst(2)
+        }
+        return path
+    }
+
+    private static func canonicalBundlePath(_ path: String) -> String {
+        let expanded = expandedPath(stripLSRegisterSuffix(path))
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) {
+            return URL(fileURLWithPath: expanded).resolvingSymlinksInPath().path
+        }
+        return expanded
+    }
+
+    private static func launchServicesPaths(bundleID: String) -> [String] {
+        guard FileManager.default.isExecutableFile(atPath: lsregisterPath) else {
+            return []
+        }
+        let result = runProcess(lsregisterPath, ["-dump"])
+        guard result.status == 0 else {
+            return []
+        }
+
+        var paths: [String] = []
+        var currentPath = ""
+        for rawLine in result.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("bundle id:") {
+                currentPath = ""
+            } else if line.hasPrefix("path:") {
+                currentPath = line.replacingOccurrences(of: "path:", with: "").trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("identifier:") {
+                let identifier = stripLSRegisterSuffix(
+                    line.replacingOccurrences(of: "identifier:", with: "").trimmingCharacters(in: .whitespaces)
+                )
+                if identifier == bundleID, !currentPath.isEmpty {
+                    paths.append(currentPath)
+                    currentPath = ""
+                }
+            }
+        }
+        return Array(Set(paths)).sorted()
+    }
+
+    private static func unregisterStaleLaunchServices(installedBundlePath: String) -> Int {
+        guard FileManager.default.isExecutableFile(atPath: lsregisterPath) else {
+            fputs("Warning: lsregister command is unavailable.\n", stderr)
+            return 0
+        }
+
+        let canonicalTarget = canonicalBundlePath(installedBundlePath)
+        var unregistered = 0
+        for candidate in launchServicesPaths(bundleID: parentInputSourceID) {
+            let canonicalCandidate = canonicalBundlePath(candidate)
+            guard canonicalCandidate != canonicalTarget else {
+                continue
+            }
+            let unregisterPath = expandedPath(stripLSRegisterSuffix(candidate))
+            let result = runProcess(lsregisterPath, ["-u", unregisterPath])
+            if result.status == 0 {
+                unregistered += 1
+            } else if !FileManager.default.fileExists(atPath: unregisterPath) {
+                _ = runProcess(lsregisterPath, ["-gc"])
+            } else {
+                fputs("Warning: lsregister -u failed for \(unregisterPath)\n", stderr)
+            }
+        }
+        return unregistered
+    }
+
+    private static func disableLegacyModes() -> Int {
+        switchAwayFromLegacyModeIfNeeded()
+
+        var disabled = 0
+        for modeID in legacyModeInputSourceIDs {
+            for source in deduplicatedSources(inputSources(id: modeID)) {
+                guard boolProperty(source, kTISPropertyInputSourceIsEnabled) else {
+                    continue
+                }
+                let status = TISDisableInputSource(source)
+                if status == noErr {
+                    disabled += 1
+                } else {
+                    fputs("Warning: TISDisableInputSource(\(modeID)) returned \(status)\n", stderr)
+                }
+            }
+        }
+        return disabled
+    }
+
+    private static func switchAwayFromLegacyModeIfNeeded() {
+        guard let currentID = currentInputSourceID(),
+              legacyModeInputSourceIDs.contains(currentID) else {
+            return
+        }
+        switchAwayFromKnowType()
+    }
+
+    private static func purgeLegacyState(installedBundlePath: String) {
+        let disabled = disableLegacyModes()
+        let unregistered = unregisterStaleLaunchServices(installedBundlePath: installedBundlePath)
+        print("purge.legacy.disabled=\(disabled)")
+        print("purge.legacy.preference.writes=skipped")
+        print("purge.active.inputsource.id=\(modeInputSourceID)")
+        print("purge.active.mode.id=\(modeInputSourceID)")
+        print("purge.launchservices.unregistered=\(unregistered)")
+    }
 }
 
 final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
@@ -166,9 +458,9 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundle = Bundle.main
-        let bundleIdentifier = bundle.bundleIdentifier ?? "com.knowtype.inputmethod.KnowType"
+        let bundleIdentifier = bundle.bundleIdentifier ?? KnowTypeInputSourceIDs.parent
         let connectionName = bundle.object(forInfoDictionaryKey: "InputMethodConnectionName") as? String
-            ?? "com.knowtype.inputmethod.KnowType_Connection"
+            ?? KnowTypeInputSourceIDs.connectionName
         server = IMKServer(name: connectionName, bundleIdentifier: bundleIdentifier)
         inputMethodLogger.notice(
             "KnowTypeInputMethodApp launched bundle=\(bundleIdentifier, privacy: .public) connection=\(connectionName, privacy: .public)"
@@ -178,11 +470,12 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
             InputMethodLexiconRuntime.prewarmDefaultEngine(scheme: preferences.inputScheme)
         }
         let shouldSelectMode = CommandLine.arguments.contains("--knowtype-install-activate")
-        if shouldSelectMode {
-            NSApp.activate(ignoringOtherApps: true)
-        }
         TextInputSourceActivation.registerAndEnableInstalledBundle(bundle, selectMode: shouldSelectMode)
     }
+}
+
+if let exitCode = TextInputSourceActivation.handleCommandLineActivation(Bundle.main, arguments: CommandLine.arguments) {
+    exit(exitCode)
 }
 
 let application = NSApplication.shared

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 
 usage() {
@@ -31,18 +32,18 @@ while (($# > 0)); do
   esac
 done
 
-BUNDLE_PATH="$("$ROOT_DIR/scripts/build-inputmethod-bundle.sh" | tail -n 1)"
+LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
+BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$ROOT_DIR/scripts/build-inputmethod-bundle.sh" | tail -n 1)"
 PREFPANE_PATH="$("$ROOT_DIR/scripts/build-preference-pane.sh" | tail -n 1)"
 TARGET_DIR="$HOME/Library/Input Methods"
 TARGET_PATH="$TARGET_DIR/KnowType.app"
 PREFPANE_TARGET_DIR="$HOME/Library/PreferencePanes"
 PREFPANE_TARGET_PATH="$PREFPANE_TARGET_DIR/KnowType.prefPane"
-INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
+INSTALLED_EXECUTABLE="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 mkdir -p "$TARGET_DIR"
 mkdir -p "$PREFPANE_TARGET_DIR"
-
-"$INPUTSOURCE_TOOL" switch-away >/dev/null 2>&1 || true
 
 killall KnowTypeInputMethodApp 2>/dev/null || true
 for _ in {1..30}; do
@@ -58,12 +59,45 @@ rm -rf "$PREFPANE_TARGET_PATH"
 cp -R "$PREFPANE_PATH" "$PREFPANE_TARGET_PATH"
 rm -rf "$PREFPANE_PATH"
 
-open -n "$TARGET_PATH" --args --knowtype-install-activate >/dev/null 2>&1 || true
-sleep 1.25
-"$INPUTSOURCE_TOOL" status >/dev/null 2>&1 || true
+if command -v xattr >/dev/null 2>&1; then
+  xattr -dr com.apple.quarantine "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 2>/dev/null || true
+fi
+
+if [[ -x "$LSREGISTER" ]]; then
+  "$LSREGISTER" -f "$TARGET_PATH" >/dev/null 2>&1 || true
+fi
+
+"$INSTALLED_EXECUTABLE" --knowtype-purge-legacy
+
+INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
+"$INPUTSOURCE_TOOL" repair-preferences \
+  --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
+  --include-history \
+  --add-active
+
+if ! "$INSTALLED_EXECUTABLE" --knowtype-install-activate; then
+  echo "warning: installed app could not select KnowType in this process context; continuing so diagnostics can report the persisted state" >&2
+fi
+
+"$INPUTSOURCE_TOOL" repair-preferences \
+  --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
+  --include-history \
+  --add-active
+
+sleep 0.75
+killall cfprefsd 2>/dev/null || true
+killall TextInputMenuAgent 2>/dev/null || true
+killall TextInputSwitcher 2>/dev/null || true
+sleep 0.5
+open -g "$TARGET_PATH" >/dev/null 2>&1 || true
+sleep 0.5
 
 echo "Installed KnowType to: $TARGET_PATH"
 echo "Installed KnowType System Settings pane to: $PREFPANE_TARGET_PATH"
+echo "Installed KnowType local build version: $LOCAL_BUILD_VERSION"
+echo "Requested input source activation from installed app: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 echo "Run ./scripts/diagnose-inputmethod.sh --strict for the read-only install status check."
 echo "Activate the target text app, run ./scripts/select-inputmethod.sh --require-selected, then type a real probe before manual acceptance."
 echo "If System Settings asks to allow 知键/KnowType as an input method, click Allow before testing selection."
