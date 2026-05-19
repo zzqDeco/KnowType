@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      release_commit: ${{ steps.validate.outputs.release_commit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate tag, branch ancestry, and bundle versions
+        id: validate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "error: release tag must match vX.Y.Z" >&2
+            exit 1
+          fi
+
+          tag_type="$(git cat-file -t "$tag")"
+          if [[ "$tag_type" != "tag" ]]; then
+            echo "error: release tag must be an annotated tag" >&2
+            exit 1
+          fi
+
+          git fetch --force origin main:refs/remotes/origin/main --tags
+          release_commit="$(git rev-list -n 1 "$tag")"
+          if ! git merge-base --is-ancestor "$release_commit" origin/main; then
+            echo "error: release commit $release_commit is not on origin/main" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          for plist in Resources/InputMethod/Info.plist Resources/PreferencePane/Info.plist; do
+            actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+            if [[ "$actual" != "$version" ]]; then
+              echo "error: $plist CFBundleShortVersionString is $actual, expected $version" >&2
+              exit 1
+            fi
+          done
+
+          {
+            echo "version=$version"
+            echo "release_commit=$release_commit"
+          } >>"$GITHUB_OUTPUT"
+
+  build-package:
+    name: Build local MVP package
+    needs: validate
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Show Swift version
+        run: swift --version
+      - name: Release build
+        run: swift build --configuration release
+      - name: Test
+        run: swift test
+      - name: Input method install/profile script smoke
+        run: ./scripts/smoke-inputmethod-install.sh
+      - name: Package release assets
+        run: |
+          CODESIGN_IDENTITY=- ./scripts/package-release.sh \
+            --version "${{ needs.validate.outputs.version }}" \
+            --build "$GITHUB_RUN_NUMBER" \
+            --configuration release
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          if-no-files-found: error
+          path: |
+            dist/release/KnowType-v${{ needs.validate.outputs.version }}-macos-local-mvp.zip
+            dist/release/KnowType-v${{ needs.validate.outputs.version }}-macos-local-mvp.zip.sha256
+            dist/release/release-manifest.json
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - validate
+      - build-package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+      - name: Refuse to overwrite an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "error: release $TAG already exists" >&2
+            exit 1
+          fi
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            "release-assets/KnowType-v${VERSION}-macos-local-mvp.zip" \
+            "release-assets/KnowType-v${VERSION}-macos-local-mvp.zip.sha256" \
+            "release-assets/release-manifest.json" \
+            --title "KnowType $TAG" \
+            --target "$RELEASE_COMMIT" \
+            --notes "Local MVP release package. This zip is ad-hoc signed and not notarized."

@@ -116,6 +116,7 @@ required for every test file.
 - [Input Method Diagnostic Scripts](scripts/inputmethod-diagnostics.plan.md)
 - [Input Method Installer](scripts/install-inputmethod.plan.md)
 - [Managed Lexicon Pack Installer](scripts/install-lexicon-pack.plan.md)
+- [Release Packager](scripts/package-release.plan.md)
 - [Input Source Tool Shell Helpers](scripts/lib/inputsource-tool.plan.md)
 - [Input Method Selection Repair](scripts/repair-inputmethod-selection.plan.md)
 - [Input Method Selector](scripts/select-inputmethod.plan.md)

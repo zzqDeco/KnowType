@@ -121,6 +121,7 @@ help_scripts=(
   "$ROOT_DIR/scripts/diagnose-inputmethod.sh"
   "$ROOT_DIR/scripts/install-inputmethod.sh"
   "$ROOT_DIR/scripts/install-lexicon-pack.sh"
+  "$ROOT_DIR/scripts/package-release.sh"
   "$ROOT_DIR/scripts/repair-inputmethod-selection.sh"
   "$ROOT_DIR/scripts/select-inputmethod.sh"
   "$ROOT_DIR/scripts/smoke-inputmethod-install.sh"

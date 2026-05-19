@@ -63,6 +63,11 @@ Keychain-backed API key 和本地词库工具。
 
 它还不是签名安装器、公证发行包、自动更新程序或 App Store 应用。
 
+GitHub Releases 可以提供名为 `KnowType-vX.Y.Z-macos-local-mvp.zip` 的本地
+MVP zip。这个压缩包包含 ad-hoc 签名的 `KnowType.app` 输入法 bundle 和
+`KnowType.prefPane`，并附带 SHA256 文件和 release manifest。它仍然只是本地
+MVP 打包，不是公证安装器。
+
 ## 快速开始
 
 要求：
@@ -110,6 +115,11 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 本地 IME 行为仍需要在真实 host app 中打字验证。macOS policy、输入源选择和
 手动验收流程见 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md)
 和 [MVP Acceptance](doc/mvp-acceptance.plan.md)。
+
+使用 GitHub Release zip 时，先用发布页提供的 `.sha256` 文件校验下载的 zip。
+然后解压，把 `KnowType.app` 复制到 `~/Library/Input Methods/`，把
+`KnowType.prefPane` 复制到 `~/Library/PreferencePanes/`。如果手边有源码
+checkout，再运行同一套本地诊断和真实打字验收流程。
 
 ## 配置
 
