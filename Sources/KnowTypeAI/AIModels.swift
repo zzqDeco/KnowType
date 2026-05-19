@@ -63,6 +63,7 @@ public struct AIRecommendationRequest: Sendable, Equatable {
     public var appName: String?
     public var locale: KnowTypeLocale
     public var compositionID: Int
+    public var lexicalContext: LexicalContextSnapshot?
 
     public init(
         rawInput: String,
@@ -70,7 +71,8 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         appBundleID: String? = nil,
         appName: String? = nil,
         locale: KnowTypeLocale = .mixed,
-        compositionID: Int
+        compositionID: Int,
+        lexicalContext: LexicalContextSnapshot? = nil
     ) {
         self.rawInput = rawInput
         self.traditionalCandidate = traditionalCandidate
@@ -78,6 +80,7 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         self.appName = appName
         self.locale = locale
         self.compositionID = compositionID
+        self.lexicalContext = lexicalContext
     }
 }
 

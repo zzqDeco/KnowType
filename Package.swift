@@ -44,8 +44,13 @@ let package = Package(
             path: "Sources/KnowTypeAI"
         ),
         .target(
+            name: "KnowTypeRimeBridge",
+            path: "Sources/KnowTypeRimeBridge",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "KnowTypeInputMethod",
-            dependencies: ["KnowTypeCore", "KnowTypeProviders", "KnowTypeAI", "KnowTypeSettingsUI"],
+            dependencies: ["KnowTypeCore", "KnowTypeProviders", "KnowTypeAI", "KnowTypeSettingsUI", "KnowTypeRimeBridge"],
             path: "Sources/KnowTypeInputMethod",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),

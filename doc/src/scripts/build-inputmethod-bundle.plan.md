@@ -19,6 +19,9 @@ products and repository resources.
 - `--version` and `--build` override the copied `Info.plist` before signing so
   release artifacts can carry tag and CI build metadata without mutating source
   plists.
+- If `Vendor/Rime` exists, the script copies `librime.1.dylib`, Rime plugins,
+  and shared data into the app bundle before signing, and adds
+  `@loader_path/../Frameworks` as a runtime search path.
 - CI smoke checks this script without installing the bundle.
 
 ## Tests

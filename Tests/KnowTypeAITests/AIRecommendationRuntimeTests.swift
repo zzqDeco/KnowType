@@ -97,6 +97,68 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requests.map(\.rawInput), ["nihao", "ni hao"])
     }
 
+    func testRecommendationIncludesLexicalProfileAndCacheKey() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let candidate = CorrectionCandidate(
+            text: "你好",
+            source: "traditional",
+            confidence: 1,
+            correctionLevel: .contextual
+        )
+        let builder = LexicalContextBuilder()
+        let firstLexical = try! XCTUnwrap(builder.snapshot(rimeCandidates: ["你好"], recentCommits: ["请同步这个方案"]))
+        let secondLexical = try! XCTUnwrap(builder.snapshot(rimeCandidates: ["你好"], recentCommits: ["这个方向可以继续"]))
+
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                lexicalContext: firstLexical
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                lexicalContext: firstLexical
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                lexicalContext: secondLexical
+            )
+        )
+        let requests = await provider.requests
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests[0].contextDocuments["LEXICAL_PROFILE.md"]?.contains("请同步这个方案") == true)
+        XCTAssertTrue(requests[1].contextDocuments["LEXICAL_PROFILE.md"]?.contains("这个方向可以继续") == true)
+        XCTAssertNotEqual(firstLexical.sha256, secondLexical.sha256)
+    }
+
+    func testLexicalProfileFiltersStandaloneProtectedTechnicalTokens() throws {
+        let snapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                rimeCandidates: ["API", "JSON", "方案"],
+                recentCommits: ["请同步这个方案"],
+                selectionHistory: ["snake_case"]
+            )
+        )
+
+        XCTAssertTrue(snapshot.markdown.contains("方案"))
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "API" })
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "JSON" })
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "snake_case" })
+    }
+
     func testLevelZeroInputDoesNotCallProvider() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: " should not be used")

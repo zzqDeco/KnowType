@@ -10,6 +10,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         var localeRawValue: String
         var environmentHash: String
         var correctionHash: String
+        var lexicalHash: String
     }
 
     private struct CacheEntry {
@@ -73,10 +74,19 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 appBundleID: request.appBundleID ?? "",
                 localeRawValue: request.locale.rawValue,
                 environmentHash: environment.sha256,
-                correctionHash: correction.sha256
+                correctionHash: correction.sha256,
+                lexicalHash: request.lexicalContext?.sha256 ?? ""
             )
             if let cached = cache[key], cached.expiresAt > Date() {
                 return .ready(cached.candidate)
+            }
+
+            var contextDocuments = [
+                "ENV.md": environment.content,
+                "CORRECTION.md": correction.content
+            ]
+            if let lexicalContext = request.lexicalContext {
+                contextDocuments["LEXICAL_PROFILE.md"] = lexicalContext.markdown
             }
 
             let llmRequest = LLMRequest(
@@ -87,10 +97,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 appContext: request.appBundleID,
                 maxCandidates: 1,
                 lengthLevel: .medium,
-                contextDocuments: [
-                    "ENV.md": environment.content,
-                    "CORRECTION.md": correction.content
-                ]
+                contextDocuments: contextDocuments
             )
             let response = try await withTimeout(nanoseconds: hardTimeoutNanoseconds) {
                 try await provider.complete(llmRequest)
@@ -99,7 +106,13 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 response: response,
                 lockedPrefix: request.traditionalCandidate.text,
                 providerName: provider.providerName,
-                contextVersion: "\(environment.sha256.prefix(12)):\(correction.sha256.prefix(12))"
+                contextVersion: [
+                    environment.sha256.prefix(12),
+                    correction.sha256.prefix(12),
+                    request.lexicalContext?.sha256.prefix(12)
+                ]
+                .compactMap { $0.map(String.init) }
+                .joined(separator: ":")
             ) else {
                 await healthMonitor.recordSuccess()
                 return .ineligible(reason: "AI 无推荐")

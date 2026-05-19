@@ -154,7 +154,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncAppendPublishesMarkedTextAndDefersLocalCandidates() async {
+    func testAsyncAppendPublishesMarkedTextAndImmediateIndexedCandidates() async {
         let client = FakeInputControllerClient()
         let lexiconRuntime = InputMethodLexiconRuntime(directories: [])
         let (coordinator, host, _) = makeCoordinator(
@@ -175,9 +175,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertLessThan(milliseconds, 250)
         XCTAssertEqual(client.markedTextWrites.last?.text, "zhegeapi")
-        XCTAssertTrue(
+        XCTAssertFalse(
             host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty ?? true,
-            "key handling should not synchronously publish local candidates"
+            "indexed local candidates should be available before async AI refreshes"
         )
 
         let hasCandidates = await waitUntilOnMainActor {
@@ -188,7 +188,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingSpaceCommitsCurrentRawTextWithoutBlocking() {
+    func testAsyncPendingSpaceCommitsFirstLocalCandidateWithoutBlocking() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -200,7 +200,31 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "ni")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testAsyncImmediateNumberSelectionCommitsCandidateWithoutAppendingDigit() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+        let secondCandidate = try XCTUnwrap(viewModel.prefixCandidates.dropFirst().first?.text)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, secondCandidate)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -403,7 +427,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAsyncPendingPunctuationCommitsCurrentRawTextWithoutBlocking() {
+    func testAsyncPendingPunctuationCommitsFirstLocalCandidateWithoutBlocking() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -415,7 +439,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(coordinator.handleText(",", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "ni，")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你，")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -468,7 +492,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你shishei")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁")
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -663,6 +687,32 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁继续推进")
+    }
+
+    @MainActor
+    func testAIRecommendationRequestCarriesLexicalProfile() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        let requests = await aiProvider.requests
+        let request = try XCTUnwrap(requests.last)
+
+        XCTAssertTrue(request.lexicalContext?.markdown.contains("你") == true)
+        XCTAssertTrue(request.lexicalContext?.sourceSummary.contains { $0.hasPrefix("rime-candidates: ") } == true)
     }
 
     @MainActor
