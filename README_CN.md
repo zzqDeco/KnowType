@@ -63,6 +63,11 @@ Keychain-backed API key 和本地词库工具。
 
 它还不是签名安装器、公证发行包、自动更新程序或 App Store 应用。
 
+GitHub Releases 可以提供名为 `KnowType-vX.Y.Z-macos-local-mvp.zip` 的本地
+MVP zip。这个压缩包包含 ad-hoc 签名的 `KnowType.app` 输入法 bundle 和
+`KnowType.prefPane`，并附带 SHA256 文件和 release manifest。它仍然只是本地
+MVP 打包，不是公证安装器。
+
 ## 快速开始
 
 要求：
@@ -95,6 +100,19 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 ./scripts/diagnose-inputmethod.sh
 ```
 
+本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Mode`
+开发状态，补齐系统设置需要的第三方 parent anchor 和可见 `.Hans` mode，并启动已安装的
+app，让注册和 best-effort 选择从 macOS 输入法切换使用的 app 上下文中执行。KnowType 采用
+Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode 形态：parent id 是
+`com.knowtype.inputmethod.KnowType`，系统可见输入源是
+`com.knowtype.inputmethod.KnowType.Hans`。
+
+首次安装或 mode id 迁移后，macOS 仍可能要求通过系统设置完成第三方输入源授权。
+打开“系统设置 > 键盘 > 输入源”，移除过期的 KnowType/知键条目，重新添加
+`知键` / `KnowType`，如果系统弹出允许提示则点击允许。如果菜单仍显示旧条目，注销再登录以清理
+Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流程使用 TIS 注册和启用，
+受保护的第三方输入源授权行由系统设置写入。
+
 需要时，在当前目标 app 上选择 KnowType：
 
 ```bash
@@ -110,6 +128,11 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 本地 IME 行为仍需要在真实 host app 中打字验证。macOS policy、输入源选择和
 手动验收流程见 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md)
 和 [MVP Acceptance](doc/mvp-acceptance.plan.md)。
+
+使用 GitHub Release zip 时，先用发布页提供的 `.sha256` 文件校验下载的 zip。
+然后解压，把 `KnowType.app` 复制到 `~/Library/Input Methods/`，把
+`KnowType.prefPane` 复制到 `~/Library/PreferencePanes/`。如果手边有源码
+checkout，再运行同一套本地诊断和真实打字验收流程。
 
 ## 配置
 

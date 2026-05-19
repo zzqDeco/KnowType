@@ -257,30 +257,34 @@ The tool delegates download, SHA256 verification, conversion, atomic writes,
 and metadata generation to `ManagedLexiconPackInstaller`. It must not commit
 third-party dictionary data to the repository.
 
-`knowtype-inputsource-tool` is the only local helper that should perform direct
-macOS TIS operations for KnowType scripts:
+`knowtype-inputsource-tool` is the local helper for direct macOS TIS diagnostics
+and cleanup in KnowType scripts:
 
 - `status` emits read-only registration, enabled, selected, and HIToolbox
   preference status.
-- `switch-away` moves the active input source away from KnowType before bundle
-  replacement.
-- `dedupe-preferences` removes duplicate KnowType rows without changing
-  unrelated input sources.
+- `switch-away` is a debug fallback; install scripts use the installed app's
+  command-line path to move away from KnowType before bundle replacement.
+- `inspect-preferences` and compatibility `dedupe-preferences` report
+  duplicate KnowType rows without mutating protected system preference domains.
+- `repair-preferences` rewrites only KnowType rows in protected input-source
+  preference arrays as an explicit local development fallback for stale `.Mode`
+  cache state or a missing third-party parent anchor.
 - `register --path ... [--select]` manually registers and optionally selects the
-  installed bundle.
-- `select [--require-selected]` requests KnowType selection and verifies the
-  helper-local TIS context.
+  installed bundle through TIS APIs only for debug use.
+- `select [--require-selected]` remains a debug-only helper-local selection path.
 
 Script contracts:
 
 - `scripts/build-inputmethod-bundle.sh` creates `dist/KnowType.app` and must
   package SwiftPM resource bundles required by the local engine.
 - `scripts/install-inputmethod.sh` copies the local development bundle to
-  `~/Library/Input Methods/KnowType.app`.
+  `~/Library/Input Methods/KnowType.app` and runs app-local purge plus
+  activation commands.
 - `scripts/diagnose-inputmethod.sh` is the read-only install status and recent
   log diagnostic path.
-- `scripts/select-inputmethod.sh` can request selection, but selection remains
-  scoped to the active macOS input context and is not proof of typing behavior.
+- `scripts/select-inputmethod.sh` requests selection through the installed app,
+  but selection remains scoped to the active macOS input context and is not proof
+  of typing behavior.
 - `scripts/accept-inputmethod-local.sh` generates the local acceptance report
   template and only mutates install or selection state when explicit flags are
   passed.

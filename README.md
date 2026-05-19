@@ -71,6 +71,11 @@ local dictionary tooling.
 It is not yet a signed installer, notarized release, auto-updater, or App Store
 package.
 
+GitHub Releases may provide a local MVP zip named
+`KnowType-vX.Y.Z-macos-local-mvp.zip`. That archive contains the ad-hoc signed
+`KnowType.app` input method bundle and `KnowType.prefPane`, plus a SHA256 file
+and release manifest. It is still local MVP packaging, not a notarized installer.
+
 ## Quick Start
 
 Requirements:
@@ -103,6 +108,24 @@ Build and install the local development bundle:
 ./scripts/diagnose-inputmethod.sh
 ```
 
+The local installer refreshes the traditional InputMethodKit app registration,
+purges stale `.Mode` development state, restores the System Settings
+third-party parent anchor plus the visible `.Hans` mode, and launches the
+installed app so registration and best-effort selection run from the app
+context macOS uses for input switching. KnowType follows the mature component
+mode shape used by Squirrel, McBopomofo, and macSKK: the parent id is
+`com.knowtype.inputmethod.KnowType`, and the visible input source is
+`com.knowtype.inputmethod.KnowType.Hans`.
+
+After the first install or a mode-id migration, macOS may still require the
+System Settings input-source approval path. Open System Settings > Keyboard >
+Input Sources, remove stale KnowType rows, add `知键` / `KnowType` again, and
+click Allow if macOS asks. If the menu still shows stale entries, log out and
+back in to clear the Text Input Source cache. This follows the same boundary
+used by mature IMK input methods: installation uses TIS registration and
+enablement, while System Settings writes the protected third-party input-source
+approval rows.
+
 Select KnowType in the active target app when needed:
 
 ```bash
@@ -119,6 +142,12 @@ Local IME behavior must still be verified by typing in real host apps. See
 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md) and
 [MVP Acceptance](doc/mvp-acceptance.plan.md) for the macOS policy, selection,
 and manual acceptance flow.
+
+For a GitHub Release zip, verify the downloaded archive with the published
+`.sha256` file first. Then expand it, copy `KnowType.app` to
+`~/Library/Input Methods/` and `KnowType.prefPane` to
+`~/Library/PreferencePanes/`, and run the same local diagnostics/manual typing
+acceptance from a source checkout when available.
 
 ## Configuration
 
