@@ -28,12 +28,14 @@ private enum TextInputSourceActivation {
         let shouldRegister = installActivate
             || args.contains("--knowtype-register-input-source")
             || args.contains("--register-input-source")
+        let explicitSelect = args.contains("--knowtype-select-input-source")
+            || args.contains("--select-input-source")
         let shouldEnable = installActivate
+            || explicitSelect
             || args.contains("--knowtype-enable-input-source")
             || args.contains("--enable-input-source")
         let shouldSelect = installActivate
-            || args.contains("--knowtype-select-input-source")
-            || args.contains("--select-input-source")
+            || explicitSelect
 
         guard shouldSwitchAway || shouldPurgeLegacy || shouldDisable || shouldRegister || shouldEnable || shouldSelect else {
             return nil
@@ -113,9 +115,7 @@ private enum TextInputSourceActivation {
         let legacyModeCount = KnowTypeInputSourceIDs.legacyModes.reduce(0) { count, modeID in
             count + inputSources(id: modeID).count
         }
-        let activationSources = deduplicatedSources([
-            inputSource(id: modeInputSourceID)
-        ].compactMap { $0 })
+        let activationSources = deduplicatedSources(inputSources(id: modeInputSourceID))
         var enabledCount = 0
         var modeCount = 0
         for source in activationSources {
@@ -239,6 +239,12 @@ private enum TextInputSourceActivation {
             return candidateEnableCapable
         }
 
+        let candidateSelectCapable = boolProperty(candidate, kTISPropertyInputSourceIsSelectCapable)
+        let existingSelectCapable = boolProperty(existing, kTISPropertyInputSourceIsSelectCapable)
+        if candidateSelectCapable != existingSelectCapable {
+            return candidateSelectCapable
+        }
+
         let candidateEnabled = boolProperty(candidate, kTISPropertyInputSourceIsEnabled)
         let existingEnabled = boolProperty(existing, kTISPropertyInputSourceIsEnabled)
         if candidateEnabled != existingEnabled {
@@ -280,7 +286,7 @@ private enum TextInputSourceActivation {
 
     @discardableResult
     private static func selectVisibleMode() -> Bool {
-        guard let mode = inputSources(id: modeInputSourceID).first else {
+        guard let mode = bestActivationTarget(deduplicatedSources(inputSources(id: modeInputSourceID))) else {
             inputMethodLogger.warning("Cannot select KnowType because mode source is missing")
             fputs("select.error=mode-missing\n", stderr)
             return false
@@ -301,6 +307,15 @@ private enum TextInputSourceActivation {
         print("select.status=\(status)")
         print("select.current=\(currentID)")
         return status == noErr
+    }
+
+    private static func bestActivationTarget(_ sources: [TISInputSource]) -> TISInputSource? {
+        sources.reduce(nil) { best, source in
+            guard let best else {
+                return source
+            }
+            return sourceIsBetterActivationTarget(source, than: best) ? source : best
+        }
     }
 
     private static func currentInputSourceID() -> String? {

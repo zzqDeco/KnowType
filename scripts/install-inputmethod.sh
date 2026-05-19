@@ -45,6 +45,16 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchS
 mkdir -p "$TARGET_DIR"
 mkdir -p "$PREFPANE_TARGET_DIR"
 
+if [[ -x "$INSTALLED_EXECUTABLE" ]]; then
+  "$INSTALLED_EXECUTABLE" --knowtype-switch-away || true
+else
+  INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
+  "$INPUTSOURCE_TOOL" switch-away \
+    --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID" >/dev/null 2>&1 || true
+fi
+sleep 0.2
+
 killall KnowTypeInputMethodApp 2>/dev/null || true
 for _ in {1..30}; do
   if ! pgrep -x KnowTypeInputMethodApp >/dev/null 2>&1; then
