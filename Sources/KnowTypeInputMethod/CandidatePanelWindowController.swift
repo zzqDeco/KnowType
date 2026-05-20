@@ -17,25 +17,43 @@ extension NSPanel: CandidatePanelWindowOperating {}
 @MainActor
 protocol CandidatePanelContentRendering: AnyObject {
     var appKitView: NSView { get }
+    var interactionHandler: CandidatePanelContentInteractionHandling? { get set }
 
     func update(model: CandidatePanelRenderModel, layoutPlan: CandidatePanelLayoutPlan)
 }
 
 @MainActor
-final class CandidatePanelWindowController {
+protocol CandidatePanelContentInteractionHandling: AnyObject {
+    func candidatePanelContentDidHover(_ selection: CandidatePanelSelection)
+    func candidatePanelContentDidCommit(_ selection: CandidatePanelSelection)
+    func candidatePanelContentDidScroll(_ navigation: InputCandidateNavigation)
+}
+
+protocol CandidatePanelInteractionHandling: AnyObject {
+    func candidatePanelDidHover(_ selection: CandidatePanelSelection)
+    func candidatePanelDidCommit(_ selection: CandidatePanelSelection)
+    func candidatePanelDidScroll(_ navigation: InputCandidateNavigation)
+}
+
+@MainActor
+final class CandidatePanelWindowController: CandidatePanelContentInteractionHandling {
     private var panel: CandidatePanelWindowOperating?
     private let contentView: CandidatePanelContentRendering
     private let screenProvider: ScreenGeometryProviding
     private let layoutEngine: CandidatePanelLayoutEngine
     private let makePanel: @MainActor (NSView) -> CandidatePanelWindowOperating
+    private let panelAppearance: CandidatePanelAppearance
+    private weak var interactionHandler: CandidatePanelInteractionHandling?
     private var lastPresentationSignature: CandidatePanelPresentationSignature?
 
-    convenience init() {
+    convenience init(interactionHandler: CandidatePanelInteractionHandling? = nil) {
         self.init(
             screenProvider: AppKitScreenGeometryProvider(),
-            contentView: CandidatePanelContentView(),
-            layoutEngine: CandidatePanelLayoutEngine(textMeasurer: CachingCandidatePanelTextMeasurer()),
-            makePanel: Self.makeAppKitPanel
+            contentView: CandidatePanelContentView(appearance: .native),
+            layoutEngine: CandidatePanelLayoutEngine(textMeasurer: CachingCandidatePanelTextMeasurer(appearance: .native)),
+            makePanel: Self.makeAppKitPanel,
+            appearance: .native,
+            interactionHandler: interactionHandler
         )
     }
 
@@ -43,12 +61,17 @@ final class CandidatePanelWindowController {
         screenProvider: ScreenGeometryProviding,
         contentView: CandidatePanelContentRendering,
         layoutEngine: CandidatePanelLayoutEngine,
-        makePanel: @escaping @MainActor (NSView) -> CandidatePanelWindowOperating
+        makePanel: @escaping @MainActor (NSView) -> CandidatePanelWindowOperating,
+        appearance: CandidatePanelAppearance = .native,
+        interactionHandler: CandidatePanelInteractionHandling? = nil
     ) {
         self.screenProvider = screenProvider
         self.contentView = contentView
         self.layoutEngine = layoutEngine
         self.makePanel = makePanel
+        self.panelAppearance = appearance
+        self.interactionHandler = interactionHandler
+        self.contentView.interactionHandler = self
     }
 
     func update(state: CandidatePanelState, locale: KnowTypeLocale) {
@@ -75,7 +98,7 @@ final class CandidatePanelWindowController {
 
         let panel = candidatePanel()
         let effectiveLayoutEngine = CandidatePanelLayoutEngine(
-            configuration: CandidatePanelLayoutConfiguration(layoutMode: windowState.layoutMode),
+            configuration: panelAppearance.layoutConfiguration(layoutMode: windowState.layoutMode),
             textMeasurer: layoutEngine.textMeasurer
         )
         guard let layoutPlan = effectiveLayoutEngine.layout(
@@ -88,10 +111,22 @@ final class CandidatePanelWindowController {
         }
         traceLayout(windowState: windowState, renderModel: renderModel, layoutPlan: layoutPlan)
         panel.setContentSize(layoutPlan.panelSize)
-        contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.setFrameOrigin(layoutPlan.panelOrigin)
+        contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.orderFrontRegardless()
         lastPresentationSignature = presentationSignature
+    }
+
+    func candidatePanelContentDidHover(_ selection: CandidatePanelSelection) {
+        interactionHandler?.candidatePanelDidHover(selection)
+    }
+
+    func candidatePanelContentDidCommit(_ selection: CandidatePanelSelection) {
+        interactionHandler?.candidatePanelDidCommit(selection)
+    }
+
+    func candidatePanelContentDidScroll(_ navigation: InputCandidateNavigation) {
+        interactionHandler?.candidatePanelDidScroll(navigation)
     }
 
     func hide() {
@@ -149,9 +184,13 @@ private struct CandidatePanelPresentationSignature: Equatable {
 }
 
 private final class CachingCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
-    private let base = AppKitCandidatePanelTextMeasurer()
+    private let base: AppKitCandidatePanelTextMeasurer
     private var textWidthCache: [TextWidthKey: CGFloat] = [:]
     private var shortcutWidthCache: [String: CGFloat] = [:]
+
+    init(appearance: CandidatePanelAppearance = .native) {
+        self.base = AppKitCandidatePanelTextMeasurer(appearance: appearance)
+    }
 
     func textWidth(for row: CandidatePanelRenderRow) -> CGFloat {
         let key = TextWidthKey(text: row.text, role: row.visualRole)
@@ -179,11 +218,13 @@ private struct TextWidthKey: Hashable {
 }
 
 private struct AppKitCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
+    var appearance: CandidatePanelAppearance = .native
+
     func textWidth(for row: CandidatePanelRenderRow) -> CGFloat {
         ceil(
             (row.text as NSString).size(
                 withAttributes: [
-                    .font: CandidatePanelTypography.font(for: row.visualRole)
+                    .font: appearance.font(for: row.visualRole)
                 ]
             ).width
         )
@@ -193,47 +234,50 @@ private struct AppKitCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
         ceil(
             (label as NSString).size(
                 withAttributes: [
-                    .font: CandidatePanelTypography.shortcutFont()
+                    .font: appearance.shortcutFont()
                 ]
             ).width
         )
     }
 }
 
-private enum CandidatePanelTypography {
-    static func shortcutFont() -> NSFont {
-        NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-    }
-
-    static func font(for role: CandidatePanelVisualRole) -> NSFont {
-        switch role {
-        case .lockedPrefix:
-            return .systemFont(ofSize: 15, weight: .regular)
-        case .aiRecommendation:
-            return .systemFont(ofSize: 15, weight: .regular)
-        case .continuation:
-            return .systemFont(ofSize: 15, weight: .regular)
-        case .rawInput:
-            return .monospacedSystemFont(ofSize: 13, weight: .regular)
-        }
-    }
-}
-
 @MainActor
-private final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
-    private let effectView = NSVisualEffectView()
+final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
+    private let backgroundView: NSView
+    private let effectView: NSVisualEffectView?
     private let stackView = NSStackView()
+    private let panelAppearance: CandidatePanelAppearance
+    private var rowHitTargets: [CandidatePanelRowHitTarget] = []
+    private var accessibilityRows: [CandidatePanelAccessibilityRow] = []
+    private var hoverSelection: CandidatePanelSelection?
+    private var mouseDownSelection: CandidatePanelSelection?
+    private var trackingArea: NSTrackingArea?
+    weak var interactionHandler: CandidatePanelContentInteractionHandling?
 
     var appKitView: NSView {
         self
     }
 
-    override init(frame frameRect: NSRect) {
+    init(frame frameRect: NSRect = .zero, appearance: CandidatePanelAppearance = .native) {
+        self.panelAppearance = appearance
+        if appearance.usesSnapshotColors {
+            self.backgroundView = NSView()
+            self.effectView = nil
+        } else {
+            let effectView = NSVisualEffectView()
+            self.backgroundView = effectView
+            self.effectView = effectView
+        }
         super.init(frame: frameRect)
+        applySnapshotAppearanceIfNeeded()
         setup()
     }
 
     required init?(coder: NSCoder) {
+        self.panelAppearance = .native
+        let effectView = NSVisualEffectView()
+        self.backgroundView = effectView
+        self.effectView = effectView
         super.init(coder: coder)
         setup()
     }
@@ -242,11 +286,27 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         true
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
     func update(model: CandidatePanelRenderModel, layoutPlan: CandidatePanelLayoutPlan) {
         stackView.arrangedSubviews.forEach {
             stackView.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
+        rowHitTargets = []
 
         stackView.orientation = layoutPlan.orientation == .horizontal ? .horizontal : .vertical
         stackView.alignment = layoutPlan.orientation == .horizontal ? .centerY : .leading
@@ -262,60 +322,95 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
             guard model.rows.indices.contains(item.rowIndex) else {
                 continue
             }
-            stackView.addArrangedSubview(makeRowView(model.rows[item.rowIndex], layoutItem: item))
+            let row = model.rows[item.rowIndex]
+            stackView.addArrangedSubview(makeRowView(row, layoutItem: item))
+            rowHitTargets.append(
+                CandidatePanelRowHitTarget(
+                    frame: item.frame,
+                    selection: row.selection,
+                    isEnabled: row.isEnabled,
+                    accessibilityLabel: row.accessibilityLabel,
+                    isSelected: row.isSelected
+                )
+            )
         }
+        rebuildAccessibilityRows()
 
         needsLayout = true
         layoutSubtreeIfNeeded()
+        updateTrackingAreas()
     }
 
     private func setup() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        effectView.material = .popover
-        effectView.blendingMode = .behindWindow
-        effectView.state = .active
-        effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = 6
-        effectView.layer?.cornerCurve = .continuous
-        effectView.layer?.masksToBounds = true
-        effectView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.18).cgColor
-        effectView.layer?.borderWidth = 0.5
-        effectView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(effectView)
+        if let effectView {
+            effectView.material = panelAppearance.material
+            effectView.blendingMode = panelAppearance.blendingMode
+            effectView.state = .active
+        }
+        backgroundView.appearance = appearance
+        backgroundView.wantsLayer = true
+        backgroundView.layer?.cornerRadius = panelAppearance.panelCornerRadius
+        backgroundView.layer?.cornerCurve = .continuous
+        backgroundView.layer?.masksToBounds = true
+        backgroundView.layer?.borderColor = panelAppearance.panelBorderColor().cgColor
+        backgroundView.layer?.borderWidth = panelAppearance.borderWidth
+        backgroundView.layer?.backgroundColor = panelAppearance.panelBackgroundColor()?.cgColor
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(backgroundView)
 
         NSLayoutConstraint.activate([
-            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            effectView.topAnchor.constraint(equalTo: topAnchor),
-            effectView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backgroundView.topAnchor.constraint(equalTo: topAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
         stackView.orientation = .horizontal
         stackView.alignment = .centerY
-        stackView.spacing = 2
-        stackView.edgeInsets = NSEdgeInsets(top: 4, left: 5, bottom: 4, right: 5)
+        stackView.spacing = panelAppearance.horizontalItemSpacing
+        stackView.edgeInsets = NSEdgeInsets(
+            top: panelAppearance.contentInsets.top,
+            left: panelAppearance.contentInsets.left,
+            bottom: panelAppearance.contentInsets.bottom,
+            right: panelAppearance.contentInsets.right
+        )
         stackView.translatesAutoresizingMaskIntoConstraints = false
-        effectView.addSubview(stackView)
+        backgroundView.addSubview(stackView)
 
         NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
-            stackView.topAnchor.constraint(equalTo: effectView.topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor)
+            stackView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor)
         ])
+    }
+
+    private func applySnapshotAppearanceIfNeeded() {
+        guard panelAppearance.usesSnapshotColors else {
+            return
+        }
+        appearance = NSAppearance(
+            named: panelAppearance.usesSnapshotDarkColors ? .darkAqua : .aqua
+        )
     }
 
     private func makeRowView(_ row: CandidatePanelRenderRow, layoutItem: CandidatePanelLayoutItem) -> NSView {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = 4
-        container.edgeInsets = NSEdgeInsets(top: 1, left: 5, bottom: 1, right: 7)
+        container.spacing = panelAppearance.shortcutTextSpacing
+        container.edgeInsets = NSEdgeInsets(
+            top: panelAppearance.itemInsets.top,
+            left: panelAppearance.itemInsets.left,
+            bottom: panelAppearance.itemInsets.bottom,
+            right: panelAppearance.itemInsets.right
+        )
         container.translatesAutoresizingMaskIntoConstraints = false
         container.wantsLayer = true
-        container.layer?.cornerRadius = 4
+        container.layer?.cornerRadius = panelAppearance.rowCornerRadius
         container.layer?.cornerCurve = .continuous
         container.layer?.backgroundColor = rowBackgroundColor(row).cgColor
         container.widthAnchor.constraint(equalToConstant: layoutItem.frame.width).isActive = true
@@ -332,8 +427,8 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         }
 
         let textLabel = baseLabel(row.text)
-        textLabel.font = CandidatePanelTypography.font(for: row.visualRole)
-        textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected)
+        textLabel.font = panelAppearance.font(for: row.visualRole)
+        textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected, isEnabled: row.isEnabled)
         textLabel.lineBreakMode = .byTruncatingTail
         textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: layoutItem.textWidthLimit).isActive = true
@@ -342,10 +437,7 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
     }
 
     private func rowBackgroundColor(_ row: CandidatePanelRenderRow) -> NSColor {
-        guard row.isSelected else {
-            return .clear
-        }
-        return .selectedContentBackgroundColor
+        panelAppearance.rowBackgroundColor(isSelected: row.isSelected)
     }
 
     private func makeShortcutLabel(
@@ -354,12 +446,12 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         isSelected: Bool
     ) -> NSTextField {
         let label = baseLabel(text)
-        label.font = CandidatePanelTypography.shortcutFont()
-        label.textColor = shortcutColor(for: role, isSelected: isSelected)
+        label.font = panelAppearance.shortcutFont()
+        label.textColor = shortcutColor(for: role, isSelected: isSelected, isEnabled: true)
         label.alignment = .right
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
-        label.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        label.widthAnchor.constraint(equalToConstant: panelAppearance.shortcutReservedWidth).isActive = true
         return label
     }
 
@@ -371,32 +463,167 @@ private final class CandidatePanelContentView: NSView, CandidatePanelContentRend
         return label
     }
 
-    private func textColor(for role: CandidatePanelVisualRole, isSelected: Bool) -> NSColor {
-        if isSelected {
-            return .alternateSelectedControlTextColor
+    override func mouseMoved(with event: NSEvent) {
+        guard let selection = hitTarget(at: convert(event.locationInWindow, from: nil))?.selection else {
+            hoverSelection = nil
+            return
         }
-        switch role {
-        case .lockedPrefix:
-            return .labelColor
-        case .aiRecommendation:
-            return .secondaryLabelColor
-        case .continuation:
-            return .secondaryLabelColor
-        case .rawInput:
-            return .tertiaryLabelColor
+        guard hoverSelection != selection else {
+            return
+        }
+        hoverSelection = selection
+        interactionHandler?.candidatePanelContentDidHover(selection)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverSelection = nil
+        mouseDownSelection = nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownSelection = hitTarget(at: convert(event.locationInWindow, from: nil))?.selection
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let upSelection = hitTarget(at: convert(event.locationInWindow, from: nil))?.selection
+        defer {
+            mouseDownSelection = nil
+        }
+        guard let upSelection,
+              upSelection == mouseDownSelection else {
+            return
+        }
+        interactionHandler?.candidatePanelContentDidCommit(upSelection)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let dominantDelta = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
+            ? event.scrollingDeltaY
+            : event.scrollingDeltaX
+        guard abs(dominantDelta) >= 3 else {
+            return
+        }
+        interactionHandler?.candidatePanelContentDidScroll(dominantDelta < 0 ? .pageDown : .pageUp)
+    }
+
+    override func isAccessibilityElement() -> Bool {
+        false
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        accessibilityRows
+    }
+
+    override func accessibilityVisibleChildren() -> [Any]? {
+        accessibilityRows
+    }
+
+    override func accessibilitySelectedChildren() -> [Any]? {
+        accessibilityRows.filter(\.isSelected)
+    }
+
+    private func hitTarget(at point: NSPoint) -> CandidatePanelRowHitTarget? {
+        rowHitTargets.first { target in
+            target.isEnabled && target.frame.contains(point)
         }
     }
 
-    private func shortcutColor(for role: CandidatePanelVisualRole, isSelected: Bool) -> NSColor {
-        if isSelected {
-            return .alternateSelectedControlTextColor
+    private func rebuildAccessibilityRows() {
+        accessibilityRows = rowHitTargets.enumerated().map { index, target in
+            CandidatePanelAccessibilityRow(
+                owner: self,
+                index: index,
+                frame: target.frame,
+                screenFrame: accessibilityScreenFrame(for: target.frame),
+                label: target.accessibilityLabel,
+                isEnabled: target.isEnabled,
+                isSelected: target.isSelected
+            )
         }
-        switch role {
-        case .lockedPrefix:
-            return .secondaryLabelColor
-        case .aiRecommendation, .continuation, .rawInput:
-            return .tertiaryLabelColor
+        if let selected = accessibilityRows.first(where: \.isSelected) {
+            NSAccessibility.post(element: selected, notification: .focusedUIElementChanged)
+            NSAccessibility.post(element: self, notification: .selectedChildrenChanged)
         }
+    }
+
+    private func accessibilityScreenFrame(for frame: NSRect) -> NSRect {
+        guard let window else {
+            return frame
+        }
+        return window.convertToScreen(convert(frame, to: nil))
+    }
+
+    private func textColor(for role: CandidatePanelVisualRole, isSelected: Bool, isEnabled: Bool) -> NSColor {
+        panelAppearance.textColor(for: role, isSelected: isSelected, isEnabled: isEnabled)
+    }
+
+    private func shortcutColor(for role: CandidatePanelVisualRole, isSelected: Bool, isEnabled: Bool) -> NSColor {
+        panelAppearance.shortcutColor(for: role, isSelected: isSelected, isEnabled: isEnabled)
+    }
+}
+
+private struct CandidatePanelRowHitTarget {
+    var frame: CGRect
+    var selection: CandidatePanelSelection?
+    var isEnabled: Bool
+    var accessibilityLabel: String
+    var isSelected: Bool
+}
+
+private final class CandidatePanelAccessibilityRow: NSAccessibilityElement {
+    weak var owner: CandidatePanelContentView?
+    let index: Int
+    let rowFrame: NSRect
+    let screenFrame: NSRect
+    let label: String
+    let isEnabled: Bool
+    let isSelected: Bool
+
+    init(
+        owner: CandidatePanelContentView,
+        index: Int,
+        frame: NSRect,
+        screenFrame: NSRect,
+        label: String,
+        isEnabled: Bool,
+        isSelected: Bool
+    ) {
+        self.owner = owner
+        self.index = index
+        self.rowFrame = frame
+        self.screenFrame = screenFrame
+        self.label = label
+        self.isEnabled = isEnabled
+        self.isSelected = isSelected
+        super.init()
+    }
+
+    override func accessibilityParent() -> Any? {
+        owner
+    }
+
+    override func accessibilityRole() -> NSAccessibility.Role {
+        isEnabled ? .button : .staticText
+    }
+
+    override func accessibilityLabel() -> String? {
+        label
+    }
+
+    override func isAccessibilityEnabled() -> Bool {
+        isEnabled
+    }
+
+    override func isAccessibilitySelected() -> Bool {
+        isSelected
+    }
+
+    override func isAccessibilityElement() -> Bool {
+        true
+    }
+
+    override func accessibilityFrame() -> NSRect {
+        screenFrame
     }
 }
 #endif

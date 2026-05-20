@@ -188,12 +188,15 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 | `Option + 数字` | 提交当前前缀加对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
-候选窗先显示前缀候选，再显示延续候选；没有建议时才显示 raw input。配置
-provider 后，KnowType 会先发布本地前缀候选，再异步更新 provider-backed
-延续。Provider 失败时，不会把固定本地 fallback 文本伪装成 AI 输出。
+候选窗先显示前缀候选，再显示延续候选；没有建议时才显示 raw input。它是
+紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click
+选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，KnowType 会
+先发布本地前缀候选，再异步更新 provider-backed 延续。Provider 失败时，不会
+把固定本地 fallback 文本伪装成 AI 输出。
 
 候选窗第一项固定为传统输入推荐，第二项固定为 AI 推荐状态。Provider 返回后
-只更新第二项，不重排本地候选列表。
+只更新第二项，不重排本地候选列表。Pending、unavailable 或 ineligible AI
+状态会显示为更弱的状态行，没有数字快捷键，也不会响应点击提交。
 
 ## 隐私
 

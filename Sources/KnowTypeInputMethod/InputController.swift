@@ -14,10 +14,10 @@ private let inputControllerLogger = Logger(
 )
 
 @objc(KnowTypeInputController)
-public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
+public final class KnowTypeInputController: IMKInputController, CandidatePanelInteractionHandling, @unchecked Sendable {
     private let coordinator: InputControllerCoordinator
     private let hostAdapter: IMKInputControllerHostAdapter
-    @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
+    @MainActor private lazy var candidatePanelController = CandidatePanelWindowController(interactionHandler: self)
     @MainActor private var preferencesWindowController: KnowTypePreferencesWindowController?
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
@@ -184,6 +184,21 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         MainActor.assumeIsolated {
             candidatePanelController.hide()
         }
+    }
+
+    func candidatePanelDidHover(_ selection: CandidatePanelSelection) {
+        coordinator.hoverCandidatePanelSelection(selection)
+    }
+
+    func candidatePanelDidCommit(_ selection: CandidatePanelSelection) {
+        coordinator.commitCandidatePanelSelection(
+            selection,
+            client: Self.inputControllerClient(from: client())
+        )
+    }
+
+    func candidatePanelDidScroll(_ navigation: InputCandidateNavigation) {
+        _ = coordinator.scrollCandidatePanel(navigation)
     }
 
     static func inputControllerClient(from sender: Any!) -> InputControllerClient? {

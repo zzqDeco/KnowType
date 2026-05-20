@@ -77,6 +77,7 @@ when converting a shipped plan into a short record.
 | [input-source-selection-activation.plan.md](input-source-selection-activation.plan.md) | Installed-app activation path and selection-chain diagnostics | Active |
 | [local-input-source-system-policy.plan.md](local-input-source-system-policy.plan.md) | macOS 15 local SystemPolicyRule generation for Apple Development testing | Active |
 | [local-input-source-switching-repair.plan.md](local-input-source-switching-repair.plan.md) | Repair stale local TIS/LaunchServices state and authorization guidance | Active |
+| [install-script-deduplicate-local-bundles.plan.md](install-script-deduplicate-local-bundles.plan.md) | Deduplicate local KnowType IMK bundles and stale LaunchServices records | Active |
 
 ## Delivered Or Recently Absorbed Work
 

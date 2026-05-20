@@ -143,7 +143,10 @@ let package = Package(
         .testTarget(
             name: "KnowTypeInputMethodTests",
             dependencies: ["KnowTypeCore", "KnowTypeInputMethod", "KnowTypeInputSourceSupport"],
-            path: "Tests/KnowTypeInputMethodTests"
+            path: "Tests/KnowTypeInputMethodTests",
+            resources: [
+                .copy("__Snapshots__")
+            ]
         )
     ]
 )

@@ -136,6 +136,11 @@ done
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 declare -F knowtype_inputsource_tool >/dev/null ||
   die "scripts/lib/inputsource-tool.sh did not load knowtype_inputsource_tool"
+source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
+declare -F knowtype_find_local_inputmethod_bundle_paths >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load duplicate discovery helpers"
+declare -F knowtype_remove_local_inputmethod_bundle_if_safe >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load safe removal helpers"
 
 bundle_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"

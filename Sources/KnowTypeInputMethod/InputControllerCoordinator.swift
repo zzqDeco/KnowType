@@ -154,6 +154,41 @@ final class InputControllerCoordinator: @unchecked Sendable {
         commit(action: .space, client: client)
     }
 
+    func hoverCandidatePanelSelection(_ selection: CandidatePanelSelection) {
+        guard candidatePanelState.selectVisibleRow(selection) else {
+            return
+        }
+        selectedNativeCandidate = inputCandidateSelection(
+            for: selection,
+            in: candidatePanelState.windowState.viewModel
+        )
+        host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+    }
+
+    func commitCandidatePanelSelection(_ selection: CandidatePanelSelection, client: InputControllerClient?) {
+        guard candidatePanelState.selectVisibleRow(selection),
+              let inputSelection = inputCandidateSelection(
+                  for: selection,
+                  in: candidatePanelState.windowState.viewModel
+              ) else {
+            return
+        }
+        selectedNativeCandidate = inputSelection
+        let result = resultForNumberSelection(inputSelection, client: client)
+        learnSelectedPrefix(action: .space, result: result, client: client)
+        _ = applyCommitResult(result, client: client)
+    }
+
+    @discardableResult
+    func scrollCandidatePanel(_ navigation: InputCandidateNavigation) -> Bool {
+        switch navigation {
+        case .pageDown, .pageUp:
+            return moveCandidateSelection(navigation)
+        case .down, .up, .left, .right:
+            return false
+        }
+    }
+
     func commitComposition(client: InputControllerClient?) {
         let text = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
         _ = applyCommitResult(text.isEmpty ? .noAction : .commit(text), client: client)
