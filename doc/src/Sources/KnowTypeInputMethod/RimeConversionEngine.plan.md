@@ -14,6 +14,9 @@ input.
 - Source-tree artifacts under `Vendor/Rime` are enabled only with
   `KNOWTYPE_RIME_ENABLED=1` or explicit Rime paths; installed app bundles use
   bundled Frameworks/Resources automatically.
+- Explicit Rime environment paths expand leading `~` before URL conversion, so
+  shell-friendly overrides resolve to the same filesystem locations as absolute
+  paths.
 - AI continuation, context memory, and prefix-lock behavior stay outside the
   base conversion session.
 

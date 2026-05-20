@@ -47,6 +47,23 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.rawInput, "ni\u{E9}")
     }
 
+    func testNativeConfigurationExpandsTildeEnvironmentPaths() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let url = NativeRimeConfiguration.environmentFileURL(
+            path: "~/Library/Application Support/KnowType/Rime",
+            isDirectory: true
+        )
+
+        XCTAssertEqual(
+            url.standardizedFileURL.path,
+            home
+                .appendingPathComponent("Library/Application Support/KnowType/Rime", isDirectory: true)
+                .standardizedFileURL
+                .path
+        )
+        XCTAssertTrue(url.hasDirectoryPath)
+    }
+
     func testNativeRimeSessionSmokeWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {

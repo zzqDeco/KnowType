@@ -260,9 +260,13 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
         }
 
         let supportDirectory = applicationSupportDirectory(fileManager: fileManager)
-        let userDataURL = environment["KNOWTYPE_RIME_USER_DATA_DIR"].map(URL.init(fileURLWithPath:))
+        let userDataURL = environment["KNOWTYPE_RIME_USER_DATA_DIR"].map {
+            environmentFileURL(path: $0, isDirectory: true)
+        }
             ?? supportDirectory.appendingPathComponent("Rime", isDirectory: true)
-        let logURL = environment["KNOWTYPE_RIME_LOG_DIR"].map(URL.init(fileURLWithPath:))
+        let logURL = environment["KNOWTYPE_RIME_LOG_DIR"].map {
+            environmentFileURL(path: $0, isDirectory: true)
+        }
             ?? fileManager.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Logs/KnowType/Rime", isDirectory: true)
         return NativeRimeConfiguration(
@@ -281,12 +285,16 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
         fileManager: FileManager
     ) -> URL? {
         if let environmentValue, !environmentValue.isEmpty {
-            let url = URL(fileURLWithPath: environmentValue)
+            let url = environmentFileURL(path: environmentValue)
             if fileManager.fileExists(atPath: url.path) {
                 return url
             }
         }
         return candidates.first { fileManager.fileExists(atPath: $0.path) }
+    }
+
+    static func environmentFileURL(path: String, isDirectory: Bool = false) -> URL {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: isDirectory)
     }
 
     private static func defaultLibraryCandidates(
