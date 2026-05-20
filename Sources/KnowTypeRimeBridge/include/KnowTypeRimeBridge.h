@@ -11,6 +11,7 @@ extern "C" {
 typedef struct KTBRimeSession KTBRimeSession;
 
 typedef struct {
+    int index;
     char *text;
     char *comment;
 } KTBRimeCandidateSnapshot;
@@ -49,6 +50,8 @@ KTBRimeContextSnapshot *ktb_rime_copy_context(KTBRimeSession *session);
 void ktb_rime_context_snapshot_free(KTBRimeContextSnapshot *snapshot);
 
 bool ktb_rime_select_candidate_on_current_page(KTBRimeSession *session, size_t index);
+
+bool ktb_rime_select_candidate(KTBRimeSession *session, size_t index);
 
 bool ktb_rime_change_page(KTBRimeSession *session, bool backward);
 

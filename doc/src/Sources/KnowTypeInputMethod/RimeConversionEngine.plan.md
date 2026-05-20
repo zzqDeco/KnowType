@@ -23,10 +23,14 @@ input.
   commit text, then read context/candidates.
 - Native sessions explicitly select `pinyin_simp`, matching the bundled
   shared-data recipe set.
-- Numeric selection maps displayed full-candidate rows back to the current Rime
-  context page before calling current-page candidate selection. Conversion rows
-  encode the native current-page index in source metadata so duplicate surface
-  forms still select the intended Rime candidate.
+- Numeric selection maps displayed full-candidate rows back to Rime's stable
+  candidate-list index before calling native candidate selection. Conversion
+  rows encode that native index in source metadata so duplicate surface forms
+  and locally paged rows still select the intended Rime candidate.
+- Native snapshots prefer librime's `candidate_list_begin` /
+  `candidate_list_next` iterator so KnowType sees the full Rime candidate list
+  instead of only the current Rime menu page; the bridge falls back to the
+  current-page menu when the iterator API is unavailable.
 - Explicit segment-candidate selection stays a KnowType composition action and
   is handled before native `Space` processing.
 - The SwiftPM target does not link to librime at build time; `KnowTypeRimeBridge`
@@ -38,6 +42,9 @@ input.
   function pointer.
 - Reset clears the native composition instead of tearing down the process-global
   Rime runtime.
+- Non-ASCII composition text bypasses the native session until reset and uses
+  the fallback conversion engine, preventing Rime's ASCII key API from silently
+  diverging from the coordinator raw buffer.
 - When the coordinator replaces the conversion engine after a runtime lexicon
   reload, it replays the active raw input into the new session before native
   Space or candidate selection can run.

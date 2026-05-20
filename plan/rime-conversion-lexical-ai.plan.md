@@ -8,7 +8,7 @@
 
 ## Scope
 
-- Add `KnowTypeRimeBridge`, a small dynamic C bridge that loads `librime.1.dylib` at runtime and exposes only session setup, key processing, commit/context reads, page changes, and current-page candidate selection.
+- Add `KnowTypeRimeBridge`, a small dynamic C bridge that loads `librime.1.dylib` at runtime and exposes only session setup, key processing, commit/context reads, page changes, full-list candidate iteration, and candidate selection.
 - Add `RimeConversionEngine` plus a `TraditionalInputEngine` fallback so tests and development remain usable when native Rime artifacts or shared data are absent.
 - Keep existing IMK registration, input-source identifiers, appex non-goal, settings UI, and release branch rules unchanged.
 - Keep all PR work targeted at `dev`; do not open feature PRs against `main`.
@@ -17,7 +17,7 @@
 
 - `InputControllerCoordinator` now publishes indexed local prefix candidates immediately after raw buffer changes, then lets async refresh add slower continuation/AI state.
 - `Space` no longer has a pending-async raw fallback branch. It commits the first current candidate or uses the synchronous fallback policy.
-- Plain numeric shortcuts read the already-visible candidate snapshot; native Rime sessions can commit via `select_candidate_on_current_page`.
+- Plain numeric shortcuts read the already-visible candidate snapshot; native Rime sessions commit by stable `select_candidate` index so locally paged rows and duplicate text preserve Rime learning/state.
 - `AIRecommendationRequest` carries an optional `LexicalContextSnapshot`; `AIRecommendationRuntime` sends it as `LEXICAL_PROFILE.md` and includes its hash in the cache key.
 - `scripts/prepare-rime-artifacts.sh` downloads and verifies pinned `librime 1.16.1 / de4700e` macOS universal artifacts into ignored `Vendor/Rime`.
 - The prepare script also installs pinned plum recipes for `rime/rime-prelude`
@@ -35,7 +35,12 @@
   profile history before any later AI recommendation request.
 - Fully resolved compositions commit before native `Space`, runtime conversion
   engine reloads replay active raw input into the replacement session, and
-  duplicate native candidate text maps by encoded current-page index.
+  duplicate native candidate text maps by encoded stable native index.
+- Native snapshots now read the complete Rime candidate list through
+  `candidate_list_begin` / `candidate_list_next` when available. Space on a
+  non-highlighted custom-panel prefix/full row selects that stable native index
+  before the generic Rime Space path, while non-ASCII composition text bypasses
+  native Rime until reset to keep raw-buffer state consistent.
 - The C bridge requires the stdbool librime API and the artifact script
   re-checks cached plum data against the pinned ref each run. Versioned Rime API
   tail calls check `data_size` before reading optional function pointers.

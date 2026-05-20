@@ -365,7 +365,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(recorder.spaceProcessCount, 0)
     }
 
-    func testNativeFullCandidateSelectionMapsAugmentedIndexToCurrentPageIndex() throws {
+    func testNativeFullCandidateSelectionMapsAugmentedRowsToStableNativeIndex() throws {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
         let nativeCandidates = ["候一", "候二", "候三", "候四", "候五", "候六"]
@@ -431,6 +431,37 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(recorder.selectedIndices, [1])
         XCTAssertEqual(client.insertTextWrites.last?.text, "重复")
+    }
+
+    func testNativeSpaceHonorsSelectedPrefixCandidateBeforeRimeSpace() throws {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["候一", "候二", "候三"],
+                recorder: recorder,
+                spaceCommit: "native-space"
+            )
+        )
+
+        for character in "hou" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(0))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F701}", keyCode: 125),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertEqual(recorder.spaceProcessCount, 0)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "候二")
     }
 
     @MainActor
@@ -1807,7 +1838,7 @@ private struct NativeHandledNoCommitConversionEngine: KnowTypeConversionEngine {
             rawInput += text
             currentSnapshot = makeSnapshot()
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
-        case .space, .selectCandidateOnCurrentPage:
+        case .space, .selectCandidateOnCurrentPage, .selectCandidate:
             currentSnapshot = makeSnapshot()
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
         case .deleteBackward:
@@ -1881,7 +1912,7 @@ private struct ReplayRecordingConversionEngine: KnowTypeConversionEngine {
             recorder.processedTexts.append(text)
             rawInput += text
             return ConversionEngineResult(handled: true, snapshot: snapshot)
-        case .space, .deleteBackward, .selectCandidateOnCurrentPage, .pageUp, .pageDown:
+        case .space, .deleteBackward, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
             return ConversionEngineResult(handled: false, snapshot: snapshot)
         }
     }
@@ -1930,7 +1961,7 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
             rawInput = ""
             currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
             return ConversionEngineResult(handled: true, commitText: spaceCommit, snapshot: currentSnapshot)
-        case .selectCandidateOnCurrentPage(let index):
+        case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
             recorder.selectedIndices.append(index)
             currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
             guard candidates.indices.contains(index) else {

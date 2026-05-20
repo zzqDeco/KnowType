@@ -32,7 +32,45 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(source.contains("offsetof(RimeApi_stdbool, member)"))
         XCTAssertTrue(source.contains("sizeof(api->data_size) + (size_t)api->data_size"))
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, select_candidate_on_current_page)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, select_candidate)"))
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, change_page)"))
+    }
+
+    func testRimeBridgeUsesFullCandidateIteratorForNativeSnapshots() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bridge = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeRimeBridge/KnowTypeRimeBridge.c"),
+            encoding: .utf8
+        )
+        let engine = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(bridge.contains("candidate_list_begin"))
+        XCTAssertTrue(bridge.contains("candidate_list_next"))
+        XCTAssertTrue(bridge.contains("candidate_list_end"))
+        XCTAssertTrue(bridge.contains("ktb_rime_copy_full_candidate_list(session, snapshot)"))
+        XCTAssertTrue(engine.contains("case selectCandidate(Int)"))
+        XCTAssertTrue(engine.contains("ktb_rime_select_candidate(session, max(0, index))"))
+    }
+
+    func testRimeConversionBypassesNativeSessionForNonASCIIComposition() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let engine = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(engine.contains("nativeBypassUntilReset"))
+        XCTAssertTrue(engine.contains("containsNonASCIIText"))
+        XCTAssertFalse(engine.contains("guard scalar.isASCII else {\n                continue\n            }"))
     }
 
     func testPreferencePaneBuildScriptPackagesSystemSettingsPane() throws {

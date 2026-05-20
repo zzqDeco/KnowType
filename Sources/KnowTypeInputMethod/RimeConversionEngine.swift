@@ -78,6 +78,7 @@ public enum ConversionEngineKey: Sendable, Equatable {
     case space
     case deleteBackward
     case selectCandidateOnCurrentPage(Int)
+    case selectCandidate(Int)
     case pageUp
     case pageDown
 }
@@ -106,9 +107,10 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     private var fallback: TraditionalFallbackConversionEngine
     private var nativeSession: NativeRimeSession?
     private var currentSnapshot: ConversionEngineSnapshot
+    private var nativeBypassUntilReset = false
 
     public var isNativeActive: Bool {
-        nativeSession != nil
+        nativeSession != nil && !nativeBypassUntilReset
     }
 
     public var snapshot: ConversionEngineSnapshot {
@@ -125,13 +127,22 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     public mutating func reset() {
+        nativeBypassUntilReset = false
         nativeSession?.reset()
         fallback.reset()
         currentSnapshot = nativeSession?.snapshot() ?? fallback.snapshot
     }
 
     public mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
-        guard let nativeSession else {
+        if Self.containsNonASCIIText(key) {
+            nativeBypassUntilReset = true
+            nativeSession?.reset()
+            let result = fallback.process(key)
+            currentSnapshot = result.snapshot
+            return result
+        }
+
+        guard let nativeSession, !nativeBypassUntilReset else {
             let result = fallback.process(key)
             currentSnapshot = result.snapshot
             return result
@@ -146,6 +157,13 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         let fallbackResult = fallback.process(key)
         currentSnapshot = fallbackResult.snapshot
         return fallbackResult
+    }
+
+    private static func containsNonASCIIText(_ key: ConversionEngineKey) -> Bool {
+        guard case .text(let text) = key else {
+            return false
+        }
+        return text.unicodeScalars.contains { !$0.isASCII }
     }
 }
 
@@ -340,11 +358,12 @@ final class NativeRimeSession: @unchecked Sendable {
                     continue
                 }
                 let comment = candidate.comment.map { String(cString: $0) }
+                let nativeIndex = Int(candidate.index)
                 candidates.append(
                     ConversionEngineCandidate(
                         text: text,
                         comment: comment?.isEmpty == true ? nil : comment,
-                        index: index,
+                        index: nativeIndex >= 0 ? nativeIndex : index,
                         confidence: 1 - Double(index) * 0.01,
                         source: "rime-native"
                     )
@@ -374,6 +393,8 @@ final class NativeRimeSession: @unchecked Sendable {
             handled = ktb_rime_process_key(session, 0xff08, 0)
         case .selectCandidateOnCurrentPage(let index):
             handled = ktb_rime_select_candidate_on_current_page(session, max(0, index))
+        case .selectCandidate(let index):
+            handled = ktb_rime_select_candidate(session, max(0, index))
         case .pageUp:
             handled = ktb_rime_change_page(session, true)
         case .pageDown:
@@ -392,7 +413,7 @@ final class NativeRimeSession: @unchecked Sendable {
         var handled = false
         for scalar in text.unicodeScalars {
             guard scalar.isASCII else {
-                continue
+                return false
             }
             handled = ktb_rime_process_key(session, Int32(scalar.value), 0) || handled
         }
@@ -445,7 +466,7 @@ private struct TraditionalFallbackConversionEngine: KnowTypeConversionEngine {
                 rawInput.removeLast()
             }
             return ConversionEngineResult(handled: true, snapshot: snapshot)
-        case .selectCandidateOnCurrentPage(let index):
+        case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
             let candidates = snapshot.candidates
             guard candidates.indices.contains(index) else {
                 return ConversionEngineResult(handled: false, snapshot: snapshot)

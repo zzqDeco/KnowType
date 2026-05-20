@@ -29,7 +29,7 @@ final class RimeConversionEngineTests: XCTestCase {
         _ = engine.process(.text("i"))
         let secondCandidate = try XCTUnwrap(engine.snapshot.candidates.dropFirst().first?.text)
 
-        let result = engine.process(.selectCandidateOnCurrentPage(1))
+        let result = engine.process(.selectCandidate(1))
 
         XCTAssertEqual(result.commitText, secondCandidate)
     }

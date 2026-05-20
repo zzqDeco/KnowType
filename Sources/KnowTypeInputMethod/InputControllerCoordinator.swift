@@ -479,22 +479,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         case .prefixCandidate, .fullCandidate, .continuationCandidate:
             if conversionEngine.isNativeActive,
-               case .prefixCandidate = selection.kind,
-               let nativeIndex = nativeCurrentPageIndex(for: selection) {
-                let conversionResult = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
-                if let commitText = conversionResult.commitText,
-                   !commitText.isEmpty {
-                    return .commit(commitText)
-                }
-                if conversionResult.handled {
-                    publishLocalSuggestion(client: client)
-                    return .noAction
-                }
-            }
-            if conversionEngine.isNativeActive,
-               case .fullCandidate = selection.kind,
-               let nativeIndex = nativeCurrentPageIndex(for: selection) {
-                let conversionResult = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
+               isNativeSelectablePrefixOrFull(selection),
+               let nativeIndex = nativeCandidateIndex(for: selection) {
+                let conversionResult = conversionEngine.process(.selectCandidate(nativeIndex))
                 if let commitText = conversionResult.commitText,
                    !commitText.isEmpty {
                     return .commit(commitText)
@@ -519,7 +506,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
-    private func nativeCurrentPageIndex(for selection: InputCandidateSelection) -> Int? {
+    private func nativeCandidateIndex(for selection: InputCandidateSelection) -> Int? {
         let snapshot = conversionEngine.snapshot
         guard !selection.text.isEmpty else {
             return nil
@@ -530,9 +517,28 @@ final class InputControllerCoordinator: @unchecked Sendable {
            }) {
             return nativeCandidateIndex
         }
-        return snapshot.candidates.firstIndex { candidate in
+        return snapshot.candidates.first { candidate in
             candidate.text == selection.text
+        }?.index
+    }
+
+    private func isNativeSelectablePrefixOrFull(_ selection: InputCandidateSelection) -> Bool {
+        switch selection.kind {
+        case .prefixCandidate, .fullCandidate:
+            return true
+        case .rawInput, .segmentCandidate, .continuationCandidate, .aiRecommendation:
+            return false
         }
+    }
+
+    private func shouldSelectNativeCandidateBeforeSpace(_ selection: InputCandidateSelection) -> Bool {
+        guard isNativeSelectablePrefixOrFull(selection),
+              let nativeIndex = nativeCandidateIndex(for: selection) else {
+            return false
+        }
+        let snapshot = conversionEngine.snapshot
+        let highlightedNativeIndex = snapshot.pageNumber * max(snapshot.pageSize, 1) + snapshot.highlightedIndex
+        return nativeIndex != highlightedNativeIndex
     }
 
     private func aiRecommendationCommitResult() -> InputCommitResult {
@@ -1133,6 +1139,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
             case .optionNumber, .toggleSymbolMode, .commitRaw:
                 break
             }
+        }
+        if action == .space,
+           conversionEngine.isNativeActive,
+           let selectedNativeCandidate,
+           shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate) {
+            return resultForNumberSelection(selectedNativeCandidate, client: client)
         }
         if action == .space,
            conversionEngine.isNativeActive {
