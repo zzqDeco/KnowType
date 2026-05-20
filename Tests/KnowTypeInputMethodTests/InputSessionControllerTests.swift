@@ -439,7 +439,8 @@ final class InputSessionControllerTests: XCTestCase {
             rawInput: "wo jue de zhege fagnan",
             suggestion: suggestion,
             suggestionRawInput: "stale",
-            locale: .zhCN
+            locale: .zhCN,
+            traditionalInputEngine: TraditionalInputEngine()
         )
 
         XCTAssertEqual(selectedPrefix, .commit("我觉得这个方法"))

@@ -302,71 +302,11 @@ static bool ktb_rime_copy_current_page_candidates(
         return false;
     }
     snapshot->candidate_count = (size_t)count;
-    int page_size = menu->page_size > 0 ? menu->page_size : count;
-    int global_base_index = menu->page_no > 0 ? menu->page_no * page_size : 0;
     for (size_t index = 0; index < snapshot->candidate_count; index += 1) {
-        snapshot->candidates[index].index = global_base_index + (int)index;
+        snapshot->candidates[index].index = (int)index;
         snapshot->candidates[index].text = ktb_strdup(menu->candidates[index].text);
         snapshot->candidates[index].comment = ktb_strdup(menu->candidates[index].comment);
     }
-    return true;
-}
-
-static bool ktb_rime_has_candidate_list_api(const RimeApi_stdbool *api) {
-    return api &&
-        KTB_RIME_API_HAS(api, candidate_list_begin) &&
-        KTB_RIME_API_HAS(api, candidate_list_next) &&
-        KTB_RIME_API_HAS(api, candidate_list_end) &&
-        api->candidate_list_begin &&
-        api->candidate_list_next &&
-        api->candidate_list_end;
-}
-
-static bool ktb_rime_copy_full_candidate_list(
-    KTBRimeSession *session,
-    KTBRimeContextSnapshot *snapshot
-) {
-    if (!session || !snapshot || !ktb_rime_has_candidate_list_api(session->api)) {
-        return false;
-    }
-
-    RimeCandidateListIterator iterator;
-    if (!session->api->candidate_list_begin(session->session_id, &iterator)) {
-        return false;
-    }
-    size_t count = 0;
-    while (session->api->candidate_list_next(&iterator)) {
-        count += 1;
-    }
-    session->api->candidate_list_end(&iterator);
-    if (count == 0) {
-        return false;
-    }
-
-    KTBRimeCandidateSnapshot *candidates =
-        (KTBRimeCandidateSnapshot *)calloc(count, sizeof(KTBRimeCandidateSnapshot));
-    if (!candidates) {
-        return false;
-    }
-    if (!session->api->candidate_list_begin(session->session_id, &iterator)) {
-        ktb_rime_free_candidate_snapshots(candidates, count);
-        return false;
-    }
-    size_t copied = 0;
-    while (copied < count && session->api->candidate_list_next(&iterator)) {
-        candidates[copied].index = iterator.index;
-        candidates[copied].text = ktb_strdup(iterator.candidate.text);
-        candidates[copied].comment = ktb_strdup(iterator.candidate.comment);
-        copied += 1;
-    }
-    session->api->candidate_list_end(&iterator);
-    if (copied == 0) {
-        ktb_rime_free_candidate_snapshots(candidates, count);
-        return false;
-    }
-
-    snapshot->candidate_count = copied;
-    snapshot->candidates = candidates;
     return true;
 }
 
@@ -524,9 +464,7 @@ KTBRimeContextSnapshot *ktb_rime_copy_context(KTBRimeSession *session) {
     snapshot->page_no = context.menu.page_no;
     snapshot->is_last_page = context.menu.is_last_page;
 
-    if (!ktb_rime_copy_full_candidate_list(session, snapshot)) {
-        (void)ktb_rime_copy_current_page_candidates(snapshot, &context.menu);
-    }
+    (void)ktb_rime_copy_current_page_candidates(snapshot, &context.menu);
 
     session->api->free_context(&context);
     return snapshot;

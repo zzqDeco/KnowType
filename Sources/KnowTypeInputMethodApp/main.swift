@@ -21,6 +21,9 @@ private enum TextInputSourceActivation {
 
     static func handleCommandLineActivation(_ bundle: Bundle, arguments: [String]) -> Int32? {
         let args = Set(arguments.dropFirst())
+        if args.contains("--knowtype-rime-smoke") {
+            return RimeRuntimeSmoke.run()
+        }
         let shouldSwitchAway = args.contains("--knowtype-switch-away")
         let shouldPurgeLegacy = args.contains("--knowtype-purge-legacy")
         let shouldDisable = args.contains("--knowtype-disable-input-source")
@@ -509,6 +512,42 @@ private enum TextInputSourceActivation {
     }
 }
 
+private enum RimeRuntimeSmoke {
+    static func run() -> Int32 {
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration() else {
+            fputs("rime.smoke=unavailable\n", stderr)
+            return 1
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-smoke-\(UUID().uuidString)", isDirectory: true)
+        configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
+        configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: sandbox)
+        }
+
+        var engine = RimeConversionEngine(configuration: configuration)
+        guard engine.isNativeActive else {
+            fputs("rime.smoke=session-unavailable\n", stderr)
+            return 1
+        }
+        for character in "wo" {
+            _ = engine.process(.text(String(character)))
+        }
+        guard !engine.snapshot.candidates.isEmpty else {
+            fputs("rime.smoke=no-candidates\n", stderr)
+            return 1
+        }
+        let result = engine.process(.space)
+        guard result.commitText?.isEmpty == false else {
+            fputs("rime.smoke=no-commit\n", stderr)
+            return 1
+        }
+        print("rime.smoke=ok")
+        return 0
+    }
+}
+
 final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
     private var server: IMKServer?
 
@@ -521,10 +560,6 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
         inputMethodLogger.notice(
             "KnowTypeInputMethodApp launched bundle=\(bundleIdentifier, privacy: .public) connection=\(connectionName, privacy: .public)"
         )
-        Task.detached(priority: .utility) {
-            let preferences = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore().loadPreferences()
-            InputMethodLexiconRuntime.prewarmDefaultEngine(scheme: preferences.inputScheme)
-        }
         let shouldSelectMode = CommandLine.arguments.contains("--knowtype-install-activate")
         TextInputSourceActivation.registerAndEnableInstalledBundle(bundle, selectMode: shouldSelectMode)
     }

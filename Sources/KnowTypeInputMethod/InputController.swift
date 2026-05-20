@@ -26,10 +26,8 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         let aiContextEventRecorder: (any AIContextEventRecording)? = provider.map {
             AIContextMemoryRuntime(provider: $0)
         }
-        let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
-        let initialLexiconState = lexiconRuntime.initialEngineState(scheme: runtimePreferences.inputScheme)
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
@@ -39,9 +37,6 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         self.hostAdapter = hostAdapter
         self.coordinator = InputControllerCoordinator(
             provider: provider,
-            traditionalInputEngine: initialLexiconState.engine,
-            lexiconRuntimeSnapshot: initialLexiconState.snapshot,
-            lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: inputModePreferenceStore,
             runtimePreferenceStore: runtimePreferenceStore,
             initialRuntimePreferences: runtimePreferences,

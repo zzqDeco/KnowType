@@ -6,23 +6,33 @@ source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
 DRY_RUN=0
+CONFIGURATION="${CONFIGURATION:-release}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-inputmethod.sh [--dry-run]
+Usage: scripts/install-inputmethod.sh [--configuration debug|release] [--dry-run]
 
 Builds and installs KnowType.app into ~/Library/Input Methods, installs
 KnowType.prefPane into ~/Library/PreferencePanes, then asks the installed app
 to register and enable the input source.
 
 Options:
-  --dry-run   Print local bundles and LaunchServices records that would be cleaned.
-  -h, --help  Show this help.
+  --configuration  SwiftPM build configuration. Defaults to CONFIGURATION or release.
+  --dry-run        Print local bundles and LaunchServices records that would be cleaned.
+  -h, --help       Show this help.
 EOF
 }
 
 while (($# > 0)); do
   case "$1" in
+    --configuration)
+      if (($# < 2)); then
+        echo "error: --configuration requires a value" >&2
+        exit 2
+      fi
+      CONFIGURATION="$2"
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -38,6 +48,14 @@ while (($# > 0)); do
       ;;
   esac
 done
+
+case "$CONFIGURATION" in
+  debug|release) ;;
+  *)
+    echo "error: --configuration must be debug or release" >&2
+    exit 2
+    ;;
+esac
 
 LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
 TARGET_DIR="$(knowtype_inputmethod_target_dir)"
@@ -81,8 +99,8 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
-BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$ROOT_DIR/scripts/build-inputmethod-bundle.sh" | tail -n 1)"
-PREFPANE_PATH="$("$ROOT_DIR/scripts/build-preference-pane.sh" | tail -n 1)"
+BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$ROOT_DIR/scripts/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+PREFPANE_PATH="$("$ROOT_DIR/scripts/build-preference-pane.sh" --configuration "$CONFIGURATION" | tail -n 1)"
 INSTALLED_EXECUTABLE="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
 
 INPUTSOURCE_TOOL=""

@@ -19,6 +19,8 @@ jobs:
         uses: actions/checkout@v6
       - name: Show Swift version
         run: swift --version
+      - name: Prepare Rime artifacts
+        run: ./scripts/prepare-rime-artifacts.sh
       - name: Build
         run: swift build
       - name: Test

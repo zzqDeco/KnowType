@@ -42,12 +42,11 @@ polish.
 
 ## Features
 
-- Chinese input first: pinyin decoding, compact pinyin segmentation, typo
-  normalization, same-pinyin candidates, common initial abbreviations, and
-  partial-syllable input.
+- Chinese input first: the production IMK hot path uses bundled `librime` for
+  synchronous pinyin conversion, Space commit, number selection, and paging.
 - Local candidate learning: recent prefix choices can boost local ranking across
   input-method restarts without being sent to providers.
-- Prefix-locked AI recommendation: the first candidate stays traditional input,
+- Prefix-locked AI recommendation: the first candidate stays Rime conversion,
   the second slot is reserved for AI, and explicit polish is the only rewrite
   path.
 - macOS input method flow: marked text, candidate selection, paging,
@@ -103,7 +102,7 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 Build and install the local development bundle:
 
 ```bash
-./scripts/build-inputmethod-bundle.sh
+./scripts/build-inputmethod-bundle.sh --configuration release
 ./scripts/install-inputmethod.sh
 ./scripts/diagnose-inputmethod.sh
 ```
@@ -116,6 +115,12 @@ context macOS uses for input switching. KnowType follows the mature component
 mode shape used by Squirrel, McBopomofo, and macSKK: the parent id is
 `com.knowtype.inputmethod.KnowType`, and the visible input source is
 `com.knowtype.inputmethod.KnowType.Hans`.
+
+`scripts/install-inputmethod.sh` defaults to a release build so local typing
+tests exercise the optimized hot path. Rime runtime files are packaged inside
+`KnowType.app`; if they are missing or fail to load, KnowType keeps raw input
+usable and reports degraded conversion state instead of falling back to the
+retired clean-room converter.
 
 After the first install or a mode-id migration, macOS may still require the
 System Settings input-source approval path. Open System Settings > Keyboard >
@@ -196,26 +201,26 @@ AI correction instructions. Traditional input does not depend on either file.
 
 | Shortcut | Behavior |
 |---|---|
-| `Space` | Commit the selected visible full prefix candidate, or apply the selected segment inside the active composition. |
+| `Space` | Commit the highlighted/current Rime candidate, or raw input when Rime is unavailable. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` / `2` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible. |
 | Plain punctuation | Commit composition plus punctuation, or insert punctuation directly with no composition. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
-| `Option + number` | Commit the selected prefix plus the mapped continuation. |
+| `Option + number` | Commit the selected prefix plus the mapped AI continuation when available. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
 The candidate panel shows prefix candidates first, continuation candidates after
 them, and raw input only when no suggestion is available. It is a compact AppKit
 panel using macOS material, system highlight colors, mouse hover/click
 selection, scroll paging, and row accessibility labels. When a provider is
-configured, local prefix candidates appear immediately and provider-backed
+configured, Rime prefix candidates appear immediately and provider-backed
 continuations update asynchronously. Provider failures do not show fixed local
 fallback text as if it were AI output.
 
-The first candidate slot is reserved for traditional input. The second slot is
+The first candidate slot is reserved for Rime conversion. The second slot is
 reserved for AI recommendation state, so async provider results update that slot
-without reordering the local candidate list. Pending, unavailable, or ineligible
+without reordering the Rime candidate list. Pending, unavailable, or ineligible
 AI states are shown as muted status rows without numeric shortcuts or click
 commit behavior.
 
@@ -272,7 +277,8 @@ Branch workflow:
   `refactor/<desc>`, `test/<desc>`, `release/<version>`
 
 Use Conventional Commits and open topic PRs into `dev` first. For code changes,
-run `swift test`. For documentation-only changes, run at least
+run `swift test`; for input-method hot-path changes also run
+`./scripts/perf-input-hotpath.sh`. For documentation-only changes, run at least
 `git diff --check` and keep indexes in `doc/` and `plan/` synchronized.
 
 ## Roadmap / Non-Goals
