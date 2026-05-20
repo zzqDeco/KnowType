@@ -302,8 +302,10 @@ static bool ktb_rime_copy_current_page_candidates(
         return false;
     }
     snapshot->candidate_count = (size_t)count;
+    int page_size = menu->page_size > 0 ? menu->page_size : count;
+    int global_base_index = menu->page_no > 0 ? menu->page_no * page_size : 0;
     for (size_t index = 0; index < snapshot->candidate_count; index += 1) {
-        snapshot->candidates[index].index = (int)index;
+        snapshot->candidates[index].index = global_base_index + (int)index;
         snapshot->candidates[index].text = ktb_strdup(menu->candidates[index].text);
         snapshot->candidates[index].comment = ktb_strdup(menu->candidates[index].comment);
     }

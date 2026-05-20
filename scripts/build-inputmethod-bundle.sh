@@ -116,13 +116,11 @@ if [[ -d "$RIME_VENDOR_DIR/share" ]]; then
   cp -R "$RIME_VENDOR_DIR/share" "$CONTENTS_DIR/Resources/rime-data"
 fi
 chmod +x "$MACOS_DIR/KnowTypeInputMethodApp"
-if [[ -d "$FRAMEWORKS_DIR" ]] && command -v install_name_tool >/dev/null 2>&1; then
+if [[ -d "$FRAMEWORKS_DIR" ]]; then
   required_rpath="@loader_path/../Frameworks"
   if ! otool -l "$MACOS_DIR/KnowTypeInputMethodApp" | grep -Fq "$required_rpath"; then
-    install_name_tool -add_rpath "$required_rpath" "$MACOS_DIR/KnowTypeInputMethodApp" >/dev/null
-  fi
-  if ! otool -l "$MACOS_DIR/KnowTypeInputMethodApp" | grep -Fq "$required_rpath"; then
     echo "Required Rime rpath is missing from KnowTypeInputMethodApp: $required_rpath" >&2
+    echo "Link the executable with the required rpath instead of patching it during packaging." >&2
     exit 1
   fi
 fi

@@ -41,6 +41,10 @@
   non-highlighted custom-panel prefix/full row selects that stable native index
   before the generic Rime Space path, while non-ASCII composition text bypasses
   native Rime until reset to keep raw-buffer state consistent.
+- Current-page snapshot fallback stores global candidate indices, shared-data
+  recipe repositories are pinned by exact commit, and `KnowTypeInputMethodApp`
+  is linked with the Rime Frameworks rpath instead of patching the executable
+  during packaging.
 - The C bridge requires the stdbool librime API and the artifact script
   re-checks cached plum data against the pinned ref each run. Versioned Rime API
   tail calls check `data_size` before reading optional function pointers.

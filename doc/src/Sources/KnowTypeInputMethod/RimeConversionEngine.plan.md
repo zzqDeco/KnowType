@@ -30,7 +30,9 @@ input.
 - Native snapshots prefer librime's `candidate_list_begin` /
   `candidate_list_next` iterator so KnowType sees the full Rime candidate list
   instead of only the current Rime menu page; the bridge falls back to the
-  current-page menu when the iterator API is unavailable.
+  current-page menu when the iterator API is unavailable, and that fallback
+  stores global indices by applying `page_no * page_size` before Swift calls
+  native `select_candidate`.
 - Explicit segment-candidate selection stays a KnowType composition action and
   is handled before native `Space` processing.
 - The SwiftPM target does not link to librime at build time; `KnowTypeRimeBridge`

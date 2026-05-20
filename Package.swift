@@ -95,7 +95,11 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
                 .linkedFramework("Carbon", .when(platforms: [.macOS])),
-                .linkedFramework("InputMethodKit", .when(platforms: [.macOS]))
+                .linkedFramework("InputMethodKit", .when(platforms: [.macOS])),
+                .unsafeFlags(
+                    ["-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks"],
+                    .when(platforms: [.macOS])
+                )
             ]
         ),
         .executableTarget(
