@@ -26,9 +26,12 @@
   the schema list to avoid missing-schema deploy noise.
 - Native Rime key handling treats `handled == true` without commit text as a
   consumed in-session action, so local fallback cannot prematurely commit text.
+- Explicit segment-candidate `Space` selection is handled before native Rime
+  `Space`, and native numeric full-candidate selection maps by current context
+  candidate text to avoid augmented-list index drift.
 - The C bridge requires the stdbool librime API and the artifact script
   re-checks cached plum data against the pinned ref each run.
-- `scripts/build-inputmethod-bundle.sh` copies optional Rime dylibs/plugins/shared data into the app bundle before signing.
+- `scripts/build-inputmethod-bundle.sh` copies optional Rime dylibs/plugins/shared data into the app bundle before signing and fails packaging if the required Rime rpath is missing.
 
 ## Test Plan
 

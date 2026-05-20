@@ -264,6 +264,76 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "ni")
     }
 
+    func testSegmentSpaceSelectionWinsBeforeNativeSpace() throws {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["候一", "候二", "候三", "候四", "候五", "候六"],
+                recorder: recorder,
+                spaceCommit: "native-space"
+            )
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        XCTAssertEqual(client.markedTextWrites.last?.text, "你shishei")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁")
+        XCTAssertEqual(recorder.spaceProcessCount, 0)
+    }
+
+    func testNativeFullCandidateSelectionMapsAugmentedIndexToCurrentPageIndex() throws {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let nativeCandidates = ["候一", "候二", "候三", "候四", "候五", "候六"]
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: nativeCandidates,
+                recorder: recorder
+            )
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+        XCTAssertTrue(
+            viewModel.prefixCandidates.contains {
+                $0.text == "你" && $0.rawRange == KnowTypeCore.TextRange(start: 0, length: 2)
+            }
+        )
+        let shortcutNumber = try visibleShortcutNumber(
+            text: "候六",
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: String(shortcutNumber), keyCode: keyCode(forNumber: shortcutNumber)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [5])
+        XCTAssertEqual(client.insertTextWrites.last?.text, "候六")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
     @MainActor
     func testAsyncReadyLocalPrefixCommitsAfterCandidatePublication() async {
         let client = FakeInputControllerClient()
@@ -1533,6 +1603,91 @@ private struct NativeHandledNoCommitConversionEngine: KnowTypeConversionEngine {
             ],
             highlightedIndex: 0,
             pageSize: 2,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-test"
+        )
+    }
+}
+
+private final class NativeSelectionRecorder: @unchecked Sendable {
+    var selectedIndices: [Int] = []
+    var spaceProcessCount = 0
+}
+
+private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    let candidates: [String]
+    let recorder: NativeSelectionRecorder
+    let spaceCommit: String?
+    private var rawInput = ""
+    private var currentSnapshot: ConversionEngineSnapshot
+
+    init(
+        candidates: [String],
+        recorder: NativeSelectionRecorder,
+        spaceCommit: String? = nil
+    ) {
+        self.candidates = candidates
+        self.recorder = recorder
+        self.spaceCommit = spaceCommit
+        currentSnapshot = Self.makeSnapshot(rawInput: "", candidates: candidates)
+    }
+
+    var snapshot: ConversionEngineSnapshot {
+        currentSnapshot
+    }
+
+    mutating func reset() {
+        rawInput = ""
+        currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .space:
+            recorder.spaceProcessCount += 1
+            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
+            guard let spaceCommit else {
+                return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+            }
+            rawInput = ""
+            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
+            return ConversionEngineResult(handled: true, commitText: spaceCommit, snapshot: currentSnapshot)
+        case .selectCandidateOnCurrentPage(let index):
+            recorder.selectedIndices.append(index)
+            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
+            guard candidates.indices.contains(index) else {
+                return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+            }
+            let commit = candidates[index]
+            rawInput = ""
+            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
+            return ConversionEngineResult(handled: true, commitText: commit, snapshot: currentSnapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates)
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .pageUp, .pageDown:
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        }
+    }
+
+    private static func makeSnapshot(rawInput: String, candidates: [String]) -> ConversionEngineSnapshot {
+        ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: candidates.enumerated().map { index, text in
+                ConversionEngineCandidate(text: text, index: index, source: "native-test")
+            },
+            highlightedIndex: 0,
+            pageSize: max(candidates.count, 1),
             pageNumber: 0,
             isLastPage: true,
             engineName: "native-test"

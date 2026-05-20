@@ -463,8 +463,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         case .prefixCandidate, .fullCandidate, .continuationCandidate:
             if conversionEngine.isNativeActive,
-               case .prefixCandidate(let index) = selection.kind {
-                let conversionResult = conversionEngine.process(.selectCandidateOnCurrentPage(index))
+               case .prefixCandidate = selection.kind,
+               let nativeIndex = nativeCurrentPageIndex(for: selection) {
+                let conversionResult = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
                 if let commitText = conversionResult.commitText,
                    !commitText.isEmpty {
                     return .commit(commitText)
@@ -475,8 +476,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 }
             }
             if conversionEngine.isNativeActive,
-               case .fullCandidate(let index) = selection.kind {
-                let conversionResult = conversionEngine.process(.selectCandidateOnCurrentPage(index))
+               case .fullCandidate = selection.kind,
+               let nativeIndex = nativeCurrentPageIndex(for: selection) {
+                let conversionResult = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
                 if let commitText = conversionResult.commitText,
                    !commitText.isEmpty {
                     return .commit(commitText)
@@ -498,6 +500,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 appBundleID: appBundleIdentifier(client: client),
                 locale: locale
             )
+        }
+    }
+
+    private func nativeCurrentPageIndex(for selection: InputCandidateSelection) -> Int? {
+        let snapshot = conversionEngine.snapshot
+        guard !selection.text.isEmpty else {
+            return nil
+        }
+        return snapshot.candidates.firstIndex { candidate in
+            candidate.text == selection.text
         }
     }
 
@@ -1007,6 +1019,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return aiRecommendationCommitResult()
         }
         if action == .space,
+           let selectedNativeCandidate,
+           case .segmentCandidate(let index) = selectedNativeCandidate.kind {
+            return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
+        }
+        if action == .space,
            conversionEngine.isNativeActive {
             let conversionResult = conversionEngine.process(.space)
             if let commitText = conversionResult.commitText,
@@ -1049,11 +1066,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
             case .optionNumber, .toggleSymbolMode, .commitRaw:
                 break
             }
-        }
-        if let selectedNativeCandidate,
-           case .segmentCandidate(let index) = selectedNativeCandidate.kind,
-           action == .space {
-            return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
         }
         if case .optionNumber = action,
            !candidatePanelState.windowState.isVisible {

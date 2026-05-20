@@ -16,6 +16,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(script.contains(#"cp -R "$resource_path" "$CONTENTS_DIR/Resources/""#))
         XCTAssertTrue(script.contains("security find-identity -v -p codesigning"))
         XCTAssertTrue(script.contains("/Apple Development/"))
+        XCTAssertTrue(script.contains("install_name_tool -add_rpath"))
+        XCTAssertTrue(script.contains("Required Rime rpath is missing"))
+        XCTAssertFalse(script.contains("install_name_tool -add_rpath \"@loader_path/../Frameworks\" \"$MACOS_DIR/KnowTypeInputMethodApp\" >/dev/null 2>&1 || true"))
     }
 
     func testPreferencePaneBuildScriptPackagesSystemSettingsPane() throws {

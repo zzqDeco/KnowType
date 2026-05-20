@@ -117,7 +117,14 @@ if [[ -d "$RIME_VENDOR_DIR/share" ]]; then
 fi
 chmod +x "$MACOS_DIR/KnowTypeInputMethodApp"
 if [[ -d "$FRAMEWORKS_DIR" ]] && command -v install_name_tool >/dev/null 2>&1; then
-  install_name_tool -add_rpath "@loader_path/../Frameworks" "$MACOS_DIR/KnowTypeInputMethodApp" >/dev/null 2>&1 || true
+  required_rpath="@loader_path/../Frameworks"
+  if ! otool -l "$MACOS_DIR/KnowTypeInputMethodApp" | grep -Fq "$required_rpath"; then
+    install_name_tool -add_rpath "$required_rpath" "$MACOS_DIR/KnowTypeInputMethodApp" >/dev/null
+  fi
+  if ! otool -l "$MACOS_DIR/KnowTypeInputMethodApp" | grep -Fq "$required_rpath"; then
+    echo "Required Rime rpath is missing from KnowTypeInputMethodApp: $required_rpath" >&2
+    exit 1
+  fi
 fi
 
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"

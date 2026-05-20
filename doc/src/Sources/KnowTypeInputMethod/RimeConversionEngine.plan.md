@@ -23,8 +23,11 @@ input.
   commit text, then read context/candidates.
 - Native sessions explicitly select `pinyin_simp`, matching the bundled
   shared-data recipe set.
-- Numeric selection can call current-page candidate selection instead of
-  recomputing candidates.
+- Numeric selection maps the displayed full-candidate text back to the current
+  Rime context page before calling current-page candidate selection. This keeps
+  local segment rows and KnowType panel paging from shifting the native index.
+- Explicit segment-candidate selection stays a KnowType composition action and
+  is handled before native `Space` processing.
 - The SwiftPM target does not link to librime at build time; `KnowTypeRimeBridge`
   loads `librime.1.dylib` dynamically.
 - The bridge requires `rime_get_api_stdbool`; it does not fall back to the
