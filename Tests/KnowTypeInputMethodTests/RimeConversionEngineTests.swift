@@ -34,6 +34,19 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(result.commitText, secondCandidate)
     }
 
+    func testFallbackBypassPreservesExistingCompositionAcrossNonASCIIInput() {
+        var engine = RimeConversionEngine(
+            traditionalInputEngine: TraditionalInputEngine(),
+            configuration: nil
+        )
+
+        XCTAssertTrue(engine.process(.text("n")).handled)
+        XCTAssertTrue(engine.process(.text("i")).handled)
+        XCTAssertTrue(engine.process(.text("\u{E9}")).handled)
+
+        XCTAssertEqual(engine.snapshot.rawInput, "ni\u{E9}")
+    }
+
     func testNativeRimeSessionSmokeWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
@@ -65,5 +78,39 @@ final class RimeConversionEngineTests: XCTestCase {
 
         XCTAssertNotNil(result.commitText)
         XCTAssertFalse(result.commitText?.isEmpty ?? true)
+    }
+
+    func testNativeNonASCIIBypassReplaysExistingPreeditWhenArtifactsAreAvailable() throws {
+        let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
+            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-nonascii-\(UUID().uuidString)", isDirectory: true)
+        configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
+        configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: sandbox)
+        }
+
+        var engine = RimeConversionEngine(
+            traditionalInputEngine: TraditionalInputEngine(),
+            configuration: configuration
+        )
+        guard engine.isNativeActive else {
+            throw XCTSkip("librime could not create a native session")
+        }
+
+        XCTAssertTrue(engine.process(.text("n")).handled)
+        XCTAssertTrue(engine.process(.text("i")).handled)
+        let existingComposition = engine.snapshot.rawInput.isEmpty
+            ? engine.snapshot.preedit
+            : engine.snapshot.rawInput
+        XCTAssertFalse(existingComposition.isEmpty)
+
+        XCTAssertTrue(engine.process(.text("\u{E9}")).handled)
+
+        XCTAssertFalse(engine.isNativeActive)
+        XCTAssertEqual(engine.snapshot.rawInput, "\(existingComposition)\u{E9}")
     }
 }

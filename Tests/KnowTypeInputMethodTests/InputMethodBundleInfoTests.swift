@@ -92,7 +92,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         )
 
         XCTAssertTrue(engine.contains("nativeBypassUntilReset"))
+        XCTAssertTrue(engine.contains("nativeRawInputMirror"))
         XCTAssertTrue(engine.contains("containsNonASCIIText"))
+        XCTAssertTrue(engine.contains("processNonASCIIBypass"))
+        XCTAssertTrue(engine.contains("fallback.process(.text(existingComposition))"))
         XCTAssertFalse(engine.contains("guard scalar.isASCII else {\n                continue\n            }"))
     }
 

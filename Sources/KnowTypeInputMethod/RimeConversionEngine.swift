@@ -108,6 +108,7 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     private var nativeSession: NativeRimeSession?
     private var currentSnapshot: ConversionEngineSnapshot
     private var nativeBypassUntilReset = false
+    private var nativeRawInputMirror = ""
 
     public var isNativeActive: Bool {
         nativeSession != nil && !nativeBypassUntilReset
@@ -128,6 +129,7 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
 
     public mutating func reset() {
         nativeBypassUntilReset = false
+        nativeRawInputMirror = ""
         nativeSession?.reset()
         fallback.reset()
         currentSnapshot = nativeSession?.snapshot() ?? fallback.snapshot
@@ -135,28 +137,62 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
 
     public mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
         if Self.containsNonASCIIText(key) {
-            nativeBypassUntilReset = true
-            nativeSession?.reset()
-            let result = fallback.process(key)
-            currentSnapshot = result.snapshot
-            return result
+            return processNonASCIIBypass(key)
         }
 
         guard let nativeSession, !nativeBypassUntilReset else {
             let result = fallback.process(key)
+            nativeRawInputMirror = result.snapshot.rawInput
             currentSnapshot = result.snapshot
             return result
         }
 
         let result = nativeSession.process(key)
-        currentSnapshot = result.snapshot
         if result.handled {
-            return result
+            updateNativeRawInputMirror(for: key, commitText: result.commitText)
+            var nativeResult = result
+            nativeResult.snapshot.rawInput = nativeRawInputMirror
+            currentSnapshot = nativeResult.snapshot
+            return nativeResult
         }
 
         let fallbackResult = fallback.process(key)
+        nativeRawInputMirror = fallbackResult.snapshot.rawInput
         currentSnapshot = fallbackResult.snapshot
         return fallbackResult
+    }
+
+    private mutating func processNonASCIIBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        let existingComposition = nativeRawInputMirror.isEmpty
+            ? (currentSnapshot.rawInput.isEmpty ? currentSnapshot.preedit : currentSnapshot.rawInput)
+            : nativeRawInputMirror
+        nativeBypassUntilReset = true
+        nativeSession?.reset()
+        fallback.reset()
+        if !existingComposition.isEmpty {
+            _ = fallback.process(.text(existingComposition))
+        }
+        let result = fallback.process(key)
+        nativeRawInputMirror = result.snapshot.rawInput
+        currentSnapshot = result.snapshot
+        return result
+    }
+
+    private mutating func updateNativeRawInputMirror(for key: ConversionEngineKey, commitText: String?) {
+        if commitText?.isEmpty == false {
+            nativeRawInputMirror = ""
+            return
+        }
+        switch key {
+        case .text(let text):
+            nativeRawInputMirror += text
+        case .deleteBackward:
+            if !nativeRawInputMirror.isEmpty {
+                nativeRawInputMirror.removeLast()
+            }
+        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+            break
+        }
     }
 
     private static func containsNonASCIIText(_ key: ConversionEngineKey) -> Bool {

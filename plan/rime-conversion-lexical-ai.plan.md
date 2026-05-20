@@ -51,6 +51,8 @@
 - Native duplicate candidate text no longer falls back to the first text match
   when a stable native index is unavailable; ambiguous rows commit through the
   selected UI candidate path instead of calling the wrong Rime index.
+- Non-ASCII native bypass now replays the existing native preedit into fallback
+  before processing the non-ASCII key, preserving the full raw composition.
 - The C bridge requires the stdbool librime API and the artifact script
   re-checks cached plum data against the pinned ref each run. Versioned Rime API
   tail calls check `data_size` before reading optional function pointers.

@@ -47,6 +47,9 @@ input.
 - Non-ASCII composition text bypasses the native session until reset and uses
   the fallback conversion engine, preventing Rime's ASCII key API from silently
   diverging from the coordinator raw buffer.
+- While native Rime is active, the Swift engine mirrors text/delete edits so a
+  later non-ASCII bypass can seed the fallback engine with the existing preedit
+  before processing the non-ASCII key.
 - When the coordinator replaces the conversion engine after a runtime lexicon
   reload, it replays the active raw input into the new session before native
   Space or candidate selection can run.
