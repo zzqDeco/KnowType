@@ -218,6 +218,14 @@ private func preferencesContainEntry(_ entries: [[String: Any]], target: [String
     entries.contains { preferenceEntryMatches($0, target: target) }
 }
 
+private func preferencesContainInputModeOrParent(bundleID: String, modeID: String, domain: String, key: String) -> Bool {
+    let entries = preferenceArray(key, domain: domain)
+    if preferencesContainEntry(entries, target: modePreferenceEntry(bundleID: bundleID, modeID: modeID)) {
+        return true
+    }
+    return modeID != bundleID && preferencesContainEntry(entries, target: parentPreferenceEntry(bundleID: bundleID))
+}
+
 private func inputSourcePreferenceSignature(_ entry: [String: Any]) -> String {
     [
         entry["InputSourceKind"] as? String ?? "",
@@ -620,7 +628,7 @@ private func printStatus(parentID: String, modeID: String, legacyModeIDs: [Strin
     print("preference.enabled.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.HIToolbox", key: "AppleEnabledInputSources"))")
     print("preference.enabled.parent.knowtype=\(modeID != parentID && preferencesContainEntry(preferenceArray("AppleEnabledInputSources", domain: "com.apple.HIToolbox"), target: parentPreferenceEntry(bundleID: parentID)))")
     print("preference.enabled.legacy.knowtype=\(preferencesContainAnyInputMode(bundleID: parentID, modeIDs: legacyModeIDs, domain: "com.apple.HIToolbox", key: "AppleEnabledInputSources"))")
-    print("preference.thirdparty.enabled.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.inputsources", key: "AppleEnabledThirdPartyInputSources"))")
+    print("preference.thirdparty.enabled.knowtype=\(preferencesContainInputModeOrParent(bundleID: parentID, modeID: modeID, domain: "com.apple.inputsources", key: "AppleEnabledThirdPartyInputSources"))")
     print("preference.thirdparty.enabled.parent.knowtype=\(modeID != parentID && preferencesContainEntry(preferenceArray("AppleEnabledThirdPartyInputSources", domain: "com.apple.inputsources"), target: parentPreferenceEntry(bundleID: parentID)))")
     print("preference.thirdparty.enabled.legacy.knowtype=\(preferencesContainAnyInputMode(bundleID: parentID, modeIDs: legacyModeIDs, domain: "com.apple.inputsources", key: "AppleEnabledThirdPartyInputSources"))")
     print("preference.history.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.HIToolbox", key: "AppleInputSourceHistory"))")

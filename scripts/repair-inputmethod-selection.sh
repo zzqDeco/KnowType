@@ -6,6 +6,7 @@ BUNDLE_PATH="${KNOWTYPE_BUNDLE_PATH:-$DEFAULT_BUNDLE_PATH}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
+source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
 
 usage() {
   cat <<'EOF'
@@ -66,6 +67,21 @@ if [[ ! -x "$BUNDLE_EXECUTABLE" ]]; then
   echo "error: installed KnowType executable is missing: $BUNDLE_EXECUTABLE" >&2
   exit 1
 fi
+
+canonical_installed_bundle_path="$(knowtype_canonical_bundle_path "$BUNDLE_PATH")"
+backup_dir="$HOME/Library/Application Support/KnowType"
+timestamp="$(date +%Y%m%d%H%M%S)"
+mkdir -p "$backup_dir"
+
+for plist in "$HOME/Library/Preferences/com.apple.HIToolbox.plist" "$HOME/Library/Preferences/com.apple.inputsources.plist"; do
+  if [[ -f "$plist" ]]; then
+    cp "$plist" "$backup_dir/$(basename "$plist" .plist)-before-selection-repair-$timestamp.plist"
+  fi
+done
+
+knowtype_cleanup_local_duplicate_bundles_except "$canonical_installed_bundle_path" 0
+knowtype_unregister_launchservices_records_except "$canonical_installed_bundle_path" 0
+knowtype_register_launchservices_path "$BUNDLE_PATH" 0
 
 "$BUNDLE_EXECUTABLE" --knowtype-purge-legacy
 INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
