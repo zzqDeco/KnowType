@@ -39,11 +39,11 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
 
 ## 功能
 
-- 中文输入优先：支持拼音解码、连续拼音切分、轻量错拼纠正、同音候选、
-  常用声母缩写和尾部半音节输入。
+- 中文输入优先：生产 IMK 热路径使用内置 `librime` 负责同步拼音转换、
+  Space 上屏、数字选词和翻页。
 - 本地候选学习：最近选择过的前缀会在输入法重启后继续影响本地排序，
   不发送给 provider。
-- 前缀锁定的 AI 推荐：第一候选固定为传统输入，第二候选固定为 AI 推荐；
+- 前缀锁定的 AI 推荐：第一候选固定为 Rime 转换，第二候选固定为 AI 推荐；
   显式 polish 才是改写路径。
 - macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及跟随光标的
   自绘 AppKit 候选窗。
@@ -95,7 +95,7 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 构建并安装本地开发 bundle：
 
 ```bash
-./scripts/build-inputmethod-bundle.sh
+./scripts/build-inputmethod-bundle.sh --configuration release
 ./scripts/install-inputmethod.sh
 ./scripts/diagnose-inputmethod.sh
 ```
@@ -106,6 +106,10 @@ app，让注册和 best-effort 选择从 macOS 输入法切换使用的 app 上�
 Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode 形态：parent id 是
 `com.knowtype.inputmethod.KnowType`，系统可见输入源是
 `com.knowtype.inputmethod.KnowType.Hans`。
+
+`scripts/install-inputmethod.sh` 默认使用 release 构建，方便本地打字测试覆盖优化后的热路径。
+Rime runtime 文件会打包在 `KnowType.app` 中；如果文件缺失或加载失败，KnowType 会保留
+raw 输入可用并报告 degraded conversion state，而不是回退到已经退役的自研转换器。
 
 首次安装或 mode id 迁移后，macOS 仍可能要求通过系统设置完成第三方输入源授权。
 打开“系统设置 > 键盘 > 输入源”，移除过期的 KnowType/知键条目，重新添加
@@ -179,23 +183,23 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 
 | 快捷键 | 行为 |
 |---|---|
-| `Space` | 提交当前可见的完整前缀候选，或把选中的分段候选应用到 composition。 |
+| `Space` | 提交 Rime 当前高亮候选；Rime 不可用时提交原始输入。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` / `2` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时，提交原始 composition。 |
 | 普通标点 | 提交 composition 加标点；没有 composition 时直接插入标点。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
-| `Option + 数字` | 提交当前前缀加对应延续。 |
+| `Option + 数字` | AI 延续可用时提交当前前缀加对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
 候选窗先显示前缀候选，再显示延续候选；没有建议时才显示 raw input。它是
 紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click
 选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，KnowType 会
-先发布本地前缀候选，再异步更新 provider-backed 延续。Provider 失败时，不会
+先发布 Rime 前缀候选，再异步更新 provider-backed 延续。Provider 失败时，不会
 把固定本地 fallback 文本伪装成 AI 输出。
 
-候选窗第一项固定为传统输入推荐，第二项固定为 AI 推荐状态。Provider 返回后
-只更新第二项，不重排本地候选列表。Pending、unavailable 或 ineligible AI
+候选窗第一项固定为 Rime 转换推荐，第二项固定为 AI 推荐状态。Provider 返回后
+只更新第二项，不重排 Rime 候选列表。Pending、unavailable 或 ineligible AI
 状态会显示为更弱的状态行，没有数字快捷键，也不会响应点击提交。
 
 ## 隐私
@@ -250,8 +254,8 @@ Resources/                      macOS bundle 资源
   `refactor/<desc>`、`test/<desc>`、`release/<version>`
 
 使用 Conventional Commits，主题 PR 先合入 `dev`。代码变更运行
-`swift test`；文档-only 变更至少运行 `git diff --check`，并同步 `doc/`
-和 `plan/` 的索引。
+`swift test`；输入法热路径变更还要运行 `./scripts/perf-input-hotpath.sh`。
+文档-only 变更至少运行 `git diff --check`，并同步 `doc/` 和 `plan/` 的索引。
 
 ## Roadmap / Non-Goals
 

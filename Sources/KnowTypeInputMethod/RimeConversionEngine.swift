@@ -60,7 +60,7 @@ public struct ConversionEngineSnapshot: Sendable, Equatable {
         pageSize: Int = 0,
         pageNumber: Int = 0,
         isLastPage: Bool = true,
-        engineName: String = "traditional-fallback"
+        engineName: String = "rime-unavailable"
     ) {
         self.rawInput = rawInput
         self.preedit = preedit
@@ -104,7 +104,6 @@ public protocol KnowTypeConversionEngine: Sendable {
 }
 
 public struct RimeConversionEngine: KnowTypeConversionEngine {
-    private var fallback: TraditionalFallbackConversionEngine
     private var nativeSession: NativeRimeSession?
     private var currentSnapshot: ConversionEngineSnapshot
     private var nativeBypassUntilReset = false
@@ -119,32 +118,27 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     public init(
-        traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
+        traditionalInputEngine _: TraditionalInputEngine? = nil,
         configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration()
     ) {
-        self.fallback = TraditionalFallbackConversionEngine(traditionalInputEngine: traditionalInputEngine)
         self.nativeSession = configuration.flatMap { NativeRimeSession(configuration: $0) }
-        self.currentSnapshot = nativeSession?.snapshot() ?? fallback.snapshot
+        self.currentSnapshot = nativeSession?.snapshot() ?? Self.unavailableSnapshot(rawInput: "")
     }
 
     public mutating func reset() {
         nativeBypassUntilReset = false
         nativeRawInputMirror = ""
         nativeSession?.reset()
-        fallback.reset()
-        currentSnapshot = nativeSession?.snapshot() ?? fallback.snapshot
+        currentSnapshot = nativeSession?.snapshot() ?? Self.unavailableSnapshot(rawInput: "")
     }
 
     public mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
         if Self.containsNonASCIIText(key) {
-            return processNonASCIIBypass(key)
+            return processRawBypass(key)
         }
 
         guard let nativeSession, !nativeBypassUntilReset else {
-            let result = fallback.process(key)
-            nativeRawInputMirror = result.snapshot.rawInput
-            currentSnapshot = result.snapshot
-            return result
+            return processUnavailable(key)
         }
 
         let result = nativeSession.process(key)
@@ -156,26 +150,66 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return nativeResult
         }
 
-        let fallbackResult = fallback.process(key)
-        nativeRawInputMirror = fallbackResult.snapshot.rawInput
-        currentSnapshot = fallbackResult.snapshot
-        return fallbackResult
+        updateNativeRawInputMirror(for: key, commitText: nil)
+        var nativeResult = result
+        nativeResult.snapshot.rawInput = nativeRawInputMirror
+        currentSnapshot = nativeResult.snapshot
+        return nativeResult
     }
 
-    private mutating func processNonASCIIBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
-        let existingComposition = nativeRawInputMirror.isEmpty
-            ? (currentSnapshot.rawInput.isEmpty ? currentSnapshot.preedit : currentSnapshot.rawInput)
-            : nativeRawInputMirror
+    private mutating func processRawBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        let existingComposition = rawMirrorOrSnapshotInput()
         nativeBypassUntilReset = true
         nativeSession?.reset()
-        fallback.reset()
-        if !existingComposition.isEmpty {
-            _ = fallback.process(.text(existingComposition))
+        nativeRawInputMirror = existingComposition
+        return processUnavailable(key, engineName: "rime-raw-bypass")
+    }
+
+    private mutating func processUnavailable(
+        _ key: ConversionEngineKey,
+        engineName: String = "rime-unavailable"
+    ) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            nativeRawInputMirror += text
+            currentSnapshot = Self.unavailableSnapshot(rawInput: nativeRawInputMirror, engineName: engineName)
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .deleteBackward:
+            if !nativeRawInputMirror.isEmpty {
+                nativeRawInputMirror.removeLast()
+            }
+            currentSnapshot = Self.unavailableSnapshot(rawInput: nativeRawInputMirror, engineName: engineName)
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+            currentSnapshot = Self.unavailableSnapshot(rawInput: nativeRawInputMirror, engineName: engineName)
+            return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
         }
-        let result = fallback.process(key)
-        nativeRawInputMirror = result.snapshot.rawInput
-        currentSnapshot = result.snapshot
-        return result
+    }
+
+    private func rawMirrorOrSnapshotInput() -> String {
+        if !nativeRawInputMirror.isEmpty {
+            return nativeRawInputMirror
+        }
+        if !currentSnapshot.rawInput.isEmpty {
+            return currentSnapshot.rawInput
+        }
+        return currentSnapshot.preedit
+    }
+
+    private static func unavailableSnapshot(
+        rawInput: String,
+        engineName: String = "rime-unavailable"
+    ) -> ConversionEngineSnapshot {
+        ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [],
+            highlightedIndex: 0,
+            pageSize: 0,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: engineName
+        )
     }
 
     private mutating func updateNativeRawInputMirror(for key: ConversionEngineKey, commitText: String?) {
@@ -239,7 +273,7 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
         }
         let explicitLibraryPath = environment["KNOWTYPE_RIME_LIBRARY_PATH"]
         let explicitSharedDataPath = environment["KNOWTYPE_RIME_SHARED_DATA_DIR"]
-        let enableSourceTreeArtifacts = environment["KNOWTYPE_RIME_ENABLED"] == "1"
+        let enableSourceTreeArtifacts = environment["KNOWTYPE_RIME_ENABLED"] != "0"
         guard let libraryURL = firstExistingURL(
             environmentValue: explicitLibraryPath,
             candidates: defaultLibraryCandidates(
@@ -259,7 +293,13 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
             return nil
         }
 
-        let supportDirectory = applicationSupportDirectory(fileManager: fileManager)
+        let usesSourceTreeArtifacts = libraryURL.path.contains("/Vendor/Rime/")
+            || sharedDataURL.path.contains("/Vendor/Rime/")
+        let supportDirectory = applicationSupportDirectory(
+            environment: environment,
+            usesSourceTreeArtifacts: usesSourceTreeArtifacts,
+            fileManager: fileManager
+        )
         let userDataURL = environment["KNOWTYPE_RIME_USER_DATA_DIR"].map {
             environmentFileURL(path: $0, isDirectory: true)
         }
@@ -335,7 +375,19 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
         return urls
     }
 
-    private static func applicationSupportDirectory(fileManager: FileManager) -> URL {
+    private static func applicationSupportDirectory(
+        environment: [String: String],
+        usesSourceTreeArtifacts: Bool,
+        fileManager: FileManager
+    ) -> URL {
+        if usesSourceTreeArtifacts
+            || environment["XCTestConfigurationFilePath"] != nil
+            || environment["XCTestBundlePath"] != nil
+            || ProcessInfo.processInfo.processName.contains(".xctest")
+            || Bundle.main.bundlePath.contains(".xctest") {
+            return fileManager.temporaryDirectory
+                .appendingPathComponent("KnowTypeRimeXCTest-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        }
         if let directory = try? fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -473,84 +525,6 @@ final class NativeRimeSession: @unchecked Sendable {
         }
         let text = String(cString: commit)
         return text.isEmpty ? nil : text
-    }
-}
-
-private struct TraditionalFallbackConversionEngine: KnowTypeConversionEngine {
-    private var rawInput = ""
-    private let traditionalInputEngine: TraditionalInputEngine
-
-    var isNativeActive: Bool {
-        false
-    }
-
-    var snapshot: ConversionEngineSnapshot {
-        snapshot(for: rawInput)
-    }
-
-    init(traditionalInputEngine: TraditionalInputEngine) {
-        self.traditionalInputEngine = traditionalInputEngine
-    }
-
-    mutating func reset() {
-        rawInput = ""
-    }
-
-    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
-        switch key {
-        case .text(let text):
-            rawInput.append(text)
-            return ConversionEngineResult(handled: true, snapshot: snapshot)
-        case .space:
-            let commit = snapshot.candidates.first?.text ?? rawInput
-            rawInput = ""
-            return ConversionEngineResult(handled: !commit.isEmpty, commitText: commit.isEmpty ? nil : commit, snapshot: snapshot)
-        case .deleteBackward:
-            if !rawInput.isEmpty {
-                rawInput.removeLast()
-            }
-            return ConversionEngineResult(handled: true, snapshot: snapshot)
-        case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
-            let candidates = snapshot.candidates
-            guard candidates.indices.contains(index) else {
-                return ConversionEngineResult(handled: false, snapshot: snapshot)
-            }
-            let commit = candidates[index].text
-            rawInput = ""
-            return ConversionEngineResult(handled: true, commitText: commit, snapshot: snapshot)
-        case .pageUp, .pageDown:
-            return ConversionEngineResult(handled: false, snapshot: snapshot)
-        }
-    }
-
-    private func snapshot(for rawInput: String) -> ConversionEngineSnapshot {
-        guard !rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return ConversionEngineSnapshot(rawInput: rawInput)
-        }
-        let candidates = traditionalInputEngine
-            .candidates(
-                for: rawInput,
-                options: InputMethodPipeline.interactiveQueryOptions
-            )
-            .enumerated()
-            .map { index, candidate in
-                ConversionEngineCandidate(
-                    text: candidate.text,
-                    index: index,
-                    confidence: candidate.confidence,
-                    source: "traditional-fallback"
-                )
-            }
-        return ConversionEngineSnapshot(
-            rawInput: rawInput,
-            preedit: rawInput,
-            candidates: candidates,
-            highlightedIndex: 0,
-            pageSize: min(max(candidates.count, 1), InputMethodRuntimePreferences.adaptiveCandidatePageSize),
-            pageNumber: 0,
-            isLastPage: true,
-            engineName: "traditional-fallback"
-        )
     }
 }
 

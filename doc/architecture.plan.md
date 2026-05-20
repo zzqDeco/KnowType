@@ -15,16 +15,14 @@ The product boundary is strict: correction may refine the prefix, but continuati
 
 ```text
 raw input
-  -> TextProtection
-  -> CorrectionEngine
-  -> CompositionBuffer / candidate spans
-  -> local traditional candidates
+  -> RimeConversionEngine / librime session
+  -> current-page Rime candidates
   -> IMK marked text / candidate panel
   -> KnowTypeAI recommendation slot
   -> commit
 ```
 
-Level 0 protected input exits through the no-provider path. It must not call cloud providers and must not publish cloud continuation candidates.
+Level 0 protected input exits through the no-provider path. It must not call cloud providers and must not publish cloud continuation candidates. The production IMK hot path no longer uses the clean-room `TraditionalInputEngine` as a Chinese conversion fallback; when Rime is unavailable, KnowType keeps raw input usable and reports degraded conversion state instead of synthesizing hidden local candidates.
 
 ## Core Layer
 
@@ -32,7 +30,8 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 
 - `TextProtection` detects Level 0 input such as URLs, emails, paths, commands, code-like snippets, and protected app contexts.
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
-- `TraditionalInputEngine` returns raw-range segment metadata so the IMK frontend can apply partial selections inside the active composition rather than committing every candidate immediately.
+- `TraditionalInputEngine` is retained for core/offline tests, package-level demos, and lexicon tooling, but it is retired from the production IMK key path.
+- `TraditionalInputEngine` raw-range segment metadata is legacy/offline behavior; the production IMK frontend no longer generates or applies those segment candidates.
 - `TraditionalInputSeedLexicon` loads the clean-room seed lexicon from a bundled TSV resource instead of embedding the table in Swift source.
 - `TraditionalInputEngine` can also be initialized with authorized local lexicon entries. Those entries use the same private index as the seed lexicon, so larger dictionaries, future bundled resources, and local user lexicons do not need a separate parser path.
 - `TraditionalInputLexiconResourceLoader` parses audited JSON or TSV lexicon resources into the same entry shape before they enter the engine.
@@ -41,7 +40,7 @@ Level 0 protected input exits through the no-provider path. It must not call clo
 - `ManagedLexiconPackInstaller` can install the recommended Rime Pinyin Simplified pack by downloading a pinned Apache-2.0 source, verifying SHA256, converting it to local TSV, and writing pack metadata beside the TSV.
 - `CorrectionEngine` can boost generated prefix candidates from local user selection history without adding new dictionary entries or sending selection data to providers.
 - English and mixed-input paths preserve technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`, and `InputMethodKit`.
-- `CorrectionEngine` may ask a configured provider for unknown pinyin-shaped input only when `TraditionalInputEngine` reports no local candidate and the input is not protected technical or English text.
+- `CorrectionEngine` may ask a configured provider for unknown pinyin-shaped input only in legacy correction/demo paths when `TraditionalInputEngine` reports no local candidate and the input is not protected technical or English text.
 - `PrefixContinuationEngine` sanitizes provider output so continuation candidates do not repeat or rewrite the locked prefix.
 
 Current Chinese-input coverage includes examples such as:
@@ -136,13 +135,13 @@ real host apps remains the evidence for IMK behavior.
 `KnowTypeInputMethod` is the macOS front end:
 
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
-- `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses local prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
+- `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses Rime prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
 - `CompositionBuffer` separates raw pinyin, resolved candidate segments, active raw range, marked-text display, and final commit text.
-- `InputMethodLexiconRuntime` loads user-owned local lexicon directories into the traditional engine before correction, using the shared `TraditionalInputLexiconDirectoryResolver`.
+- `InputMethodLexiconRuntime` remains available for legacy demos/tests and settings visibility, but local lexicon rebuilds are not part of the IMK key path.
 - Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
-- The IMK controller publishes raw marked text and immediate local prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
-- Runtime lexicon snapshot checks and engine rebuilds run in the background; active compositions are refreshed only after the new engine is ready and the composition is still current.
+- The IMK controller publishes raw marked text and immediate Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
+- Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
 - `CandidatePanelWindowController` owns the AppKit panel, mouse interaction, and row accessibility.
@@ -151,7 +150,7 @@ real host apps remains the evidence for IMK behavior.
   presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
   frame cannot fit the natural height.
 
-The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Marked text shows raw pinyin until a candidate is confirmed; segment selections update only the marked composition. Commit replaces the active marked range with raw input, a fully resolved Chinese composition, the selected full prefix, or prefix plus continuation depending on the shortcut.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Marked text shows raw pinyin until a Rime candidate is confirmed. Commit replaces the active marked range with raw input, the selected Rime prefix, or an explicitly selected AI recommendation depending on the shortcut.
 
 User selection history is stored under Application Support as `user-selection-history.json`. This file is local candidate-learning data only; it is not serialized into provider requests.
 
@@ -161,9 +160,9 @@ KnowType uses a custom AppKit `NSPanel` as the primary candidate surface. It doe
 
 Candidate rows are flat and compact:
 
-- traditional prefix candidate 1 appears first
+- Rime prefix candidate 1 appears first
 - the AI recommendation slot appears second when AI state is pending, ready, disabled, or unavailable
-- remaining traditional prefix candidates appear after the AI slot
+- remaining Rime prefix candidates appear after the AI slot
 - legacy continuation candidates may still be represented by core/session tests, but the production IMK panel uses the AI slot for provider-backed continuation
 - raw input appears only when no suggestion is available
 - adaptive layout pages up to 6 visible rows; vertical-list mode can show up to 9 visible rows

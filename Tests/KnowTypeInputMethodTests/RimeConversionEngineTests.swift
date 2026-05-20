@@ -3,7 +3,7 @@ import XCTest
 import KnowTypeCore
 
 final class RimeConversionEngineTests: XCTestCase {
-    func testFallbackSessionCommitsFirstCandidateOnSpace() {
+    func testUnavailableSessionTracksRawInputWithoutTraditionalCandidates() {
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),
             configuration: nil
@@ -12,14 +12,18 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertFalse(engine.isNativeActive)
         XCTAssertTrue(engine.process(.text("w")).handled)
         XCTAssertTrue(engine.process(.text("o")).handled)
-        XCTAssertFalse(engine.snapshot.candidates.isEmpty)
+        XCTAssertEqual(engine.snapshot.rawInput, "wo")
+        XCTAssertEqual(engine.snapshot.preedit, "wo")
+        XCTAssertTrue(engine.snapshot.candidates.isEmpty)
+        XCTAssertEqual(engine.snapshot.engineName, "rime-unavailable")
 
         let result = engine.process(.space)
 
-        XCTAssertEqual(result.commitText, "我")
+        XCTAssertFalse(result.handled)
+        XCTAssertNil(result.commitText)
     }
 
-    func testFallbackNumberSelectionCommitsVisibleCandidateWithoutAppendingDigit() throws {
+    func testUnavailableSessionDoesNotCommitCandidateSelection() {
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),
             configuration: nil
@@ -27,14 +31,15 @@ final class RimeConversionEngineTests: XCTestCase {
 
         _ = engine.process(.text("n"))
         _ = engine.process(.text("i"))
-        let secondCandidate = try XCTUnwrap(engine.snapshot.candidates.dropFirst().first?.text)
 
-        let result = engine.process(.selectCandidate(1))
+        let result = engine.process(.selectCandidateOnCurrentPage(1))
 
-        XCTAssertEqual(result.commitText, secondCandidate)
+        XCTAssertFalse(result.handled)
+        XCTAssertNil(result.commitText)
+        XCTAssertEqual(engine.snapshot.rawInput, "ni")
     }
 
-    func testFallbackBypassPreservesExistingCompositionAcrossNonASCIIInput() {
+    func testUnavailableSessionPreservesRawBypassForNonASCIIInput() {
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),
             configuration: nil
@@ -45,6 +50,8 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertTrue(engine.process(.text("\u{E9}")).handled)
 
         XCTAssertEqual(engine.snapshot.rawInput, "ni\u{E9}")
+        XCTAssertTrue(engine.snapshot.candidates.isEmpty)
+        XCTAssertEqual(engine.snapshot.engineName, "rime-raw-bypass")
     }
 
     func testNativeConfigurationExpandsTildeEnvironmentPaths() {
@@ -97,7 +104,7 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertFalse(result.commitText?.isEmpty ?? true)
     }
 
-    func testNativeNonASCIIBypassReplaysExistingPreeditWhenArtifactsAreAvailable() throws {
+    func testNativeNonASCIIBypassPreservesRawWithoutTraditionalFallbackWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
             throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
@@ -129,5 +136,7 @@ final class RimeConversionEngineTests: XCTestCase {
 
         XCTAssertFalse(engine.isNativeActive)
         XCTAssertEqual(engine.snapshot.rawInput, "\(existingComposition)\u{E9}")
+        XCTAssertTrue(engine.snapshot.candidates.isEmpty)
+        XCTAssertEqual(engine.snapshot.engineName, "rime-raw-bypass")
     }
 }

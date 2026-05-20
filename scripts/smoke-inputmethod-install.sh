@@ -123,6 +123,7 @@ help_scripts=(
   "$ROOT_DIR/scripts/install-inputmethod.sh"
   "$ROOT_DIR/scripts/install-lexicon-pack.sh"
   "$ROOT_DIR/scripts/package-release.sh"
+  "$ROOT_DIR/scripts/perf-input-hotpath.sh"
   "$ROOT_DIR/scripts/repair-inputmethod-selection.sh"
   "$ROOT_DIR/scripts/select-inputmethod.sh"
   "$ROOT_DIR/scripts/smoke-inputmethod-install.sh"
@@ -151,6 +152,10 @@ assert_file "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp"
   die "input-method executable is not executable"
 assert_dir "$bundle_path/Contents/Resources/KnowType_KnowTypeCore.bundle"
 assert_file "$bundle_path/Contents/Resources/KnowTypeInputMethodIcon.tiff"
+assert_file "$bundle_path/Contents/Frameworks/librime.1.dylib"
+assert_dir "$bundle_path/Contents/Resources/rime-data"
+assert_file "$bundle_path/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
+assert_file "$bundle_path/Contents/Resources/rime-data/pinyin_simp.dict.yaml"
 assert_equals "com.knowtype.inputmethod.KnowType" \
   "$(plist_read ":CFBundleIdentifier" "$bundle_path/Contents/Info.plist")" \
   "CFBundleIdentifier"
@@ -173,6 +178,8 @@ assert_equals "4608" \
 assert_equals "KnowTypeInputMethodApp" \
   "$(plist_read ":CFBundleExecutable" "$bundle_path/Contents/Info.plist")" \
   "CFBundleExecutable"
+"$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rime-smoke >/dev/null ||
+  die "bundled Rime runtime smoke failed"
 
 prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"

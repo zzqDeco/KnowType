@@ -39,7 +39,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, change_page)"))
     }
 
-    func testRimeBridgeUsesFullCandidateIteratorForNativeSnapshots() throws {
+    func testRimeBridgeUsesCurrentPageCandidatesForNativeSnapshots() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -53,14 +53,15 @@ final class InputMethodBundleInfoTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(bridge.contains("candidate_list_begin"))
-        XCTAssertTrue(bridge.contains("candidate_list_next"))
-        XCTAssertTrue(bridge.contains("candidate_list_end"))
-        XCTAssertTrue(bridge.contains("ktb_rime_copy_full_candidate_list(session, snapshot)"))
-        XCTAssertTrue(bridge.contains("global_base_index = menu->page_no > 0 ? menu->page_no * page_size : 0"))
-        XCTAssertTrue(bridge.contains("snapshot->candidates[index].index = global_base_index + (int)index"))
+        XCTAssertFalse(bridge.contains("candidate_list_begin(session->session_id"))
+        XCTAssertFalse(bridge.contains("candidate_list_next(&iterator)"))
+        XCTAssertFalse(bridge.contains("candidate_list_end(&iterator)"))
+        XCTAssertFalse(bridge.contains("ktb_rime_copy_full_candidate_list"))
+        XCTAssertFalse(bridge.contains("global_base_index"))
+        XCTAssertTrue(bridge.contains("ktb_rime_copy_current_page_candidates(snapshot, &context.menu)"))
+        XCTAssertTrue(bridge.contains("snapshot->candidates[index].index = (int)index"))
         XCTAssertTrue(engine.contains("case selectCandidate(Int)"))
-        XCTAssertTrue(engine.contains("ktb_rime_select_candidate(session, max(0, index))"))
+        XCTAssertTrue(engine.contains("ktb_rime_select_candidate_on_current_page(session, max(0, index))"))
     }
 
     func testRimeArtifactPreparationPinsSharedDataRecipeCommits() throws {
@@ -94,8 +95,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(engine.contains("nativeBypassUntilReset"))
         XCTAssertTrue(engine.contains("nativeRawInputMirror"))
         XCTAssertTrue(engine.contains("containsNonASCIIText"))
-        XCTAssertTrue(engine.contains("processNonASCIIBypass"))
-        XCTAssertTrue(engine.contains("fallback.process(.text(existingComposition))"))
+        XCTAssertTrue(engine.contains("processRawBypass"))
+        XCTAssertTrue(engine.contains("rime-raw-bypass"))
+        XCTAssertFalse(engine.contains("fallback.process(.text(existingComposition))"))
         XCTAssertFalse(engine.contains("guard scalar.isASCII else {\n                continue\n            }"))
     }
 
