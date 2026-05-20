@@ -448,7 +448,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     publishLocalSuggestion(client: client)
                     return .noAction
                 }
-                return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
+                return .noAction
             }
             guard let selectedCandidate = sessionSelection(from: selection) else {
                 return .noAction

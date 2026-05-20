@@ -99,7 +99,7 @@ The input-method keydown path never awaits this layer. It publishes raw marked t
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
 - `InputModePreferencesViewModel` edits punctuation language and symbol-width defaults stored in the shared `com.knowtype.preferences` defaults domain.
-- `RuntimePreferencesViewModel` edits input scheme, candidate paging/layout, and AI continuation behavior through the same shared defaults domain.
+- `RuntimePreferencesViewModel` edits candidate paging/layout and AI continuation behavior through the same shared defaults domain. The legacy input-scheme value remains persisted for compatibility but is not exposed in the Rime-only settings UI.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 - Lexicon settings can create missing directories, create a non-overwriting sample TSV file, install the recommended managed lexicon pack, and display installed pack metadata.
 

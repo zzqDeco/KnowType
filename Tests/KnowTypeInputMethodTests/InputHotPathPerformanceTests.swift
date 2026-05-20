@@ -22,6 +22,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
             encoding: .utf8
         )
+        let settingsView = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeSettingsUI/ProviderProfilesView.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertFalse(coordinator.contains("InputMethodPipeline.localSuggestions"))
         XCTAssertFalse(coordinator.contains(".segmentCandidates("))
@@ -33,6 +37,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(inputController.contains("InputMethodLexiconRuntime.defaultRuntime"))
         XCTAssertFalse(inputController.contains("initialEngineState"))
         XCTAssertFalse(rimeEngine.contains("InputMethodLexiconRuntime.defaultEngine"))
+        XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
+        XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {

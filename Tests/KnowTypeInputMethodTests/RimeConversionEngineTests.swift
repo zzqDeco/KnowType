@@ -71,6 +71,54 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertTrue(url.hasDirectoryPath)
     }
 
+    func testSourceTreeRimeArtifactsRequireExplicitOptIn() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-source-opt-in-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let libraryDirectory = root.appendingPathComponent("Vendor/Rime/dist/lib", isDirectory: true)
+        let sharedDirectory = root.appendingPathComponent("Vendor/Rime/share", isDirectory: true)
+        try fileManager.createDirectory(at: libraryDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: sharedDirectory, withIntermediateDirectories: true)
+        fileManager.createFile(
+            atPath: libraryDirectory.appendingPathComponent("librime.1.dylib").path,
+            contents: Data()
+        )
+        fileManager.createFile(
+            atPath: sharedDirectory.appendingPathComponent("pinyin_simp.schema.yaml").path,
+            contents: Data()
+        )
+        let previousDirectory = fileManager.currentDirectoryPath
+        XCTAssertTrue(fileManager.changeCurrentDirectoryPath(root.path))
+        defer {
+            fileManager.changeCurrentDirectoryPath(previousDirectory)
+        }
+
+        let defaultConfiguration = NativeRimeConfiguration.defaultConfiguration(environment: [:])
+        XCTAssertNotEqual(
+            defaultConfiguration?.libraryURL.standardizedFileURL.path,
+            libraryDirectory.appendingPathComponent("librime.1.dylib").standardizedFileURL.path
+        )
+        XCTAssertNotEqual(
+            defaultConfiguration?.sharedDataURL.standardizedFileURL.path,
+            sharedDirectory.standardizedFileURL.path
+        )
+
+        let optInConfiguration = NativeRimeConfiguration.defaultConfiguration(
+            environment: ["KNOWTYPE_RIME_ENABLED": "1"]
+        )
+        XCTAssertEqual(
+            optInConfiguration?.libraryURL.standardizedFileURL.path,
+            libraryDirectory.appendingPathComponent("librime.1.dylib").standardizedFileURL.path
+        )
+        XCTAssertEqual(
+            optInConfiguration?.sharedDataURL.standardizedFileURL.path,
+            sharedDirectory.standardizedFileURL.path
+        )
+    }
+
     func testNativeRimeSessionSmokeWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
@@ -80,9 +128,8 @@ final class RimeConversionEngineTests: XCTestCase {
             .appendingPathComponent("knowtype-rime-smoke-\(UUID().uuidString)", isDirectory: true)
         configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
         configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
-        defer {
-            try? FileManager.default.removeItem(at: sandbox)
-        }
+        // librime keeps process-global state after a session is destroyed, so do
+        // not remove this sandbox before the test process exits.
 
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),
@@ -113,9 +160,8 @@ final class RimeConversionEngineTests: XCTestCase {
             .appendingPathComponent("knowtype-rime-nonascii-\(UUID().uuidString)", isDirectory: true)
         configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
         configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
-        defer {
-            try? FileManager.default.removeItem(at: sandbox)
-        }
+        // librime keeps process-global state after a session is destroyed, so do
+        // not remove this sandbox before the test process exits.
 
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),

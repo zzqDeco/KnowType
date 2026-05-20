@@ -6,7 +6,7 @@
 
 The view uses top-level native tabs:
 
-- Input: MVP composition behavior, punctuation defaults, symbol width, and input scheme.
+- Input: MVP composition behavior, punctuation defaults, symbol width, and Rime commit behavior.
 - Candidates: candidate page size, panel layout preference, ordering, and shortcut behavior.
 - Lexicons: local JSON/TSV directory status, entry counts, diagnostics, and missing-directory creation.
 - AI Provider: continuation controls, provider profile editor, and connection test backed by `ProviderProfilesViewModel`.

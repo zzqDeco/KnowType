@@ -9,7 +9,7 @@ input.
 
 - `RimeConversionEngine` owns the production base conversion path through a native `librime` session.
 - The engine does not fall back to `TraditionalInputEngine`; when Rime is unavailable it reports a degraded raw-input snapshot without candidates.
-- Source-tree artifacts under `Vendor/Rime` are enabled by default unless `KNOWTYPE_RIME_ENABLED=0`; installed app bundles use bundled Frameworks/Resources automatically.
+- Source-tree artifacts under `Vendor/Rime` require explicit `KNOWTYPE_RIME_ENABLED=1`; installed app bundles use bundled Frameworks/Resources automatically.
 - xctest processes use temporary Rime user/log directories to avoid locking the user's live Rime DB.
 - Explicit Rime environment paths expand leading `~` before URL conversion, so
   shell-friendly overrides resolve to the same filesystem locations as absolute

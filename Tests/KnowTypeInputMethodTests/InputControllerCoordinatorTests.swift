@@ -510,6 +510,36 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "重复")
     }
 
+    func testNativeCandidateSelectionFailureKeepsCompositionInsteadOfCommittingRaw() throws {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["候一", "候二"],
+                recorder: recorder,
+                commitsSelection: false
+            )
+        )
+
+        for character in "hou" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+        XCTAssertEqual(viewModel.prefixCandidates.map(\.text), ["候一", "候二"])
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "hou")
+    }
+
     func testRimeOnlyNativeSuggestionDoesNotAddSynchronousLocalFallbackContinuations() throws {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
@@ -1830,6 +1860,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
     ) {
         let host = FakeInputControllerHost()
         host.currentClientValue = client
+        let effectiveConversionEngine = conversionEngine
+            ?? (conversionEngineFactory == nil ? FixtureNativeConversionEngine() : nil)
         let coordinator = InputControllerCoordinator(
             provider: provider,
             traditionalInputEngine: lexiconRuntime.makeEngine(),
@@ -1842,7 +1874,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
-            conversionEngine: conversionEngine,
+            conversionEngine: effectiveConversionEngine,
             conversionEngineFactory: conversionEngineFactory,
             host: host,
             anchorResolver: CandidateAnchorResolver(
@@ -1949,6 +1981,100 @@ final class InputControllerCoordinatorTests: XCTestCase {
         case 8: return 28
         case 9: return 25
         default: return -1
+        }
+    }
+}
+
+private struct FixtureNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    private var rawInput = ""
+    private var currentSnapshot = ConversionEngineSnapshot(engineName: "native-test")
+
+    var snapshot: ConversionEngineSnapshot {
+        currentSnapshot
+    }
+
+    mutating func reset() {
+        rawInput = ""
+        currentSnapshot = makeSnapshot()
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            currentSnapshot = makeSnapshot()
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .space:
+            let candidates = candidateTexts(for: rawInput)
+            guard let commit = candidates.first else {
+                currentSnapshot = makeSnapshot()
+                return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+            }
+            rawInput = ""
+            currentSnapshot = makeSnapshot()
+            return ConversionEngineResult(handled: true, commitText: commit, snapshot: currentSnapshot)
+        case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
+            let candidates = candidateTexts(for: rawInput)
+            guard candidates.indices.contains(index) else {
+                currentSnapshot = makeSnapshot()
+                return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+            }
+            let commit = candidates[index]
+            rawInput = ""
+            currentSnapshot = makeSnapshot()
+            return ConversionEngineResult(handled: true, commitText: commit, snapshot: currentSnapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            currentSnapshot = makeSnapshot()
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .pageUp, .pageDown:
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        }
+    }
+
+    private func makeSnapshot() -> ConversionEngineSnapshot {
+        let candidates = candidateTexts(for: rawInput).enumerated().map { index, text in
+            ConversionEngineCandidate(
+                text: text,
+                index: index,
+                confidence: 1 - Double(index) * 0.01,
+                source: "native-test"
+            )
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: candidates,
+            highlightedIndex: 0,
+            pageSize: candidates.count,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-test"
+        )
+    }
+
+    private func candidateTexts(for rawInput: String) -> [String] {
+        guard !rawInput.isEmpty else {
+            return []
+        }
+        switch rawInput {
+        case "n":
+            return ["你", "呢"]
+        case "ni":
+            return ["你", "尼"]
+        case "wsm":
+            return ["为什么", "为啥"]
+        case "zhegeapi":
+            return ["这个 API", "这个接口"]
+        case "zz":
+            return ["在这", "组织"]
+        case "wojuedezhegefagnan":
+            return ["我觉得这个方案", "我觉得这个方法"]
+        default:
+            return ["候选\(rawInput)", "备选\(rawInput)"]
         }
     }
 }
@@ -2162,6 +2288,7 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
     let recorder: NativeSelectionRecorder
     let spaceCommit: String?
     let source: String
+    let commitsSelection: Bool
     private var rawInput = ""
     private var currentSnapshot: ConversionEngineSnapshot
 
@@ -2169,12 +2296,14 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
         candidates: [String],
         recorder: NativeSelectionRecorder,
         spaceCommit: String? = nil,
-        source: String = "native-test"
+        source: String = "native-test",
+        commitsSelection: Bool = true
     ) {
         self.candidates = candidates
         self.recorder = recorder
         self.spaceCommit = spaceCommit
         self.source = source
+        self.commitsSelection = commitsSelection
         currentSnapshot = Self.makeSnapshot(rawInput: "", candidates: candidates, source: source)
     }
 
@@ -2205,7 +2334,8 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
         case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
             recorder.selectedIndices.append(index)
             currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates, source: source)
-            guard candidates.indices.contains(index) else {
+            guard commitsSelection,
+                  candidates.indices.contains(index) else {
                 return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
             }
             let commit = candidates[index]

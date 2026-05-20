@@ -86,12 +86,8 @@ private struct InputSettingsView: View {
             Section("Composition") {
                 LabeledContent("Input host", value: "InputMethodKit")
                 LabeledContent("Composition mode", value: "Marked text before commit")
-                LabeledContent("Primary commit", value: "Space commits the corrected prefix")
+                LabeledContent("Primary commit", value: "Space commits the Rime candidate")
                 LabeledContent("Continuation commit", value: "Tab commits prefix plus continuation")
-                Picker("Input scheme", selection: inputSchemeBinding) {
-                    Text("Full Pinyin").tag(TraditionalInputEngine.Scheme.fullPinyin)
-                    Text("Xiaohe Shuangpin").tag(TraditionalInputEngine.Scheme.xiaohe)
-                }
             }
 
             Section("Punctuation") {
@@ -159,12 +155,6 @@ private struct InputSettingsView: View {
         )
     }
 
-    private var inputSchemeBinding: Binding<TraditionalInputEngine.Scheme> {
-        Binding(
-            get: { runtimePreferencesViewModel.preferences.inputScheme },
-            set: { runtimePreferencesViewModel.setInputScheme($0) }
-        )
-    }
 }
 
 private struct CandidateSettingsView: View {

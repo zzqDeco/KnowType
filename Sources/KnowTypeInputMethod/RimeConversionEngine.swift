@@ -273,11 +273,11 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
         }
         let explicitLibraryPath = environment["KNOWTYPE_RIME_LIBRARY_PATH"]
         let explicitSharedDataPath = environment["KNOWTYPE_RIME_SHARED_DATA_DIR"]
-        let enableSourceTreeArtifacts = environment["KNOWTYPE_RIME_ENABLED"] != "0"
+        let enableSourceTreeArtifacts = environment["KNOWTYPE_RIME_ENABLED"] == "1"
         guard let libraryURL = firstExistingURL(
             environmentValue: explicitLibraryPath,
             candidates: defaultLibraryCandidates(
-                includeSourceTreeArtifacts: enableSourceTreeArtifacts || explicitLibraryPath != nil,
+                includeSourceTreeArtifacts: enableSourceTreeArtifacts,
                 fileManager: fileManager
             ),
             fileManager: fileManager
@@ -285,7 +285,7 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
             let sharedDataURL = firstExistingURL(
                 environmentValue: explicitSharedDataPath,
                 candidates: defaultSharedDataCandidates(
-                    includeSourceTreeArtifacts: enableSourceTreeArtifacts || explicitSharedDataPath != nil,
+                    includeSourceTreeArtifacts: enableSourceTreeArtifacts,
                     fileManager: fileManager
                 ),
                 fileManager: fileManager
@@ -293,13 +293,7 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
             return nil
         }
 
-        let usesSourceTreeArtifacts = libraryURL.path.contains("/Vendor/Rime/")
-            || sharedDataURL.path.contains("/Vendor/Rime/")
-        let supportDirectory = applicationSupportDirectory(
-            environment: environment,
-            usesSourceTreeArtifacts: usesSourceTreeArtifacts,
-            fileManager: fileManager
-        )
+        let supportDirectory = applicationSupportDirectory(environment: environment, fileManager: fileManager)
         let userDataURL = environment["KNOWTYPE_RIME_USER_DATA_DIR"].map {
             environmentFileURL(path: $0, isDirectory: true)
         }
@@ -377,14 +371,9 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
 
     private static func applicationSupportDirectory(
         environment: [String: String],
-        usesSourceTreeArtifacts: Bool,
         fileManager: FileManager
     ) -> URL {
-        if usesSourceTreeArtifacts
-            || environment["XCTestConfigurationFilePath"] != nil
-            || environment["XCTestBundlePath"] != nil
-            || ProcessInfo.processInfo.processName.contains(".xctest")
-            || Bundle.main.bundlePath.contains(".xctest") {
+        if isXCTestEnvironment(environment) {
             return fileManager.temporaryDirectory
                 .appendingPathComponent("KnowTypeRimeXCTest-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
         }
@@ -398,6 +387,13 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
         }
         return fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent(".knowtype", isDirectory: true)
+    }
+
+    private static func isXCTestEnvironment(_ environment: [String: String]) -> Bool {
+        environment["XCTestConfigurationFilePath"] != nil
+            || environment["XCTestBundlePath"] != nil
+            || ProcessInfo.processInfo.processName.contains(".xctest")
+            || Bundle.main.bundlePath.contains(".xctest")
     }
 }
 
