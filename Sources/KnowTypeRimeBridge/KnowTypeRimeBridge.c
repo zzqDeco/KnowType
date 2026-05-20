@@ -288,9 +288,6 @@ KTBRimeSession *ktb_rime_session_create(
 
         RimeGetApiFunction get_api = (RimeGetApiFunction)dlsym(handle, "rime_get_api_stdbool");
         if (!get_api) {
-            get_api = (RimeGetApiFunction)dlsym(handle, "rime_get_api");
-        }
-        if (!get_api) {
             dlclose(handle);
             return NULL;
         }

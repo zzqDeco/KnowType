@@ -27,6 +27,8 @@ input.
   recomputing candidates.
 - The SwiftPM target does not link to librime at build time; `KnowTypeRimeBridge`
   loads `librime.1.dylib` dynamically.
+- The bridge requires `rime_get_api_stdbool`; it does not fall back to the
+  non-`stdbool` ABI because the local context/status structs use bool fields.
 - Reset clears the native composition instead of tearing down the process-global
   Rime runtime.
 

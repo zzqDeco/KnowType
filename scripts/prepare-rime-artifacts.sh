@@ -121,10 +121,16 @@ if ((${#recipes[@]} > 0)); then
   if [[ ! -d "$plum_dir/.git" ]]; then
     rm -rf "$plum_dir"
     git init "$plum_dir"
-    git -C "$plum_dir" remote add origin "$RIME_PLUM_REPOSITORY"
-    git -C "$plum_dir" fetch --depth 1 origin "$RIME_PLUM_REF"
-    git -C "$plum_dir" checkout --detach FETCH_HEAD
   fi
+  if git -C "$plum_dir" remote get-url origin >/dev/null 2>&1; then
+    git -C "$plum_dir" remote set-url origin "$RIME_PLUM_REPOSITORY"
+  else
+    git -C "$plum_dir" remote add origin "$RIME_PLUM_REPOSITORY"
+  fi
+  git -C "$plum_dir" fetch --depth 1 origin "$RIME_PLUM_REF"
+  git -C "$plum_dir" checkout --detach --force FETCH_HEAD
+  git -C "$plum_dir" reset --hard FETCH_HEAD
+  git -C "$plum_dir" clean -fdx
   plum_output="$tmp_dir/plum-output"
   mkdir -p "$plum_output"
   rime_dir="$plum_output" bash "$plum_dir/rime-install" "${recipes[@]}"

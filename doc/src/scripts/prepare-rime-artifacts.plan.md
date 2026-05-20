@@ -21,6 +21,8 @@ optional native Rime conversion bridge.
   `rime/rime-pinyin-simp`; set `RIME_DATA_RECIPES=""` to skip recipe install.
 - The script writes a KnowType `default.custom.yaml` so the bundled schema list
   is limited to `RIME_DEFAULT_SCHEMA`, which defaults to `pinyin_simp`.
+- Cached plum checkouts are fetched, force-checked out, reset, and cleaned to
+  the pinned `RIME_PLUM_REF` on every run before recipe installation.
 - `scripts/build-inputmethod-bundle.sh` copies prepared artifacts into
   `KnowType.app` before signing when the vendor directory exists.
 

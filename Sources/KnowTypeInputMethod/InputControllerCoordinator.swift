@@ -9,7 +9,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var sessionController: InputSessionController
     private let hasProvider: Bool
     private var traditionalInputEngine: TraditionalInputEngine
-    private var conversionEngine: RimeConversionEngine
+    private var conversionEngine: any KnowTypeConversionEngine
     private var lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot
     private let lexiconRuntime: InputMethodLexiconRuntime
     private let keyMapper = InputKeyCommandMapper()
@@ -66,6 +66,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        conversionEngine: (any KnowTypeConversionEngine)? = nil,
         host: InputControllerHost,
         anchorResolver: CandidateAnchorResolver,
         enablesAsyncSuggestionRefresh: Bool = true
@@ -75,7 +76,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.provider = provider
         self.hasProvider = provider != nil
         self.traditionalInputEngine = traditionalInputEngine
-        self.conversionEngine = RimeConversionEngine(traditionalInputEngine: traditionalInputEngine)
+        self.conversionEngine = conversionEngine ?? RimeConversionEngine(traditionalInputEngine: traditionalInputEngine)
         self.lexiconRuntimeSnapshot = lexiconRuntimeSnapshot
         self.lexiconRuntime = lexiconRuntime
         self.sessionController = InputSessionController(
@@ -468,6 +469,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                    !commitText.isEmpty {
                     return .commit(commitText)
                 }
+                if conversionResult.handled {
+                    publishLocalSuggestion(client: client)
+                    return .noAction
+                }
             }
             if conversionEngine.isNativeActive,
                case .fullCandidate(let index) = selection.kind {
@@ -475,6 +480,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 if let commitText = conversionResult.commitText,
                    !commitText.isEmpty {
                     return .commit(commitText)
+                }
+                if conversionResult.handled {
+                    publishLocalSuggestion(client: client)
+                    return .noAction
                 }
             }
             guard let selectedCandidate = sessionSelection(from: selection) else {
@@ -1003,6 +1012,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             if let commitText = conversionResult.commitText,
                !commitText.isEmpty {
                 return .commit(commitText)
+            }
+            if conversionResult.handled {
+                publishLocalSuggestion(client: client)
+                return .noAction
             }
         }
         if compositionBuffer.hasResolvedSegments,

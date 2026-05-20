@@ -228,6 +228,42 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testNativeHandledSpaceWithoutCommitConsumesInsteadOfFallingBack() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: NativeHandledNoCommitConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+    }
+
+    func testNativeHandledNumberSelectionWithoutCommitConsumesInsteadOfFallingBack() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: NativeHandledNoCommitConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(host.panelStates.last?.windowState.isVisible == true)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: keyCode(forNumber: 1)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+    }
+
     @MainActor
     func testAsyncReadyLocalPrefixCommitsAfterCandidatePublication() async {
         let client = FakeInputControllerClient()
@@ -1330,7 +1366,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         enablesAsyncSuggestionRefresh: Bool = false,
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferences: InputModePreferences = .standard,
-        runtimePreferences: InputMethodRuntimePreferences = .standard
+        runtimePreferences: InputMethodRuntimePreferences = .standard,
+        conversionEngine: (any KnowTypeConversionEngine)? = nil
     ) -> (
         InputControllerCoordinator,
         FakeInputControllerHost,
@@ -1350,6 +1387,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
+            conversionEngine: conversionEngine,
             host: host,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: FixedInputControllerScreenProvider(),
@@ -1448,6 +1486,57 @@ final class InputControllerCoordinatorTests: XCTestCase {
         case 9: return 25
         default: return -1
         }
+    }
+}
+
+private struct NativeHandledNoCommitConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    private var rawInput = ""
+    private var currentSnapshot = ConversionEngineSnapshot(engineName: "native-test")
+
+    var snapshot: ConversionEngineSnapshot {
+        currentSnapshot
+    }
+
+    mutating func reset() {
+        rawInput = ""
+        currentSnapshot = ConversionEngineSnapshot(engineName: "native-test")
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            currentSnapshot = makeSnapshot()
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .space, .selectCandidateOnCurrentPage:
+            currentSnapshot = makeSnapshot()
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            currentSnapshot = makeSnapshot()
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        case .pageUp, .pageDown:
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
+        }
+    }
+
+    private func makeSnapshot() -> ConversionEngineSnapshot {
+        ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [
+                ConversionEngineCandidate(text: "你", index: 0, source: "native-test"),
+                ConversionEngineCandidate(text: "尼", index: 1, source: "native-test")
+            ],
+            highlightedIndex: 0,
+            pageSize: 2,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-test"
+        )
     }
 }
 

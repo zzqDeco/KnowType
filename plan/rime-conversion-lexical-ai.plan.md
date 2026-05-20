@@ -24,6 +24,10 @@
   and `rime/rime-pinyin-simp` shared data by default.
 - Native Rime sessions select `pinyin_simp`; the prepared shared data patches
   the schema list to avoid missing-schema deploy noise.
+- Native Rime key handling treats `handled == true` without commit text as a
+  consumed in-session action, so local fallback cannot prematurely commit text.
+- The C bridge requires the stdbool librime API and the artifact script
+  re-checks cached plum data against the pinned ref each run.
 - `scripts/build-inputmethod-bundle.sh` copies optional Rime dylibs/plugins/shared data into the app bundle before signing.
 
 ## Test Plan
