@@ -160,7 +160,7 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 
 - raw input is shown only when no prefix or continuation suggestion exists
 - traditional prefix candidate 1 is the first selectable row
-- the AI recommendation slot is fixed as the second selectable row when it has a visible state
+- the AI recommendation slot is fixed as the second visible row when it has a visible state
 - remaining traditional prefix candidates follow the AI slot
 - full candidates cover the entire raw buffer and commit as complete Chinese text
 - segment candidates cover part of the raw buffer and update the active composition without inserting committed text
@@ -169,12 +169,22 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 - production IMK key handling first shows raw marked text, then publishes local prefix/segment candidates asynchronously while the AI slot resolves separately
 - when a provider is configured, local output omits fallback continuation rows and never labels mock text as AI
 
+Ready AI recommendations are selectable and keep the second numeric shortcut. Pending, unavailable, and ineligible AI
+states are rendered as disabled status rows: they preserve the visible slot but have no selection identity, no numeric
+shortcut, and no commit behavior. Mouse hover, click commit, keyboard selection, and accessibility selected children all
+consume the same `CandidatePanelSelection` values so click commits match keyboard commits.
+
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
 `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when
 possible, switches to vertical layout for long phrases, and returns the final panel size, origin, row frames, and
 per-row text limits used by the AppKit view. The layout plan must keep shortcut/selectable rows in sync with
 rendered rows; constrained vertical layouts compress row height and spacing instead of dropping rows after
 shortcuts are assigned.
+
+The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
+that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use
+static-text semantics. Selection changes post focused-element and selected-children notifications. Screenshot
+regression tests render fixed examples to PNG baselines under `Tests/KnowTypeInputMethodTests/__Snapshots__/`.
 
 `CompositionBuffer` keeps `rawInput`, resolved segments, active range, display text, and commit text separate. While composing `nishishei`, marked text displays `nishishei`; selecting the segment `你` changes marked text to `你shishei` without calling `insertText`.
 

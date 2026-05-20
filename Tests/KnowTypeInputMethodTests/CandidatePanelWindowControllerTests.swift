@@ -44,11 +44,11 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(
             origins,
             [
-                NSPoint(x: 100, y: 358),
-                NSPoint(x: 160, y: 378)
+                NSPoint(x: 100, y: 354),
+                NSPoint(x: 160, y: 374)
             ]
         )
-        XCTAssertEqual(contentSizes, [NSSize(width: 220, height: 36), NSSize(width: 220, height: 36)])
+        XCTAssertEqual(contentSizes, [NSSize(width: 220, height: 40), NSSize(width: 220, height: 40)])
         XCTAssertEqual(frontCount, 2)
         XCTAssertEqual(outCount, 0)
         XCTAssertEqual(modelCount, 2)
@@ -80,7 +80,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                 anchorRect: CGRect(x: 490, y: 390, width: 0, height: 18),
                 screenProvider: screenProvider
             )?.panelOrigin,
-            NSPoint(x: 222, y: 296)
+            NSPoint(x: 222, y: 292)
         )
     }
 
@@ -107,7 +107,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                 anchorRect: CGRect(x: 999, y: 300, width: 0, height: 18),
                 screenProvider: screenProvider
             )?.panelOrigin,
-            NSPoint(x: 1_008, y: 258)
+            NSPoint(x: 1_008, y: 254)
         )
     }
 
@@ -207,8 +207,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         let origins = window.frameOrigins
         let layoutPlans = contentView.layoutPlans
 
-        XCTAssertEqual(contentSizes, [NSSize(width: 296, height: 186)])
-        XCTAssertEqual(origins, [NSPoint(x: 396, y: 8)])
+        XCTAssertEqual(contentSizes, [NSSize(width: 305, height: 205)])
+        XCTAssertEqual(origins, [NSPoint(x: 387, y: 187)])
         XCTAssertEqual(layoutPlans.map(\.orientation), [.vertical])
         XCTAssertEqual(layoutPlans.first?.items.map(\.isTruncated), Array(repeating: false, count: 6))
     }
@@ -313,7 +313,30 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
             locale: .zhCN
         )
 
-        XCTAssertEqual(operationLog.events, ["setContentSize", "contentUpdate", "setFrameOrigin", "orderFront"])
+        XCTAssertEqual(operationLog.events, ["setContentSize", "setFrameOrigin", "contentUpdate", "orderFront"])
+    }
+
+    @MainActor
+    func testContentInteractionsForwardToDelegate() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let interactionHandler = FakeCandidatePanelInteractionHandler()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window },
+            interactionHandler: interactionHandler
+        )
+
+        contentView.interactionHandler?.candidatePanelContentDidHover(.prefixCandidate(1))
+        contentView.interactionHandler?.candidatePanelContentDidCommit(.aiRecommendation)
+        contentView.interactionHandler?.candidatePanelContentDidScroll(.pageDown)
+
+        XCTAssertEqual(interactionHandler.hoveredSelections, [.prefixCandidate(1)])
+        XCTAssertEqual(interactionHandler.committedSelections, [.aiRecommendation])
+        XCTAssertEqual(interactionHandler.scrollNavigations, [.pageDown])
+        XCTAssertNotNil(controller)
     }
 
     private func fakeScreenProvider() -> FakeCandidatePanelScreenProvider {
@@ -386,6 +409,7 @@ private struct FakeCandidatePanelScreenProvider: ScreenGeometryProviding {
 @MainActor
 private final class FakeCandidatePanelContentRenderer: CandidatePanelContentRendering {
     let appKitView = NSView()
+    weak var interactionHandler: CandidatePanelContentInteractionHandling?
     private(set) var models: [CandidatePanelRenderModel] = []
     private(set) var layoutPlans: [CandidatePanelLayoutPlan] = []
     private let operationLog: CandidatePanelWindowOperationLog?
@@ -449,5 +473,23 @@ private final class FakeCandidatePanelWindow: CandidatePanelWindowOperating {
 
 private final class CandidatePanelWindowOperationLog {
     var events: [String] = []
+}
+
+private final class FakeCandidatePanelInteractionHandler: CandidatePanelInteractionHandling {
+    private(set) var hoveredSelections: [CandidatePanelSelection] = []
+    private(set) var committedSelections: [CandidatePanelSelection] = []
+    private(set) var scrollNavigations: [InputCandidateNavigation] = []
+
+    func candidatePanelDidHover(_ selection: CandidatePanelSelection) {
+        hoveredSelections.append(selection)
+    }
+
+    func candidatePanelDidCommit(_ selection: CandidatePanelSelection) {
+        committedSelections.append(selection)
+    }
+
+    func candidatePanelDidScroll(_ navigation: InputCandidateNavigation) {
+        scrollNavigations.append(navigation)
+    }
 }
 #endif

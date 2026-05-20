@@ -82,6 +82,34 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
     }
 
+    func testNavigationSkipsNonReadyAIStatusRows() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: suggestion(prefixTexts: ["你好", "你号"]),
+            aiRecommendation: .unavailable(reason: "AI 暂不可用")
+        )
+
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+        XCTAssertTrue(state.moveSelection(.down))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
+        XCTAssertTrue(state.moveSelection(.up))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+    }
+
+    func testSelectVisibleRowAcceptsOnlyVisibleEnabledRows() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "candidate",
+            suggestion: multiPagePrefixSuggestion(count: 12)
+        )
+
+        XCTAssertTrue(state.selectVisibleRow(.prefixCandidate(5)))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(5))
+        XCTAssertFalse(state.selectVisibleRow(.prefixCandidate(6)))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(5))
+    }
+
     func testVisibleShortcutIgnoresLegacyContinuationRowsWithoutNumberLabels() {
         var state = CandidatePanelState()
         state.update(

@@ -61,6 +61,13 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows[1].shortcutLabel, "2")
         XCTAssertEqual(rendered.rows[2].shortcutLabel, "⇥")
         XCTAssertEqual(rendered.rows[3].shortcutLabel, "⌥2")
+        XCTAssertEqual(rendered.rows.map(\.selection), [
+            .prefixCandidate(0),
+            .prefixCandidate(1),
+            .continuationCandidate(0),
+            .continuationCandidate(1)
+        ])
+        XCTAssertTrue(rendered.rows.allSatisfy(\.isEnabled))
     }
 
     func testAIRecommendationOccupiesSecondCandidateSlot() {
@@ -88,6 +95,25 @@ final class CandidatePanelRendererTests: XCTestCase {
         )
         XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3"])
         XCTAssertEqual(rendered.rows[1].visualRole, .aiRecommendation)
+        XCTAssertEqual(rendered.rows[1].accessibilityLabel, "AI 推荐，2，我觉得这个方案需要先验证核心假设")
+    }
+
+    func testPendingAIStatusIsRenderedButNotSelectable() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "wo jue de zhege fangan",
+            prefixCandidates: prefixCandidates,
+            continuationCandidates: [],
+            aiRecommendation: .pending(requestID: UUID())
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(viewModel)
+
+        XCTAssertEqual(rendered.rows.map(\.kind), [.prefixCandidate, .aiRecommendation, .prefixCandidate])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", nil, "2"])
+        XCTAssertEqual(rendered.rows[1].selection, nil)
+        XCTAssertFalse(rendered.rows[1].isEnabled)
+        XCTAssertFalse(rendered.rows[1].isSelected)
+        XCTAssertEqual(rendered.rows[1].accessibilityLabel, "AI 状态，AI 推荐中...")
     }
 
     func testRendersRawInputOnlyWhenNoSuggestionsExist() {

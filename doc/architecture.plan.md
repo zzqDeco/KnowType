@@ -145,7 +145,7 @@ real host apps remains the evidence for IMK behavior.
 - Runtime lexicon snapshot checks and engine rebuilds run in the background; active compositions are refreshed only after the new engine is ready and the composition is still current.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
-- `CandidatePanelWindowController` owns the AppKit panel.
+- `CandidatePanelWindowController` owns the AppKit panel, mouse interaction, and row accessibility.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
 - `CandidatePanelLayoutEngine` measures rendered rows before AppKit layout, chooses horizontal versus vertical
   presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
@@ -166,13 +166,22 @@ Candidate rows are flat and compact:
 - remaining traditional prefix candidates appear after the AI slot
 - legacy continuation candidates may still be represented by core/session tests, but the production IMK panel uses the AI slot for provider-backed continuation
 - raw input appears only when no suggestion is available
-- rows are paged in 9-row windows
+- adaptive layout pages up to 6 visible rows; vertical-list mode can show up to 9 visible rows
 
 Candidate-window layout keeps those row semantics but derives horizontal versus vertical presentation from measured
 row widths. Horizontal layout targets 4-6 complete candidates; vertical layout is used when long phrases would
-otherwise leave only 1-3 complete horizontal candidates. The layout layer does not drop selectable rows after
-shortcuts are assigned; on constrained visible frames it compresses vertical row height and spacing, and hides only
-when the frame cannot fit the current page at the minimum row height.
+otherwise leave only 1-3 complete horizontal candidates. The panel uses AppKit popover material, dynamic system
+colors, compact 16 pt candidate text, 11 pt monospaced shortcut labels, a 0.5 pt separator border, continuous
+corners, and system shadowing. The layout layer does not drop selectable rows after shortcuts are assigned; on
+constrained visible frames it compresses vertical row height and spacing, and hides only when the frame cannot fit
+the current page at the minimum row height.
+
+Mouse hover selects enabled visible rows, click commits the same target as keyboard selection, and scroll-wheel
+events page the panel. Pending, unavailable, or ineligible AI state rows are visible but disabled: they have muted
+text, no numeric shortcut, no hover selection, and no click commit. Row accessibility elements expose button-like
+labels for enabled candidates, static-text semantics for disabled AI status, and selected-children notifications
+when the highlighted row changes. Candidate-panel screenshot baselines live under
+`Tests/KnowTypeInputMethodTests/__Snapshots__/` and cover light horizontal, dark vertical, and AI-status examples.
 
 Candidate positioning is centralized in `CandidateAnchorResolver`. The resolver tries fresh text geometry first, then progressively falls back:
 
