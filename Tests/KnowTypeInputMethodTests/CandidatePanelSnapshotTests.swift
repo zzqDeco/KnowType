@@ -107,7 +107,23 @@ final class CandidatePanelSnapshotTests: XCTestCase {
         view.setFrameSize(layoutPlan.panelSize)
         view.layoutSubtreeIfNeeded()
 
-        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        let pixelWidth = Int(ceil(layoutPlan.panelSize.width))
+        let pixelHeight = Int(ceil(layoutPlan.panelSize.height))
+        let rep = try XCTUnwrap(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: pixelWidth,
+                pixelsHigh: pixelHeight,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            )
+        )
+        rep.size = layoutPlan.panelSize
         view.cacheDisplay(in: view.bounds, to: rep)
         return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
     }
