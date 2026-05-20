@@ -313,7 +313,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
             locale: .zhCN
         )
 
-        XCTAssertEqual(operationLog.events, ["setContentSize", "contentUpdate", "setFrameOrigin", "orderFront"])
+        XCTAssertEqual(operationLog.events, ["setContentSize", "setFrameOrigin", "contentUpdate", "orderFront"])
     }
 
     @MainActor

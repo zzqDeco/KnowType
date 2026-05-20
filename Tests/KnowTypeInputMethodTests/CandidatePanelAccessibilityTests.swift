@@ -18,10 +18,16 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertEqual(children.count, 3)
         XCTAssertEqual(children[0].accessibilityRole(), .button)
         XCTAssertEqual(children[0].accessibilityLabel(), "1，我觉得这个方案")
+        XCTAssertTrue(children[0].isAccessibilityEnabled())
+        XCTAssertTrue(children[0].isAccessibilitySelected())
         XCTAssertEqual(children[1].accessibilityRole(), .staticText)
         XCTAssertEqual(children[1].accessibilityLabel(), "AI 状态，AI 推荐中...")
+        XCTAssertFalse(children[1].isAccessibilityEnabled())
+        XCTAssertFalse(children[1].isAccessibilitySelected())
         XCTAssertEqual(children[2].accessibilityRole(), .button)
         XCTAssertEqual(children[2].accessibilityLabel(), "2，我觉得这套方案")
+        XCTAssertTrue(children[2].isAccessibilityEnabled())
+        XCTAssertFalse(children[2].isAccessibilitySelected())
         XCTAssertEqual(selectedChildren.count, 1)
         XCTAssertEqual(selectedChildren.first?.accessibilityLabel(), "1，我觉得这个方案")
     }
@@ -43,6 +49,7 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         let selectedChildren = try XCTUnwrap(view.accessibilitySelectedChildren() as? [NSAccessibilityElement])
         XCTAssertEqual(selectedChildren.count, 1)
         XCTAssertEqual(selectedChildren.first?.accessibilityLabel(), "2，我觉得这套方案")
+        XCTAssertTrue(selectedChildren.first?.isAccessibilitySelected() == true)
     }
 
     private func accessibilityModel(selectedIndex: Int) -> CandidatePanelRenderModel {

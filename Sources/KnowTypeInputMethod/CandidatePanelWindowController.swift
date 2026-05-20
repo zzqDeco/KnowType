@@ -111,8 +111,8 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         }
         traceLayout(windowState: windowState, renderModel: renderModel, layoutPlan: layoutPlan)
         panel.setContentSize(layoutPlan.panelSize)
-        contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.setFrameOrigin(layoutPlan.panelOrigin)
+        contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.orderFrontRegardless()
         lastPresentationSignature = presentationSignature
     }
@@ -610,11 +610,11 @@ private final class CandidatePanelAccessibilityRow: NSAccessibilityElement {
         label
     }
 
-    func accessibilityEnabled() -> Bool {
+    override func isAccessibilityEnabled() -> Bool {
         isEnabled
     }
 
-    func accessibilitySelected() -> Bool {
+    override func isAccessibilitySelected() -> Bool {
         isSelected
     }
 
