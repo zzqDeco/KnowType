@@ -4,22 +4,29 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
+source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
+DRY_RUN=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-inputmethod.sh
+Usage: scripts/install-inputmethod.sh [--dry-run]
 
 Builds and installs KnowType.app into ~/Library/Input Methods, installs
 KnowType.prefPane into ~/Library/PreferencePanes, then asks the installed app
 to register and enable the input source.
 
 Options:
+  --dry-run   Print local bundles and LaunchServices records that would be cleaned.
   -h, --help  Show this help.
 EOF
 }
 
 while (($# > 0)); do
   case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -33,14 +40,50 @@ while (($# > 0)); do
 done
 
 LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
+TARGET_DIR="$(knowtype_inputmethod_target_dir)"
+TARGET_PATH="$(knowtype_inputmethod_target_path)"
+PREFPANE_TARGET_DIR="$(knowtype_preferencepane_target_dir)"
+PREFPANE_TARGET_PATH="$(knowtype_preferencepane_target_path)"
+
+if (( DRY_RUN == 1 )); then
+  echo "KnowType input-method install dry run"
+  echo "Target bundle: $TARGET_PATH"
+  echo "Target System Settings pane: $PREFPANE_TARGET_PATH"
+  echo
+  echo "Local KnowType bundles that would be removed before install:"
+  local_bundle_count=0
+  while IFS= read -r bundle_path; do
+    [[ -n "$bundle_path" ]] || continue
+    local_bundle_count=$((local_bundle_count + 1))
+    echo "  $bundle_path"
+  done < <(knowtype_find_local_inputmethod_bundle_paths)
+  if (( local_bundle_count == 0 )); then
+    echo "  <none>"
+  fi
+  echo
+  echo "LaunchServices records that would be unregistered:"
+  ls_count=0
+  while IFS= read -r bundle_path; do
+    [[ -n "$bundle_path" ]] || continue
+    ls_count=$((ls_count + 1))
+    echo "  $(knowtype_expand_home_path "$(knowtype_strip_lsregister_suffix "$bundle_path")")"
+  done < <(knowtype_launchservices_paths_for_identity)
+  if (( ls_count == 0 )); then
+    echo "  <none>"
+  fi
+  if [[ -d "$PREFPANE_TARGET_PATH" ]]; then
+    echo
+    echo "System Settings pane that would be replaced:"
+    echo "  $PREFPANE_TARGET_PATH"
+  fi
+  echo
+  echo "Text Input Source preference rows would be repaired and menu agents would be restarted."
+  exit 0
+fi
+
 BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$ROOT_DIR/scripts/build-inputmethod-bundle.sh" | tail -n 1)"
 PREFPANE_PATH="$("$ROOT_DIR/scripts/build-preference-pane.sh" | tail -n 1)"
-TARGET_DIR="$HOME/Library/Input Methods"
-TARGET_PATH="$TARGET_DIR/KnowType.app"
-PREFPANE_TARGET_DIR="$HOME/Library/PreferencePanes"
-PREFPANE_TARGET_PATH="$PREFPANE_TARGET_DIR/KnowType.prefPane"
 INSTALLED_EXECUTABLE="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
-LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 INPUTSOURCE_TOOL=""
 
@@ -107,7 +150,10 @@ for _ in {1..30}; do
   fi
   sleep 0.1
 done
-rm -rf "$TARGET_PATH"
+if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
+  knowtype_remove_local_inputmethod_bundle_if_safe "$TARGET_PATH" 0
+fi
+knowtype_cleanup_local_duplicate_bundles_except "" 0
 cp -R "$BUNDLE_PATH" "$TARGET_PATH"
 rm -rf "$BUNDLE_PATH"
 rm -rf "$PREFPANE_TARGET_PATH"
@@ -118,9 +164,8 @@ if command -v xattr >/dev/null 2>&1; then
   xattr -dr com.apple.quarantine "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 2>/dev/null || true
 fi
 
-if [[ -x "$LSREGISTER" ]]; then
-  "$LSREGISTER" -f "$TARGET_PATH" >/dev/null 2>&1 || true
-fi
+knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0
+knowtype_register_launchservices_path "$TARGET_PATH" 0
 
 "$INSTALLED_EXECUTABLE" --knowtype-purge-legacy
 
@@ -139,6 +184,13 @@ killall TextInputSwitcher 2>/dev/null || true
 sleep 0.5
 open -g "$TARGET_PATH" >/dev/null 2>&1 || true
 sleep 0.5
+
+duplicate_count="$(knowtype_find_local_inputmethod_bundle_paths | knowtype_count_nonempty_lines)"
+if [[ "$duplicate_count" =~ ^[0-9]+$ && "$duplicate_count" -gt 1 ]]; then
+  echo "warning: found $duplicate_count local KnowType bundles after install:" >&2
+  knowtype_find_local_inputmethod_bundle_paths | sed 's/^/  /' >&2
+  echo "Run ./scripts/repair-inputmethod-selection.sh before testing selection." >&2
+fi
 
 echo "Installed KnowType to: $TARGET_PATH"
 echo "Installed KnowType System Settings pane to: $PREFPANE_TARGET_PATH"

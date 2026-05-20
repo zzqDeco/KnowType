@@ -239,6 +239,11 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("repair_preferences_best_effort"))
         XCTAssertTrue(installScript.contains("falling back to helper"))
         XCTAssertTrue(installScript.contains("continuing so installed app activation and diagnostics can run"))
+        XCTAssertTrue(installScript.contains("scripts/lib/inputmethod-installation.sh"))
+        XCTAssertTrue(installScript.contains("knowtype_remove_local_inputmethod_bundle_if_safe"))
+        XCTAssertTrue(installScript.contains("knowtype_cleanup_local_duplicate_bundles_except"))
+        XCTAssertTrue(installScript.contains("knowtype_unregister_launchservices_records_except"))
+        XCTAssertTrue(installScript.contains("--dry-run"))
         XCTAssertLessThan(
             try XCTUnwrap(installScript.range(of: #"switch_away_before_replace"#, options: .backwards)?.lowerBound),
             try XCTUnwrap(installScript.range(of: #"killall KnowTypeInputMethodApp"#)?.lowerBound)
@@ -253,6 +258,32 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" register --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" disable"#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" select"#))
+    }
+
+    func testInstallHelperUsesCurrentInputSourceIDsAndSafeRemoval() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let helperSource = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/lib/inputmethod-installation.sh"),
+            encoding: .utf8
+        )
+        let uninstallScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/uninstall-inputmethod.sh"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(helperSource.contains(#"source "$KNOWTYPE_INSTALLATION_LIB_DIR/inputsource-ids.sh""#))
+        XCTAssertTrue(helperSource.contains("KNOWTYPE_ACTIVE_INPUT_MODE_ID"))
+        XCTAssertTrue(helperSource.contains("KNOWTYPE_LEGACY_INPUT_MODE_IDS"))
+        XCTAssertTrue(helperSource.contains(#"find "$target_dir" -maxdepth 1 \( -type d -o -type l \) -name '*.app'"#))
+        XCTAssertTrue(helperSource.contains("refusing to remove or replace"))
+        XCTAssertTrue(helperSource.contains("return 1"))
+        XCTAssertTrue(uninstallScript.contains(#"elif (( DRY_RUN == 1 )); then"#))
+        XCTAssertTrue(uninstallScript.contains("Would remove $bundle_count local KnowType input method bundle(s)."))
+        XCTAssertTrue(uninstallScript.contains("Removed $bundle_count local KnowType input method bundle(s)."))
     }
 
     func testInputMethodInfoDeclaresVisibleInputMode() throws {

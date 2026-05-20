@@ -8,6 +8,7 @@ PREFPANE_PATH="${KNOWTYPE_PREFPANE_PATH:-$DEFAULT_PREFPANE_PATH}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
+source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
 STRICT=0
 REQUIRE_SELECTED=0
 SHOW_LOGS=0
@@ -134,10 +135,7 @@ canonical_bundle_path() {
 plist_value() {
   local key="$1"
   local plist="$2"
-  local output
-  if output="$(/usr/bin/plutil -extract "$key" raw -o - "$plist" 2>/dev/null)"; then
-    printf '%s' "$output"
-  fi
+  knowtype_plist_value "$key" "$plist"
 }
 
 plist_buddy_value() {
