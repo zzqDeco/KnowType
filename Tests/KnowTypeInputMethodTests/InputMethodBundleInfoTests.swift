@@ -82,6 +82,26 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(script.contains("recipe_refs=${RIME_DATA_RECIPE_REFS}"))
     }
 
+    func testCIWorkflowPreparesRimeArtifactsBeforeBuildTestAndSmoke() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let workflow = try String(
+            contentsOf: rootURL.appendingPathComponent(".github/workflows/ci.yml"),
+            encoding: .utf8
+        )
+
+        let prepareRange = try XCTUnwrap(workflow.range(of: "./scripts/prepare-rime-artifacts.sh"))
+        let buildRange = try XCTUnwrap(workflow.range(of: "swift build"))
+        let testRange = try XCTUnwrap(workflow.range(of: "swift test"))
+        let smokeRange = try XCTUnwrap(workflow.range(of: "./scripts/smoke-inputmethod-install.sh"))
+
+        XCTAssertLessThan(prepareRange.lowerBound, buildRange.lowerBound)
+        XCTAssertLessThan(prepareRange.lowerBound, testRange.lowerBound)
+        XCTAssertLessThan(prepareRange.lowerBound, smokeRange.lowerBound)
+    }
+
     func testRimeConversionBypassesNativeSessionForNonASCIIComposition() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
