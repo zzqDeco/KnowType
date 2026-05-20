@@ -4,18 +4,99 @@ import XCTest
 
 final class InputMethodBundleInfoTests: XCTestCase {
     func testBuildScriptPackagesSwiftPMResourceBundlesInsideAppResources() throws {
-        let scriptURL = URL(fileURLWithPath: #filePath)
+        let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("scripts/build-inputmethod-bundle.sh")
-        let script = try String(contentsOf: scriptURL, encoding: .utf8)
+        let script = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/build-inputmethod-bundle.sh"),
+            encoding: .utf8
+        )
+        let package = try String(contentsOf: rootURL.appendingPathComponent("Package.swift"), encoding: .utf8)
 
         XCTAssertTrue(script.contains(#""$BIN_DIR"/KnowType_*.bundle"#))
         XCTAssertTrue(script.contains(#"cp -R "$resource_bundle" "$CONTENTS_DIR/Resources/""#))
         XCTAssertTrue(script.contains(#"cp -R "$resource_path" "$CONTENTS_DIR/Resources/""#))
         XCTAssertTrue(script.contains("security find-identity -v -p codesigning"))
         XCTAssertTrue(script.contains("/Apple Development/"))
+        XCTAssertFalse(script.contains("install_name_tool"))
+        XCTAssertTrue(script.contains("Required Rime rpath is missing"))
+        XCTAssertTrue(package.contains(#""-Xlinker", "-rpath", "-Xlinker", "@loader_path/../Frameworks""#))
+    }
+
+    func testRimeBridgeGuardsVersionedApiTailMembers() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/KnowTypeRimeBridge/KnowTypeRimeBridge.c")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("offsetof(RimeApi_stdbool, member)"))
+        XCTAssertTrue(source.contains("sizeof(api->data_size) + (size_t)api->data_size"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, select_candidate_on_current_page)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, select_candidate)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, change_page)"))
+    }
+
+    func testRimeBridgeUsesFullCandidateIteratorForNativeSnapshots() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bridge = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeRimeBridge/KnowTypeRimeBridge.c"),
+            encoding: .utf8
+        )
+        let engine = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(bridge.contains("candidate_list_begin"))
+        XCTAssertTrue(bridge.contains("candidate_list_next"))
+        XCTAssertTrue(bridge.contains("candidate_list_end"))
+        XCTAssertTrue(bridge.contains("ktb_rime_copy_full_candidate_list(session, snapshot)"))
+        XCTAssertTrue(bridge.contains("global_base_index = menu->page_no > 0 ? menu->page_no * page_size : 0"))
+        XCTAssertTrue(bridge.contains("snapshot->candidates[index].index = global_base_index + (int)index"))
+        XCTAssertTrue(engine.contains("case selectCandidate(Int)"))
+        XCTAssertTrue(engine.contains("ktb_rime_select_candidate(session, max(0, index))"))
+    }
+
+    func testRimeArtifactPreparationPinsSharedDataRecipeCommits() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/prepare-rime-artifacts.sh"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(script.contains("RIME_DATA_RECIPE_REFS"))
+        XCTAssertTrue(script.contains("rime/rime-prelude=082425ea0684bca36474415d4a0e8db9b016487e"))
+        XCTAssertTrue(script.contains("rime/rime-pinyin-simp=0c6861ef7420ee780270ca6d993d18d4101049d0"))
+        XCTAssertTrue(script.contains("missing pinned ref for Rime recipe"))
+        XCTAssertTrue(script.contains(#"git -C "$package_dir" fetch --depth 1 origin "$ref""#))
+        XCTAssertTrue(script.contains("recipe_refs=${RIME_DATA_RECIPE_REFS}"))
+    }
+
+    func testRimeConversionBypassesNativeSessionForNonASCIIComposition() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let engine = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(engine.contains("nativeBypassUntilReset"))
+        XCTAssertTrue(engine.contains("nativeRawInputMirror"))
+        XCTAssertTrue(engine.contains("containsNonASCIIText"))
+        XCTAssertTrue(engine.contains("processNonASCIIBypass"))
+        XCTAssertTrue(engine.contains("fallback.process(.text(existingComposition))"))
+        XCTAssertFalse(engine.contains("guard scalar.isASCII else {\n                continue\n            }"))
     }
 
     func testPreferencePaneBuildScriptPackagesSystemSettingsPane() throws {

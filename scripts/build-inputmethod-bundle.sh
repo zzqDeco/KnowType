@@ -9,7 +9,9 @@ DIST_DIR="$ROOT_DIR/dist"
 BUNDLE_DIR="$DIST_DIR/KnowType.app"
 CONTENTS_DIR="$BUNDLE_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
 PLIST_BUDDY="/usr/libexec/PlistBuddy"
+RIME_VENDOR_DIR="${KNOWTYPE_RIME_VENDOR_DIR:-$ROOT_DIR/Vendor/Rime}"
 
 usage() {
   cat <<'EOF'
@@ -98,7 +100,30 @@ for resource_bundle in "$BIN_DIR"/KnowType_*.bundle; do
   [[ -d "$resource_bundle" ]] || continue
   cp -R "$resource_bundle" "$CONTENTS_DIR/Resources/"
 done
+if [[ -d "$RIME_VENDOR_DIR/dist/lib" ]]; then
+  mkdir -p "$FRAMEWORKS_DIR"
+  if [[ -f "$RIME_VENDOR_DIR/dist/lib/librime.1.16.1.dylib" ]]; then
+    cp -L "$RIME_VENDOR_DIR/dist/lib/librime.1.16.1.dylib" "$FRAMEWORKS_DIR/librime.1.dylib"
+  elif [[ -f "$RIME_VENDOR_DIR/dist/lib/librime.1.dylib" ]]; then
+    cp -L "$RIME_VENDOR_DIR/dist/lib/librime.1.dylib" "$FRAMEWORKS_DIR/librime.1.dylib"
+  fi
+  if [[ -d "$RIME_VENDOR_DIR/dist/lib/rime-plugins" ]]; then
+    cp -R "$RIME_VENDOR_DIR/dist/lib/rime-plugins" "$FRAMEWORKS_DIR/"
+  fi
+fi
+if [[ -d "$RIME_VENDOR_DIR/share" ]]; then
+  rm -rf "$CONTENTS_DIR/Resources/rime-data"
+  cp -R "$RIME_VENDOR_DIR/share" "$CONTENTS_DIR/Resources/rime-data"
+fi
 chmod +x "$MACOS_DIR/KnowTypeInputMethodApp"
+if [[ -d "$FRAMEWORKS_DIR" ]]; then
+  required_rpath="@loader_path/../Frameworks"
+  if ! otool -l "$MACOS_DIR/KnowTypeInputMethodApp" | grep -Fq "$required_rpath"; then
+    echo "Required Rime rpath is missing from KnowTypeInputMethodApp: $required_rpath" >&2
+    echo "Link the executable with the required rpath instead of patching it during packaging." >&2
+    exit 1
+  fi
+fi
 
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
 if [[ -z "$SIGN_IDENTITY" ]]; then

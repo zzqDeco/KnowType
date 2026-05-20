@@ -70,6 +70,8 @@ jobs:
           fetch-depth: 0
       - name: Show Swift version
         run: swift --version
+      - name: Prepare Rime artifacts
+        run: ./scripts/prepare-rime-artifacts.sh
       - name: Release build
         run: swift build --configuration release
       - name: Test
