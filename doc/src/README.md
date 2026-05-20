@@ -62,6 +62,7 @@ required for every test file.
 - [Overview](Sources/KnowTypeInputMethod/README.plan.md)
 - [CandidateAnchorPolicy](Sources/KnowTypeInputMethod/CandidateAnchorPolicy.plan.md)
 - [CandidateAnchorResolver](Sources/KnowTypeInputMethod/CandidateAnchorResolver.plan.md)
+- [CandidatePanelAppearance](Sources/KnowTypeInputMethod/CandidatePanelAppearance.plan.md)
 - [CandidatePanelLayoutEngine](Sources/KnowTypeInputMethod/CandidatePanelLayoutEngine.plan.md)
 - [CandidatePanelRenderer](Sources/KnowTypeInputMethod/CandidatePanelRenderer.plan.md)
 - [CandidatePanelState](Sources/KnowTypeInputMethod/CandidatePanelState.plan.md)

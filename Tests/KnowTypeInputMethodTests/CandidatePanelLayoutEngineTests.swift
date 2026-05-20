@@ -15,8 +15,8 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
 
         XCTAssertEqual(plan?.orientation, .horizontal)
         XCTAssertEqual(plan?.items.count, 6)
-        XCTAssertEqual(plan?.panelSize.width, 428)
-        XCTAssertEqual(plan?.panelSize.height, 38)
+        XCTAssertEqual(plan?.panelSize.width, 477)
+        XCTAssertEqual(plan?.panelSize.height, 42)
         XCTAssertEqual(plan?.items.map(\.rowIndex), [0, 1, 2, 3, 4, 5])
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: false, count: 6))
     }
@@ -32,7 +32,7 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
 
         XCTAssertEqual(plan?.orientation, .horizontal)
         XCTAssertEqual(plan?.items.count, 4)
-        XCTAssertEqual(plan?.panelSize.width, 640)
+        XCTAssertEqual(plan?.panelSize.width, 673)
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: false, count: 4))
     }
 
@@ -46,8 +46,8 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(plan?.orientation, .vertical)
-        XCTAssertEqual(plan?.panelSize.width, 296)
-        XCTAssertEqual(plan?.panelSize.height, 186)
+        XCTAssertEqual(plan?.panelSize.width, 305)
+        XCTAssertEqual(plan?.panelSize.height, 205)
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: false, count: 6))
     }
 
@@ -71,15 +71,15 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         let plan = engine.layout(
             model: renderModel(rowCount: 9),
             anchorRect: CGRect(x: 100, y: 120, width: 0, height: 18),
-            screenProvider: screenProvider(width: 800, height: 200)
+            screenProvider: screenProvider(width: 800, height: 210)
         )
 
         XCTAssertEqual(plan?.orientation, .vertical)
         XCTAssertEqual(plan?.items.count, 9)
         XCTAssertEqual(plan?.items.map(\.rowIndex), Array(0..<9))
-        XCTAssertEqual(plan?.items.first?.frame.height, 18)
-        XCTAssertEqual(plan?.itemSpacing, 1.75)
-        XCTAssertLessThanOrEqual(plan?.panelSize.height ?? .infinity, 184)
+        XCTAssertEqual(plan?.items.first?.frame.height, 20)
+        XCTAssertEqual(plan?.itemSpacing, 0.5)
+        XCTAssertLessThanOrEqual(plan?.panelSize.height ?? .infinity, 194)
     }
 
     func testLayoutReturnsNilWhenVisibleFrameCannotFitOneRow() {
@@ -106,7 +106,7 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         XCTAssertEqual(plan?.orientation, .vertical)
         XCTAssertEqual(plan?.panelSize.width, 560)
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: true, count: 6))
-        XCTAssertEqual(plan?.items.first?.textWidthLimit, 514)
+        XCTAssertEqual(plan?.items.first?.textWidthLimit, 505)
     }
 
     func testLayoutAvoidsVisibleFrameEdges() {
@@ -133,7 +133,7 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(bottomLeft?.panelOrigin, CGPoint(x: 58, y: 84))
-        XCTAssertEqual(topRight?.panelOrigin, CGPoint(x: 154, y: 294))
+        XCTAssertEqual(topRight?.panelOrigin, CGPoint(x: 121, y: 290))
     }
 
     func testLayoutReturnsNilForInvalidAnchor() {

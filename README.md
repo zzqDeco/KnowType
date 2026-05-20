@@ -206,14 +206,18 @@ AI correction instructions. Traditional input does not depend on either file.
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
 The candidate panel shows prefix candidates first, continuation candidates after
-them, and raw input only when no suggestion is available. When a provider is
+them, and raw input only when no suggestion is available. It is a compact AppKit
+panel using macOS material, system highlight colors, mouse hover/click
+selection, scroll paging, and row accessibility labels. When a provider is
 configured, local prefix candidates appear immediately and provider-backed
 continuations update asynchronously. Provider failures do not show fixed local
 fallback text as if it were AI output.
 
 The first candidate slot is reserved for traditional input. The second slot is
 reserved for AI recommendation state, so async provider results update that slot
-without reordering the local candidate list.
+without reordering the local candidate list. Pending, unavailable, or ineligible
+AI states are shown as muted status rows without numeric shortcuts or click
+commit behavior.
 
 ## Privacy
 
