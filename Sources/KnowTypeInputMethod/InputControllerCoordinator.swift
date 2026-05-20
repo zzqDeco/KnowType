@@ -36,6 +36,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?
     private var userSelectionHistory: [String]
     private let enablesAsyncSuggestionRefresh: Bool
+    private let asyncSuggestionDelayNanoseconds: UInt64
     private var suggestionGeneration = 0
     private var runtimeReloadGeneration = 0
     private var runtimeReloadTask: Task<Void, Never>?
@@ -72,7 +73,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         conversionEngineFactory: (@Sendable (TraditionalInputEngine) -> any KnowTypeConversionEngine)? = nil,
         host: InputControllerHost,
         anchorResolver: CandidateAnchorResolver,
-        enablesAsyncSuggestionRefresh: Bool = true
+        enablesAsyncSuggestionRefresh: Bool = true,
+        asyncSuggestionDelayNanoseconds: UInt64 = 0
     ) {
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
@@ -106,6 +108,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.host = host
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
+        self.asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
         if enablesAsyncSuggestionRefresh {
             scheduleRuntimeLexiconReloadIfNeeded()
         }
@@ -200,6 +203,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 compositionBuffer.updateRawInput(rawBuffer)
                 if rawBuffer.isEmpty {
                     deleteCountBeforeCommit = 0
+                    conversionEngine.reset()
                     resetAnchorState()
                 }
             }
@@ -324,11 +328,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let conversionSnapshot = conversionEngine.isNativeActive ? conversionEngine.snapshot : nil
         let engineSnapshot = traditionalInputEngine
         let runtimePreferencesSnapshot = runtimePreferences
+        let asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
         let includeLocalFallbackContinuations = !hasProvider
             && runtimePreferencesSnapshot.localContinuationEnabledWhenNoProvider
         suggestionGeneration += 1
         let generation = suggestionGeneration
         let task = Task.detached(priority: .userInitiated) { [weak self, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot, conversionSnapshot] in
+            if asyncSuggestionDelayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: asyncSuggestionDelayNanoseconds)
+                guard !Task.isCancelled else {
+                    return
+                }
+            }
             let context = InputContext(
                 rawInput: rawInput,
                 appBundleID: appBundleID,
@@ -553,7 +564,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func publishLocalSuggestion(client: InputControllerClient?) {
+        cancelPendingSuggestionRefresh()
         publishLocalSuggestionSynchronously(client: client)
+    }
+
+    private func cancelPendingSuggestionRefresh() {
+        suggestionGeneration += 1
+        suggestionTask?.cancel()
+        suggestionTask = nil
+        taskSupervisor.cancel(.localCandidates)
     }
 
     private func publishLocalSuggestionSynchronously(client: InputControllerClient?) {

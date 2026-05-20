@@ -297,6 +297,48 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "ni")
     }
 
+    @MainActor
+    func testNativeHandledSpaceCancelsPendingAsyncSuggestionPublication() async {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: SpaceUpdatingNativeConversionEngine(),
+            asyncSuggestionDelayNanoseconds: 200_000_000
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text, "before-space")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text, "after-space")
+
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text, "after-space")
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+    }
+
+    func testDeleteToEmptyResetsConversionEngineBeforeNextComposition() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: BypassUntilResetConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("\u{E9}", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{7F}", keyCode: 51),
+                client: client
+            )
+        )
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text, "native-n")
+    }
+
     func testSegmentSpaceSelectionWinsBeforeNativeSpace() throws {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
@@ -1688,7 +1730,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         inputModePreferences: InputModePreferences = .standard,
         runtimePreferences: InputMethodRuntimePreferences = .standard,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
-        conversionEngineFactory: (@Sendable (TraditionalInputEngine) -> any KnowTypeConversionEngine)? = nil
+        conversionEngineFactory: (@Sendable (TraditionalInputEngine) -> any KnowTypeConversionEngine)? = nil,
+        asyncSuggestionDelayNanoseconds: UInt64 = 0
     ) -> (
         InputControllerCoordinator,
         FakeInputControllerHost,
@@ -1716,7 +1759,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 accessibilityProvider: NoopAccessibilityAnchorProvider(),
                 traceEnabled: false
             ),
-            enablesAsyncSuggestionRefresh: enablesAsyncSuggestionRefresh
+            enablesAsyncSuggestionRefresh: enablesAsyncSuggestionRefresh,
+            asyncSuggestionDelayNanoseconds: asyncSuggestionDelayNanoseconds
         )
         return (coordinator, host, persistence)
     }
@@ -1815,6 +1859,109 @@ final class InputControllerCoordinatorTests: XCTestCase {
         case 9: return 25
         default: return -1
         }
+    }
+}
+
+private struct SpaceUpdatingNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    private var rawInput = ""
+    private var didHandleSpace = false
+
+    var snapshot: ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-test")
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [
+                ConversionEngineCandidate(
+                    text: didHandleSpace ? "after-space" : "before-space",
+                    index: 0,
+                    source: "native-test"
+                )
+            ],
+            highlightedIndex: 0,
+            pageSize: 1,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-test"
+        )
+    }
+
+    mutating func reset() {
+        rawInput = ""
+        didHandleSpace = false
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            didHandleSpace = false
+        case .space:
+            didHandleSpace = true
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+        case .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+            break
+        }
+        return ConversionEngineResult(handled: true, snapshot: snapshot)
+    }
+}
+
+private struct BypassUntilResetConversionEngine: KnowTypeConversionEngine {
+    private var rawInput = ""
+    private var bypassed = false
+
+    var isNativeActive: Bool {
+        !bypassed
+    }
+
+    var snapshot: ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: bypassed ? "traditional-fallback" : "native-test")
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [
+                ConversionEngineCandidate(
+                    text: bypassed ? "fallback-\(rawInput)" : "native-\(rawInput)",
+                    index: 0,
+                    source: bypassed ? "traditional-fallback" : "native-test"
+                )
+            ],
+            highlightedIndex: 0,
+            pageSize: 1,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: bypassed ? "traditional-fallback" : "native-test"
+        )
+    }
+
+    mutating func reset() {
+        rawInput = ""
+        bypassed = false
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            if text.unicodeScalars.contains(where: { !$0.isASCII }) {
+                bypassed = true
+            }
+            rawInput += text
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+            break
+        }
+        return ConversionEngineResult(handled: true, snapshot: snapshot)
     }
 }
 

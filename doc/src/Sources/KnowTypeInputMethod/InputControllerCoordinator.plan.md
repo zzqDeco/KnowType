@@ -10,6 +10,7 @@ Current behavior:
 - commits through `InputControllerClient.insertText` using the active marked range when available
 - maps Return/Enter to raw commit and keeps segment selection inside the marked composition until a full commit action is reached
 - publishes raw marked text synchronously, then computes local prefix and segment candidates through a cancellable background task
+- cancels any pending async local-candidate task before synchronous local/native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
 - coalesces candidate panel refreshes so anchor resolution and AppKit panel layout run after the key event returns
 - keeps `Space` tied to the visible candidate snapshot for the current raw input; while candidates are still pending it commits the current raw/composition display instead of synchronously computing a hidden fallback
 - keeps `Tab` and visible shortcut `2` tied to a ready AI recommendation only; pending, disabled, unavailable, and ineligible AI states keep the composition
@@ -21,6 +22,7 @@ Current behavior:
 - rejects stale AI publications by raw input, composition id, and AI generation
 - warms or refreshes runtime lexicon engines in the background with generation checks; synchronous lexicon reload remains available only for deterministic test/offline paths
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
+- resets the conversion engine when Delete clears the raw buffer, including native bypass state from non-ASCII fallback compositions
 - flushes user selection history on deactivate and close; close also hides the panel
 - schedules delayed candidate re-anchor through `InputControllerHost` and applies only the latest same-raw-input, same-composition reanchor
 - keeps provider-backed suggestion publication guarded by `SuggestionPublicationGuard`

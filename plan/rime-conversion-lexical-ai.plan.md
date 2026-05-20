@@ -45,6 +45,9 @@
   recipe repositories are pinned by exact commit, and `KnowTypeInputMethodApp`
   is linked with the Rime Frameworks rpath instead of patching the executable
   during packaging.
+- Synchronous native/local candidate publication cancels stale async local
+  refresh tasks before publishing, and Delete-to-empty resets the conversion
+  engine so non-ASCII fallback bypasses do not leak into the next composition.
 - The C bridge requires the stdbool librime API and the artifact script
   re-checks cached plum data against the pinned ref each run. Versioned Rime API
   tail calls check `data_size` before reading optional function pointers.
