@@ -48,6 +48,9 @@
 - Synchronous native/local candidate publication cancels stale async local
   refresh tasks before publishing, and Delete-to-empty resets the conversion
   engine so non-ASCII fallback bypasses do not leak into the next composition.
+- Native duplicate candidate text no longer falls back to the first text match
+  when a stable native index is unavailable; ambiguous rows commit through the
+  selected UI candidate path instead of calling the wrong Rime index.
 - The C bridge requires the stdbool librime API and the artifact script
   re-checks cached plum data against the pinned ref each run. Versioned Rime API
   tail calls check `data_size` before reading optional function pointers.

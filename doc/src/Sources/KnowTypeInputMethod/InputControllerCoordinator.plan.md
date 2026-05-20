@@ -16,6 +16,7 @@ Current behavior:
 - keeps `Tab` and visible shortcut `2` tied to a ready AI recommendation only; pending, disabled, unavailable, and ineligible AI states keep the composition
 - keeps pending Space and punctuation commits non-blocking when the user has already resolved part of the composition; they commit the current displayed composition and do not run segment fallback synchronously
 - when native Rime is active, keeps visible candidate selection authoritative: segment/continuation/fully-resolved composition paths run before native Space, and a non-highlighted prefix/full row selected in the custom panel is committed through Rime's stable candidate index before the generic native Space path
+- native candidate mapping uses the encoded stable native index when present; text-only fallback is allowed only for a unique native text match, and ambiguous duplicate text falls back to the selected UI candidate instead of selecting the wrong Rime index
 - records committed typing events through `AIContextEventRecording` after insert decisions, while external Delete events are logged only when no composition is active
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
 - uses `InputTaskSupervisor` to replace stale local-candidate, AI, panel-render, and runtime-lexicon tasks

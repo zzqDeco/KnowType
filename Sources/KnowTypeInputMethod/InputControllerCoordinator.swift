@@ -528,9 +528,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
            }) {
             return nativeCandidateIndex
         }
-        return snapshot.candidates.first { candidate in
+        let textMatches = snapshot.candidates.filter { candidate in
             candidate.text == selection.text
-        }?.index
+        }
+        guard textMatches.count == 1 else {
+            return nil
+        }
+        return textMatches[0].index
     }
 
     private func isNativeSelectablePrefixOrFull(_ selection: InputCandidateSelection) -> Bool {
@@ -1163,6 +1167,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
            conversionEngine.isNativeActive,
            let selectedNativeCandidate,
            shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate) {
+            return resultForNumberSelection(selectedNativeCandidate, client: client)
+        }
+        if action == .space,
+           conversionEngine.isNativeActive,
+           let selectedNativeCandidate,
+           isNativeSelectablePrefixOrFull(selectedNativeCandidate),
+           nativeCandidateIndex(for: selectedNativeCandidate) == nil {
             return resultForNumberSelection(selectedNativeCandidate, client: client)
         }
         if action == .space,
