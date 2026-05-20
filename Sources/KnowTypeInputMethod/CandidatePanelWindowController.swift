@@ -243,7 +243,8 @@ private struct AppKitCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
 
 @MainActor
 final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
-    private let effectView = NSVisualEffectView()
+    private let backgroundView: NSView
+    private let effectView: NSVisualEffectView?
     private let stackView = NSStackView()
     private let panelAppearance: CandidatePanelAppearance
     private var rowHitTargets: [CandidatePanelRowHitTarget] = []
@@ -259,6 +260,14 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
 
     init(frame frameRect: NSRect = .zero, appearance: CandidatePanelAppearance = .native) {
         self.panelAppearance = appearance
+        if appearance.usesSnapshotColors {
+            self.backgroundView = NSView()
+            self.effectView = nil
+        } else {
+            let effectView = NSVisualEffectView()
+            self.backgroundView = effectView
+            self.effectView = effectView
+        }
         super.init(frame: frameRect)
         applySnapshotAppearanceIfNeeded()
         setup()
@@ -266,6 +275,9 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
 
     required init?(coder: NSCoder) {
         self.panelAppearance = .native
+        let effectView = NSVisualEffectView()
+        self.backgroundView = effectView
+        self.effectView = effectView
         super.init(coder: coder)
         setup()
     }
@@ -333,25 +345,27 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
 
-        effectView.material = panelAppearance.material
-        effectView.blendingMode = panelAppearance.blendingMode
-        effectView.state = .active
-        effectView.appearance = appearance
-        effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = panelAppearance.panelCornerRadius
-        effectView.layer?.cornerCurve = .continuous
-        effectView.layer?.masksToBounds = true
-        effectView.layer?.borderColor = panelAppearance.panelBorderColor().cgColor
-        effectView.layer?.borderWidth = panelAppearance.borderWidth
-        effectView.layer?.backgroundColor = panelAppearance.panelBackgroundColor()?.cgColor
-        effectView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(effectView)
+        if let effectView {
+            effectView.material = panelAppearance.material
+            effectView.blendingMode = panelAppearance.blendingMode
+            effectView.state = .active
+        }
+        backgroundView.appearance = appearance
+        backgroundView.wantsLayer = true
+        backgroundView.layer?.cornerRadius = panelAppearance.panelCornerRadius
+        backgroundView.layer?.cornerCurve = .continuous
+        backgroundView.layer?.masksToBounds = true
+        backgroundView.layer?.borderColor = panelAppearance.panelBorderColor().cgColor
+        backgroundView.layer?.borderWidth = panelAppearance.borderWidth
+        backgroundView.layer?.backgroundColor = panelAppearance.panelBackgroundColor()?.cgColor
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(backgroundView)
 
         NSLayoutConstraint.activate([
-            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            effectView.topAnchor.constraint(equalTo: topAnchor),
-            effectView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backgroundView.topAnchor.constraint(equalTo: topAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
         stackView.orientation = .horizontal
@@ -364,13 +378,13 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
             right: panelAppearance.contentInsets.right
         )
         stackView.translatesAutoresizingMaskIntoConstraints = false
-        effectView.addSubview(stackView)
+        backgroundView.addSubview(stackView)
 
         NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
-            stackView.topAnchor.constraint(equalTo: effectView.topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor)
+            stackView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor)
         ])
     }
 

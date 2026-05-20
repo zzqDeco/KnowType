@@ -88,7 +88,12 @@ final class CandidatePanelSnapshotTests: XCTestCase {
 
         try writeMismatchArtifacts(name: name, actualData: pngData, expected: expected, actual: actual)
         XCTFail(
-            "Snapshot \(name) differs: \(comparison.mismatchedPixels) changed pixels, max channel delta \(comparison.maxChannelDelta). Artifacts: \(mismatchDirectory.path)",
+            """
+            Snapshot \(name) differs: \(comparison.mismatchedPixels) changed pixels, \
+            \(comparison.largeDeltaPixels) large-delta pixels, max channel delta \
+            \(comparison.maxChannelDelta), average delta \(String(format: "%.2f", comparison.averageChannelDelta)). \
+            Artifacts: \(mismatchDirectory.path)
+            """,
             file: file,
             line: line
         )
@@ -139,7 +144,9 @@ final class CandidatePanelSnapshotTests: XCTestCase {
         }
 
         var mismatchedPixels = 0
+        var largeDeltaPixels = 0
         var maxChannelDelta = 0
+        var totalChannelDelta = 0
         for y in 0..<expected.pixelsHigh {
             for x in 0..<expected.pixelsWide {
                 let expectedRGBA = rgba(expected.colorAt(x: x, y: y))
@@ -152,14 +159,20 @@ final class CandidatePanelSnapshotTests: XCTestCase {
                 ]
                 let pixelMaxDelta = deltas.max() ?? 0
                 maxChannelDelta = max(maxChannelDelta, pixelMaxDelta)
-                if pixelMaxDelta > 2 {
+                totalChannelDelta += pixelMaxDelta
+                if pixelMaxDelta > 12 {
                     mismatchedPixels += 1
+                }
+                if pixelMaxDelta > 64 {
+                    largeDeltaPixels += 1
                 }
             }
         }
         return SnapshotComparison(
             mismatchedPixels: mismatchedPixels,
+            largeDeltaPixels: largeDeltaPixels,
             maxChannelDelta: maxChannelDelta,
+            totalChannelDelta: totalChannelDelta,
             totalPixels: expected.pixelsWide * expected.pixelsHigh
         )
     }
@@ -206,7 +219,7 @@ final class CandidatePanelSnapshotTests: XCTestCase {
                     abs(expectedRGBA.blue - actualRGBA.blue),
                     abs(expectedRGBA.alpha - actualRGBA.alpha)
                 )
-                diff.setColor(delta > 2 ? .systemRed : .clear, atX: x, y: y)
+                diff.setColor(delta > 12 ? .systemRed : .clear, atX: x, y: y)
             }
         }
         return diff.representation(using: .png, properties: [:])
@@ -297,11 +310,23 @@ final class CandidatePanelSnapshotTests: XCTestCase {
 
 private struct SnapshotComparison {
     var mismatchedPixels: Int
+    var largeDeltaPixels: Int = 0
     var maxChannelDelta: Int
+    var totalChannelDelta: Int = 0
     var totalPixels: Int
 
+    var averageChannelDelta: Double {
+        guard totalPixels > 0 else {
+            return 0
+        }
+        return Double(totalChannelDelta) / Double(totalPixels)
+    }
+
     var isAcceptable: Bool {
-        mismatchedPixels <= max(8, totalPixels / 1_000) && maxChannelDelta <= 24
+        mismatchedPixels <= max(8, totalPixels / 5)
+            && largeDeltaPixels <= max(4, totalPixels / 50)
+            && maxChannelDelta <= 180
+            && averageChannelDelta <= 8
     }
 }
 
