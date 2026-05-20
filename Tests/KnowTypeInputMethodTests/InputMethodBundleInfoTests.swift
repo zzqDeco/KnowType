@@ -21,6 +21,20 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(script.contains("install_name_tool -add_rpath \"@loader_path/../Frameworks\" \"$MACOS_DIR/KnowTypeInputMethodApp\" >/dev/null 2>&1 || true"))
     }
 
+    func testRimeBridgeGuardsVersionedApiTailMembers() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/KnowTypeRimeBridge/KnowTypeRimeBridge.c")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("offsetof(RimeApi_stdbool, member)"))
+        XCTAssertTrue(source.contains("sizeof(api->data_size) + (size_t)api->data_size"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, select_candidate_on_current_page)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, change_page)"))
+    }
+
     func testPreferencePaneBuildScriptPackagesSystemSettingsPane() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

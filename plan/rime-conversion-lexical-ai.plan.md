@@ -29,8 +29,13 @@
 - Explicit segment-candidate `Space` selection is handled before native Rime
   `Space`, and native numeric full-candidate selection maps by current context
   candidate text to avoid augmented-list index drift.
+- Explicit continuation selection also runs before native Rime `Space`, native
+  suggestions preserve local offline continuations when no provider is
+  configured, and protected app commits are excluded from lexical profile
+  history before any later AI recommendation request.
 - The C bridge requires the stdbool librime API and the artifact script
-  re-checks cached plum data against the pinned ref each run.
+  re-checks cached plum data against the pinned ref each run. Versioned Rime API
+  tail calls check `data_size` before reading optional function pointers.
 - `scripts/build-inputmethod-bundle.sh` copies optional Rime dylibs/plugins/shared data into the app bundle before signing and fails packaging if the required Rime rpath is missing.
 
 ## Test Plan

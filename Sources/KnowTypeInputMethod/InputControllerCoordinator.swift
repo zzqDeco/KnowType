@@ -331,7 +331,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
             let suggestion: SuggestionResponse
             if let rimeSuggestion = conversionSnapshot?.suggestionResponse(originalRawInput: rawInput),
                !compositionSnapshot.hasResolvedSegments {
-                suggestion = rimeSuggestion
+                let localSuggestion = InputMethodPipeline.localSuggestions(
+                    for: context,
+                    includeFallbackContinuations: includeLocalFallbackContinuations,
+                    traditionalInputEngine: engineSnapshot,
+                    runtimePreferences: runtimePreferencesSnapshot
+                )
+                suggestion = Self.mergedConversionSuggestion(
+                    rimeSuggestion,
+                    localSuggestion: localSuggestion
+                )
             } else if compositionSnapshot.hasResolvedSegments {
                 suggestion = InputMethodPipeline.localSuggestions(
                     for: context,
@@ -543,13 +552,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: locale,
             userSelectionHistory: userSelectionHistory
         )
+        let includeLocalFallbackContinuations = conversionEngine.isNativeActive
+            && !hasProvider
+            && runtimePreferences.localContinuationEnabledWhenNoProvider
         let localSuggestion = InputMethodPipeline.localSuggestions(
             for: context,
-            includeFallbackContinuations: false,
+            includeFallbackContinuations: includeLocalFallbackContinuations,
             traditionalInputEngine: traditionalInputEngine,
             runtimePreferences: runtimePreferences
         )
-        let suggestion = conversionSuggestion() ?? localSuggestion
+        let suggestion = Self.mergedConversionSuggestion(
+            conversionSuggestion(),
+            localSuggestion: localSuggestion
+        )
         let augmentedSuggestion = augmentedSuggestion(suggestion)
         lastSuggestion = augmentedSuggestion
         lastSuggestionRawInput = rawBuffer
@@ -563,6 +578,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return nil
         }
         return conversionEngine.snapshot.suggestionResponse(originalRawInput: rawBuffer)
+    }
+
+    private static func mergedConversionSuggestion(
+        _ conversionSuggestion: SuggestionResponse?,
+        localSuggestion: SuggestionResponse
+    ) -> SuggestionResponse {
+        guard var conversionSuggestion else {
+            return localSuggestion
+        }
+        if conversionSuggestion.continuationCandidates.isEmpty {
+            conversionSuggestion.continuationCandidates = localSuggestion.continuationCandidates
+        }
+        return conversionSuggestion
     }
 
     private func lexicalContextSnapshot(for suggestion: SuggestionResponse) -> LexicalContextSnapshot? {
@@ -582,6 +610,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard let firstPrefix = suggestion.prefixCandidates.first,
               !isPartialSegmentCandidate(firstPrefix),
               !compositionBuffer.hasResolvedSegments || compositionBuffer.isFullyResolved else {
+            aiRecommendationState = .idle
+            updateCandidatePanel(suggestion: suggestion, client: client)
+            return
+        }
+
+        let currentAppBundleID = appBundleIdentifier(client: client)
+        guard !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: currentAppBundleID),
+              !TextProtection.requiresNoCorrection(firstPrefix.text, appBundleID: currentAppBundleID) else {
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
@@ -613,8 +649,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let request = AIRecommendationRequest(
             rawInput: rawInput,
             traditionalCandidate: firstPrefix,
-            appBundleID: appBundleIdentifier(client: client),
-            appName: appBundleIdentifier(client: client),
+            appBundleID: currentAppBundleID,
+            appName: currentAppBundleID,
             locale: locale,
             compositionID: currentCompositionID,
             lexicalContext: lexicalContextSnapshot(for: suggestion)
@@ -1024,6 +1060,23 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
         }
         if action == .space,
+           let selectedNativeCandidate,
+           case .continuationCandidate = selectedNativeCandidate.kind {
+            let commitSuggestion = commitSuggestionSnapshot(for: action, client: client)
+            return InputSessionCommitPolicy.result(
+                for: action,
+                rawInput: rawBuffer,
+                suggestion: commitSuggestion.suggestion,
+                suggestionRawInput: commitSuggestion.rawInput,
+                selectedCandidate: sessionSelection(from: selectedNativeCandidate),
+                appBundleID: appBundleIdentifier(client: client),
+                locale: locale,
+                traditionalInputEngine: traditionalInputEngine,
+                runtimePreferences: runtimePreferences,
+                allowsSynchronousFallback: true
+            )
+        }
+        if action == .space,
            conversionEngine.isNativeActive {
             let conversionResult = conversionEngine.process(.space)
             if let commitText = conversionResult.commitText,
@@ -1137,6 +1190,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func recordTypingCommit(_ text: String, client: InputControllerClient?) {
+        let appBundleID = appBundleIdentifier(client: client)
+        guard !TextProtection.requiresNoCorrection(text, appBundleID: appBundleID),
+              !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
+            return
+        }
         recordLexicalCommit(text)
         guard let aiContextEventRecorder,
               hasProvider,

@@ -7,6 +7,8 @@ Current responsibilities:
 - `AIRecommendationRuntime` builds real-time prefix-locked provider requests from raw input, the traditional first candidate, app context, `ENV.md`, `CORRECTION.md`, and optional `LEXICAL_PROFILE.md`.
 - `AIRecommendationRuntime` debounces, hard-times out, caches, sanitizes returned continuations, and reports ready/unavailable/ineligible state through `AIRecommendationState`.
 - `LexicalContextBuilder` produces top-K local lexical and tone summaries from current candidates, recent commits, and selection history; full DB files and raw logs are not sent.
+- Input-method callers must keep Level 0/protected app commits out of lexical
+  profile inputs before constructing AI recommendation requests.
 - `AIContextMemoryRuntime` records committed typing events and periodically asks the provider to summarize them into `ENV.md`.
 - `TypingEventStore` stores event batches as JSONL and archives processed batches after a successful digest.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, replacing only the generated section.

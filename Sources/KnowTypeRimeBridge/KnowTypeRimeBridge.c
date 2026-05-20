@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -235,6 +236,16 @@ static bool ktb_rime_initialized = false;
 static void *ktb_rime_library_handle = NULL;
 static RimeApi_stdbool *ktb_rime_api = NULL;
 
+#define KTB_RIME_API_HAS(api, member) \
+    ktb_rime_api_has_member((api), offsetof(RimeApi_stdbool, member), sizeof((api)->member))
+
+static bool ktb_rime_api_has_member(const RimeApi_stdbool *api, size_t offset, size_t size) {
+    if (!api || api->data_size < 0) {
+        return false;
+    }
+    return sizeof(api->data_size) + (size_t)api->data_size >= offset + size;
+}
+
 static void ktb_rime_traits_init(RimeTraits *traits) {
     memset(traits, 0, sizeof(RimeTraits));
     traits->data_size = (int)(sizeof(RimeTraits) - sizeof(traits->data_size));
@@ -455,14 +466,18 @@ void ktb_rime_context_snapshot_free(KTBRimeContextSnapshot *snapshot) {
 }
 
 bool ktb_rime_select_candidate_on_current_page(KTBRimeSession *session, size_t index) {
-    if (!session || !session->api || !session->api->select_candidate_on_current_page) {
+    if (!session || !session->api ||
+        !KTB_RIME_API_HAS(session->api, select_candidate_on_current_page) ||
+        !session->api->select_candidate_on_current_page) {
         return false;
     }
     return session->api->select_candidate_on_current_page(session->session_id, index);
 }
 
 bool ktb_rime_change_page(KTBRimeSession *session, bool backward) {
-    if (!session || !session->api || !session->api->change_page) {
+    if (!session || !session->api ||
+        !KTB_RIME_API_HAS(session->api, change_page) ||
+        !session->api->change_page) {
         return false;
     }
     return session->api->change_page(session->session_id, backward);

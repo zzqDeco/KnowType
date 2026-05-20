@@ -335,6 +335,73 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeNoProviderSuggestionsKeepLocalFallbackContinuations() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["我觉得这个方案"],
+                recorder: recorder
+            )
+        )
+
+        for character in "wojuedezhegefagnan" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+
+        let hasFallbackContinuation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.continuationCandidates.contains {
+                $0.text == "还有进一步优化空间"
+            } == true
+        }
+        XCTAssertTrue(hasFallbackContinuation)
+    }
+
+    @MainActor
+    func testNativeSpaceHonorsSelectedContinuationBeforeRime() async throws {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["我觉得这个方案"],
+                recorder: recorder,
+                spaceCommit: "native-space"
+            )
+        )
+
+        for character in "wojuedezhegefagnan" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasFallbackContinuation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.continuationCandidates.contains {
+                $0.text == "还有进一步优化空间"
+            } == true
+        }
+        XCTAssertTrue(hasFallbackContinuation)
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+        let prefix = try XCTUnwrap(viewModel.prefixCandidates.first?.text)
+        let continuation = try XCTUnwrap(viewModel.continuationCandidates.first?.text)
+
+        for _ in 0..<20 where host.panelStates.last?.windowState.selection != .continuationCandidate(0) {
+            XCTAssertTrue(
+                coordinator.handle(
+                    stroke: InputKeyStroke(text: "\u{F701}", keyCode: 125),
+                    client: client
+                )
+            )
+        }
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .continuationCandidate(0))
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "\(prefix)\(continuation)")
+        XCTAssertEqual(recorder.spaceProcessCount, 0)
+    }
+
+    @MainActor
     func testAsyncReadyLocalPrefixCommitsAfterCandidatePublication() async {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
@@ -819,6 +886,50 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(request.lexicalContext?.markdown.contains("你") == true)
         XCTAssertTrue(request.lexicalContext?.sourceSummary.contains { $0.hasPrefix("rime-candidates: ") } == true)
+    }
+
+    @MainActor
+    func testProtectedAppInputDoesNotReachAIRecommendationOrLaterLexicalProfile() async throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "secretphrase" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\r", keyCode: 36),
+                client: client
+            )
+        )
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let protectedRequests = await aiProvider.requests
+        XCTAssertTrue(protectedRequests.isEmpty)
+
+        client.bundleIdentifier = "com.example.host"
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+
+        var unprotectedRequest: AIRecommendationRequest?
+        for _ in 0..<60 {
+            let requests = await aiProvider.requests
+            unprotectedRequest = requests.last { $0.rawInput == "ni" }
+            if unprotectedRequest != nil {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let request = try XCTUnwrap(unprotectedRequest)
+        XCTAssertFalse(request.lexicalContext?.markdown.contains("secretphrase") ?? false)
     }
 
     @MainActor
