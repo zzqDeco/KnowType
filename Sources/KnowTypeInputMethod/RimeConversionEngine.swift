@@ -24,6 +24,24 @@ public struct ConversionEngineCandidate: Sendable, Equatable {
     }
 }
 
+enum ConversionCandidateSource {
+    private static let nativeIndexMarker = "#native-index="
+
+    static func encode(_ source: String, nativeIndex: Int) -> String {
+        guard source != "traditional-fallback" else {
+            return source
+        }
+        return "\(source)\(nativeIndexMarker)\(nativeIndex)"
+    }
+
+    static func nativeIndex(from source: String) -> Int? {
+        guard let range = source.range(of: nativeIndexMarker, options: .backwards) else {
+            return nil
+        }
+        return Int(source[range.upperBound...])
+    }
+}
+
 public struct ConversionEngineSnapshot: Sendable, Equatable {
     public var rawInput: String
     public var preedit: String
@@ -479,7 +497,7 @@ extension ConversionEngineSnapshot {
         let prefixCandidates = candidates.map { candidate in
             CorrectionCandidate(
                 text: candidate.text,
-                source: candidate.source,
+                source: ConversionCandidateSource.encode(candidate.source, nativeIndex: candidate.index),
                 confidence: candidate.confidence,
                 correctionLevel: .contextual,
                 protectedRanges: TextProtection.detectProtectedRanges(in: candidate.text),

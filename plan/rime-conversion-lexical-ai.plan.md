@@ -31,8 +31,11 @@
   candidate text to avoid augmented-list index drift.
 - Explicit continuation selection also runs before native Rime `Space`, native
   suggestions preserve local offline continuations when no provider is
-  configured, and protected app commits are excluded from lexical profile
-  history before any later AI recommendation request.
+  configured, and protected app commits/selections are excluded from lexical
+  profile history before any later AI recommendation request.
+- Fully resolved compositions commit before native `Space`, runtime conversion
+  engine reloads replay active raw input into the replacement session, and
+  duplicate native candidate text maps by encoded current-page index.
 - The C bridge requires the stdbool librime API and the artifact script
   re-checks cached plum data against the pinned ref each run. Versioned Rime API
   tail calls check `data_size` before reading optional function pointers.

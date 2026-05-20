@@ -188,6 +188,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testRuntimeLexiconReloadReplaysActiveRawInputIntoReplacementConversionEngine() async throws {
+        let client = FakeInputControllerClient()
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let lexiconRuntime = InputMethodLexiconRuntime(directories: [directory])
+        let recorder = ConversionReplayRecorder()
+        let nativeRecorder = NativeSelectionRecorder()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true,
+            lexiconRuntime: lexiconRuntime,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: nativeRecorder
+            ),
+            conversionEngineFactory: { _ in
+                ReplayRecordingConversionEngine(recorder: recorder)
+            }
+        )
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        try Data("ce shi ci\t测试词\t0.995\n".utf8)
+            .write(to: directory.appendingPathComponent("user.tsv"))
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+
+        let replayedActiveInput = await waitUntilOnMainActor {
+            recorder.processedTexts.contains { !$0.isEmpty }
+        }
+        XCTAssertTrue(replayedActiveInput)
+    }
+
+    @MainActor
     func testAsyncPendingSpaceCommitsFirstLocalCandidateWithoutBlocking() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
@@ -294,6 +327,44 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(recorder.spaceProcessCount, 0)
     }
 
+    func testFullyResolvedCompositionSpaceWinsBeforeNativeSpace() throws {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["native-one", "native-two"],
+                recorder: recorder,
+                spaceCommit: "native-space"
+            )
+        )
+
+        for character in "nishishei" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        try selectCandidate(
+            text: "你",
+            rawRange: KnowTypeCore.TextRange(start: 0, length: 2),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+        try selectCandidate(
+            text: "是谁",
+            rawRange: KnowTypeCore.TextRange(start: 2, length: 7),
+            coordinator: coordinator,
+            host: host,
+            client: client
+        )
+
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(coordinator.composedString() as? String, "你是谁")
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁")
+        XCTAssertEqual(recorder.spaceProcessCount, 0)
+    }
+
     func testNativeFullCandidateSelectionMapsAugmentedIndexToCurrentPageIndex() throws {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
@@ -332,6 +403,34 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(recorder.selectedIndices, [5])
         XCTAssertEqual(client.insertTextWrites.last?.text, "候六")
         XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testNativeDuplicateCandidateSelectionUsesStableNativeIndex() throws {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["重复", "重复", "其他"],
+                recorder: recorder
+            )
+        )
+
+        for character in "chongfu" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
+        XCTAssertEqual(viewModel.prefixCandidates.filter { $0.text == "重复" }.count, 2)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertEqual(client.insertTextWrites.last?.text, "重复")
     }
 
     @MainActor
@@ -914,6 +1013,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let protectedRequests = await aiProvider.requests
         XCTAssertTrue(protectedRequests.isEmpty)
 
+        for character in "wojuedezhegefagnan" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let requestsAfterProtectedSelection = await aiProvider.requests
+        XCTAssertTrue(requestsAfterProtectedSelection.isEmpty)
+
         client.bundleIdentifier = "com.example.host"
         for character in "ni" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
@@ -930,6 +1037,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let request = try XCTUnwrap(unprotectedRequest)
         XCTAssertFalse(request.lexicalContext?.markdown.contains("secretphrase") ?? false)
+        XCTAssertFalse(request.lexicalContext?.markdown.contains("我觉得这个方案") ?? false)
     }
 
     @MainActor
@@ -1548,7 +1656,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferences: InputModePreferences = .standard,
         runtimePreferences: InputMethodRuntimePreferences = .standard,
-        conversionEngine: (any KnowTypeConversionEngine)? = nil
+        conversionEngine: (any KnowTypeConversionEngine)? = nil,
+        conversionEngineFactory: (@Sendable (TraditionalInputEngine) -> any KnowTypeConversionEngine)? = nil
     ) -> (
         InputControllerCoordinator,
         FakeInputControllerHost,
@@ -1569,6 +1678,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
             conversionEngine: conversionEngine,
+            conversionEngineFactory: conversionEngineFactory,
             host: host,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: FixedInputControllerScreenProvider(),
@@ -1653,6 +1763,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
         return condition()
     }
 
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KnowTypeInputControllerCoordinatorTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
     private func keyCode(forNumber number: Int) -> Int {
         switch number {
         case 0: return 29
@@ -1724,6 +1841,50 @@ private struct NativeHandledNoCommitConversionEngine: KnowTypeConversionEngine {
 private final class NativeSelectionRecorder: @unchecked Sendable {
     var selectedIndices: [Int] = []
     var spaceProcessCount = 0
+}
+
+private final class ConversionReplayRecorder: @unchecked Sendable {
+    var processedTexts: [String] = []
+}
+
+private struct ReplayRecordingConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    let recorder: ConversionReplayRecorder
+    private var rawInput = ""
+
+    init(recorder: ConversionReplayRecorder) {
+        self.recorder = recorder
+    }
+
+    var snapshot: ConversionEngineSnapshot {
+        ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: rawInput.isEmpty
+                ? []
+                : [ConversionEngineCandidate(text: "replayed", index: 0, source: "native-test")],
+            highlightedIndex: 0,
+            pageSize: 1,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-test"
+        )
+    }
+
+    mutating func reset() {
+        rawInput = ""
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            recorder.processedTexts.append(text)
+            rawInput += text
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space, .deleteBackward, .selectCandidateOnCurrentPage, .pageUp, .pageDown:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
+        }
+    }
 }
 
 private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
