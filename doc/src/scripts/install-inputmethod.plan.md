@@ -39,6 +39,11 @@ Installs the locally built KnowType input method bundle into
   `KnowType.prefPane` so an old pane cannot drift out of version sync with the
   newly installed input-method app. Use `--with-prefpane` to install a matching
   compatibility pane.
+- The script removes stale System Settings PreferencePane cache files when they
+  still reference `com.knowtype.preferencepane` or `KnowType.prefPane`, and asks
+  System Settings to quit if it is running so the sidebar is rebuilt on next
+  launch. This prevents a default install from leaving an unloadable `KnowType`
+  sidebar item after the optional pane has been removed.
 - TIS registration, enablement, and selection remain attributed to
   `KnowType.app`; the SwiftPM helper is used only for scoped preference repair.
 - macOS 15 local policy issues may still require the SystemPolicyRule profile

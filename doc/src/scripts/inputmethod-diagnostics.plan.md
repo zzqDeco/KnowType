@@ -66,6 +66,10 @@ When `TISSelectInputSource` returns success in the app context and `AppleSelecte
 The default install script does not install `KnowType.prefPane`. That
 PreferencePane remains a compatibility fallback requested with `--with-prefpane`;
 the primary settings entry is the input-method menu item `KnowType Settings...`.
+When the pane is missing, strict diagnostics fail if System Settings cache files
+still contain KnowType PreferencePane metadata, because that produces an
+unloadable `KnowType` sidebar entry. Re-run the install or uninstall script to
+remove those cache files and reopen System Settings.
 
 `KnowTypeInputMethodApp` handles `--knowtype-install-activate`,
 `--knowtype-switch-away`, `--knowtype-purge-legacy`,

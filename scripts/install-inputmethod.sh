@@ -117,6 +117,20 @@ if (( DRY_RUN == 1 )); then
     echo "  $PREFPANE_TARGET_PATH"
   fi
   echo
+  echo "System Settings PreferencePane caches that would be refreshed:"
+  cache_count=0
+  while IFS= read -r cache_path; do
+    [[ -n "$cache_path" ]] || continue
+    cache_count=$((cache_count + 1))
+    echo "  $cache_path"
+  done < <(knowtype_preferencepane_cache_identity_paths)
+  if (( cache_count == 0 )); then
+    echo "  <none with KnowType metadata>"
+  else
+    knowtype_clean_preferencepane_caches 1
+  fi
+  knowtype_quit_system_settings_if_running 1
+  echo
   echo "Text Input Source preference rows would be repaired and menu agents would be restarted."
   exit 0
 fi
@@ -210,6 +224,9 @@ elif [[ -d "$PREFPANE_TARGET_PATH" ]]; then
   REMOVED_STALE_PREFPANE=1
 fi
 
+knowtype_clean_preferencepane_caches 0
+knowtype_quit_system_settings_if_running 0
+
 if command -v xattr >/dev/null 2>&1; then
   if (( WITH_PREFPANE == 1 )); then
     xattr -dr com.apple.quarantine "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 2>/dev/null || true
@@ -249,8 +266,10 @@ fi
 echo "Installed KnowType to: $TARGET_PATH"
 if (( WITH_PREFPANE == 1 )); then
   echo "Installed KnowType compatibility PreferencePane to: $PREFPANE_TARGET_PATH"
+  echo "System Settings may show the compatibility KnowType pane after reopening."
 else
   echo "KnowType settings are available from the input-method menu: KnowType Settings..."
+  echo "Default install keeps System Settings free of stale KnowType PreferencePane entries."
   if (( REMOVED_STALE_PREFPANE == 1 )); then
     echo "Removed stale KnowType compatibility PreferencePane from: $PREFPANE_TARGET_PATH"
   fi

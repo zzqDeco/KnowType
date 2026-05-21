@@ -6,6 +6,8 @@ source "$KNOWTYPE_INSTALLATION_LIB_DIR/inputsource-ids.sh"
 KNOWTYPE_PREFPANE_BUNDLE_ID="com.knowtype.preferencepane"
 KNOWTYPE_LSREGISTER="${KNOWTYPE_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
 KNOWTYPE_PLIST_BUDDY="${KNOWTYPE_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
+KNOWTYPE_SYSTEM_SETTINGS_APP_PATH="/System/Applications/System Settings.app/Contents/MacOS/System Settings"
+KNOWTYPE_SYSTEM_PREFERENCES_APP_PATH="/System/Applications/System Preferences.app/Contents/MacOS/System Preferences"
 
 knowtype_inputmethod_target_dir() {
   printf '%s' "${KNOWTYPE_INPUTMETHOD_TARGET_DIR:-$HOME/Library/Input Methods}"
@@ -21,6 +23,85 @@ knowtype_preferencepane_target_dir() {
 
 knowtype_preferencepane_target_path() {
   printf '%s/KnowType.prefPane' "$(knowtype_preferencepane_target_dir)"
+}
+
+knowtype_preferencepane_cache_paths() {
+  if [[ -n "${KNOWTYPE_PREFPANE_CACHE_PATHS:-}" ]]; then
+    tr ':' '\n' <<<"$KNOWTYPE_PREFPANE_CACHE_PATHS" | awk 'NF'
+    return 0
+  fi
+
+  printf '%s\n' "$HOME/Library/Caches/com.apple.preferencepanes.usercache"
+  printf '%s\n' "$HOME/Library/Caches/com.apple.systemsettings.menucache"
+}
+
+knowtype_preferencepane_cache_contains_identity() {
+  local cache_path="$1"
+  [[ -f "$cache_path" ]] || return 1
+
+  LC_ALL=C grep -a -q \
+    -e "$KNOWTYPE_PREFPANE_BUNDLE_ID" \
+    -e "KnowType.prefPane" \
+    -e "KnowType" \
+    "$cache_path" 2>/dev/null
+}
+
+knowtype_preferencepane_cache_identity_paths() {
+  while IFS= read -r cache_path; do
+    [[ -n "$cache_path" ]] || continue
+    if knowtype_preferencepane_cache_contains_identity "$cache_path"; then
+      printf '%s\n' "$cache_path"
+    fi
+  done < <(knowtype_preferencepane_cache_paths)
+}
+
+knowtype_preferencepane_cache_has_identity() {
+  [[ -n "$(knowtype_preferencepane_cache_identity_paths)" ]]
+}
+
+knowtype_clean_preferencepane_caches() {
+  local dry_run="${1:-0}"
+  local cleaned=0
+
+  while IFS= read -r cache_path; do
+    [[ -n "$cache_path" ]] || continue
+    if ! knowtype_preferencepane_cache_contains_identity "$cache_path"; then
+      continue
+    fi
+    cleaned=$((cleaned + 1))
+    if [[ "$dry_run" == "1" ]]; then
+      echo "[dry-run] Would remove stale System Settings PreferencePane cache: $cache_path"
+    else
+      rm -f -- "$cache_path"
+      echo "Removed stale System Settings PreferencePane cache: $cache_path"
+    fi
+  done < <(knowtype_preferencepane_cache_paths)
+
+  return 0
+}
+
+knowtype_system_settings_is_running() {
+  pgrep -f "$KNOWTYPE_SYSTEM_SETTINGS_APP_PATH" >/dev/null 2>&1 ||
+    pgrep -f "$KNOWTYPE_SYSTEM_PREFERENCES_APP_PATH" >/dev/null 2>&1
+}
+
+knowtype_quit_system_settings_if_running() {
+  local dry_run="${1:-0}"
+
+  if ! knowtype_system_settings_is_running; then
+    return 0
+  fi
+
+  if [[ "$dry_run" == "1" ]]; then
+    echo "[dry-run] Would ask System Settings to quit so its PreferencePane sidebar cache can rebuild"
+    return 0
+  fi
+
+  if osascript -e 'tell application id "com.apple.systempreferences" to quit' >/dev/null 2>&1; then
+    echo "Asked System Settings to quit so its PreferencePane sidebar cache can rebuild"
+  else
+    echo "warning: could not ask System Settings to quit; close and reopen System Settings before checking the KnowType sidebar entry" >&2
+  fi
 }
 
 knowtype_strip_lsregister_suffix() {

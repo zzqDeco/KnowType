@@ -148,6 +148,32 @@ declare -F knowtype_find_local_inputmethod_bundle_paths >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load duplicate discovery helpers"
 declare -F knowtype_remove_local_inputmethod_bundle_if_safe >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load safe removal helpers"
+declare -F knowtype_clean_preferencepane_caches >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
+
+cache_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-prefpane-cache-smoke.XXXXXX")"
+cache_stale="$cache_tmp_dir/com.apple.systemsettings.menucache"
+cache_clean="$cache_tmp_dir/com.apple.preferencepanes.usercache"
+printf 'label=KnowType id=com.knowtype.preferencepane path=KnowType.prefPane\n' >"$cache_stale"
+printf 'label=Keyboard id=com.apple.Keyboard-Settings.extension\n' >"$cache_clean"
+previous_cache_paths="${KNOWTYPE_PREFPANE_CACHE_PATHS-}"
+export KNOWTYPE_PREFPANE_CACHE_PATHS="$cache_stale:$cache_clean"
+knowtype_preferencepane_cache_has_identity ||
+  die "PreferencePane cache helper did not detect stale KnowType metadata"
+cache_dry_run_output="$(knowtype_clean_preferencepane_caches 1)"
+assert_contains "$cache_dry_run_output" "$cache_stale" "PreferencePane cache dry run output"
+assert_file "$cache_stale"
+assert_file "$cache_clean"
+knowtype_clean_preferencepane_caches 0 >/dev/null
+[[ ! -e "$cache_stale" ]] ||
+  die "PreferencePane cache helper did not remove stale KnowType cache"
+assert_file "$cache_clean"
+if [[ -n "$previous_cache_paths" ]]; then
+  export KNOWTYPE_PREFPANE_CACHE_PATHS="$previous_cache_paths"
+else
+  unset KNOWTYPE_PREFPANE_CACHE_PATHS
+fi
+rm -rf "$cache_tmp_dir"
 
 bundle_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"

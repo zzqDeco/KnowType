@@ -329,7 +329,7 @@ if [[ -d "$PREFPANE_PATH" ]]; then
     expect_plist_value "CFBundleExecutable" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
     expect_plist_value "NSPrincipalClass" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
   else
-    warn "PreferencePane Info.plist is missing"
+    fail "PreferencePane Info.plist is missing"
   fi
 
   if [[ -x "$PREFPANE_EXECUTABLE" ]]; then
@@ -338,28 +338,55 @@ if [[ -d "$PREFPANE_PATH" ]]; then
       if otool -hv "$PREFPANE_EXECUTABLE" | grep -q "BUNDLE"; then
         ok "PreferencePane executable is a loadable bundle"
       else
-        warn "PreferencePane executable is not an MH_BUNDLE; rebuild with scripts/build-preference-pane.sh"
+        fail "PreferencePane executable is not an MH_BUNDLE; rebuild with scripts/build-preference-pane.sh"
       fi
     fi
   else
-    warn "PreferencePane executable is missing or not executable"
+    fail "PreferencePane executable is missing or not executable"
   fi
 
   if [[ -f "$PREFPANE_LIBRARY" ]]; then
     ok "PreferencePane SwiftPM library is packaged"
   else
-    warn "PreferencePane SwiftPM library is missing"
+    fail "PreferencePane SwiftPM library is missing"
+  fi
+
+  if command -v swift >/dev/null 2>&1; then
+    PREFPANE_PRINCIPAL_CLASS="$(
+      PREFPANE_PATH="$PREFPANE_PATH" swift -e 'import Foundation; let path = ProcessInfo.processInfo.environment["PREFPANE_PATH"]!; guard let bundle = Bundle(url: URL(fileURLWithPath: path)), bundle.load() else { fatalError("PreferencePane bundle did not load") }; print(String(describing: bundle.principalClass))' 2>&1
+    )"
+    if [[ "$PREFPANE_PRINCIPAL_CLASS" == *"KnowTypePreferencePane"* ]]; then
+      ok "PreferencePane principal class loads"
+    else
+      fail "PreferencePane bundle did not load KnowTypePreferencePane principal class: $PREFPANE_PRINCIPAL_CLASS"
+    fi
+  else
+    warn "swift command is unavailable; cannot load-check PreferencePane principal class"
   fi
 
   if command -v codesign >/dev/null 2>&1; then
     if codesign --verify --deep --strict "$PREFPANE_PATH" >/dev/null 2>&1; then
       ok "PreferencePane codesign verification passes"
     else
-      warn "PreferencePane codesign verification failed"
+      fail "PreferencePane codesign verification failed"
     fi
   fi
 else
   warn "KnowType.prefPane is missing; this is optional because primary settings are opened from the input-method menu"
+  STALE_PREFPANE_CACHE_PATHS="$(knowtype_preferencepane_cache_identity_paths)"
+  if [[ -z "$STALE_PREFPANE_CACHE_PATHS" ]]; then
+    ok "System Settings PreferencePane caches do not contain stale KnowType metadata"
+  elif (( STRICT == 1 )); then
+    fail "System Settings PreferencePane caches still contain stale KnowType prefPane metadata; run ./scripts/install-inputmethod.sh or ./scripts/uninstall-inputmethod.sh to refresh caches"
+    while IFS= read -r cache_path; do
+      [[ -n "$cache_path" ]] && info "stale System Settings cache: $cache_path"
+    done <<<"$STALE_PREFPANE_CACHE_PATHS"
+  else
+    warn "System Settings PreferencePane caches still contain stale KnowType prefPane metadata"
+    while IFS= read -r cache_path; do
+      [[ -n "$cache_path" ]] && info "stale System Settings cache: $cache_path"
+    done <<<"$STALE_PREFPANE_CACHE_PATHS"
+  fi
 fi
 
 echo

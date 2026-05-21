@@ -66,6 +66,9 @@ if [[ -d "$PREFPANE_TARGET_PATH" ]]; then
   fi
 fi
 
+knowtype_clean_preferencepane_caches "$DRY_RUN"
+knowtype_quit_system_settings_if_running "$DRY_RUN"
+
 if (( DRY_RUN == 0 )); then
   INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
   "$INPUTSOURCE_TOOL" repair-preferences \
