@@ -78,6 +78,8 @@ jobs:
         run: swift test
       - name: Input method install/profile script smoke
         run: ./scripts/smoke-inputmethod-install.sh
+      - name: Compatibility PreferencePane script smoke
+        run: ./scripts/smoke-inputmethod-install.sh --with-prefpane
       - name: Package release assets
         run: |
           CODESIGN_IDENTITY=- ./scripts/package-release.sh \

@@ -234,7 +234,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func reloadRuntimePreferencesForExternalChange() {
         lastRuntimePreferenceReload = .distantPast
-        reloadRuntimePreferencesIfNeeded()
+        guard reloadRuntimePreferencesIfNeeded() else {
+            return
+        }
+        let client = host?.currentClient
+        publishLocalSuggestionSynchronously(client: client)
+        updateCandidatePanelImmediately(suggestion: lastSuggestion, client: client)
     }
 
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
@@ -1375,19 +1380,21 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func reloadRuntimePreferencesIfNeeded() {
+    @discardableResult
+    private func reloadRuntimePreferencesIfNeeded() -> Bool {
         let now = Date()
         guard now.timeIntervalSince(lastRuntimePreferenceReload) >= Self.preferenceReloadInterval else {
-            return
+            return false
         }
         lastRuntimePreferenceReload = now
         let preferences = runtimePreferenceStore.loadPreferences()
         guard preferences != runtimePreferences else {
-            return
+            return false
         }
         runtimePreferences = preferences
         sessionController = Self.polishOnlySessionController()
         invalidateSuggestion()
+        return true
     }
 
     private func reloadRuntimeLexiconEngineIfNeeded() {

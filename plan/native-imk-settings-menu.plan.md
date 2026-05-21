@@ -25,12 +25,17 @@
   the coordinator to reload runtime preferences for that external change.
 - Make `scripts/install-inputmethod.sh` install the compatibility
   `KnowType.prefPane` only with `--with-prefpane`; keep release packaging of the
-  pane as a fallback artifact and do not add a standalone settings app.
+  pane as a fallback artifact and do not add a standalone settings app. Default
+  installs remove any stale local `KnowType.prefPane` to prevent version skew.
+- Keep default smoke focused on `KnowType.app`, but run
+  `./scripts/smoke-inputmethod-install.sh --with-prefpane` in CI/release and
+  local validation so the compatibility release asset remains covered.
 
 ## Test Plan
 
 - `swift test`
 - `./scripts/smoke-inputmethod-install.sh`
+- `./scripts/smoke-inputmethod-install.sh --with-prefpane`
 - `./scripts/perf-input-hotpath.sh`
 - `git diff --check`
 - Manual: install release build, open `KnowType Settings...` from the input menu,

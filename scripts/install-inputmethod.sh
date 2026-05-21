@@ -77,6 +77,7 @@ TARGET_DIR="$(knowtype_inputmethod_target_dir)"
 TARGET_PATH="$(knowtype_inputmethod_target_path)"
 PREFPANE_TARGET_DIR="$(knowtype_preferencepane_target_dir)"
 PREFPANE_TARGET_PATH="$(knowtype_preferencepane_target_path)"
+REMOVED_STALE_PREFPANE=0
 
 if (( DRY_RUN == 1 )); then
   echo "KnowType input-method install dry run"
@@ -106,9 +107,13 @@ if (( DRY_RUN == 1 )); then
   if (( ls_count == 0 )); then
     echo "  <none>"
   fi
-  if (( WITH_PREFPANE == 1 )) && [[ -d "$PREFPANE_TARGET_PATH" ]]; then
+  if [[ -d "$PREFPANE_TARGET_PATH" ]]; then
     echo
-    echo "Compatibility PreferencePane that would be replaced:"
+    if (( WITH_PREFPANE == 1 )); then
+      echo "Compatibility PreferencePane that would be replaced:"
+    else
+      echo "Stale compatibility PreferencePane that would be removed:"
+    fi
     echo "  $PREFPANE_TARGET_PATH"
   fi
   echo
@@ -200,6 +205,9 @@ if (( WITH_PREFPANE == 1 )); then
   rm -rf "$PREFPANE_TARGET_PATH"
   cp -R "$PREFPANE_PATH" "$PREFPANE_TARGET_PATH"
   rm -rf "$PREFPANE_PATH"
+elif [[ -d "$PREFPANE_TARGET_PATH" ]]; then
+  rm -rf "$PREFPANE_TARGET_PATH"
+  REMOVED_STALE_PREFPANE=1
 fi
 
 if command -v xattr >/dev/null 2>&1; then
@@ -243,6 +251,9 @@ if (( WITH_PREFPANE == 1 )); then
   echo "Installed KnowType compatibility PreferencePane to: $PREFPANE_TARGET_PATH"
 else
   echo "KnowType settings are available from the input-method menu: KnowType Settings..."
+  if (( REMOVED_STALE_PREFPANE == 1 )); then
+    echo "Removed stale KnowType compatibility PreferencePane from: $PREFPANE_TARGET_PATH"
+  fi
 fi
 echo "Installed KnowType local build version: $LOCAL_BUILD_VERSION"
 echo "Requested input source activation from installed app: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"

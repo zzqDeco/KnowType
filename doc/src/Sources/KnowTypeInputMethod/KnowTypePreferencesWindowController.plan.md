@@ -16,7 +16,8 @@ inside the InputMethodKit preferences window.
   default preferences loader.
 - The window uses native macOS settings chrome where available, including
   preference toolbar style, autosaved frame placement, a fixed minimum size, and
-  disabled tabbing.
+  disabled tabbing. It centers the first in-memory window before assigning the
+  autosave name so a saved frame can still take precedence.
 - The IMK preferences window is the primary user-facing settings entry. The
   developer settings app and compatibility PreferencePane should share the same
   SwiftUI root view and stores without becoming the default install path.

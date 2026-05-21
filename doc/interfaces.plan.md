@@ -286,8 +286,10 @@ The input-method menu also exposes `AI Continuation`, log/support folder
 shortcuts, the Rime user folder, and About. The standalone settings app target
 is a developer preview host, and `KnowType.prefPane` in
 `~/Library/PreferencePanes` is a compatibility fallback rather than the default
-installation path. The macOS Keyboard/Input Sources page remains the
-enable/select surface and is not treated as a custom settings host.
+installation path. Default local installs remove stale compatibility panes;
+`--with-prefpane` installs a matching fallback pane when needed. The macOS
+Keyboard/Input Sources page remains the enable/select surface and is not
+treated as a custom settings host.
 
 ## CLI And Script Contracts
 

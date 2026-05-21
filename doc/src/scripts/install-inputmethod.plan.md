@@ -35,6 +35,10 @@ Installs the locally built KnowType input method bundle into
   `IMKServer` connection is available to Text Input clients.
 - The primary settings entry is the input-method menu's
   `KnowType Settings...`; the script does not install a standalone settings app.
+- Default installs remove any previously installed compatibility
+  `KnowType.prefPane` so an old pane cannot drift out of version sync with the
+  newly installed input-method app. Use `--with-prefpane` to install a matching
+  compatibility pane.
 - TIS registration, enablement, and selection remain attributed to
   `KnowType.app`; the SwiftPM helper is used only for scoped preference repair.
 - macOS 15 local policy issues may still require the SystemPolicyRule profile

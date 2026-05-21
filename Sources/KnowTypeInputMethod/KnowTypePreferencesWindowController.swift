@@ -22,9 +22,6 @@ public final class KnowTypePreferencesWindowController: NSWindowController {
 
     public override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
-        if window?.isVisible == false {
-            window?.center()
-        }
         window?.makeKeyAndOrderFront(sender)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -49,6 +46,7 @@ public final class KnowTypePreferencesWindowController: NSWindowController {
         if #available(macOS 11.0, *) {
             window.toolbarStyle = .preference
         }
+        window.center()
         window.setFrameAutosaveName("KnowTypePreferencesWindow")
         return window
     }

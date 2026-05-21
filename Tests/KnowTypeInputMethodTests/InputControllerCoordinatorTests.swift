@@ -1295,6 +1295,36 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testExternalRuntimePreferenceReloadRefreshesVisibleAIState() async throws {
+        let client = FakeInputControllerClient()
+        let runtimeStore = MutableInputMethodRuntimePreferenceStore(
+            preferences: InputMethodRuntimePreferences(cloudContinuationEnabled: true)
+        )
+        let aiProvider = RecordingAIRecommendationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            runtimePreferences: runtimeStore.preferences,
+            runtimePreferenceStore: runtimeStore
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        let hasReadyAI = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+        }
+        XCTAssertTrue(hasReadyAI)
+
+        runtimeStore.preferences = InputMethodRuntimePreferences(cloudContinuationEnabled: false)
+        coordinator.reloadRuntimePreferencesForExternalChange()
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text, "你")
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText, "AI 已关闭")
+        XCTAssertTrue(host.panelStates.last?.windowState.viewModel.continuationCandidates.isEmpty == true)
+    }
+
+    @MainActor
     func testFullyResolvedSegmentSelectionHonorsDisabledLocalContinuationsWithoutProvider() async throws {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
@@ -2320,6 +2350,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferences: InputModePreferences = .standard,
         runtimePreferences: InputMethodRuntimePreferences = .standard,
+        runtimePreferenceStore: (any InputMethodRuntimePreferenceStore)? = nil,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
         screenProvider: any ScreenGeometryProviding = FixedInputControllerScreenProvider(),
@@ -2339,7 +2370,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             lexiconRuntimeSnapshot: lexiconRuntime.snapshot(),
             lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: FixedInputModePreferenceStore(preferences: inputModePreferences),
-            runtimePreferenceStore: FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
+            runtimePreferenceStore: runtimePreferenceStore ?? FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: client.bundleIdentifier,
             userSelectionHistoryPersistence: persistence,
@@ -3213,6 +3244,22 @@ private struct FixedInputMethodRuntimePreferenceStore: InputMethodRuntimePrefere
     }
 
     func savePreferences(_ preferences: InputMethodRuntimePreferences) throws {}
+}
+
+private final class MutableInputMethodRuntimePreferenceStore: InputMethodRuntimePreferenceStore, @unchecked Sendable {
+    var preferences: InputMethodRuntimePreferences
+
+    init(preferences: InputMethodRuntimePreferences) {
+        self.preferences = preferences
+    }
+
+    func loadPreferences() -> InputMethodRuntimePreferences {
+        preferences
+    }
+
+    func savePreferences(_ preferences: InputMethodRuntimePreferences) throws {
+        self.preferences = preferences
+    }
 }
 
 private actor RecordingContinuationProvider: LLMProvider {
