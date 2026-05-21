@@ -2,6 +2,14 @@ import KnowTypeCore
 import KnowTypeProviders
 import SwiftUI
 
+private func settingsString(_ key: String) -> String {
+    SettingsLocalization.string(key)
+}
+
+private func settingsFormat(_ key: String, _ arguments: CVarArg...) -> String {
+    String(format: settingsString(key), arguments: arguments)
+}
+
 public struct ProviderProfilesView: View {
     @ObservedObject private var viewModel: ProviderProfilesViewModel
     @StateObject private var lexiconViewModel: LexiconSettingsViewModel
@@ -70,7 +78,7 @@ private struct SettingsSidebarView: View {
             }
 
             if presentation.sections.isEmpty {
-                Text("没有匹配的设置")
+                Text(settingsString("settings.sidebar.noMatches"))
                     .foregroundStyle(.secondary)
             }
         }
@@ -86,31 +94,31 @@ private struct InputSettingsView: View {
 
     var body: some View {
         SettingsForm(title: SettingsSection.input.title) {
-            Section("组合输入") {
-                LabeledContent("输入宿主", value: "InputMethodKit")
-                LabeledContent("组合模式", value: "提交前使用 marked text")
-                LabeledContent("基础提交", value: "Space 提交 Rime 候选")
-                LabeledContent("续写提交", value: "Tab 提交前缀与续写")
+            Section(settingsString("settings.input.section.composition")) {
+                LabeledContent(settingsString("settings.input.host"), value: settingsString("settings.input.host.value"))
+                LabeledContent(settingsString("settings.input.compositionMode"), value: settingsString("settings.input.compositionMode.value"))
+                LabeledContent(settingsString("settings.input.basicCommit"), value: settingsString("settings.input.basicCommit.value"))
+                LabeledContent(settingsString("settings.input.continuationCommit"), value: settingsString("settings.input.continuationCommit.value"))
             }
 
-            Section("标点与宽度") {
-                Picker("默认标点", selection: defaultPunctuationBinding) {
-                    Text("中文").tag(InputSymbolMode.chinese)
-                    Text("英文").tag(InputSymbolMode.english)
+            Section(settingsString("settings.input.section.symbols")) {
+                Picker(settingsString("settings.input.defaultPunctuation"), selection: defaultPunctuationBinding) {
+                    Text(settingsString("settings.input.symbol.chinese")).tag(InputSymbolMode.chinese)
+                    Text(settingsString("settings.input.symbol.english")).tag(InputSymbolMode.english)
                 }
-                Picker("默认宽度", selection: defaultWidthBinding) {
-                    Text("半角").tag(InputSymbolWidth.halfWidth)
-                    Text("全角").tag(InputSymbolWidth.fullWidth)
+                Picker(settingsString("settings.input.defaultWidth"), selection: defaultWidthBinding) {
+                    Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
+                    Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
                 }
-                Picker("代码 app 标点", selection: codeAppPunctuationBinding) {
-                    Text("中文").tag(InputSymbolMode.chinese)
-                    Text("英文").tag(InputSymbolMode.english)
+                Picker(settingsString("settings.input.codeAppPunctuation"), selection: codeAppPunctuationBinding) {
+                    Text(settingsString("settings.input.symbol.chinese")).tag(InputSymbolMode.chinese)
+                    Text(settingsString("settings.input.symbol.english")).tag(InputSymbolMode.english)
                 }
-                Picker("代码 app 宽度", selection: codeAppWidthBinding) {
-                    Text("半角").tag(InputSymbolWidth.halfWidth)
-                    Text("全角").tag(InputSymbolWidth.fullWidth)
+                Picker(settingsString("settings.input.codeAppWidth"), selection: codeAppWidthBinding) {
+                    Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
+                    Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
                 }
-                LabeledContent("切换快捷键", value: "Option + .")
+                LabeledContent(settingsString("settings.input.toggleShortcut"), value: "Option + .")
                 Button {
                     inputModeViewModel.resetToDefaults()
                     runtimePreferencesViewModel.resetToDefaults()
@@ -123,8 +131,8 @@ private struct InputSettingsView: View {
                 }
             }
 
-            Section("前缀锁定") {
-                Text("续写候选只会追加在已锁定前缀之后。改写前缀只允许通过显式润色操作触发。")
+            Section(settingsString("settings.input.section.prefixLock")) {
+                Text(settingsString("settings.input.prefixLock.note"))
                     .foregroundStyle(.secondary)
             }
         }
@@ -165,35 +173,35 @@ private struct CandidateSettingsView: View {
 
     var body: some View {
         SettingsForm(title: SettingsSection.candidates.title) {
-            Section("显示") {
-                Picker("每页候选数", selection: candidatePageSizeBinding) {
+            Section(settingsString("settings.candidates.section.display")) {
+                Picker(settingsString("settings.candidates.pageSize"), selection: candidatePageSizeBinding) {
                     Text("6").tag(6)
                     Text("9").tag(9)
                 }
-                Picker("候选窗布局", selection: candidateLayoutModeBinding) {
-                    Text("自适应横排").tag(CandidatePanelLayoutMode.adaptive)
-                    Text("竖排列表").tag(CandidatePanelLayoutMode.verticalPreferred)
+                Picker(settingsString("settings.candidates.layout"), selection: candidateLayoutModeBinding) {
+                    Text(settingsString("settings.candidates.layout.adaptive")).tag(CandidatePanelLayoutMode.adaptive)
+                    Text(settingsString("settings.candidates.layout.vertical")).tag(CandidatePanelLayoutMode.verticalPreferred)
                 }
-                LabeledContent("自适应页", value: "最多 6 个候选")
-                LabeledContent("竖排页", value: "使用上方每页候选数")
+                LabeledContent(settingsString("settings.candidates.adaptivePage"), value: settingsString("settings.candidates.adaptivePage.value"))
+                LabeledContent(settingsString("settings.candidates.verticalPage"), value: settingsString("settings.candidates.verticalPage.value"))
                 if let message = viewModel.lastErrorMessage {
                     Text(message)
                         .foregroundStyle(.red)
                 }
             }
 
-            Section("候选顺序") {
-                LabeledContent("Rime 候选", value: "优先显示")
-                LabeledContent("AI 续写", value: "只在显式快捷键或点击时提交")
-                LabeledContent("原始输入", value: "仅在没有中文候选时保留")
+            Section(settingsString("settings.candidates.section.order")) {
+                LabeledContent(settingsString("settings.candidates.rimeCandidates"), value: settingsString("settings.candidates.rimeCandidates.value"))
+                LabeledContent(settingsString("settings.candidates.aiContinuation"), value: settingsString("settings.candidates.aiContinuation.value"))
+                LabeledContent(settingsString("settings.candidates.rawInput"), value: settingsString("settings.candidates.rawInput.value"))
             }
 
-            Section("快捷键") {
-                LabeledContent("Space", value: "提交当前 Rime 候选")
-                LabeledContent("数字键", value: "选择当前页 Rime 候选")
-                LabeledContent("Tab", value: "提交第一条 AI 续写")
-                LabeledContent("Option + 数字", value: "提交对应 AI 续写")
-                LabeledContent("Option + R", value: "显式润色")
+            Section(settingsString("settings.candidates.section.shortcuts")) {
+                LabeledContent("Space", value: settingsString("settings.candidates.shortcut.space.value"))
+                LabeledContent(settingsString("settings.candidates.shortcut.number.label"), value: settingsString("settings.candidates.shortcut.number.value"))
+                LabeledContent("Tab", value: settingsString("settings.candidates.shortcut.tab.value"))
+                LabeledContent("Option + 1...9", value: settingsString("settings.candidates.shortcut.optionNumber.value"))
+                LabeledContent("Option + R", value: settingsString("settings.candidates.shortcut.optionR.value"))
             }
         }
     }
@@ -220,7 +228,7 @@ private struct LexiconSettingsView: View {
         let presentation = LexiconSettingsPresentation(viewModel: viewModel)
 
         SettingsForm(title: SettingsSection.lexicons.title) {
-            Section("本地词库") {
+            Section(settingsString("settings.lexicon.section.local")) {
                 LabeledContent(presentation.loadedEntries.label, value: presentation.loadedEntries.value)
                 if let lastRefreshDate = presentation.lastRefreshDate {
                     LabeledContent(presentation.lastRefreshLabel, value: lastRefreshDate.formatted(date: .abbreviated, time: .standard))
@@ -296,7 +304,7 @@ private struct LexiconSettingsView: View {
                 }
             }
 
-            Section("格式") {
+            Section(settingsString("settings.lexicon.section.format")) {
                 ForEach(presentation.formatRows, id: \.label) { row in
                     LabeledContent(row.label, value: row.value)
                 }
@@ -316,16 +324,16 @@ private struct AIProviderSettingsView: View {
         let lastErrorPresentation = ProviderLastErrorPresentation(message: viewModel.lastErrorMessage)
 
         SettingsForm(title: SettingsSection.aiProvider.title) {
-            Section("续写") {
-                Toggle("启用云端续写", isOn: cloudContinuationEnabledBinding)
-                Toggle("没有 provider 时显示本地续写", isOn: localContinuationEnabledBinding)
-                Picker("长度", selection: continuationLengthLevelBinding) {
-                    Text("短").tag(ContinuationLengthLevel.short)
-                    Text("中").tag(ContinuationLengthLevel.medium)
-                    Text("长").tag(ContinuationLengthLevel.long)
+            Section(settingsString("settings.provider.section.continuation")) {
+                Toggle(settingsString("settings.provider.cloudContinuation"), isOn: cloudContinuationEnabledBinding)
+                Toggle(settingsString("settings.provider.localContinuation"), isOn: localContinuationEnabledBinding)
+                Picker(settingsString("settings.provider.length"), selection: continuationLengthLevelBinding) {
+                    Text(settingsString("settings.provider.length.short")).tag(ContinuationLengthLevel.short)
+                    Text(settingsString("settings.provider.length.medium")).tag(ContinuationLengthLevel.medium)
+                    Text(settingsString("settings.provider.length.long")).tag(ContinuationLengthLevel.long)
                 }
                 Stepper(value: maxContinuationCandidatesBinding, in: 1...6, step: 1) {
-                    Text("最多续写候选：\(runtimePreferencesViewModel.preferences.maxContinuationCandidates)")
+                    Text(settingsFormat("settings.provider.maxCandidates", runtimePreferencesViewModel.preferences.maxContinuationCandidates))
                 }
                 if let message = runtimePreferencesViewModel.lastErrorMessage {
                     Text(message)
@@ -335,10 +343,10 @@ private struct AIProviderSettingsView: View {
 
             Section("Provider") {
                 if viewModel.profiles.isEmpty {
-                    Text("尚未配置 provider。")
+                    Text(settingsString("settings.provider.noProfiles"))
                         .foregroundStyle(.secondary)
                 } else {
-                    Picker("当前配置", selection: profileSelectionBinding) {
+                    Picker(settingsString("settings.provider.currentProfile"), selection: profileSelectionBinding) {
                         ForEach(viewModel.profiles) { profile in
                             let item = ProviderProfileListItemPresentation(profile: profile)
 
@@ -355,7 +363,7 @@ private struct AIProviderSettingsView: View {
                         }
                     }
                 } label: {
-                    Label("添加 Provider", systemImage: "plus")
+                    Label(settingsString("settings.provider.add"), systemImage: "plus")
                 }
 
                 TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
@@ -391,7 +399,7 @@ private struct AIProviderSettingsView: View {
 
             if draftPresentation.showsCustomHTTPFields {
                 Section {
-                    DisclosureGroup("高级 Custom HTTP") {
+                    DisclosureGroup(settingsString("settings.provider.advancedCustomHTTP")) {
                         TextEditor(text: $viewModel.draft.customBodyTemplate)
                             .font(.system(.body, design: .monospaced))
                             .frame(minHeight: 120)
@@ -500,26 +508,30 @@ private struct PrivacySettingsView: View {
 
     var body: some View {
         SettingsForm(title: SettingsSection.privacy.title) {
-            Section("云端续写") {
+            Section(settingsString("settings.privacy.section.cloud")) {
                 LabeledContent(
-                    "Provider 调用",
-                    value: runtimePreferencesViewModel.preferences.cloudContinuationEnabled ? "续写时启用" : "已关闭"
+                    settingsString("settings.privacy.providerCalls"),
+                    value: runtimePreferencesViewModel.preferences.cloudContinuationEnabled
+                        ? settingsString("settings.privacy.providerCalls.enabled")
+                        : settingsString("settings.privacy.providerCalls.disabled")
                 )
                 LabeledContent(
-                    "本地 fallback",
-                    value: runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider ? "没有 provider 时启用" : "已关闭"
+                    settingsString("settings.privacy.localFallback"),
+                    value: runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider
+                        ? settingsString("settings.privacy.localFallback.enabled")
+                        : settingsString("settings.privacy.localFallback.disabled")
                 )
             }
 
-            Section("Level 0 本地路径") {
-                LabeledContent("URL 与邮箱", value: "不调用 provider")
-                LabeledContent("路径与命令", value: "不调用 provider")
-                LabeledContent("代码形态输入", value: "不调用 provider")
-                LabeledContent("Terminal、iTerm、Xcode", value: "不调用 provider")
+            Section(settingsString("settings.privacy.section.level0")) {
+                LabeledContent(settingsString("settings.privacy.urlEmail"), value: settingsString("settings.privacy.localOnly"))
+                LabeledContent(settingsString("settings.privacy.pathCommand"), value: settingsString("settings.privacy.localOnly"))
+                LabeledContent(settingsString("settings.privacy.codeInput"), value: settingsString("settings.privacy.localOnly"))
+                LabeledContent("Terminal, iTerm, Xcode", value: settingsString("settings.privacy.localOnly"))
             }
 
-            Section("技术 token") {
-                Text("API、JSON、macOS、InputMethodKit、snake_case 和 camelCase 会通过本地保护规则保留。")
+            Section(settingsString("settings.privacy.section.technicalTokens")) {
+                Text(settingsString("settings.privacy.technicalTokens.note"))
                     .foregroundStyle(.secondary)
             }
         }
@@ -529,14 +541,14 @@ private struct PrivacySettingsView: View {
 private struct DiagnosticsSettingsView: View {
     var body: some View {
         SettingsForm(title: SettingsSection.diagnostics.title) {
-            Section("本地诊断") {
+            Section(settingsString("settings.diagnostics.section.local")) {
                 ForEach(DebugInstallGuidance.steps) { step in
                     InstallStepView(title: step.title, detail: step.detail)
                 }
             }
 
             Section {
-                DisclosureGroup("命令") {
+                DisclosureGroup(settingsString("settings.diagnostics.commands")) {
                     ForEach(DebugInstallGuidance.commands, id: \.self) { command in
                         MonospacedText(command)
                     }

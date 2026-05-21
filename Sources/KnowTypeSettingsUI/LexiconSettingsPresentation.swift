@@ -30,21 +30,39 @@ struct LexiconSettingsPresentation: Equatable, Sendable {
         lastRefreshDate: Date?,
         directories: [LexiconDirectoryStatus],
         lastActionMessage: String?,
-        isInstallingRecommendedPack: Bool = false
+        isInstallingRecommendedPack: Bool = false,
+        preferredLanguages: [String] = Locale.preferredLanguages
     ) {
-        self.loadedEntries = SettingsKeyValuePresentation(label: "已载入词条", value: "\(totalLoadedEntryCount)")
-        self.lastRefreshLabel = "上次刷新"
+        self.loadedEntries = SettingsKeyValuePresentation(
+            label: SettingsLocalization.string("settings.lexicon.loadedEntries", preferredLanguages: preferredLanguages),
+            value: "\(totalLoadedEntryCount)"
+        )
+        self.lastRefreshLabel = SettingsLocalization.string(
+            "settings.lexicon.lastRefresh",
+            preferredLanguages: preferredLanguages
+        )
         self.lastRefreshDate = lastRefreshDate
-        self.refreshActionLabel = "刷新"
-        self.createSampleActionLabel = "创建示例 TSV"
+        self.refreshActionLabel = SettingsLocalization.string(
+            "settings.lexicon.refresh",
+            preferredLanguages: preferredLanguages
+        )
+        self.createSampleActionLabel = SettingsLocalization.string(
+            "settings.lexicon.createSample",
+            preferredLanguages: preferredLanguages
+        )
         self.installRecommendedPackActionLabel = isInstallingRecommendedPack
-            ? "正在安装推荐词库..."
-            : "安装推荐词库"
+            ? SettingsLocalization.string("settings.lexicon.installingRecommended", preferredLanguages: preferredLanguages)
+            : SettingsLocalization.string("settings.lexicon.installRecommended", preferredLanguages: preferredLanguages)
         self.isInstallingRecommendedPack = isInstallingRecommendedPack
-        self.createMissingDirectoriesActionLabel = "创建缺失目录"
+        self.createMissingDirectoriesActionLabel = SettingsLocalization.string(
+            "settings.lexicon.createMissingDirectories",
+            preferredLanguages: preferredLanguages
+        )
         self.showsCreateMissingDirectoriesAction = directories.contains { !$0.exists }
         self.lastActionMessage = lastActionMessage
-        self.directories = directories.map(LexiconDirectoryPresentation.init(status:))
+        self.directories = directories.map {
+            LexiconDirectoryPresentation(status: $0, preferredLanguages: preferredLanguages)
+        }
         self.formatRows = [
             SettingsKeyValuePresentation(label: "TSV", value: "pinyin<TAB>text<TAB>confidence"),
             SettingsKeyValuePresentation(label: "JSON", value: "TraditionalInputLexiconEntry array")
@@ -63,24 +81,31 @@ struct LexiconDirectoryPresentation: Equatable, Identifiable, Sendable {
     var installedPacks: [InstalledLexiconPackPresentation]
     var diagnostics: [LexiconDiagnosticPresentation]
 
-    init(status: LexiconDirectoryStatus) {
+    init(status: LexiconDirectoryStatus, preferredLanguages: [String] = Locale.preferredLanguages) {
         self.id = status.id
-        self.sectionTitle = "目录"
+        self.sectionTitle = SettingsLocalization.string(
+            "settings.lexicon.directory",
+            preferredLanguages: preferredLanguages
+        )
         self.status = SettingsKeyValuePresentation(
-            label: "状态",
-            value: status.exists ? "可用" : "缺失"
+            label: SettingsLocalization.string("settings.lexicon.status", preferredLanguages: preferredLanguages),
+            value: status.exists
+                ? SettingsLocalization.string("settings.lexicon.status.available", preferredLanguages: preferredLanguages)
+                : SettingsLocalization.string("settings.lexicon.status.missing", preferredLanguages: preferredLanguages)
         )
         self.resourceFiles = SettingsKeyValuePresentation(
-            label: "资源文件",
+            label: SettingsLocalization.string("settings.lexicon.resourceFiles", preferredLanguages: preferredLanguages),
             value: "\(status.resourceFileCount)"
         )
         self.loadedEntries = SettingsKeyValuePresentation(
-            label: "已载入词条",
+            label: SettingsLocalization.string("settings.lexicon.loadedEntries", preferredLanguages: preferredLanguages),
             value: "\(status.loadedEntryCount)"
         )
-        self.pathLabel = "路径"
+        self.pathLabel = SettingsLocalization.string("settings.lexicon.path", preferredLanguages: preferredLanguages)
         self.path = status.directory.path
-        self.installedPacks = status.installedPacks.map(InstalledLexiconPackPresentation.init(status:))
+        self.installedPacks = status.installedPacks.map {
+            InstalledLexiconPackPresentation(status: $0, preferredLanguages: preferredLanguages)
+        }
         self.diagnostics = status.diagnostics.map(LexiconDiagnosticPresentation.init(diagnostic:))
     }
 }
@@ -93,14 +118,23 @@ struct InstalledLexiconPackPresentation: Equatable, Identifiable, Sendable {
     var source: SettingsKeyValuePresentation
     var installedAt: SettingsKeyValuePresentation
 
-    init(status: InstalledLexiconPackStatus) {
+    init(status: InstalledLexiconPackStatus, preferredLanguages: [String] = Locale.preferredLanguages) {
         self.id = status.id
         self.title = status.displayName
-        self.entries = SettingsKeyValuePresentation(label: "词条", value: "\(status.entryCount)")
-        self.license = SettingsKeyValuePresentation(label: "许可证", value: status.licenseName)
-        self.source = SettingsKeyValuePresentation(label: "来源", value: status.sourceURL.absoluteString)
+        self.entries = SettingsKeyValuePresentation(
+            label: SettingsLocalization.string("settings.lexicon.entries", preferredLanguages: preferredLanguages),
+            value: "\(status.entryCount)"
+        )
+        self.license = SettingsKeyValuePresentation(
+            label: SettingsLocalization.string("settings.lexicon.license", preferredLanguages: preferredLanguages),
+            value: status.licenseName
+        )
+        self.source = SettingsKeyValuePresentation(
+            label: SettingsLocalization.string("settings.lexicon.source", preferredLanguages: preferredLanguages),
+            value: status.sourceURL.absoluteString
+        )
         self.installedAt = SettingsKeyValuePresentation(
-            label: "安装时间",
+            label: SettingsLocalization.string("settings.lexicon.installedAt", preferredLanguages: preferredLanguages),
             value: status.installedAt.formatted(date: .abbreviated, time: .shortened)
         )
     }

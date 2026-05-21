@@ -18,7 +18,8 @@ final class LexiconSettingsPresentationTests: XCTestCase {
             totalLoadedEntryCount: 0,
             lastRefreshDate: Date(timeIntervalSince1970: 123),
             directories: [status],
-            lastActionMessage: "Created 1 lexicon directory."
+            lastActionMessage: "Created 1 lexicon directory.",
+            preferredLanguages: ["zh-Hans-CN"]
         )
 
         XCTAssertEqual(presentation.loadedEntries, SettingsKeyValuePresentation(label: "已载入词条", value: "0"))
@@ -40,6 +41,18 @@ final class LexiconSettingsPresentationTests: XCTestCase {
         XCTAssertEqual(directoryPresentation.pathLabel, "路径")
         XCTAssertEqual(directoryPresentation.path, "/tmp/KnowType/Lexicons")
         XCTAssertTrue(directoryPresentation.diagnostics.isEmpty)
+
+        let englishPresentation = LexiconSettingsPresentation(
+            totalLoadedEntryCount: 0,
+            lastRefreshDate: nil,
+            directories: [status],
+            lastActionMessage: nil,
+            preferredLanguages: ["en-US"]
+        )
+        XCTAssertEqual(englishPresentation.loadedEntries.label, "Loaded Entries")
+        XCTAssertEqual(englishPresentation.refreshActionLabel, "Refresh")
+        XCTAssertEqual(englishPresentation.directories.first?.status.label, "Status")
+        XCTAssertEqual(englishPresentation.directories.first?.status.value, "Missing")
     }
 
     func testPresentationHidesMissingDirectoryActionAndMapsDiagnostics() throws {
@@ -59,7 +72,8 @@ final class LexiconSettingsPresentationTests: XCTestCase {
             totalLoadedEntryCount: 1,
             lastRefreshDate: nil,
             directories: [status],
-            lastActionMessage: nil
+            lastActionMessage: nil,
+            preferredLanguages: ["zh-Hans-CN"]
         )
 
         XCTAssertEqual(presentation.loadedEntries.value, "1")
@@ -114,7 +128,8 @@ final class LexiconSettingsPresentationTests: XCTestCase {
             lastRefreshDate: nil,
             directories: [status],
             lastActionMessage: nil,
-            isInstallingRecommendedPack: true
+            isInstallingRecommendedPack: true,
+            preferredLanguages: ["zh-Hans-CN"]
         )
 
         XCTAssertEqual(presentation.installRecommendedPackActionLabel, "正在安装推荐词库...")

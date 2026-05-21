@@ -80,7 +80,7 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         var customDraft = ProviderProfileDraft(profile: customProfile)
         customDraft.timeoutSeconds = 37
 
-        let customPresentation = ProviderProfileDraftPresentation(draft: customDraft)
+        let customPresentation = ProviderProfileDraftPresentation(draft: customDraft, preferredLanguages: ["zh-Hans-CN"])
 
         XCTAssertEqual(customPresentation.displayNameFieldLabel, "显示名称")
         XCTAssertEqual(customPresentation.kindPickerLabel, "Provider 类型")
@@ -101,7 +101,19 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             )
         )
 
-        XCTAssertFalse(ProviderProfileDraftPresentation(draft: chatDraft).showsCustomHTTPFields)
+        XCTAssertFalse(
+            ProviderProfileDraftPresentation(
+                draft: chatDraft,
+                preferredLanguages: ["zh-Hans-CN"]
+            ).showsCustomHTTPFields
+        )
+
+        let englishPresentation = ProviderProfileDraftPresentation(draft: customDraft, preferredLanguages: ["en-US"])
+        XCTAssertEqual(englishPresentation.displayNameFieldLabel, "Display Name")
+        XCTAssertEqual(englishPresentation.kindPickerLabel, "Provider Type")
+        XCTAssertEqual(englishPresentation.modelFieldLabel, "Model")
+        XCTAssertEqual(englishPresentation.timeoutLabel, "Timeout: 37 seconds")
+        XCTAssertEqual(englishPresentation.defaultProviderLabel, "Default provider")
     }
 
     func testSecretPresentationLabelsSecretReferenceWithoutExposingTypedAPIKey() {
@@ -117,7 +129,7 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         )
         draft.apiKey = "sk-typed-secret"
 
-        let presentation = ProviderProfileDraftPresentation(draft: draft)
+        let presentation = ProviderProfileDraftPresentation(draft: draft, preferredLanguages: ["zh-Hans-CN"])
 
         XCTAssertEqual(presentation.secret.sectionTitle, "API Key")
         XCTAssertEqual(presentation.secret.apiKeyFieldPrompt, "留空则保留现有 key")
@@ -130,6 +142,10 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         )
         XCTAssertTrue(presentation.secret.helpText.contains("Keychain"))
         XCTAssertFalse(String(reflecting: presentation).contains("sk-typed-secret"))
+
+        let englishPresentation = ProviderProfileDraftPresentation(draft: draft, preferredLanguages: ["en-US"])
+        XCTAssertEqual(englishPresentation.secret.apiKeyFieldPrompt, "Leave blank to keep the existing key")
+        XCTAssertEqual(englishPresentation.secret.reference?.label, "Secret Reference")
     }
 
     func testConnectionStatusPresentationMapsProgressSuccessAndFailure() {
@@ -144,6 +160,10 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         XCTAssertTrue(testing.showsProgress)
         XCTAssertTrue(testing.isTesting)
         XCTAssertNil(testing.message)
+
+        let english = ProviderConnectionStatusPresentation(status: .idle, preferredLanguages: ["en-US"])
+        XCTAssertEqual(english.sectionTitle, "Connection")
+        XCTAssertEqual(english.testButtonLabel, "Test Connection")
 
         let success = ProviderConnectionStatusPresentation(status: .success("Connected to openai_chat."))
         XCTAssertFalse(success.showsProgress)
@@ -161,21 +181,30 @@ final class ProviderProfilesPresentationTests: XCTestCase {
     }
 
     func testValidationAndLastErrorPresentationsControlSectionVisibility() {
-        let emptyValidation = ProviderValidationPresentation(errors: [])
+        let emptyValidation = ProviderValidationPresentation(errors: [], preferredLanguages: ["zh-Hans-CN"])
         XCTAssertFalse(emptyValidation.isVisible)
         XCTAssertEqual(emptyValidation.title, "校验")
 
-        let validation = ProviderValidationPresentation(errors: ["Model is required."])
+        let validation = ProviderValidationPresentation(errors: ["Model is required."], preferredLanguages: ["zh-Hans-CN"])
         XCTAssertTrue(validation.isVisible)
         XCTAssertEqual(validation.messages, ["Model is required."])
 
-        let emptyError = ProviderLastErrorPresentation(message: nil)
+        let emptyError = ProviderLastErrorPresentation(message: nil, preferredLanguages: ["zh-Hans-CN"])
         XCTAssertFalse(emptyError.isVisible)
         XCTAssertNil(emptyError.message)
 
-        let error = ProviderLastErrorPresentation(message: "save failed")
+        let error = ProviderLastErrorPresentation(message: "save failed", preferredLanguages: ["zh-Hans-CN"])
         XCTAssertTrue(error.isVisible)
         XCTAssertEqual(error.title, "最近错误")
         XCTAssertEqual(error.message, "save failed")
+
+        XCTAssertEqual(
+            ProviderValidationPresentation(errors: [], preferredLanguages: ["en-US"]).title,
+            "Validation"
+        )
+        XCTAssertEqual(
+            ProviderLastErrorPresentation(message: nil, preferredLanguages: ["en-US"]).title,
+            "Last Error"
+        )
     }
 }

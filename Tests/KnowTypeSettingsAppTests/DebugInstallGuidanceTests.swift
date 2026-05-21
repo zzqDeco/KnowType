@@ -3,15 +3,17 @@ import XCTest
 
 final class DebugInstallGuidanceTests: XCTestCase {
     func testGuidanceIncludesSeparateDiagnosticAndSelectionSteps() {
-        XCTAssertTrue(DebugInstallGuidance.steps.contains { $0.title == "诊断安装" })
-        XCTAssertTrue(DebugInstallGuidance.steps.contains { $0.title == "请求切换" })
+        let steps = DebugInstallGuidance.steps(preferredLanguages: ["zh-Hans-CN"])
+
+        XCTAssertTrue(steps.contains { $0.title == "诊断安装" })
+        XCTAssertTrue(steps.contains { $0.title == "请求切换" })
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/diagnose-inputmethod.sh --strict"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/install-inputmethod.sh --with-prefpane"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/diagnose-inputmethod.sh --strict --logs"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/repair-inputmethod-selection.sh"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/select-inputmethod.sh"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/select-inputmethod.sh --require-selected"))
-        XCTAssertTrue(DebugInstallGuidance.steps.contains {
+        XCTAssertTrue(steps.contains {
             $0.title == "请求切换"
                 && $0.detail.contains("激活要测试的文本 app")
                 && $0.detail.contains("实际输入探针")
@@ -19,7 +21,7 @@ final class DebugInstallGuidanceTests: XCTestCase {
     }
 
     func testGuidanceExplainsSelectionRepair() {
-        XCTAssertTrue(DebugInstallGuidance.steps.contains {
+        XCTAssertTrue(DebugInstallGuidance.steps(preferredLanguages: ["zh-Hans-CN"]).contains {
             $0.title == "刷新注册状态"
                 && $0.detail.contains("LaunchServices")
                 && $0.detail.contains("legacy .Mode")
@@ -29,7 +31,7 @@ final class DebugInstallGuidanceTests: XCTestCase {
     }
 
     func testGuidanceExplainsInputMethodAuthorizationPrompt() {
-        XCTAssertTrue(DebugInstallGuidance.steps.contains {
+        XCTAssertTrue(DebugInstallGuidance.steps(preferredLanguages: ["zh-Hans-CN"]).contains {
             $0.title == "启用输入源"
                 && $0.detail.contains("允许")
                 && $0.detail.contains("知键")
@@ -41,9 +43,20 @@ final class DebugInstallGuidanceTests: XCTestCase {
         XCTAssertTrue(DebugInstallGuidance.commands.contains {
             $0.contains("CODESIGN_IDENTITY=\"Apple Development: Name (TEAMID)\"")
         })
-        XCTAssertTrue(DebugInstallGuidance.steps.contains {
+        XCTAssertTrue(DebugInstallGuidance.steps(preferredLanguages: ["zh-Hans-CN"]).contains {
             $0.title == "安装 bundle"
                 && $0.detail.contains("输入法菜单")
+        })
+    }
+
+    func testGuidanceUsesEnglishFallback() {
+        let steps = DebugInstallGuidance.steps(preferredLanguages: ["en-US"])
+
+        XCTAssertTrue(steps.contains { $0.title == "Diagnose Install" })
+        XCTAssertTrue(steps.contains { $0.title == "Request Switch" })
+        XCTAssertTrue(steps.contains {
+            $0.title == "Install Bundle"
+                && $0.detail.contains("input-method menu")
         })
     }
 }

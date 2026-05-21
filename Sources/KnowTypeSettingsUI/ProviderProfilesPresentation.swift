@@ -114,17 +114,32 @@ struct ProviderProfileDraftPresentation: Equatable, Sendable {
     var customResponsePathLabel: String
     var secret: ProviderSecretPresentation
 
-    init(draft: ProviderProfileDraft) {
-        self.displayNameFieldLabel = "显示名称"
-        self.kindPickerLabel = "Provider 类型"
+    init(draft: ProviderProfileDraft, preferredLanguages: [String] = Locale.preferredLanguages) {
+        self.displayNameFieldLabel = SettingsLocalization.string(
+            "settings.provider.displayName",
+            preferredLanguages: preferredLanguages
+        )
+        self.kindPickerLabel = SettingsLocalization.string(
+            "settings.provider.kind",
+            preferredLanguages: preferredLanguages
+        )
         self.baseURLFieldLabel = "Base URL"
-        self.modelFieldLabel = "模型"
-        self.timeoutLabel = "超时：\(Int(draft.timeoutSeconds)) 秒"
-        self.defaultProviderLabel = "设为默认 provider"
+        self.modelFieldLabel = SettingsLocalization.string(
+            "settings.provider.model",
+            preferredLanguages: preferredLanguages
+        )
+        self.timeoutLabel = String(
+            format: SettingsLocalization.string("settings.provider.timeout", preferredLanguages: preferredLanguages),
+            Int(draft.timeoutSeconds)
+        )
+        self.defaultProviderLabel = SettingsLocalization.string(
+            "settings.provider.default",
+            preferredLanguages: preferredLanguages
+        )
         self.showsCustomHTTPFields = draft.kind == .customHTTP
         self.customBodyTemplateLabel = "Custom HTTP"
         self.customResponsePathLabel = "Response Path"
-        self.secret = ProviderSecretPresentation(secretName: draft.secretName)
+        self.secret = ProviderSecretPresentation(secretName: draft.secretName, preferredLanguages: preferredLanguages)
     }
 }
 
@@ -134,13 +149,25 @@ struct ProviderSecretPresentation: Equatable, Sendable {
     var reference: SettingsKeyValuePresentation?
     var helpText: String
 
-    init(secretName: String?) {
+    init(secretName: String?, preferredLanguages: [String] = Locale.preferredLanguages) {
         self.sectionTitle = "API Key"
-        self.apiKeyFieldPrompt = "留空则保留现有 key"
+        self.apiKeyFieldPrompt = SettingsLocalization.string(
+            "settings.provider.secretPrompt",
+            preferredLanguages: preferredLanguages
+        )
         self.reference = secretName.map {
-            SettingsKeyValuePresentation(label: "Secret 引用", value: $0)
+            SettingsKeyValuePresentation(
+                label: SettingsLocalization.string(
+                    "settings.provider.secretReference",
+                    preferredLanguages: preferredLanguages
+                ),
+                value: $0
+            )
         }
-        self.helpText = "API Key 通过 SecretStore 写入；macOS 使用 Keychain，provider JSON 只保存 secret 引用。"
+        self.helpText = SettingsLocalization.string(
+            "settings.provider.secretHelp",
+            preferredLanguages: preferredLanguages
+        )
     }
 }
 
@@ -155,7 +182,10 @@ struct ProviderConnectionStatusPresentation: Equatable, Sendable {
     }
 
     init(status: ProviderConnectionStatus, preferredLanguages: [String] = Locale.preferredLanguages) {
-        self.sectionTitle = "连接"
+        self.sectionTitle = SettingsLocalization.string(
+            "settings.provider.connection",
+            preferredLanguages: preferredLanguages
+        )
         self.testButtonLabel = SettingsLocalization.string(
             "settings.action.testConnection",
             preferredLanguages: preferredLanguages
@@ -195,8 +225,11 @@ struct ProviderValidationPresentation: Equatable, Sendable {
         !messages.isEmpty
     }
 
-    init(errors: [String]) {
-        self.title = "校验"
+    init(errors: [String], preferredLanguages: [String] = Locale.preferredLanguages) {
+        self.title = SettingsLocalization.string(
+            "settings.provider.validation",
+            preferredLanguages: preferredLanguages
+        )
         self.messages = errors
     }
 }
@@ -209,8 +242,11 @@ struct ProviderLastErrorPresentation: Equatable, Sendable {
         message != nil
     }
 
-    init(message: String?) {
-        self.title = "最近错误"
+    init(message: String?, preferredLanguages: [String] = Locale.preferredLanguages) {
+        self.title = SettingsLocalization.string(
+            "settings.provider.lastError",
+            preferredLanguages: preferredLanguages
+        )
         self.message = message
     }
 }
