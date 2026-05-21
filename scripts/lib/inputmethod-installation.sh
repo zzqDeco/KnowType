@@ -39,7 +39,7 @@ knowtype_preferencepane_cache_contains_identity() {
   local cache_path="$1"
   [[ -f "$cache_path" ]] || return 1
 
-  LC_ALL=C grep -a -q \
+  LC_ALL=C grep -a -F -q \
     -e "$KNOWTYPE_PREFPANE_BUNDLE_ID" \
     -e "KnowType.prefPane" \
     "$cache_path" 2>/dev/null

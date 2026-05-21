@@ -12,7 +12,9 @@
 
 - Add shared install helpers that detect and remove the known System Settings
   PreferencePane cache files only when they contain stable pane identifiers:
-  `com.knowtype.preferencepane` or `KnowType.prefPane`.
+  `com.knowtype.preferencepane` or `KnowType.prefPane`. Matching is fixed-string
+  only, so regex-like lookalikes such as `comXknowtypeXpreferencepane` do not
+  trigger cleanup or strict diagnostic failures.
 - Run that cleanup from default install, `--with-prefpane` install, and
   uninstall, then ask System Settings to quit so its sidebar cache rebuilds.
 - Make strict diagnostics fail when the pane is absent but the cache still

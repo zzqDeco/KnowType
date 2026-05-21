@@ -155,11 +155,13 @@ cache_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-prefpane-cache-smoke.XXXXXX
 cache_stale="$cache_tmp_dir/com.apple.systemsettings.menucache"
 cache_clean="$cache_tmp_dir/com.apple.preferencepanes.usercache"
 cache_unrelated="$cache_tmp_dir/com.apple.preferencepanes.unrelated"
+cache_regex_false_positive="$cache_tmp_dir/com.apple.preferencepanes.regex-like"
 printf 'label=KnowType id=com.knowtype.preferencepane path=KnowType.prefPane\n' >"$cache_stale"
 printf 'label=Keyboard id=com.apple.Keyboard-Settings.extension\n' >"$cache_clean"
 printf 'label=KnowType recent search text without prefpane identity\n' >"$cache_unrelated"
+printf 'id=comXknowtypeXpreferencepane path=KnowTypeXprefPane\n' >"$cache_regex_false_positive"
 previous_cache_paths="${KNOWTYPE_PREFPANE_CACHE_PATHS-}"
-export KNOWTYPE_PREFPANE_CACHE_PATHS="$cache_stale:$cache_clean:$cache_unrelated"
+export KNOWTYPE_PREFPANE_CACHE_PATHS="$cache_stale:$cache_clean:$cache_unrelated:$cache_regex_false_positive"
 knowtype_preferencepane_cache_has_identity ||
   die "PreferencePane cache helper did not detect stale KnowType metadata"
 cache_dry_run_output="$(knowtype_clean_preferencepane_caches 1)"
@@ -167,14 +169,19 @@ assert_contains "$cache_dry_run_output" "$cache_stale" "PreferencePane cache dry
 if grep -Fq "$cache_unrelated" <<<"$cache_dry_run_output"; then
   die "PreferencePane cache dry run treated unrelated KnowType text as stale prefPane metadata"
 fi
+if grep -Fq "$cache_regex_false_positive" <<<"$cache_dry_run_output"; then
+  die "PreferencePane cache dry run treated regex-like text as stale prefPane metadata"
+fi
 assert_file "$cache_stale"
 assert_file "$cache_clean"
 assert_file "$cache_unrelated"
+assert_file "$cache_regex_false_positive"
 knowtype_clean_preferencepane_caches 0 >/dev/null
 [[ ! -e "$cache_stale" ]] ||
   die "PreferencePane cache helper did not remove stale KnowType cache"
 assert_file "$cache_clean"
 assert_file "$cache_unrelated"
+assert_file "$cache_regex_false_positive"
 if [[ -n "$previous_cache_paths" ]]; then
   export KNOWTYPE_PREFPANE_CACHE_PATHS="$previous_cache_paths"
 else
