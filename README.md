@@ -50,8 +50,8 @@ polish.
   the second slot is reserved for AI, and explicit polish is the only rewrite
   path.
 - macOS input method flow: marked text, candidate selection, paging,
-  punctuation handling, and a custom AppKit candidate panel anchored near the
-  caret.
+  punctuation handling, and a compact native-style AppKit candidate panel that
+  stays above Spotlight/search overlays.
 - Provider compatibility: OpenAI-compatible chat, OpenAI Responses, Anthropic
   Messages, Gemini native, Ollama native, and custom HTTP profiles normalize
   into one provider interface.

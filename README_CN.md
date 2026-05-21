@@ -45,8 +45,8 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
   不发送给 provider。
 - 前缀锁定的 AI 推荐：第一候选固定为 Rime 转换，第二候选固定为 AI 推荐；
   显式 polish 才是改写路径。
-- macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及跟随光标的
-  自绘 AppKit 候选窗。
+- macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及紧凑、
+  原生风格并能覆盖 Spotlight/search 浮层的 AppKit 候选窗。
 - 多 provider 兼容：OpenAI-compatible chat、OpenAI Responses、
   Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到
   同一套 provider 接口。

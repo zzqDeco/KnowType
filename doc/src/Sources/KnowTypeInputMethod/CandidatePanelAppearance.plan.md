@@ -20,7 +20,10 @@
 
 ## Behavior Notes
 
-- Native rendering uses dynamic system colors and AppKit popover material.
+- Native rendering uses dynamic system colors and AppKit `hudWindow` material.
+- Native metrics are intentionally compact: 26 pt rows, tight content insets,
+  8 pt panel corners, and measured shortcut labels with no fixed reserved
+  shortcut column.
 - Snapshot rendering uses fixed light/dark colors so PNG regression tests do not
   depend on the current system accent or appearance.
 - Disabled AI status rows use weaker text colors but keep the same measured
