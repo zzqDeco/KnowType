@@ -130,7 +130,10 @@ strings on non-Chinese locales. The local install does not install a standalone
 settings app. The default install removes any stale local compatibility
 `KnowType.prefPane` so it cannot drift out of sync. A matching compatibility pane
 is only built and installed when `./scripts/install-inputmethod.sh --with-prefpane`
-is used.
+is used. If System Settings still shows a `KnowType` sidebar entry after a
+default install, it is stale macOS PreferencePane cache state; run the install
+script again or `./scripts/uninstall-inputmethod.sh` to refresh the cache, then
+reopen System Settings.
 
 After the first install or a mode-id migration, macOS may still require the
 System Settings input-source approval path. Open System Settings > Keyboard >
@@ -163,6 +166,8 @@ For a GitHub Release zip, verify the downloaded archive with the published
 `~/Library/Input Methods/`, and use the input menu's `KnowType Settings...`
 entry for configuration. `KnowType.prefPane` is a compatibility settings host
 and may be copied to `~/Library/PreferencePanes/` when that fallback is needed.
+Do not use a stale System Settings sidebar entry unless the matching pane is
+installed.
 Run the same local diagnostics/manual typing acceptance from a source checkout
 when available.
 

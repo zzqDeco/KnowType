@@ -117,6 +117,8 @@ macOS 原生 sidebar 和 grouped settings 页面；中文 macOS locale 下使用
 非中文 locale 使用英文 fallback 文案。本地安装默认不安装独立 Settings app。默认安装会移除
 本机过期的兼容 `KnowType.prefPane`，避免它和新安装的输入法版本不一致；需要匹配版本的兼容 pane 时，再执行
 `./scripts/install-inputmethod.sh --with-prefpane` 构建并安装。
+如果默认安装后系统设置侧边栏仍显示 `KnowType`，那是 macOS PreferencePane 缓存残留；
+重新运行安装脚本或 `./scripts/uninstall-inputmethod.sh` 刷新缓存，然后重新打开系统设置。
 
 首次安装或 mode id 迁移后，macOS 仍可能要求通过系统设置完成第三方输入源授权。
 打开“系统设置 > 键盘 > 输入源”，移除过期的 KnowType/知键条目，重新添加
@@ -143,7 +145,8 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 使用 GitHub Release zip 时，先用发布页提供的 `.sha256` 文件校验下载的 zip。
 然后解压，把 `KnowType.app` 复制到 `~/Library/Input Methods/`，通过输入法菜单中的
 `KnowType Settings...` 修改配置。`KnowType.prefPane` 是兼容设置入口，只有需要 fallback
-时再复制到 `~/Library/PreferencePanes/`。如果手边有源码 checkout，再运行同一套本地诊断和真实打字验收流程。
+时再复制到 `~/Library/PreferencePanes/`。除非已安装匹配版本的 pane，否则不要使用系统设置侧边栏里残留的
+KnowType 入口。如果手边有源码 checkout，再运行同一套本地诊断和真实打字验收流程。
 
 ## 配置
 

@@ -43,6 +43,7 @@ when converting a shipped plan into a short record.
 | [rime-only-hotpath-performance.plan.md](rime-only-hotpath-performance.plan.md) | Retire production local conversion fallback and enforce Rime-only hot-path performance budgets | Active |
 | [rime-native-interaction-polish.plan.md](rime-native-interaction-polish.plan.md) | Align marked text, arrows, pages, numbers, symbols, and AI shortcuts with Rime-native IME behavior | Active |
 | [native-imk-settings-menu.plan.md](native-imk-settings-menu.plan.md) | Native IMK input-menu settings entry and compatibility prefPane fallback | Active |
+| [system-settings-prefpane-cache-cleanup.plan.md](system-settings-prefpane-cache-cleanup.plan.md) | Remove stale System Settings prefPane cache after default local installs | Active |
 | [native-settings-ui-polish.plan.md](native-settings-ui-polish.plan.md) | Chinese macOS-native sidebar settings UI for the IMK preferences window | Active |
 | [segmented-candidate-selection.plan.md](segmented-candidate-selection.plan.md) | Raw-span candidate rows and segmented confirmation behavior | Active |
 | [ai-capability-runtime-layer.plan.md](ai-capability-runtime-layer.plan.md) | Separate AI recommendation, context memory, correction-instruction, and health layers from the IMK key path | Active |
