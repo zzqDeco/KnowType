@@ -11,12 +11,14 @@
 ## Implementation
 
 - Add shared install helpers that detect and remove the known System Settings
-  PreferencePane cache files only when they contain KnowType metadata.
+  PreferencePane cache files only when they contain stable pane identifiers:
+  `com.knowtype.preferencepane` or `KnowType.prefPane`.
 - Run that cleanup from default install, `--with-prefpane` install, and
   uninstall, then ask System Settings to quit so its sidebar cache rebuilds.
 - Make strict diagnostics fail when the pane is absent but the cache still
-  references KnowType; a matching installed pane remains valid as a compatibility
-  fallback.
+  references those pane identifiers; a matching installed pane remains valid as a
+  compatibility fallback. Diagnostics must not load or execute the pane bundle
+  while inspecting install state.
 
 ## Test Plan
 

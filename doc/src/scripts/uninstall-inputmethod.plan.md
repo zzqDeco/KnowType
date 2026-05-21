@@ -15,8 +15,10 @@ machine.
 
 - Use after manual acceptance or when replacing local builds.
 - It removes stale System Settings PreferencePane caches that still reference
-  KnowType and asks System Settings to quit if needed, so an already removed
-  compatibility pane does not remain as an unloadable sidebar item.
+  `com.knowtype.preferencepane` or `KnowType.prefPane` and asks System Settings
+  to quit if needed, so an already removed compatibility pane does not remain as
+  an unloadable sidebar item. Plain unrelated `KnowType` cache text is left
+  untouched.
 - Stale Text Input Source state can still require diagnostics or repair helpers
   after removal.
 

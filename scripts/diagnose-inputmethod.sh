@@ -351,19 +351,6 @@ if [[ -d "$PREFPANE_PATH" ]]; then
     fail "PreferencePane SwiftPM library is missing"
   fi
 
-  if command -v swift >/dev/null 2>&1; then
-    PREFPANE_PRINCIPAL_CLASS="$(
-      PREFPANE_PATH="$PREFPANE_PATH" swift -e 'import Foundation; let path = ProcessInfo.processInfo.environment["PREFPANE_PATH"]!; guard let bundle = Bundle(url: URL(fileURLWithPath: path)), bundle.load() else { fatalError("PreferencePane bundle did not load") }; print(String(describing: bundle.principalClass))' 2>&1
-    )"
-    if [[ "$PREFPANE_PRINCIPAL_CLASS" == *"KnowTypePreferencePane"* ]]; then
-      ok "PreferencePane principal class loads"
-    else
-      fail "PreferencePane bundle did not load KnowTypePreferencePane principal class: $PREFPANE_PRINCIPAL_CLASS"
-    fi
-  else
-    warn "swift command is unavailable; cannot load-check PreferencePane principal class"
-  fi
-
   if command -v codesign >/dev/null 2>&1; then
     if codesign --verify --deep --strict "$PREFPANE_PATH" >/dev/null 2>&1; then
       ok "PreferencePane codesign verification passes"

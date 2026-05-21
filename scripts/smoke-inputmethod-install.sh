@@ -154,26 +154,37 @@ declare -F knowtype_clean_preferencepane_caches >/dev/null ||
 cache_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-prefpane-cache-smoke.XXXXXX")"
 cache_stale="$cache_tmp_dir/com.apple.systemsettings.menucache"
 cache_clean="$cache_tmp_dir/com.apple.preferencepanes.usercache"
+cache_unrelated="$cache_tmp_dir/com.apple.preferencepanes.unrelated"
 printf 'label=KnowType id=com.knowtype.preferencepane path=KnowType.prefPane\n' >"$cache_stale"
 printf 'label=Keyboard id=com.apple.Keyboard-Settings.extension\n' >"$cache_clean"
+printf 'label=KnowType recent search text without prefpane identity\n' >"$cache_unrelated"
 previous_cache_paths="${KNOWTYPE_PREFPANE_CACHE_PATHS-}"
-export KNOWTYPE_PREFPANE_CACHE_PATHS="$cache_stale:$cache_clean"
+export KNOWTYPE_PREFPANE_CACHE_PATHS="$cache_stale:$cache_clean:$cache_unrelated"
 knowtype_preferencepane_cache_has_identity ||
   die "PreferencePane cache helper did not detect stale KnowType metadata"
 cache_dry_run_output="$(knowtype_clean_preferencepane_caches 1)"
 assert_contains "$cache_dry_run_output" "$cache_stale" "PreferencePane cache dry run output"
+if grep -Fq "$cache_unrelated" <<<"$cache_dry_run_output"; then
+  die "PreferencePane cache dry run treated unrelated KnowType text as stale prefPane metadata"
+fi
 assert_file "$cache_stale"
 assert_file "$cache_clean"
+assert_file "$cache_unrelated"
 knowtype_clean_preferencepane_caches 0 >/dev/null
 [[ ! -e "$cache_stale" ]] ||
   die "PreferencePane cache helper did not remove stale KnowType cache"
 assert_file "$cache_clean"
+assert_file "$cache_unrelated"
 if [[ -n "$previous_cache_paths" ]]; then
   export KNOWTYPE_PREFPANE_CACHE_PATHS="$previous_cache_paths"
 else
   unset KNOWTYPE_PREFPANE_CACHE_PATHS
 fi
 rm -rf "$cache_tmp_dir"
+
+if grep -Fq 'bundle.load()' "$ROOT_DIR/scripts/diagnose-inputmethod.sh"; then
+  die "diagnostics must not execute PreferencePane bundle code while inspecting install state"
+fi
 
 bundle_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"
