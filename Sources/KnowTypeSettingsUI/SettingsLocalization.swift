@@ -2,6 +2,10 @@ import Foundation
 
 public enum SettingsLocalization {
     public static let tableName = "Localizable"
+    private static let resourceBundleName = "KnowType_KnowTypeSettingsUI.bundle"
+    private static let cachedResourceBundle = locateSettingsResourceBundle()
+
+    private final class BundleToken: NSObject {}
 
     public static func string(_ key: String) -> String {
         string(key, preferredLanguages: Locale.preferredLanguages)
@@ -36,20 +40,122 @@ public enum SettingsLocalization {
     }
 
     private static func localizedBundle(localeIdentifier: String) -> Bundle? {
+        guard let resourceBundle = settingsResourceBundle() else {
+            return nil
+        }
+
         for candidate in localeCandidates(for: localeIdentifier) {
-            if let path = Bundle.module.path(forResource: candidate, ofType: "lproj"),
+            if let path = resourceBundle.path(forResource: candidate, ofType: "lproj"),
                let bundle = Bundle(path: path) {
                 return bundle
             }
         }
 
-        let available = Bundle.module.localizations.first {
+        let available = resourceBundle.localizations.first {
             $0.caseInsensitiveCompare(localeIdentifier) == .orderedSame
         }
         return available
-            .flatMap { Bundle.module.path(forResource: $0, ofType: "lproj") }
+            .flatMap { resourceBundle.path(forResource: $0, ofType: "lproj") }
             .flatMap(Bundle.init(path:))
     }
+
+    private static func settingsResourceBundle() -> Bundle? {
+        cachedResourceBundle
+    }
+
+    private static func locateSettingsResourceBundle() -> Bundle? {
+        for candidate in resourceBundleCandidates() {
+            if let bundle = Bundle(url: candidate) {
+                return bundle
+            }
+        }
+        return nil
+    }
+
+    private static func resourceBundleCandidates() -> [URL] {
+        var candidates: [URL] = []
+        let markerBundle = Bundle(for: BundleToken.self)
+
+        appendResourceBundleCandidates(from: Bundle.main, to: &candidates)
+        appendResourceBundleCandidates(from: markerBundle, to: &candidates)
+        for bundle in Bundle.allBundles + Bundle.allFrameworks {
+            appendResourceBundleCandidates(from: bundle, to: &candidates)
+        }
+
+        #if SWIFT_PACKAGE
+        if isSwiftPMBuildOrTestProcess {
+            candidates.append(contentsOf: swiftPMBuildResourceBundleCandidates())
+        }
+        #endif
+
+        return uniqueURLs(candidates)
+    }
+
+    private static func appendResourceBundleCandidates(from bundle: Bundle, to candidates: inout [URL]) {
+        if let resourceURL = bundle.resourceURL {
+            candidates.append(resourceURL.appendingPathComponent(resourceBundleName))
+        }
+        for baseURL in ancestorURLs(from: bundle.bundleURL, limit: 6) {
+            candidates.append(baseURL.appendingPathComponent("Contents/Resources/\(resourceBundleName)"))
+            candidates.append(baseURL.appendingPathComponent(resourceBundleName))
+        }
+    }
+
+    private static func ancestorURLs(from url: URL, limit: Int) -> [URL] {
+        var urls: [URL] = []
+        var current = url
+        for _ in 0..<max(1, limit) {
+            urls.append(current)
+            let parent = current.deletingLastPathComponent()
+            guard parent.path != current.path else {
+                break
+            }
+            current = parent
+        }
+        return urls
+    }
+
+    #if SWIFT_PACKAGE
+    private static var isSwiftPMBuildOrTestProcess: Bool {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        return CommandLine.arguments.contains { argument in
+            argument.contains(".build") || argument.contains(".xctest")
+        }
+    }
+
+    private static func swiftPMBuildResourceBundleCandidates() -> [URL] {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let buildURL = rootURL.appendingPathComponent(".build")
+        var candidates = [
+            buildURL.appendingPathComponent("debug/\(resourceBundleName)"),
+            buildURL.appendingPathComponent("release/\(resourceBundleName)")
+        ]
+
+        let fileManager = FileManager.default
+        let platformBuildURLs = (try? fileManager.contentsOfDirectory(
+            at: buildURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        for platformBuildURL in platformBuildURLs {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: platformBuildURL.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                continue
+            }
+            candidates.append(platformBuildURL.appendingPathComponent("debug/\(resourceBundleName)"))
+            candidates.append(platformBuildURL.appendingPathComponent("release/\(resourceBundleName)"))
+        }
+
+        return candidates
+    }
+    #endif
 
     private static func localeCandidates(for localeIdentifier: String) -> [String] {
         let normalized = localeIdentifier.replacingOccurrences(of: "_", with: "-")
@@ -85,6 +191,13 @@ public enum SettingsLocalization {
         var seen = Set<String>()
         return values.filter { value in
             seen.insert(value.lowercased()).inserted
+        }
+    }
+
+    private static func uniqueURLs(_ values: [URL]) -> [URL] {
+        var seen = Set<String>()
+        return values.filter { value in
+            seen.insert(value.standardizedFileURL.path).inserted
         }
     }
 }

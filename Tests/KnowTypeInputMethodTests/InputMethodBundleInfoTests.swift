@@ -17,6 +17,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(script.contains(#""$BIN_DIR"/KnowType_*.bundle"#))
         XCTAssertTrue(script.contains(#"cp -R "$resource_bundle" "$CONTENTS_DIR/Resources/""#))
         XCTAssertTrue(script.contains(#"cp -R "$resource_path" "$CONTENTS_DIR/Resources/""#))
+        XCTAssertTrue(smokeScriptContainsSettingsUIBundle(rootURL: rootURL))
         XCTAssertTrue(script.contains("security find-identity -v -p codesigning"))
         XCTAssertTrue(script.contains("/Apple Development/"))
         XCTAssertFalse(script.contains("install_name_tool"))
@@ -152,9 +153,13 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(script.contains("--product KnowTypePreferencePane"))
         XCTAssertTrue(script.contains("libKnowTypePreferencePane.dylib"))
         XCTAssertTrue(script.contains("Frameworks"))
+        XCTAssertTrue(script.contains(#"copy_swiftpm_resource_bundle "KnowType_KnowTypeSettingsUI.bundle""#))
+        XCTAssertTrue(script.contains(#"copy_swiftpm_resource_bundle "KnowType_KnowTypeCore.bundle""#))
         XCTAssertTrue(script.contains("xcrun clang -bundle"))
         XCTAssertTrue(script.contains(#"-Wl,-rpath,@loader_path/../Frameworks"#))
         XCTAssertTrue(smokeScript.contains("Contents/Frameworks/libKnowTypePreferencePane.dylib"))
+        XCTAssertTrue(smokeScript.contains("Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"))
+        XCTAssertTrue(diagnosticScript.contains("PreferencePane settings UI resource bundle is packaged"))
         XCTAssertTrue(smokeScript.contains("--with-prefpane"))
         XCTAssertTrue(smokeScript.contains("WITH_PREFPANE=0"))
         XCTAssertTrue(smokeScript.contains("otool -hv"))
@@ -169,6 +174,16 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "KnowTypePreferencePane")
         XCTAssertEqual(plist["NSPrincipalClass"] as? String, "KnowTypePreferencePane")
         XCTAssertEqual(plist["CFBundlePackageType"] as? String, "BNDL")
+    }
+
+    private func smokeScriptContainsSettingsUIBundle(rootURL: URL) -> Bool {
+        guard let smokeScript = try? String(
+            contentsOf: rootURL.appendingPathComponent("scripts/smoke-inputmethod-install.sh"),
+            encoding: .utf8
+        ) else {
+            return false
+        }
+        return smokeScript.contains("Contents/Resources/KnowType_KnowTypeSettingsUI.bundle")
     }
 
     func testInputSourceScriptsUseDedicatedHelperExecutable() throws {
