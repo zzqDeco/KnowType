@@ -46,6 +46,11 @@ input.
 - While native Rime is active, the Swift engine mirrors text/delete edits so a
   later non-ASCII bypass can preserve the existing raw preedit without invoking
   the retired local converter.
+- When a host librime ABI does not expose `get_input`, handled native actions
+  that can change composition text (`Space`, candidate selection, and
+  composition commit) rebuild the raw-input mirror from Rime preedit instead of
+  reusing a stale mirror. Highlight and page-only actions preserve the existing
+  mirror because they do not edit composition text.
 - Runtime lexicon reload no longer initializes or replaces the production conversion engine.
 
 ## Tests

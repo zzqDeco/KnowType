@@ -148,7 +148,11 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         }
 
         var result = nativeSession.process(key)
-        updateNativeRawInputMirror(for: key, result: result)
+        nativeRawInputMirror = NativeRawInputMirrorPolicy.updatedMirror(
+            current: nativeRawInputMirror,
+            key: key,
+            result: result
+        )
         if result.snapshot.rawInput.isEmpty,
            result.snapshot.hasComposition,
            !nativeRawInputMirror.isEmpty {
@@ -219,38 +223,46 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         )
     }
 
-    private mutating func updateNativeRawInputMirror(for key: ConversionEngineKey, result: ConversionEngineResult) {
-        guard result.handled else {
-            return
-        }
-        if !result.snapshot.rawInput.isEmpty || !result.snapshot.hasComposition {
-            nativeRawInputMirror = result.snapshot.rawInput
-            return
-        }
-
-        switch key {
-        case .text(let text):
-            nativeRawInputMirror += text
-        case .deleteBackward:
-            if !nativeRawInputMirror.isEmpty {
-                nativeRawInputMirror.removeLast()
-            }
-        case .space,
-             .selectCandidateOnCurrentPage,
-             .selectCandidate,
-             .highlightCandidateOnCurrentPage,
-             .pageUp,
-             .pageDown,
-             .commitComposition:
-            break
-        }
-    }
-
     private static func containsNonASCIIText(_ key: ConversionEngineKey) -> Bool {
         guard case .text(let text) = key else {
             return false
         }
         return text.unicodeScalars.contains { !$0.isASCII }
+    }
+}
+
+enum NativeRawInputMirrorPolicy {
+    static func updatedMirror(
+        current: String,
+        key: ConversionEngineKey,
+        result: ConversionEngineResult
+    ) -> String {
+        guard result.handled else {
+            return current
+        }
+        if !result.snapshot.rawInput.isEmpty || !result.snapshot.hasComposition {
+            return result.snapshot.rawInput
+        }
+
+        switch key {
+        case .text(let text):
+            return current + text
+        case .deleteBackward:
+            var updated = current
+            if !updated.isEmpty {
+                updated.removeLast()
+            }
+            return updated
+        case .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown:
+            return current
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .commitComposition:
+            return result.snapshot.preedit
+        }
     }
 }
 
