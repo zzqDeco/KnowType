@@ -14,6 +14,39 @@ protocol CandidatePanelWindowOperating: AnyObject {
 
 extension NSPanel: CandidatePanelWindowOperating {}
 
+struct CandidatePanelWindowConfiguration {
+    var contentRect = NSRect(x: 0, y: 0, width: 220, height: 32)
+    var styleMask: NSWindow.StyleMask = [.borderless, .nonactivatingPanel]
+    var level: NSWindow.Level = .popUpMenu
+    var collectionBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces,
+        .fullScreenAuxiliary,
+        .ignoresCycle
+    ]
+    var hasShadow = true
+    var isFloatingPanel = true
+    var worksWhenModal = true
+    var hidesOnDeactivate = false
+    var isOpaque = false
+    var backgroundColor: NSColor = .clear
+    var isReleasedWhenClosed = false
+
+    static let native = CandidatePanelWindowConfiguration()
+
+    @MainActor
+    func apply(to panel: NSPanel) {
+        panel.level = level
+        panel.collectionBehavior = collectionBehavior
+        panel.hasShadow = hasShadow
+        panel.isFloatingPanel = isFloatingPanel
+        panel.worksWhenModal = worksWhenModal
+        panel.hidesOnDeactivate = hidesOnDeactivate
+        panel.isOpaque = isOpaque
+        panel.backgroundColor = backgroundColor
+        panel.isReleasedWhenClosed = isReleasedWhenClosed
+    }
+}
+
 @MainActor
 protocol CandidatePanelContentRendering: AnyObject {
     var appKitView: NSView { get }
@@ -159,19 +192,14 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     }
 
     private static func makeAppKitPanel(contentView: NSView) -> CandidatePanelWindowOperating {
+        let configuration = CandidatePanelWindowConfiguration.native
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 220, height: 32),
-            styleMask: [.borderless, .nonactivatingPanel],
+            contentRect: configuration.contentRect,
+            styleMask: configuration.styleMask,
             backing: .buffered,
             defer: true
         )
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        panel.hasShadow = true
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
+        configuration.apply(to: panel)
         panel.contentView = contentView
         return panel
     }
@@ -421,7 +449,8 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
                 makeShortcutLabel(
                     shortcutLabel,
                     role: row.visualRole,
-                    isSelected: row.isSelected
+                    isSelected: row.isSelected,
+                    labelWidth: layoutItem.shortcutLabelWidth > 0 ? layoutItem.shortcutLabelWidth : nil
                 )
             )
         }
@@ -443,7 +472,8 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
     private func makeShortcutLabel(
         _ text: String,
         role: CandidatePanelVisualRole,
-        isSelected: Bool
+        isSelected: Bool,
+        labelWidth: CGFloat?
     ) -> NSTextField {
         let label = baseLabel(text)
         label.font = panelAppearance.shortcutFont()
@@ -451,7 +481,9 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
         label.alignment = .right
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
-        label.widthAnchor.constraint(equalToConstant: panelAppearance.shortcutReservedWidth).isActive = true
+        if let labelWidth {
+            label.widthAnchor.constraint(equalToConstant: labelWidth).isActive = true
+        }
         return label
     }
 

@@ -5,6 +5,20 @@ import XCTest
 @testable import KnowTypeInputMethod
 
 final class CandidatePanelWindowControllerTests: XCTestCase {
+    func testNativeWindowConfigurationUsesPopupNonactivatingCandidatePanelLevel() {
+        let configuration = CandidatePanelWindowConfiguration.native
+
+        XCTAssertTrue(configuration.styleMask.contains(.borderless))
+        XCTAssertTrue(configuration.styleMask.contains(.nonactivatingPanel))
+        XCTAssertEqual(configuration.level, .popUpMenu)
+        XCTAssertTrue(configuration.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(configuration.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(configuration.collectionBehavior.contains(.ignoresCycle))
+        XCTAssertTrue(configuration.isFloatingPanel)
+        XCTAssertTrue(configuration.worksWhenModal)
+        XCTAssertFalse(configuration.hidesOnDeactivate)
+    }
+
     @MainActor
     func testUpdateMovesExistingWindowWhenAnchorMoves() {
         let contentView = FakeCandidatePanelContentRenderer()
@@ -44,11 +58,11 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(
             origins,
             [
-                NSPoint(x: 100, y: 354),
-                NSPoint(x: 160, y: 374)
+                NSPoint(x: 100, y: 360),
+                NSPoint(x: 160, y: 380)
             ]
         )
-        XCTAssertEqual(contentSizes, [NSSize(width: 220, height: 40), NSSize(width: 220, height: 40)])
+        XCTAssertEqual(contentSizes, [NSSize(width: 220, height: 34), NSSize(width: 220, height: 34)])
         XCTAssertEqual(frontCount, 2)
         XCTAssertEqual(outCount, 0)
         XCTAssertEqual(modelCount, 2)
@@ -80,7 +94,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                 anchorRect: CGRect(x: 490, y: 390, width: 0, height: 18),
                 screenProvider: screenProvider
             )?.panelOrigin,
-            NSPoint(x: 222, y: 292)
+            NSPoint(x: 222, y: 298)
         )
     }
 
@@ -107,7 +121,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                 anchorRect: CGRect(x: 999, y: 300, width: 0, height: 18),
                 screenProvider: screenProvider
             )?.panelOrigin,
-            NSPoint(x: 1_008, y: 254)
+            NSPoint(x: 1_008, y: 260)
         )
     }
 
@@ -207,8 +221,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         let origins = window.frameOrigins
         let layoutPlans = contentView.layoutPlans
 
-        XCTAssertEqual(contentSizes, [NSSize(width: 305, height: 205)])
-        XCTAssertEqual(origins, [NSPoint(x: 387, y: 187)])
+        XCTAssertEqual(contentSizes, [NSSize(width: 285, height: 174)])
+        XCTAssertEqual(origins, [NSPoint(x: 407, y: 20)])
         XCTAssertEqual(layoutPlans.map(\.orientation), [.vertical])
         XCTAssertEqual(layoutPlans.first?.items.map(\.isTruncated), Array(repeating: false, count: 6))
     }

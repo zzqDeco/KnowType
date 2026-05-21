@@ -1840,6 +1840,187 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.layoutMode, .verticalPreferred)
     }
 
+    func testNativePageDownKeyRefreshesRimeCurrentPageSnapshot() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第一页一", "第一页二"]
+        )
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F72D}", keyCode: 121),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第二页一", "第二页二"]
+        )
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+    }
+
+    func testNativePageKeysUpdateRimeSnapshotWhenPanelIsHidden() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine(),
+            screenProvider: FixedInputControllerScreenProvider(screens: [])
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, false)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F72D}", keyCode: 121),
+                client: client
+            )
+        )
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第二页一")
+    }
+
+    func testNativeRightArrowPagesRimeSnapshotAtCurrentPageBoundary() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第一页一", "第一页二"]
+        )
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: client
+            )
+        )
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第二页一", "第二页二"]
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(0))
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F702}", keyCode: 123),
+                client: client
+            )
+        )
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第一页一", "第一页二"]
+        )
+    }
+
+    func testRimeDefaultPagingSymbolsRefreshNativePageBeforePunctuationCommit() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "=", keyCode: -1),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第二页一", "第二页二"]
+        )
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "-", keyCode: -1),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第一页一", "第一页二"]
+        )
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: -1),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第二页一", "第二页二"]
+        )
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ",", keyCode: -1),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第一页一", "第一页二"]
+        )
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+    }
+
+    func testPagingSymbolFallsBackToPunctuationWhenRimeHasNoTargetPage() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "-", keyCode: -1),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页一－")
+    }
+
     private func makeCoordinator(
         client: FakeInputControllerClient,
         persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence(),
@@ -1852,6 +2033,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         runtimePreferences: InputMethodRuntimePreferences = .standard,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
+        screenProvider: any ScreenGeometryProviding = FixedInputControllerScreenProvider(),
         asyncSuggestionDelayNanoseconds: UInt64 = 0
     ) -> (
         InputControllerCoordinator,
@@ -1878,7 +2060,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             conversionEngineFactory: conversionEngineFactory,
             host: host,
             anchorResolver: CandidateAnchorResolver(
-                screenProvider: FixedInputControllerScreenProvider(),
+                screenProvider: screenProvider,
                 accessibilityProvider: NoopAccessibilityAnchorProvider(),
                 traceEnabled: false
             ),
@@ -2364,6 +2546,85 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
             pageSize: max(candidates.count, 1),
             pageNumber: 0,
             isLastPage: true,
+            engineName: "native-test"
+        )
+    }
+}
+
+private struct PagedNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    private var rawInput = ""
+    private var currentPage = 0
+    private let pages = [
+        ["第一页一", "第一页二"],
+        ["第二页一", "第二页二"]
+    ]
+
+    var snapshot: ConversionEngineSnapshot {
+        makeSnapshot()
+    }
+
+    mutating func reset() {
+        rawInput = ""
+        currentPage = 0
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            currentPage = 0
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .pageDown:
+            guard currentPage < pages.count - 1 else {
+                return ConversionEngineResult(handled: false, snapshot: snapshot)
+            }
+            currentPage += 1
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .pageUp:
+            guard currentPage > 0 else {
+                return ConversionEngineResult(handled: false, snapshot: snapshot)
+            }
+            currentPage -= 1
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space:
+            guard let candidate = pages[currentPage].first else {
+                return ConversionEngineResult(handled: false, snapshot: snapshot)
+            }
+            reset()
+            return ConversionEngineResult(handled: true, commitText: candidate, snapshot: snapshot)
+        case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
+            guard pages[currentPage].indices.contains(index) else {
+                return ConversionEngineResult(handled: false, snapshot: snapshot)
+            }
+            let candidate = pages[currentPage][index]
+            reset()
+            return ConversionEngineResult(handled: true, commitText: candidate, snapshot: snapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            if rawInput.isEmpty {
+                currentPage = 0
+            }
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        }
+    }
+
+    private func makeSnapshot() -> ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-test")
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: pages[currentPage].enumerated().map { index, text in
+                ConversionEngineCandidate(text: text, index: index, source: "native-test")
+            },
+            highlightedIndex: 0,
+            pageSize: pages[currentPage].count,
+            pageNumber: currentPage,
+            isLastPage: currentPage == pages.count - 1,
             engineName: "native-test"
         )
     }

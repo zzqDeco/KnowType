@@ -5,24 +5,24 @@ import AppKit
 import KnowTypeCore
 
 struct CandidatePanelAppearance {
-    var panelCornerRadius: CGFloat = 7
-    var rowCornerRadius: CGFloat = 5
+    var panelCornerRadius: CGFloat = 8
+    var rowCornerRadius: CGFloat = 4.5
     var borderWidth: CGFloat = 0.5
     var borderAlpha: CGFloat = 0.22
-    var material: NSVisualEffectView.Material = .popover
+    var material: NSVisualEffectView.Material = .hudWindow
     var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
-    var contentInsets = CandidatePanelLayoutInsets(top: 5, left: 6, bottom: 5, right: 6)
-    var itemInsets = CandidatePanelLayoutInsets(top: 2, left: 7, bottom: 2, right: 9)
-    var horizontalRowHeight: CGFloat = 32
-    var verticalRowHeight: CGFloat = 30
+    var contentInsets = CandidatePanelLayoutInsets(top: 4, left: 5, bottom: 4, right: 5)
+    var itemInsets = CandidatePanelLayoutInsets(top: 1, left: 5, bottom: 1, right: 7)
+    var horizontalRowHeight: CGFloat = 26
+    var verticalRowHeight: CGFloat = 26
     var minimumVerticalRowHeight: CGFloat = 20
-    var horizontalItemSpacing: CGFloat = 3
-    var verticalItemSpacing: CGFloat = 3
-    var shortcutReservedWidth: CGFloat = 22
-    var shortcutTextSpacing: CGFloat = 5
-    var textFontSize: CGFloat = 16
-    var shortcutFontSize: CGFloat = 11
-    var rawFontSize: CGFloat = 14
+    var horizontalItemSpacing: CGFloat = 2
+    var verticalItemSpacing: CGFloat = 2
+    var minimumShortcutWidth: CGFloat = 0
+    var shortcutTextSpacing: CGFloat = 3
+    var textFontSize: CGFloat = 15
+    var shortcutFontSize: CGFloat = 10.5
+    var rawFontSize: CGFloat = 13.5
     var usesSnapshotColors = false
     var usesSnapshotDarkColors = false
 
@@ -40,7 +40,7 @@ struct CandidatePanelAppearance {
         configuration.itemInsets = itemInsets
         configuration.horizontalItemSpacing = horizontalItemSpacing
         configuration.verticalItemSpacing = verticalItemSpacing
-        configuration.shortcutReservedWidth = shortcutReservedWidth
+        configuration.minimumShortcutWidth = minimumShortcutWidth
         configuration.shortcutTextSpacing = shortcutTextSpacing
         return configuration
     }

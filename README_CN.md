@@ -45,8 +45,8 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
   不发送给 provider。
 - 前缀锁定的 AI 推荐：第一候选固定为 Rime 转换，第二候选固定为 AI 推荐；
   显式 polish 才是改写路径。
-- macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及跟随光标的
-  自绘 AppKit 候选窗。
+- macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及紧凑、
+  原生风格并能覆盖 Spotlight/search 浮层的 AppKit 候选窗。
 - 多 provider 兼容：OpenAI-compatible chat、OpenAI Responses、
   Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到
   同一套 provider 接口。
@@ -184,6 +184,7 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 | 快捷键 | 行为 |
 |---|---|
 | `Space` | 提交 Rime 当前高亮候选；Rime 不可用时提交原始输入。 |
+| 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` / `2` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时，提交原始 composition。 |

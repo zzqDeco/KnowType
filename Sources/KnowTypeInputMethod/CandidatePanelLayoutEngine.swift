@@ -34,15 +34,15 @@ struct CandidatePanelLayoutConfiguration: Sendable, Equatable {
     var horizontalMaximumWidth: CGFloat = 720
     var verticalMinimumWidth: CGFloat = 220
     var verticalMaximumWidth: CGFloat = 560
-    var horizontalRowHeight: CGFloat = 32
-    var verticalRowHeight: CGFloat = 30
+    var horizontalRowHeight: CGFloat = 26
+    var verticalRowHeight: CGFloat = 26
     var minimumVerticalRowHeight: CGFloat = 20
-    var contentInsets = CandidatePanelLayoutInsets(top: 5, left: 6, bottom: 5, right: 6)
-    var itemInsets = CandidatePanelLayoutInsets(top: 2, left: 7, bottom: 2, right: 9)
-    var horizontalItemSpacing: CGFloat = 3
-    var verticalItemSpacing: CGFloat = 3
-    var shortcutReservedWidth: CGFloat = 22
-    var shortcutTextSpacing: CGFloat = 5
+    var contentInsets = CandidatePanelLayoutInsets(top: 4, left: 5, bottom: 4, right: 5)
+    var itemInsets = CandidatePanelLayoutInsets(top: 1, left: 5, bottom: 1, right: 7)
+    var horizontalItemSpacing: CGFloat = 2
+    var verticalItemSpacing: CGFloat = 2
+    var minimumShortcutWidth: CGFloat = 0
+    var shortcutTextSpacing: CGFloat = 3
     var visibleFrameInset: CGFloat = 8
     var verticalAnchorSpacing: CGFloat = 6
     var minimumHorizontalCandidateCount: Int = 4
@@ -66,6 +66,21 @@ struct CandidatePanelLayoutItem: Sendable, Equatable {
     var frame: CGRect
     var textWidthLimit: CGFloat
     var isTruncated: Bool
+    var shortcutLabelWidth: CGFloat
+
+    init(
+        rowIndex: Int,
+        frame: CGRect,
+        textWidthLimit: CGFloat,
+        isTruncated: Bool,
+        shortcutLabelWidth: CGFloat = 0
+    ) {
+        self.rowIndex = rowIndex
+        self.frame = frame
+        self.textWidthLimit = textWidthLimit
+        self.isTruncated = isTruncated
+        self.shortcutLabelWidth = shortcutLabelWidth
+    }
 }
 
 struct CandidatePanelLayoutPlan: Sendable, Equatable {
@@ -94,6 +109,7 @@ struct CandidatePanelLayoutEngine {
         var panelSize: CGSize
         var rowHeight: CGFloat
         var itemSpacing: CGFloat
+        var sharedShortcutLabelWidth: CGFloat?
     }
 
     var configuration: CandidatePanelLayoutConfiguration
@@ -153,7 +169,8 @@ struct CandidatePanelLayoutEngine {
             orientation: orientation,
             panelSize: measurement.panelSize,
             rowHeight: measurement.rowHeight,
-            itemSpacing: measurement.itemSpacing
+            itemSpacing: measurement.itemSpacing,
+            sharedShortcutLabelWidth: measurement.sharedShortcutLabelWidth
         )
 
         return CandidatePanelLayoutPlan(
@@ -204,7 +221,8 @@ struct CandidatePanelLayoutEngine {
                 rows: rows,
                 panelSize: CGSize(width: ceil(width), height: height),
                 rowHeight: configuration.horizontalRowHeight,
-                itemSpacing: configuration.horizontalItemSpacing
+                itemSpacing: configuration.horizontalItemSpacing,
+                sharedShortcutLabelWidth: nil
             )
         case .vertical:
             guard let metrics = verticalMetrics(
@@ -214,8 +232,9 @@ struct CandidatePanelLayoutEngine {
                 return nil
             }
             let maximumWidth = verticalMaximumWidth(availableWidth: availableWidth)
+            let sharedShortcutLabelWidth = verticalSharedShortcutLabelWidth(for: rows)
             let width = clamp(
-                verticalNaturalWidth(for: rows),
+                verticalNaturalWidth(for: rows, sharedShortcutLabelWidth: sharedShortcutLabelWidth),
                 minimum: min(configuration.verticalMinimumWidth, maximumWidth),
                 maximum: maximumWidth
             )
@@ -226,7 +245,8 @@ struct CandidatePanelLayoutEngine {
                     height: ceil(metrics.height)
                 ),
                 rowHeight: metrics.rowHeight,
-                itemSpacing: metrics.itemSpacing
+                itemSpacing: metrics.itemSpacing,
+                sharedShortcutLabelWidth: sharedShortcutLabelWidth
             )
         }
     }
@@ -285,7 +305,8 @@ struct CandidatePanelLayoutEngine {
         orientation: CandidatePanelLayoutOrientation,
         panelSize: CGSize,
         rowHeight: CGFloat,
-        itemSpacing: CGFloat
+        itemSpacing: CGFloat,
+        sharedShortcutLabelWidth: CGFloat?
     ) -> [CandidatePanelLayoutItem] {
         switch orientation {
         case .horizontal:
@@ -295,7 +316,8 @@ struct CandidatePanelLayoutEngine {
                 for: rows,
                 panelSize: panelSize,
                 rowHeight: rowHeight,
-                itemSpacing: itemSpacing
+                itemSpacing: itemSpacing,
+                sharedShortcutLabelWidth: sharedShortcutLabelWidth
             )
         }
     }
@@ -307,7 +329,8 @@ struct CandidatePanelLayoutEngine {
     ) -> [CandidatePanelLayoutItem] {
         var x = configuration.contentInsets.left
         return rows.map { row in
-            let width = naturalItemWidth(for: row)
+            let shortcutLabelWidth = shortcutLabelWidth(for: row, sharedShortcutLabelWidth: nil)
+            let width = naturalItemWidth(for: row, shortcutLabelWidth: shortcutLabelWidth)
             let frame = CGRect(
                 x: x,
                 y: configuration.contentInsets.top,
@@ -315,12 +338,13 @@ struct CandidatePanelLayoutEngine {
                 height: rowHeight
             )
             x += width + configuration.horizontalItemSpacing
-            let textLimit = textWidthLimit(for: row, itemWidth: width)
+            let textLimit = textWidthLimit(for: row, itemWidth: width, shortcutLabelWidth: shortcutLabelWidth)
             return CandidatePanelLayoutItem(
                 rowIndex: row.rowIndex,
                 frame: frame,
                 textWidthLimit: textLimit,
-                isTruncated: row.textWidth > textLimit
+                isTruncated: row.textWidth > textLimit,
+                shortcutLabelWidth: shortcutLabelWidth
             )
         }
     }
@@ -329,11 +353,16 @@ struct CandidatePanelLayoutEngine {
         for rows: [MeasuredRow],
         panelSize: CGSize,
         rowHeight: CGFloat,
-        itemSpacing: CGFloat
+        itemSpacing: CGFloat,
+        sharedShortcutLabelWidth: CGFloat?
     ) -> [CandidatePanelLayoutItem] {
         let width = max(0, panelSize.width - configuration.contentInsets.horizontal)
         var y = configuration.contentInsets.top
         return rows.map { row in
+            let shortcutLabelWidth = shortcutLabelWidth(
+                for: row,
+                sharedShortcutLabelWidth: sharedShortcutLabelWidth
+            )
             let frame = CGRect(
                 x: configuration.contentInsets.left,
                 y: y,
@@ -341,12 +370,17 @@ struct CandidatePanelLayoutEngine {
                 height: rowHeight
             )
             y += rowHeight + itemSpacing
-            let textLimit = textWidthLimit(for: row, itemWidth: width)
+            let textLimit = textWidthLimit(
+                for: row,
+                itemWidth: width,
+                shortcutLabelWidth: shortcutLabelWidth
+            )
             return CandidatePanelLayoutItem(
                 rowIndex: row.rowIndex,
                 frame: frame,
                 textWidthLimit: textLimit,
-                isTruncated: row.textWidth > textLimit
+                isTruncated: row.textWidth > textLimit,
+                shortcutLabelWidth: shortcutLabelWidth
             )
         }
     }
@@ -375,37 +409,73 @@ struct CandidatePanelLayoutEngine {
     }
 
     private func horizontalNaturalWidth(for rows: [MeasuredRow]) -> CGFloat {
-        let rowWidth = rows.reduce(CGFloat(0)) { $0 + naturalItemWidth(for: $1) }
+        let rowWidth = rows.reduce(CGFloat(0)) { partial, row in
+            partial + naturalItemWidth(
+                for: row,
+                shortcutLabelWidth: shortcutLabelWidth(for: row, sharedShortcutLabelWidth: nil)
+            )
+        }
         let spacing = CGFloat(max(rows.count - 1, 0)) * configuration.horizontalItemSpacing
         return configuration.contentInsets.horizontal + rowWidth + spacing
     }
 
-    private func verticalNaturalWidth(for rows: [MeasuredRow]) -> CGFloat {
-        let itemWidth = rows.map(naturalItemWidth(for:)).max() ?? 0
+    private func verticalNaturalWidth(
+        for rows: [MeasuredRow],
+        sharedShortcutLabelWidth: CGFloat?
+    ) -> CGFloat {
+        let itemWidth = rows.map { row in
+            naturalItemWidth(
+                for: row,
+                shortcutLabelWidth: shortcutLabelWidth(
+                    for: row,
+                    sharedShortcutLabelWidth: sharedShortcutLabelWidth
+                )
+            )
+        }.max() ?? 0
         return configuration.contentInsets.horizontal + itemWidth
     }
 
-    private func naturalItemWidth(for row: MeasuredRow) -> CGFloat {
+    private func naturalItemWidth(for row: MeasuredRow, shortcutLabelWidth: CGFloat) -> CGFloat {
         configuration.itemInsets.horizontal
-            + shortcutSlotWidth(for: row)
+            + shortcutSlotWidth(shortcutLabelWidth: shortcutLabelWidth)
             + row.textWidth
     }
 
-    private func textWidthLimit(for row: MeasuredRow, itemWidth: CGFloat) -> CGFloat {
+    private func textWidthLimit(
+        for row: MeasuredRow,
+        itemWidth: CGFloat,
+        shortcutLabelWidth: CGFloat
+    ) -> CGFloat {
         max(
             0,
             itemWidth
                 - configuration.itemInsets.horizontal
-                - shortcutSlotWidth(for: row)
+                - shortcutSlotWidth(shortcutLabelWidth: shortcutLabelWidth)
         )
     }
 
-    private func shortcutSlotWidth(for row: MeasuredRow) -> CGFloat {
+    private func verticalSharedShortcutLabelWidth(for rows: [MeasuredRow]) -> CGFloat? {
+        rows
+            .filter(\.hasShortcut)
+            .map { max(configuration.minimumShortcutWidth, $0.shortcutWidth) }
+            .max()
+    }
+
+    private func shortcutLabelWidth(
+        for row: MeasuredRow,
+        sharedShortcutLabelWidth: CGFloat?
+    ) -> CGFloat {
         guard row.hasShortcut else {
             return 0
         }
-        return max(configuration.shortcutReservedWidth, row.shortcutWidth)
-            + configuration.shortcutTextSpacing
+        return max(configuration.minimumShortcutWidth, sharedShortcutLabelWidth ?? row.shortcutWidth)
+    }
+
+    private func shortcutSlotWidth(shortcutLabelWidth: CGFloat) -> CGFloat {
+        guard shortcutLabelWidth > 0 else {
+            return 0
+        }
+        return shortcutLabelWidth + configuration.shortcutTextSpacing
     }
 
     private func horizontalMaximumWidth(availableWidth: CGFloat) -> CGFloat {

@@ -1,7 +1,7 @@
 # CandidatePanelWindowController
 
 `CandidatePanelWindowController` owns the candidate panel lifecycle used by the macOS input method bundle.
-The default implementation still creates an AppKit floating panel, but the controller now routes rendering,
+The default implementation creates an AppKit non-activating popup-level panel, and the controller routes rendering,
 window operations, sizing, placement, and screen geometry through small internal seams so geometry behavior can
 be tested without opening real AppKit windows.
 
@@ -21,7 +21,9 @@ Current behavior:
 - clamps the panel to the visible frame of the caret's validated screen, compressing vertical row height and spacing on constrained screens without dropping selectable rows
 - resizes the panel before asking the content view to lay out fixed measured row constraints; row containers and labels opt into Auto Layout so candidate text remains visible in real windows
 - hides from composition reset, `hidePalettes`, and input-controller close lifecycle
-- uses a borderless AppKit floating panel with `NSVisualEffectView` popover material, compact row sizing, system highlight selection, 0.5 pt separator border, continuous corners, and muted continuation/AI-status styling to stay close to macOS native input method candidate windows
+- uses a borderless non-activating AppKit panel at `.popUpMenu` window level, with all-spaces/full-screen auxiliary behavior, `isFloatingPanel`, `worksWhenModal`, and `hidesOnDeactivate = false`
+- uses `NSVisualEffectView` `hudWindow` material, compact row sizing, system highlight selection, 0.5 pt separator border, continuous corners, and muted continuation/AI-status styling to stay close to macOS native input method candidate windows
+- keeps the panel above Spotlight and search-like overlays without using private APIs, screen-saver level, or shielding window levels
 - hit-tests visible rows so hover updates selection, mouse up commits the same selection as keyboard shortcuts, and disabled AI status rows do not react
 - maps scroll-wheel up/down to PageUp/PageDown with a threshold so trackpad jitter does not page accidentally
 - exposes each visible row as an accessibility element; enabled candidates use button semantics, disabled AI status uses static-text semantics, and selection changes post focused-element and selected-children notifications

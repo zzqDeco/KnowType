@@ -50,8 +50,8 @@ polish.
   the second slot is reserved for AI, and explicit polish is the only rewrite
   path.
 - macOS input method flow: marked text, candidate selection, paging,
-  punctuation handling, and a custom AppKit candidate panel anchored near the
-  caret.
+  punctuation handling, and a compact native-style AppKit candidate panel that
+  stays above Spotlight/search overlays.
 - Provider compatibility: OpenAI-compatible chat, OpenAI Responses, Anthropic
   Messages, Gemini native, Ollama native, and custom HTTP profiles normalize
   into one provider interface.
@@ -202,6 +202,7 @@ AI correction instructions. Traditional input does not depend on either file.
 | Shortcut | Behavior |
 |---|---|
 | `Space` | Commit the highlighted/current Rime candidate, or raw input when Rime is unavailable. |
+| Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the visible Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` / `2` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible. |

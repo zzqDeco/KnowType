@@ -182,6 +182,9 @@ consume the same `CandidatePanelSelection` values so click commits match keyboar
 - `process(.text)`, `.space`, `.selectCandidateOnCurrentPage`, `.pageUp`, and `.pageDown` call the native Rime session synchronously.
 - `ConversionEngineSnapshot.suggestionResponse` maps only the current Rime page into prefix candidates; full candidate-list iteration is not part of the key path.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
+- Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, the key falls back to the normal punctuation commit path so page shortcuts do not swallow punctuation at page boundaries.
+- Explicit `PageUp`/`PageDown` are forwarded to the native engine whenever composition is active, even if the custom panel is hidden because anchoring failed.
+- Arrow navigation moves selection inside the current Rime page first. At a page edge, left/up attempts `.pageUp` and right/down attempts `.pageDown` so the custom panel behaves like a single paged candidate list even though snapshots contain only the current Rime page.
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
 
@@ -190,7 +193,15 @@ Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row s
 possible, switches to vertical layout for long phrases, and returns the final panel size, origin, row frames, and
 per-row text limits used by the AppKit view. The layout plan must keep shortcut/selectable rows in sync with
 rendered rows; constrained vertical layouts compress row height and spacing instead of dropping rows after
-shortcuts are assigned.
+shortcuts are assigned. Shortcut labels are measured instead of using a fixed reserved slot. Horizontal rows use
+their own shortcut label width; vertical rows align only the rows that have shortcuts to the current page's widest
+shortcut label; rows without shortcuts reserve no shortcut space.
+
+The native AppKit candidate panel is a borderless non-activating `NSPanel` at `.popUpMenu` window level, with
+all-spaces/full-screen auxiliary behavior, `isFloatingPanel`, `worksWhenModal`, and `hidesOnDeactivate = false`.
+This keeps the panel above Spotlight and search-like overlays while avoiding private APIs, screen-saver level, or
+shielding levels. The visual style uses compact rows, `hudWindow` material, dynamic system colors, and continuous
+corners so it stays close to macOS native candidate panels.
 
 The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
 that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use

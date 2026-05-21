@@ -216,6 +216,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .append(let text):
             return appendComposition(text, client: client)
         case .symbol(let text):
+            if handleNativePagingSymbol(text, client: client) {
+                return true
+            }
             if rawBuffer.isEmpty {
                 reloadInputModeDefaultsIfNeeded(client: client)
             }
@@ -1334,30 +1337,100 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
-        if conversionEngine.isNativeActive {
-            switch navigation {
-            case .pageDown, .pageUp:
-                let key: ConversionEngineKey = navigation == .pageUp ? .pageUp : .pageDown
-                let result = conversionEngine.process(key)
-                guard result.handled else {
-                    return false
-                }
-                publishLocalSuggestion(client: host?.currentClient)
-                return true
-            case .down, .up, .left, .right:
-                break
-            }
-        }
-        guard candidatePanelState.moveSelection(navigation) else {
+    private func handleNativePagingSymbol(_ text: String, client: InputControllerClient?) -> Bool {
+        guard let navigation = Self.nativePagingSymbolNavigation(for: text) else {
             return false
         }
-        selectedNativeCandidate = inputCandidateSelection(
-            for: candidatePanelState.windowState.selection,
-            in: candidatePanelState.windowState.viewModel
+        return moveNativeCandidatePage(
+            navigation,
+            client: client,
+            consumeOnlyWhenSnapshotChanges: true
         )
-        host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+    }
+
+    private static func nativePagingSymbolNavigation(for text: String) -> InputCandidateNavigation? {
+        switch text {
+        case "-", ",":
+            return .pageUp
+        case "=", ".":
+            return .pageDown
+        default:
+            return nil
+        }
+    }
+
+    private func moveNativeCandidatePage(
+        _ navigation: InputCandidateNavigation,
+        client: InputControllerClient?,
+        consumeOnlyWhenSnapshotChanges: Bool = false
+    ) -> Bool {
+        guard conversionEngine.isNativeActive,
+              !rawBuffer.isEmpty else {
+            return false
+        }
+        let snapshotBeforePage = conversionEngine.snapshot
+        let key: ConversionEngineKey
+        switch navigation {
+        case .pageUp:
+            key = .pageUp
+        case .pageDown:
+            key = .pageDown
+        case .up, .down, .left, .right:
+            return false
+        }
+        let result = conversionEngine.process(key)
+        guard result.handled else {
+            return false
+        }
+        if consumeOnlyWhenSnapshotChanges,
+           result.snapshot == snapshotBeforePage,
+           result.commitText == nil {
+            return false
+        }
+        publishLocalSuggestion(client: client)
         return true
+    }
+
+    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        if moveNativeCandidatePage(navigation, client: host?.currentClient) {
+            return true
+        }
+        if conversionEngine.isNativeActive,
+           navigation == .pageDown || navigation == .pageUp {
+            return false
+        }
+        let previousWindowState = candidatePanelState.windowState
+        if candidatePanelState.moveSelection(navigation) {
+            if conversionEngine.isNativeActive,
+               candidatePanelState.windowState == previousWindowState,
+               let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation),
+               moveNativeCandidatePage(pageNavigation, client: host?.currentClient) {
+                return true
+            }
+            selectedNativeCandidate = inputCandidateSelection(
+                for: candidatePanelState.windowState.selection,
+                in: candidatePanelState.windowState.viewModel
+            )
+            host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+            return true
+        }
+        guard let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation) else {
+            return false
+        }
+        return moveNativeCandidatePage(pageNavigation, client: host?.currentClient)
+    }
+
+    private static func nativeBoundaryPageNavigation(
+        for navigation: InputCandidateNavigation
+    ) -> InputCandidateNavigation? {
+        switch navigation {
+        case .right, .down:
+            return .pageDown
+        case .left, .up:
+            return .pageUp
+        case .pageDown, .pageUp:
+            return nil
+        }
     }
 
     private func candidateAnchorResult(client: InputControllerClient?) -> CandidateAnchorResult {
