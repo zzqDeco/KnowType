@@ -40,7 +40,7 @@ public struct ProviderProfilesView: View {
 
             LexiconSettingsView(viewModel: lexiconViewModel)
                 .tabItem {
-                    Label("Lexicons", systemImage: "books.vertical")
+                    Label("Rime/User Data", systemImage: "folder")
                 }
                 .tag(SettingsSection.lexicons)
 
@@ -59,11 +59,11 @@ public struct ProviderProfilesView: View {
                 }
                 .tag(SettingsSection.privacy)
 
-            DebugInstallSettingsView()
+            DiagnosticsSettingsView()
                 .tabItem {
-                    Label("Debug Install", systemImage: "hammer")
+                    Label("Diagnostics", systemImage: "stethoscope")
                 }
-                .tag(SettingsSection.debugInstall)
+                .tag(SettingsSection.diagnostics)
         }
     }
 }
@@ -74,7 +74,7 @@ private enum SettingsSection: Hashable {
     case lexicons
     case aiProvider
     case privacy
-    case debugInstall
+    case diagnostics
 }
 
 private struct InputSettingsView: View {
@@ -520,10 +520,10 @@ private struct PrivacySettingsView: View {
     }
 }
 
-private struct DebugInstallSettingsView: View {
+private struct DiagnosticsSettingsView: View {
     var body: some View {
         SettingsForm {
-            Section("Local Development Flow") {
+            Section("Local Diagnostics") {
                 ForEach(DebugInstallGuidance.steps) { step in
                     InstallStepView(title: step.title, detail: step.detail)
                 }

@@ -7,17 +7,19 @@ source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
 DRY_RUN=0
 CONFIGURATION="${CONFIGURATION:-release}"
+WITH_PREFPANE="${KNOWTYPE_INSTALL_PREFPANE:-0}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-inputmethod.sh [--configuration debug|release] [--dry-run]
+Usage: scripts/install-inputmethod.sh [--configuration debug|release] [--with-prefpane] [--dry-run]
 
-Builds and installs KnowType.app into ~/Library/Input Methods, installs
-KnowType.prefPane into ~/Library/PreferencePanes, then asks the installed app
-to register and enable the input source.
+Builds and installs KnowType.app into ~/Library/Input Methods, then asks the
+installed app to register and enable the input source. KnowType-specific
+settings are opened from the input-method menu's KnowType Settings item.
 
 Options:
   --configuration  SwiftPM build configuration. Defaults to CONFIGURATION or release.
+  --with-prefpane  Also build and install the compatibility KnowType.prefPane.
   --dry-run        Print local bundles and LaunchServices records that would be cleaned.
   -h, --help       Show this help.
 EOF
@@ -35,6 +37,10 @@ while (($# > 0)); do
       ;;
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --with-prefpane)
+      WITH_PREFPANE=1
       shift
       ;;
     -h|--help)
@@ -57,6 +63,15 @@ case "$CONFIGURATION" in
     ;;
 esac
 
+case "$WITH_PREFPANE" in
+  1|true|TRUE|yes|YES) WITH_PREFPANE=1 ;;
+  0|false|FALSE|no|NO) WITH_PREFPANE=0 ;;
+  *)
+    echo "error: KNOWTYPE_INSTALL_PREFPANE must be 0/1, true/false, or yes/no" >&2
+    exit 2
+    ;;
+esac
+
 LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
 TARGET_DIR="$(knowtype_inputmethod_target_dir)"
 TARGET_PATH="$(knowtype_inputmethod_target_path)"
@@ -66,7 +81,9 @@ PREFPANE_TARGET_PATH="$(knowtype_preferencepane_target_path)"
 if (( DRY_RUN == 1 )); then
   echo "KnowType input-method install dry run"
   echo "Target bundle: $TARGET_PATH"
-  echo "Target System Settings pane: $PREFPANE_TARGET_PATH"
+  if (( WITH_PREFPANE == 1 )); then
+    echo "Target compatibility PreferencePane: $PREFPANE_TARGET_PATH"
+  fi
   echo
   echo "Local KnowType bundles that would be removed before install:"
   local_bundle_count=0
@@ -89,9 +106,9 @@ if (( DRY_RUN == 1 )); then
   if (( ls_count == 0 )); then
     echo "  <none>"
   fi
-  if [[ -d "$PREFPANE_TARGET_PATH" ]]; then
+  if (( WITH_PREFPANE == 1 )) && [[ -d "$PREFPANE_TARGET_PATH" ]]; then
     echo
-    echo "System Settings pane that would be replaced:"
+    echo "Compatibility PreferencePane that would be replaced:"
     echo "  $PREFPANE_TARGET_PATH"
   fi
   echo
@@ -100,7 +117,10 @@ if (( DRY_RUN == 1 )); then
 fi
 
 BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$ROOT_DIR/scripts/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" | tail -n 1)"
-PREFPANE_PATH="$("$ROOT_DIR/scripts/build-preference-pane.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+PREFPANE_PATH=""
+if (( WITH_PREFPANE == 1 )); then
+  PREFPANE_PATH="$("$ROOT_DIR/scripts/build-preference-pane.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+fi
 INSTALLED_EXECUTABLE="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
 
 INPUTSOURCE_TOOL=""
@@ -156,7 +176,9 @@ repair_preferences_best_effort() {
 }
 
 mkdir -p "$TARGET_DIR"
-mkdir -p "$PREFPANE_TARGET_DIR"
+if (( WITH_PREFPANE == 1 )); then
+  mkdir -p "$PREFPANE_TARGET_DIR"
+fi
 
 switch_away_before_replace
 sleep 0.2
@@ -174,12 +196,18 @@ fi
 knowtype_cleanup_local_duplicate_bundles_except "" 0
 cp -R "$BUNDLE_PATH" "$TARGET_PATH"
 rm -rf "$BUNDLE_PATH"
-rm -rf "$PREFPANE_TARGET_PATH"
-cp -R "$PREFPANE_PATH" "$PREFPANE_TARGET_PATH"
-rm -rf "$PREFPANE_PATH"
+if (( WITH_PREFPANE == 1 )); then
+  rm -rf "$PREFPANE_TARGET_PATH"
+  cp -R "$PREFPANE_PATH" "$PREFPANE_TARGET_PATH"
+  rm -rf "$PREFPANE_PATH"
+fi
 
 if command -v xattr >/dev/null 2>&1; then
-  xattr -dr com.apple.quarantine "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 2>/dev/null || true
+  if (( WITH_PREFPANE == 1 )); then
+    xattr -dr com.apple.quarantine "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 2>/dev/null || true
+  else
+    xattr -dr com.apple.quarantine "$TARGET_PATH" 2>/dev/null || true
+  fi
 fi
 
 knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0
@@ -211,7 +239,11 @@ if [[ "$duplicate_count" =~ ^[0-9]+$ && "$duplicate_count" -gt 1 ]]; then
 fi
 
 echo "Installed KnowType to: $TARGET_PATH"
-echo "Installed KnowType System Settings pane to: $PREFPANE_TARGET_PATH"
+if (( WITH_PREFPANE == 1 )); then
+  echo "Installed KnowType compatibility PreferencePane to: $PREFPANE_TARGET_PATH"
+else
+  echo "KnowType settings are available from the input-method menu: KnowType Settings..."
+fi
 echo "Installed KnowType local build version: $LOCAL_BUILD_VERSION"
 echo "Requested input source activation from installed app: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 echo "Run ./scripts/diagnose-inputmethod.sh --strict for the read-only install status check."

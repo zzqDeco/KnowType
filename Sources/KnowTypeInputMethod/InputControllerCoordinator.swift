@@ -232,6 +232,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         hideCandidatePanel()
     }
 
+    func reloadRuntimePreferencesForExternalChange() {
+        lastRuntimePreferenceReload = .distantPast
+        reloadRuntimePreferencesIfNeeded()
+    }
+
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
         switch intent {
         case .append(let text):

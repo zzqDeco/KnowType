@@ -75,6 +75,7 @@ required for every test file.
 - [InputControllerCoordinator](Sources/KnowTypeInputMethod/InputControllerCoordinator.plan.md)
 - [InputControllerHostClientSeams](Sources/KnowTypeInputMethod/InputControllerHostClientSeams.plan.md)
 - [InputKeyCommandMapper](Sources/KnowTypeInputMethod/InputKeyCommandMapper.plan.md)
+- [InputMethodMenuBuilder](Sources/KnowTypeInputMethod/InputMethodMenuBuilder.plan.md)
 - [InputMethodHost](Sources/KnowTypeInputMethod/InputMethodHost.plan.md)
 - [InputMethodLexiconRuntime](Sources/KnowTypeInputMethod/InputMethodLexiconRuntime.plan.md)
 - [InputSessionController](Sources/KnowTypeInputMethod/InputSessionController.plan.md)

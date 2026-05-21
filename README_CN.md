@@ -111,6 +111,11 @@ Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode 形态：pare
 Rime runtime 文件会打包在 `KnowType.app` 中；如果文件缺失或加载失败，KnowType 会保留
 raw 输入可用并报告 degraded conversion state，而不是回退到已经退役的自研转换器。
 
+KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
+macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。本地安装默认不安装独立
+Settings app。兼容用的 `KnowType.prefPane` 只有在执行
+`./scripts/install-inputmethod.sh --with-prefpane` 时才会构建并安装。
+
 首次安装或 mode id 迁移后，macOS 仍可能要求通过系统设置完成第三方输入源授权。
 打开“系统设置 > 键盘 > 输入源”，移除过期的 KnowType/知键条目，重新添加
 `知键` / `KnowType`，如果系统弹出允许提示则点击允许。如果菜单仍显示旧条目，注销再登录以清理
@@ -134,9 +139,9 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 和 [MVP Acceptance](doc/mvp-acceptance.plan.md)。
 
 使用 GitHub Release zip 时，先用发布页提供的 `.sha256` 文件校验下载的 zip。
-然后解压，把 `KnowType.app` 复制到 `~/Library/Input Methods/`，把
-`KnowType.prefPane` 复制到 `~/Library/PreferencePanes/`。如果手边有源码
-checkout，再运行同一套本地诊断和真实打字验收流程。
+然后解压，把 `KnowType.app` 复制到 `~/Library/Input Methods/`，通过输入法菜单中的
+`KnowType Settings...` 修改配置。`KnowType.prefPane` 是兼容设置入口，只有需要 fallback
+时再复制到 `~/Library/PreferencePanes/`。如果手边有源码 checkout，再运行同一套本地诊断和真实打字验收流程。
 
 ## 配置
 
@@ -242,8 +247,8 @@ Sources/KnowTypeAI/             AI 推荐、上下文记忆、纠错说明
 Sources/KnowTypeInputMethod/    IMK controller、会话动作、候选窗
 Sources/KnowTypeInputMethodApp/ 本地 macOS 输入法 app 入口
 Sources/KnowTypeSettingsUI/     共享 SwiftUI 设置 UI
-Sources/KnowTypeSettingsApp/    独立设置 app 宿主
-Sources/KnowTypePreferencePane/ System Settings PreferencePane 宿主
+Sources/KnowTypeSettingsApp/    开发预览设置 app 宿主
+Sources/KnowTypePreferencePane/ 兼容 PreferencePane 宿主
 Tests/                          单元测试
 doc/                            当前工程文档
 plan/                           当前和近期交付的实施计划

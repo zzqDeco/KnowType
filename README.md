@@ -122,6 +122,12 @@ tests exercise the optimized hot path. Rime runtime files are packaged inside
 usable and reports degraded conversion state instead of falling back to the
 retired clean-room converter.
 
+KnowType-specific settings follow the native IMK input-method pattern used by
+McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
+`KnowType Settings...`. The local install does not install a standalone settings
+app. The compatibility `KnowType.prefPane` is only built and installed when
+`./scripts/install-inputmethod.sh --with-prefpane` is used.
+
 After the first install or a mode-id migration, macOS may still require the
 System Settings input-source approval path. Open System Settings > Keyboard >
 Input Sources, remove stale KnowType rows, add `知键` / `KnowType` again, and
@@ -150,9 +156,11 @@ and manual acceptance flow.
 
 For a GitHub Release zip, verify the downloaded archive with the published
 `.sha256` file first. Then expand it, copy `KnowType.app` to
-`~/Library/Input Methods/` and `KnowType.prefPane` to
-`~/Library/PreferencePanes/`, and run the same local diagnostics/manual typing
-acceptance from a source checkout when available.
+`~/Library/Input Methods/`, and use the input menu's `KnowType Settings...`
+entry for configuration. `KnowType.prefPane` is a compatibility settings host
+and may be copied to `~/Library/PreferencePanes/` when that fallback is needed.
+Run the same local diagnostics/manual typing acceptance from a source checkout
+when available.
 
 ## Configuration
 
@@ -265,8 +273,8 @@ Sources/KnowTypeAI/             AI recommendation, context memory, correction in
 Sources/KnowTypeInputMethod/    IMK controller, session actions, candidate panel
 Sources/KnowTypeInputMethodApp/ Local macOS input-method app entry point
 Sources/KnowTypeSettingsUI/     Shared SwiftUI settings UI
-Sources/KnowTypeSettingsApp/    Standalone settings app host
-Sources/KnowTypePreferencePane/ System Settings PreferencePane host
+Sources/KnowTypeSettingsApp/    Developer preview settings app host
+Sources/KnowTypePreferencePane/ Compatibility PreferencePane host
 Tests/                          Unit tests
 doc/                            Current engineering documentation
 plan/                           Active and recently delivered implementation plans

@@ -27,6 +27,7 @@ The script does not mutate macOS input-source state. It reports:
 - parent TIS type and select-capable state;
 - Gatekeeper assessment status, because an Apple Development-signed local bundle can pass `codesign --verify` but still be rejected by system execution policy;
 - stale LaunchServices records for the same KnowType bundle id outside `~/Library/Input Methods/KnowType.app`;
+- optional compatibility `KnowType.prefPane` metadata when it is installed;
 - `KnowTypeInputMethodApp` process status;
 - provider profile, candidate history, and local lexicon directory paths.
 
@@ -61,6 +62,10 @@ When `TISSelectInputSource` returns success in the app context and `AppleSelecte
 `scripts/repair-inputmethod-selection.sh` runs the installed app with `--knowtype-purge-legacy`, uses the helper's explicit `repair-preferences` command to remove legacy KnowType rows and restore the third-party parent anchor plus `.Hans`, restarts `cfprefsd`, `TextInputMenuAgent`, `TextInputSwitcher`, and `KnowTypeInputMethodApp`, then executes the installed app with `--knowtype-install-activate`. Selection still goes through the installed app. Use it after repeated local installs when stale `.Mode` rows or missing third-party anchors make the menu bounce back to Apple Pinyin or ABC. Add KnowType in System Settings if the third-party enabled list remains missing.
 
 `knowtype-inputsource-tool disable` remains available for manual cleanup, but the local install script no longer switches, purges, enables, or selects through the command-line helper. It copies the new bundle, then launches `KnowType.app --knowtype-purge-legacy` and `KnowType.app --knowtype-install-activate` so cleanup, registration, enabling, and the best-effort selection request run from the installed app context.
+
+The default install script does not install `KnowType.prefPane`. That
+PreferencePane remains a compatibility fallback requested with `--with-prefpane`;
+the primary settings entry is the input-method menu item `KnowType Settings...`.
 
 `KnowTypeInputMethodApp` handles `--knowtype-install-activate`,
 `--knowtype-switch-away`, `--knowtype-purge-legacy`,

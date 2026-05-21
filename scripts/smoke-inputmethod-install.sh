@@ -4,21 +4,27 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLIST_BUDDY="/usr/libexec/PlistBuddy"
 source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
+WITH_PREFPANE=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/smoke-inputmethod-install.sh
+Usage: scripts/smoke-inputmethod-install.sh [--with-prefpane]
 
 Runs deterministic install/profile smoke checks without installing KnowType,
 selecting an input source, or installing a configuration profile.
 
 Options:
+  --with-prefpane  Also build and validate the compatibility KnowType.prefPane.
   -h, --help  Show this help.
 EOF
 }
 
 while (($# > 0)); do
   case "$1" in
+    --with-prefpane)
+      WITH_PREFPANE=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -181,34 +187,36 @@ assert_equals "KnowTypeInputMethodApp" \
 "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rime-smoke >/dev/null ||
   die "bundled Rime runtime smoke failed"
 
-prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"
-assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"
-assert_dir "$prefpane_path"
-assert_file "$prefpane_path/Contents/Info.plist"
-assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
-assert_file "$prefpane_path/Contents/Frameworks/libKnowTypePreferencePane.dylib"
-[[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
-  die "PreferencePane executable is not executable"
-if command -v otool >/dev/null 2>&1; then
-  otool -hv "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "BUNDLE" ||
-    die "PreferencePane executable is not an MH_BUNDLE"
-  otool -L "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "@rpath/libKnowTypePreferencePane.dylib" ||
-    die "PreferencePane executable does not load the SwiftPM preference pane library"
+if (( WITH_PREFPANE == 1 )); then
+  prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"
+  assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"
+  assert_dir "$prefpane_path"
+  assert_file "$prefpane_path/Contents/Info.plist"
+  assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
+  assert_file "$prefpane_path/Contents/Frameworks/libKnowTypePreferencePane.dylib"
+  [[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
+    die "PreferencePane executable is not executable"
+  if command -v otool >/dev/null 2>&1; then
+    otool -hv "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "BUNDLE" ||
+      die "PreferencePane executable is not an MH_BUNDLE"
+    otool -L "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "@rpath/libKnowTypePreferencePane.dylib" ||
+      die "PreferencePane executable does not load the SwiftPM preference pane library"
+  fi
+  principal_class="$(
+    PREFPANE_PATH="$prefpane_path" swift -e 'import Foundation; let path = ProcessInfo.processInfo.environment["PREFPANE_PATH"]!; guard let bundle = Bundle(url: URL(fileURLWithPath: path)), bundle.load() else { fatalError("PreferencePane bundle did not load") }; print(String(describing: bundle.principalClass))'
+  )"
+  [[ "$principal_class" == *"KnowTypePreferencePane"* ]] ||
+    die "PreferencePane principal class did not resolve"
+  assert_equals "com.knowtype.preferencepane" \
+    "$(plist_read ":CFBundleIdentifier" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane CFBundleIdentifier"
+  assert_equals "KnowTypePreferencePane" \
+    "$(plist_read ":CFBundleExecutable" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane CFBundleExecutable"
+  assert_equals "KnowTypePreferencePane" \
+    "$(plist_read ":NSPrincipalClass" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane NSPrincipalClass"
 fi
-principal_class="$(
-  PREFPANE_PATH="$prefpane_path" swift -e 'import Foundation; let path = ProcessInfo.processInfo.environment["PREFPANE_PATH"]!; guard let bundle = Bundle(url: URL(fileURLWithPath: path)), bundle.load() else { fatalError("PreferencePane bundle did not load") }; print(String(describing: bundle.principalClass))'
-)"
-[[ "$principal_class" == *"KnowTypePreferencePane"* ]] ||
-  die "PreferencePane principal class did not resolve"
-assert_equals "com.knowtype.preferencepane" \
-  "$(plist_read ":CFBundleIdentifier" "$prefpane_path/Contents/Info.plist")" \
-  "PreferencePane CFBundleIdentifier"
-assert_equals "KnowTypePreferencePane" \
-  "$(plist_read ":CFBundleExecutable" "$prefpane_path/Contents/Info.plist")" \
-  "PreferencePane CFBundleExecutable"
-assert_equals "KnowTypePreferencePane" \
-  "$(plist_read ":NSPrincipalClass" "$prefpane_path/Contents/Info.plist")" \
-  "PreferencePane NSPrincipalClass"
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-profile-smoke.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT

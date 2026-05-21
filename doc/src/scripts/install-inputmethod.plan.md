@@ -8,6 +8,8 @@ Installs the locally built KnowType input method bundle into
 ## Boundaries
 
 - The script copies and prepares the local development bundle.
+- The compatibility PreferencePane is optional and installed only with
+  `--with-prefpane` or `KNOWTYPE_INSTALL_PREFPANE=1`.
 - It does not prove target-app typing behavior; manual acceptance still must
   type in real host apps.
 
@@ -31,6 +33,8 @@ Installs the locally built KnowType input method bundle into
   plus `.Hans` in `com.apple.inputsources`.
 - After activation, it opens the installed app as a background agent so the
   `IMKServer` connection is available to Text Input clients.
+- The primary settings entry is the input-method menu's
+  `KnowType Settings...`; the script does not install a standalone settings app.
 - TIS registration, enablement, and selection remain attributed to
   `KnowType.app`; the SwiftPM helper is used only for scoped preference repair.
 - macOS 15 local policy issues may still require the SystemPolicyRule profile

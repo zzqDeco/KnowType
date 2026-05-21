@@ -17,6 +17,7 @@ private let inputControllerLogger = Logger(
 public final class KnowTypeInputController: IMKInputController, CandidatePanelInteractionHandling, @unchecked Sendable {
     private let coordinator: InputControllerCoordinator
     private let hostAdapter: IMKInputControllerHostAdapter
+    private let runtimePreferenceStore: any InputMethodRuntimePreferenceStore
     @MainActor private lazy var candidatePanelController = CandidatePanelWindowController(interactionHandler: self)
     @MainActor private var preferencesWindowController: KnowTypePreferencesWindowController?
 
@@ -35,6 +36,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         let initialClient = Self.inputControllerClient(from: inputClient)
 
         self.hostAdapter = hostAdapter
+        self.runtimePreferenceStore = runtimePreferenceStore
         self.coordinator = InputControllerCoordinator(
             provider: provider,
             inputModePreferenceStore: inputModePreferenceStore,
@@ -103,15 +105,10 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     }
 
     public override func menu() -> NSMenu! {
-        let menu = NSMenu(title: "KnowType")
-        let preferencesItem = NSMenuItem(
-            title: "KnowType Settings...",
-            action: #selector(showPreferences(_:)),
-            keyEquivalent: ","
+        KnowTypeInputMethodMenuBuilder.makeMenu(
+            target: self,
+            runtimePreferences: runtimePreferenceStore.loadPreferences()
         )
-        preferencesItem.target = self
-        menu.addItem(preferencesItem)
-        return menu
     }
 
     public override func showPreferences(_ sender: Any!) {
@@ -120,6 +117,43 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
                 preferencesWindowController = KnowTypePreferencesWindowController()
             }
             preferencesWindowController?.showWindow(nil)
+        }
+    }
+
+    @objc func toggleAIContinuation(_ sender: Any!) {
+        do {
+            let preferences = try KnowTypeInputMethodMenuBuilder.toggleAIContinuation(in: runtimePreferenceStore)
+            coordinator.reloadRuntimePreferencesForExternalChange()
+            inputControllerLogger.notice("AI continuation menu toggle enabled=\(preferences.cloudContinuationEnabled, privacy: .public)")
+        } catch {
+            inputControllerLogger.error("AI continuation menu toggle failed: \(error.localizedDescription, privacy: .public)")
+            NSSound.beep()
+        }
+    }
+
+    @objc func openKnowTypeLogs(_ sender: Any!) {
+        openDirectory(Self.knowTypeLogsURL)
+    }
+
+    @objc func openKnowTypeSupportFolder(_ sender: Any!) {
+        openDirectory(Self.knowTypeSupportURL)
+    }
+
+    @objc func openRimeUserFolder(_ sender: Any!) {
+        openDirectory(NativeRimeConfiguration.defaultConfiguration()?.userDataURL ?? Self.defaultRimeUserURL)
+    }
+
+    @objc func showAbout(_ sender: Any!) {
+        MainActor.assumeIsolated {
+            NSApp.activate(ignoringOtherApps: true)
+            let bundle = Bundle.main
+            let shortVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+            let buildVersion = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "local"
+            NSApp.orderFrontStandardAboutPanel(options: [
+                .applicationName: "KnowType",
+                .applicationVersion: shortVersion,
+                .version: buildVersion
+            ])
         }
     }
 
@@ -159,6 +193,16 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     public override func inputControllerWillClose() {
         coordinator.inputControllerWillClose()
         super.inputControllerWillClose()
+    }
+
+    private func openDirectory(_ url: URL) {
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(url)
+        } catch {
+            inputControllerLogger.error("Could not open directory \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            NSSound.beep()
+        }
     }
 
     fileprivate var currentInputControllerClient: InputControllerClient? {
@@ -229,6 +273,27 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         default:
             return nil
         }
+    }
+
+    private static var knowTypeSupportURL: URL {
+        libraryURL
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("KnowType", isDirectory: true)
+    }
+
+    private static var knowTypeLogsURL: URL {
+        libraryURL
+            .appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("KnowType", isDirectory: true)
+    }
+
+    private static var defaultRimeUserURL: URL {
+        knowTypeSupportURL.appendingPathComponent("Rime", isDirectory: true)
+    }
+
+    private static var libraryURL: URL {
+        FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library", isDirectory: true)
     }
 }
 
