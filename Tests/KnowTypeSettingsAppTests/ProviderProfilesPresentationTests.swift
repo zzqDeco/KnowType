@@ -4,6 +4,96 @@ import XCTest
 @testable import KnowTypeSettingsUI
 
 final class ProviderProfilesPresentationTests: XCTestCase {
+    func testSettingsSidebarUsesChineseNativeSectionsAndSearch() {
+        let allSections = SettingsSidebarPresentation(searchText: "", preferredLanguages: ["zh-Hans-CN"])
+
+        XCTAssertEqual(
+            allSections.sections.map { $0.title(preferredLanguages: ["zh-Hans-CN"]) },
+            ["输入", "候选窗", "Rime 与用户数据", "AI 续写", "隐私", "诊断"]
+        )
+        XCTAssertEqual(SettingsSection.input.systemImage, "keyboard")
+        XCTAssertEqual(SettingsSection.aiProvider.systemImage, "sparkles")
+
+        let aiSearch = SettingsSidebarPresentation(searchText: "模型", preferredLanguages: ["zh-Hans-CN"])
+        XCTAssertEqual(aiSearch.sections, [.aiProvider])
+
+        let lexiconSearch = SettingsSidebarPresentation(searchText: "Rime", preferredLanguages: ["zh-Hans-CN"])
+        XCTAssertEqual(lexiconSearch.sections, [.lexicons])
+
+        let emptySearch = SettingsSidebarPresentation(searchText: "不存在", preferredLanguages: ["zh-Hans-CN"])
+        XCTAssertTrue(emptySearch.sections.isEmpty)
+    }
+
+    func testSettingsLocalizationRespectsPreferredLanguagesAndFallbacks() {
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.window.title", preferredLanguages: ["zh-Hans-CN"]),
+            "KnowType 设置"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.section.ai", preferredLanguages: ["zh-Hant-TW"]),
+            "AI 续写"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.section.ai", preferredLanguages: ["en-US"]),
+            "AI Continuation"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.section.ai", localeIdentifier: "en"),
+            "AI Continuation"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.action.testConnection", localeIdentifier: "en-US"),
+            "Test Connection"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.action.testConnection", localeIdentifier: "fr-FR"),
+            "Test Connection"
+        )
+    }
+
+    func testSettingsLocalizationFallsBackWhenPreferredBundleLacksKey() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-settings-localization-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
+
+        let zhBundle = try makeLocalizationBundle(
+            rootURL: temporaryDirectory,
+            language: "zh-Hans",
+            strings: #""settings.window.title" = "KnowType 设置";"#
+        )
+        let englishBundle = try makeLocalizationBundle(
+            rootURL: temporaryDirectory,
+            language: "en",
+            strings: #""settings.test.englishOnly" = "English fallback";"#
+        )
+
+        let value = SettingsLocalization.string(
+            "settings.test.englishOnly",
+            preferredLanguages: ["zh-Hans-CN"],
+            bundleResolver: { identifier in
+                identifier.hasPrefix("zh") ? zhBundle : englishBundle
+            }
+        )
+
+        XCTAssertEqual(value, "English fallback")
+    }
+
+    func testSettingsDetailDoesNotReplaceWindowTitleWithSectionTitle() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeSettingsUI/ProviderProfilesView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(source.contains(".navigationTitle(selectedSection.title)"))
+        XCTAssertTrue(source.contains("SettingsForm(title: SettingsSection.input.title)"))
+    }
+
     func testListItemUsesSavedDisplayNameAndProviderKind() {
         let profile = ProviderProfile(
             id: "work",
@@ -33,14 +123,14 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         var customDraft = ProviderProfileDraft(profile: customProfile)
         customDraft.timeoutSeconds = 37
 
-        let customPresentation = ProviderProfileDraftPresentation(draft: customDraft)
+        let customPresentation = ProviderProfileDraftPresentation(draft: customDraft, preferredLanguages: ["zh-Hans-CN"])
 
-        XCTAssertEqual(customPresentation.displayNameFieldLabel, "Display Name")
-        XCTAssertEqual(customPresentation.kindPickerLabel, "Kind")
+        XCTAssertEqual(customPresentation.displayNameFieldLabel, "显示名称")
+        XCTAssertEqual(customPresentation.kindPickerLabel, "Provider 类型")
         XCTAssertEqual(customPresentation.baseURLFieldLabel, "Base URL")
-        XCTAssertEqual(customPresentation.modelFieldLabel, "Model")
-        XCTAssertEqual(customPresentation.timeoutLabel, "Timeout: 37 seconds")
-        XCTAssertEqual(customPresentation.defaultProviderLabel, "Default provider")
+        XCTAssertEqual(customPresentation.modelFieldLabel, "模型")
+        XCTAssertEqual(customPresentation.timeoutLabel, "超时：37 秒")
+        XCTAssertEqual(customPresentation.defaultProviderLabel, "设为默认 provider")
         XCTAssertTrue(customPresentation.showsCustomHTTPFields)
         XCTAssertEqual(customPresentation.customBodyTemplateLabel, "Custom HTTP")
         XCTAssertEqual(customPresentation.customResponsePathLabel, "Response Path")
@@ -54,7 +144,19 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             )
         )
 
-        XCTAssertFalse(ProviderProfileDraftPresentation(draft: chatDraft).showsCustomHTTPFields)
+        XCTAssertFalse(
+            ProviderProfileDraftPresentation(
+                draft: chatDraft,
+                preferredLanguages: ["zh-Hans-CN"]
+            ).showsCustomHTTPFields
+        )
+
+        let englishPresentation = ProviderProfileDraftPresentation(draft: customDraft, preferredLanguages: ["en-US"])
+        XCTAssertEqual(englishPresentation.displayNameFieldLabel, "Display Name")
+        XCTAssertEqual(englishPresentation.kindPickerLabel, "Provider Type")
+        XCTAssertEqual(englishPresentation.modelFieldLabel, "Model")
+        XCTAssertEqual(englishPresentation.timeoutLabel, "Timeout: 37 seconds")
+        XCTAssertEqual(englishPresentation.defaultProviderLabel, "Default provider")
     }
 
     func testSecretPresentationLabelsSecretReferenceWithoutExposingTypedAPIKey() {
@@ -70,25 +172,29 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         )
         draft.apiKey = "sk-typed-secret"
 
-        let presentation = ProviderProfileDraftPresentation(draft: draft)
+        let presentation = ProviderProfileDraftPresentation(draft: draft, preferredLanguages: ["zh-Hans-CN"])
 
         XCTAssertEqual(presentation.secret.sectionTitle, "API Key")
-        XCTAssertEqual(presentation.secret.apiKeyFieldPrompt, "Leave blank to keep existing key")
+        XCTAssertEqual(presentation.secret.apiKeyFieldPrompt, "留空则保留现有 key")
         XCTAssertEqual(
             presentation.secret.reference,
             SettingsKeyValuePresentation(
-                label: "Secret reference",
+                label: "Secret 引用",
                 value: "knowtype.provider.work.apiKey"
             )
         )
         XCTAssertTrue(presentation.secret.helpText.contains("Keychain"))
         XCTAssertFalse(String(reflecting: presentation).contains("sk-typed-secret"))
+
+        let englishPresentation = ProviderProfileDraftPresentation(draft: draft, preferredLanguages: ["en-US"])
+        XCTAssertEqual(englishPresentation.secret.apiKeyFieldPrompt, "Leave blank to keep the existing key")
+        XCTAssertEqual(englishPresentation.secret.reference?.label, "Secret Reference")
     }
 
     func testConnectionStatusPresentationMapsProgressSuccessAndFailure() {
-        let idle = ProviderConnectionStatusPresentation(status: .idle)
-        XCTAssertEqual(idle.sectionTitle, "Connection")
-        XCTAssertEqual(idle.testButtonLabel, "Test Connection")
+        let idle = ProviderConnectionStatusPresentation(status: .idle, preferredLanguages: ["zh-Hans-CN"])
+        XCTAssertEqual(idle.sectionTitle, "连接")
+        XCTAssertEqual(idle.testButtonLabel, "测试连接")
         XCTAssertFalse(idle.showsProgress)
         XCTAssertFalse(idle.isTesting)
         XCTAssertNil(idle.message)
@@ -97,6 +203,10 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         XCTAssertTrue(testing.showsProgress)
         XCTAssertTrue(testing.isTesting)
         XCTAssertNil(testing.message)
+
+        let english = ProviderConnectionStatusPresentation(status: .idle, preferredLanguages: ["en-US"])
+        XCTAssertEqual(english.sectionTitle, "Connection")
+        XCTAssertEqual(english.testButtonLabel, "Test Connection")
 
         let success = ProviderConnectionStatusPresentation(status: .success("Connected to openai_chat."))
         XCTAssertFalse(success.showsProgress)
@@ -114,21 +224,45 @@ final class ProviderProfilesPresentationTests: XCTestCase {
     }
 
     func testValidationAndLastErrorPresentationsControlSectionVisibility() {
-        let emptyValidation = ProviderValidationPresentation(errors: [])
+        let emptyValidation = ProviderValidationPresentation(errors: [], preferredLanguages: ["zh-Hans-CN"])
         XCTAssertFalse(emptyValidation.isVisible)
-        XCTAssertEqual(emptyValidation.title, "Validation")
+        XCTAssertEqual(emptyValidation.title, "校验")
 
-        let validation = ProviderValidationPresentation(errors: ["Model is required."])
+        let validation = ProviderValidationPresentation(errors: ["Model is required."], preferredLanguages: ["zh-Hans-CN"])
         XCTAssertTrue(validation.isVisible)
         XCTAssertEqual(validation.messages, ["Model is required."])
 
-        let emptyError = ProviderLastErrorPresentation(message: nil)
+        let emptyError = ProviderLastErrorPresentation(message: nil, preferredLanguages: ["zh-Hans-CN"])
         XCTAssertFalse(emptyError.isVisible)
         XCTAssertNil(emptyError.message)
 
-        let error = ProviderLastErrorPresentation(message: "save failed")
+        let error = ProviderLastErrorPresentation(message: "save failed", preferredLanguages: ["zh-Hans-CN"])
         XCTAssertTrue(error.isVisible)
-        XCTAssertEqual(error.title, "Last Error")
+        XCTAssertEqual(error.title, "最近错误")
         XCTAssertEqual(error.message, "save failed")
+
+        XCTAssertEqual(
+            ProviderValidationPresentation(errors: [], preferredLanguages: ["en-US"]).title,
+            "Validation"
+        )
+        XCTAssertEqual(
+            ProviderLastErrorPresentation(message: nil, preferredLanguages: ["en-US"]).title,
+            "Last Error"
+        )
     }
+}
+
+private func makeLocalizationBundle(
+    rootURL: URL,
+    language: String,
+    strings: String
+) throws -> Bundle {
+    let bundleURL = rootURL.appendingPathComponent("\(language).lproj", isDirectory: true)
+    try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
+    try strings.write(
+        to: bundleURL.appendingPathComponent("Localizable.strings"),
+        atomically: true,
+        encoding: .utf8
+    )
+    return try XCTUnwrap(Bundle(url: bundleURL))
 }

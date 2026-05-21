@@ -65,6 +65,18 @@ assert_file() {
   [[ -f "$path" ]] || die "missing file: $path"
 }
 
+assert_file_any() {
+  local label="$1"
+  shift
+  local path
+  for path in "$@"; do
+    if [[ -f "$path" ]]; then
+      return 0
+    fi
+  done
+  die "missing file for $label; checked: $*"
+}
+
 assert_dir() {
   local path="$1"
   [[ -d "$path" ]] || die "missing directory: $path"
@@ -201,6 +213,7 @@ assert_file "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp"
 [[ -x "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" ]] ||
   die "input-method executable is not executable"
 assert_dir "$bundle_path/Contents/Resources/KnowType_KnowTypeCore.bundle"
+assert_dir "$bundle_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
 assert_file "$bundle_path/Contents/Resources/KnowTypeInputMethodIcon.tiff"
 assert_file "$bundle_path/Contents/Frameworks/librime.1.dylib"
 assert_dir "$bundle_path/Contents/Resources/rime-data"
@@ -238,6 +251,11 @@ if (( WITH_PREFPANE == 1 )); then
   assert_file "$prefpane_path/Contents/Info.plist"
   assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
   assert_file "$prefpane_path/Contents/Frameworks/libKnowTypePreferencePane.dylib"
+  assert_dir "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
+  assert_file "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/en.lproj/Localizable.strings"
+  assert_file_any "zh-Hans settings localization" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/zh-Hans.lproj/Localizable.strings" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/zh-hans.lproj/Localizable.strings"
   [[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
     die "PreferencePane executable is not executable"
   if command -v otool >/dev/null 2>&1; then

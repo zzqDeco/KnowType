@@ -187,6 +187,7 @@ fi
 INFO_PLIST="$BUNDLE_PATH/Contents/Info.plist"
 EXECUTABLE="$BUNDLE_PATH/Contents/MacOS/KnowTypeInputMethodApp"
 CORE_RESOURCE_BUNDLE="$BUNDLE_PATH/Contents/Resources/KnowType_KnowTypeCore.bundle"
+SETTINGS_UI_RESOURCE_BUNDLE="$BUNDLE_PATH/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
 ICON_RESOURCE="$BUNDLE_PATH/Contents/Resources/KnowTypeInputMethodIcon.tiff"
 PARENT_ID="$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
 MODE_ID="$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
@@ -279,6 +280,12 @@ else
   fail "SwiftPM core resource bundle is missing; bundled lexicon may not load"
 fi
 
+if [[ -d "$SETTINGS_UI_RESOURCE_BUNDLE" ]]; then
+  ok "SwiftPM settings UI resource bundle is packaged"
+else
+  fail "SwiftPM settings UI resource bundle is missing; input-method settings may not load localized strings"
+fi
+
 if [[ -f "$ICON_RESOURCE" ]]; then
   ok "input-source icon resource is packaged"
 else
@@ -320,6 +327,7 @@ echo "Compatibility PreferencePane"
 PREFPANE_INFO_PLIST="$PREFPANE_PATH/Contents/Info.plist"
 PREFPANE_EXECUTABLE="$PREFPANE_PATH/Contents/MacOS/KnowTypePreferencePane"
 PREFPANE_LIBRARY="$PREFPANE_PATH/Contents/Frameworks/libKnowTypePreferencePane.dylib"
+PREFPANE_SETTINGS_UI_RESOURCE_BUNDLE="$PREFPANE_PATH/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
 
 if [[ -d "$PREFPANE_PATH" ]]; then
   ok "KnowType.prefPane is installed"
@@ -349,6 +357,12 @@ if [[ -d "$PREFPANE_PATH" ]]; then
     ok "PreferencePane SwiftPM library is packaged"
   else
     fail "PreferencePane SwiftPM library is missing"
+  fi
+
+  if [[ -d "$PREFPANE_SETTINGS_UI_RESOURCE_BUNDLE" ]]; then
+    ok "PreferencePane settings UI resource bundle is packaged"
+  else
+    warn "PreferencePane settings UI resource bundle is missing; rebuild with scripts/build-preference-pane.sh"
   fi
 
   if command -v codesign >/dev/null 2>&1; then

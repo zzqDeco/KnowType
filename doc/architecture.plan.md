@@ -94,7 +94,7 @@ The input-method keydown path never awaits this layer. It publishes raw marked t
 
 ## Settings Layer
 
-`KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view:
+`KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view. The primary UI is a macOS settings surface with a sidebar, search, and grouped-form detail pages for input, candidates, Rime/user data, AI continuation, privacy, and diagnostics. Localized settings strings use Simplified Chinese for Chinese preferred languages and English fallback resources for non-Chinese locales.
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
@@ -103,7 +103,7 @@ The input-method keydown path never awaits this layer. It publishes raw marked t
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 - Lexicon settings can create missing directories, create a non-overwriting sample TSV file, install the recommended managed lexicon pack, and display installed pack metadata.
 
-Settings status does not import the IMK frontend and does not own dictionary licensing. The macOS Keyboard/Input Sources page still only enables/selects the input method; KnowType-specific controls live in the PreferencePane or IMK preferences window.
+Settings status does not import the IMK frontend and does not own dictionary licensing. The macOS Keyboard/Input Sources page still only enables/selects the input method; KnowType-specific controls live in the IMK preferences window, with the prefPane retained only as an optional compatibility host.
 
 ## CLI And Local Tooling
 

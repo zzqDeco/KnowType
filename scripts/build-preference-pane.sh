@@ -12,6 +12,20 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
 PLIST_BUDDY="/usr/libexec/PlistBuddy"
 
+copy_swiftpm_resource_bundle() {
+  local bundle_name="$1"
+  local source_path="$BIN_DIR/$bundle_name"
+  local destination_path="$CONTENTS_DIR/Resources/$bundle_name"
+
+  if [[ ! -d "$source_path" ]]; then
+    echo "error: required SwiftPM resource bundle is missing: $source_path" >&2
+    exit 1
+  fi
+
+  rm -rf "$destination_path"
+  cp -R "$source_path" "$CONTENTS_DIR/Resources/"
+}
+
 usage() {
   cat <<'EOF'
 Usage: scripts/build-preference-pane.sh [--configuration debug|release] [--version X.Y.Z] [--build N]
@@ -85,6 +99,8 @@ if [[ -n "$BUNDLE_BUILD_VERSION" ]]; then
   "$PLIST_BUDDY" -c "Set :CFBundleVersion $BUNDLE_BUILD_VERSION" "$CONTENTS_DIR/Info.plist"
 fi
 cp "$BIN_DIR/libKnowTypePreferencePane.dylib" "$FRAMEWORKS_DIR/"
+copy_swiftpm_resource_bundle "KnowType_KnowTypeSettingsUI.bundle"
+copy_swiftpm_resource_bundle "KnowType_KnowTypeCore.bundle"
 xcrun clang -bundle -x c /dev/null \
   -o "$MACOS_DIR/KnowTypePreferencePane" \
   -L"$FRAMEWORKS_DIR" \

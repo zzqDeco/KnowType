@@ -124,14 +124,16 @@ retired clean-room converter.
 
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
-`KnowType Settings...`. The local install does not install a standalone settings
-app. The default install removes any stale local compatibility
-`KnowType.prefPane` so it cannot drift out of sync. A matching compatibility
-pane is only built and installed when `./scripts/install-inputmethod.sh
---with-prefpane` is used. If System Settings still shows a `KnowType` sidebar
-entry after a default install, it is stale macOS PreferencePane cache state; run
-the install script again or `./scripts/uninstall-inputmethod.sh` to refresh the
-cache, then reopen System Settings.
+`KnowType Settings...`. It opens a macOS-native sidebar and grouped settings
+window using Simplified Chinese on Chinese macOS locales and English fallback
+strings on non-Chinese locales. The local install does not install a standalone
+settings app. The default install removes any stale local compatibility
+`KnowType.prefPane` so it cannot drift out of sync. A matching compatibility pane
+is only built and installed when `./scripts/install-inputmethod.sh --with-prefpane`
+is used. If System Settings still shows a `KnowType` sidebar entry after a
+default install, it is stale macOS PreferencePane cache state; run the install
+script again or `./scripts/uninstall-inputmethod.sh` to refresh the cache, then
+reopen System Settings.
 
 After the first install or a mode-id migration, macOS may still require the
 System Settings input-source approval path. Open System Settings > Keyboard >

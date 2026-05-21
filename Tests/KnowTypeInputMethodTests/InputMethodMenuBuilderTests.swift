@@ -1,6 +1,7 @@
 #if canImport(AppKit)
 import AppKit
 import KnowTypeCore
+import KnowTypeSettingsUI
 @testable import KnowTypeInputMethod
 import XCTest
 
@@ -78,13 +79,13 @@ final class InputMethodMenuBuilderTests: XCTestCase {
         let controller = KnowTypePreferencesWindowController()
         let window = try XCTUnwrap(controller.window)
 
-        XCTAssertEqual(window.title, "KnowType Settings")
+        XCTAssertEqual(window.title, SettingsLocalization.string("settings.window.title"))
         XCTAssertGreaterThanOrEqual(window.minSize.width, 840)
         XCTAssertGreaterThanOrEqual(window.minSize.height, 560)
         XCTAssertEqual(window.tabbingMode, .disallowed)
         XCTAssertNotNil(window.contentView)
         if #available(macOS 11.0, *) {
-            XCTAssertEqual(window.toolbarStyle, .preference)
+            XCTAssertEqual(window.toolbarStyle, .unified)
         }
     }
 }
