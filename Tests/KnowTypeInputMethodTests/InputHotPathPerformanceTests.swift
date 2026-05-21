@@ -82,6 +82,24 @@ final class InputHotPathPerformanceTests: XCTestCase {
             let result = runRimeSequence("ni", commit: .selectCandidateOnCurrentPage(1), engine: &rimeEngine)
             XCTAssertNotEqual(result.commitText, "ni2")
         }
+        try assertP95("rime.shi.highlight2", budgetMilliseconds: 5) {
+            rimeEngine.reset()
+        } operation: {
+            let result = runRimeSequence("shi", commit: .highlightCandidateOnCurrentPage(1), engine: &rimeEngine)
+            XCTAssertTrue(result.handled)
+        }
+        try assertP95("rime.shi.pageDown", budgetMilliseconds: 5) {
+            rimeEngine.reset()
+        } operation: {
+            let result = runRimeSequence("shi", commit: .pageDown, engine: &rimeEngine)
+            XCTAssertTrue(result.handled)
+        }
+        try assertP95("rime.n.apostrophe", budgetMilliseconds: 5) {
+            rimeEngine.reset()
+        } operation: {
+            let result = runRimeSequence("n", commit: .text("'"), engine: &rimeEngine)
+            XCTAssertTrue(result.handled)
+        }
         try assertPerStepBudget("rime.woxiangceshi.steps", budgetMilliseconds: 16) { measure in
             rimeEngine.reset()
             for character in "woxiangceshi" {
@@ -133,6 +151,49 @@ final class InputHotPathPerformanceTests: XCTestCase {
             )
             XCTAssertNotEqual(numberFixture.client.insertTextWrites.last?.text, "ni2")
         }
+        let arrowFixture = makeCoordinator(configuration: configuration)
+        try assertP95("coordinator.shi.arrowRight", budgetMilliseconds: 20) {
+        } operation: {
+            for character in "shi" {
+                XCTAssertTrue(arrowFixture.coordinator.handleText(String(character), client: arrowFixture.client))
+            }
+            XCTAssertTrue(
+                arrowFixture.coordinator.handle(
+                    stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                    client: arrowFixture.client
+                )
+            )
+        } cleanup: {
+            XCTAssertTrue(arrowFixture.coordinator.handleText(" ", client: arrowFixture.client))
+        }
+        let pageFixture = makeCoordinator(configuration: configuration)
+        try assertP95("coordinator.shi.pageDown", budgetMilliseconds: 20) {
+        } operation: {
+            for character in "shi" {
+                XCTAssertTrue(pageFixture.coordinator.handleText(String(character), client: pageFixture.client))
+            }
+            XCTAssertTrue(
+                pageFixture.coordinator.handle(
+                    stroke: InputKeyStroke(text: "\u{F72D}", keyCode: 121),
+                    client: pageFixture.client
+                )
+            )
+        } cleanup: {
+            XCTAssertTrue(pageFixture.coordinator.handleText(" ", client: pageFixture.client))
+        }
+        let symbolFixture = makeCoordinator(configuration: configuration)
+        try assertP95("coordinator.n.apostrophe", budgetMilliseconds: 20) {
+        } operation: {
+            XCTAssertTrue(symbolFixture.coordinator.handleText("n", client: symbolFixture.client))
+            XCTAssertTrue(
+                symbolFixture.coordinator.handle(
+                    stroke: InputKeyStroke(text: "'", keyCode: 39),
+                    client: symbolFixture.client
+                )
+            )
+        } cleanup: {
+            XCTAssertTrue(symbolFixture.coordinator.handleText(" ", client: symbolFixture.client))
+        }
         let stepFixture = makeCoordinator(configuration: configuration)
         try assertPerStepBudget("coordinator.woxiangceshi.steps", budgetMilliseconds: 16) { measure in
             for character in "woxiangceshi" {
@@ -143,6 +204,51 @@ final class InputHotPathPerformanceTests: XCTestCase {
             try measure {
                 XCTAssertTrue(stepFixture.coordinator.handleText(" ", client: stepFixture.client))
                 XCTAssertFalse(stepFixture.client.insertTextWrites.last?.text == "woxiangceshi")
+            }
+        }
+        let interactionStepFixture = makeCoordinator(configuration: configuration)
+        try assertPerStepBudget("coordinator.interaction.steps", budgetMilliseconds: 16) { measure in
+            try measure {
+                XCTAssertTrue(interactionStepFixture.coordinator.handleText("s", client: interactionStepFixture.client))
+            }
+            try measure {
+                XCTAssertTrue(interactionStepFixture.coordinator.handleText("h", client: interactionStepFixture.client))
+            }
+            try measure {
+                XCTAssertTrue(interactionStepFixture.coordinator.handleText("i", client: interactionStepFixture.client))
+            }
+            try measure {
+                XCTAssertTrue(
+                    interactionStepFixture.coordinator.handle(
+                        stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                        client: interactionStepFixture.client
+                    )
+                )
+            }
+            try measure {
+                XCTAssertTrue(
+                    interactionStepFixture.coordinator.handle(
+                        stroke: InputKeyStroke(text: "\u{F72D}", keyCode: 121),
+                        client: interactionStepFixture.client
+                    )
+                )
+            }
+            try measure {
+                XCTAssertTrue(interactionStepFixture.coordinator.handleText(" ", client: interactionStepFixture.client))
+            }
+            try measure {
+                XCTAssertTrue(interactionStepFixture.coordinator.handleText("n", client: interactionStepFixture.client))
+            }
+            try measure {
+                XCTAssertTrue(
+                    interactionStepFixture.coordinator.handle(
+                        stroke: InputKeyStroke(text: "'", keyCode: 39),
+                        client: interactionStepFixture.client
+                    )
+                )
+            }
+            try measure {
+                XCTAssertTrue(interactionStepFixture.coordinator.handleText(" ", client: interactionStepFixture.client))
             }
         }
     }

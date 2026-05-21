@@ -136,11 +136,11 @@ real host apps remains the evidence for IMK behavior.
 
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
 - `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses Rime prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
-- `CompositionBuffer` separates raw pinyin, resolved candidate segments, active raw range, marked-text display, and final commit text.
+- `CompositionBuffer` remains available for legacy/session tests, but native Rime preedit is the production marked-text source during active Chinese composition.
 - `InputMethodLexiconRuntime` remains available for legacy demos/tests and settings visibility, but local lexicon rebuilds are not part of the IMK key path.
 - Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
-- The IMK controller publishes raw marked text and immediate Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
+- The IMK controller publishes Rime preedit marked text and immediate current-page Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
 - Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
@@ -150,7 +150,7 @@ real host apps remains the evidence for IMK behavior.
   presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
   frame cannot fit the natural height.
 
-The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Marked text shows raw pinyin until a Rime candidate is confirmed. Commit replaces the active marked range with raw input, the selected Rime prefix, or an explicitly selected AI recommendation depending on the shortcut.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Marked text mirrors Rime preedit, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Commit replaces the active marked range with raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
 
 User selection history is stored under Application Support as `user-selection-history.json`. This file is local candidate-learning data only; it is not serialized into provider requests.
 
@@ -176,11 +176,12 @@ constrained visible frames it compresses vertical row height and spacing, and hi
 the current page at the minimum row height.
 
 Mouse hover selects enabled visible rows, click commits the same target as keyboard selection, and scroll-wheel
-events page the panel. Arrow keys move selection inside the current Rime page and drive native page movement at
-candidate-list edges; explicit `PageUp`/`PageDown` keep working while composition is active even if the panel is
-hidden. Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) also drives the native Rime page state before
-punctuation commit fallback. Pending, unavailable, or ineligible AI state rows are
-visible but disabled: they have muted text, no numeric shortcut, no hover selection, and no click commit. Row accessibility elements expose button-like
+events page the panel. Arrow keys update Rime's highlighted candidate: right/down at the page end moves to the
+next page's first row, while left/up at the page start moves to the previous page's last row. Explicit
+`PageUp`/`PageDown` keep working while composition is active even if the panel is hidden.
+Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) also drives the native Rime page state before punctuation
+commit fallback. Pending, unavailable, or ineligible AI state rows are visible but disabled; ready AI rows use Tab
+as their visible shortcut and do not take ordinary number keys from Rime candidates. Row accessibility elements expose button-like
 labels for enabled candidates, static-text semantics for disabled AI status, and selected-children notifications
 when the highlighted row changes. Candidate-panel screenshot baselines live under
 `Tests/KnowTypeInputMethodTests/__Snapshots__/` and cover light horizontal, dark vertical, and AI-status examples.

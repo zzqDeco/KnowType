@@ -184,24 +184,27 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 | 快捷键 | 行为 |
 |---|---|
 | `Space` | 提交 Rime 当前高亮候选；Rime 不可用时提交原始输入。 |
-| 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。 |
+| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏。 |
+| 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。第一页首项按左/上会到上一页最后一项。 |
 | `Return` / `Enter` | 提交原始 composition。 |
-| `Tab` / `2` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
+| `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时，提交原始 composition。 |
-| 普通标点 | 提交 composition 加标点；没有 composition 时直接插入标点。 |
+| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
-| `Option + 数字` | AI 延续可用时提交当前前缀加对应延续。 |
+| `Option + 1` | 显式提交 ready AI 推荐。 |
+| `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
-候选窗先显示前缀候选，再显示延续候选；没有建议时才显示 raw input。它是
+候选窗显示 Rime 前缀候选、固定 AI 推荐状态行，以及没有建议时的 raw input。它是
 紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click
 选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，KnowType 会
-先发布 Rime 前缀候选，再异步更新 provider-backed 延续。Provider 失败时，不会
+先发布 Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider 失败时，不会
 把固定本地 fallback 文本伪装成 AI 输出。
 
 候选窗第一项固定为 Rime 转换推荐，第二项固定为 AI 推荐状态。Provider 返回后
-只更新第二项，不重排 Rime 候选列表。Pending、unavailable 或 ineligible AI
-状态会显示为更弱的状态行，没有数字快捷键，也不会响应点击提交。
+只更新第二项，不重排 Rime 候选列表。Ready AI 使用 Tab 或显式 Option+数字，不占用
+普通数字选词。Pending、unavailable 或 ineligible AI 状态会显示为更弱的状态行，
+没有数字快捷键，也不会响应点击提交。
 
 ## 隐私
 

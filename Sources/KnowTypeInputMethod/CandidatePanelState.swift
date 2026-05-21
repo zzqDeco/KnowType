@@ -79,7 +79,8 @@ public struct CandidatePanelState: Sendable, Equatable {
         isDisplayable: Bool = true,
         pageSize: Int = CandidatePanelPagingState.defaultPageSize,
         layoutMode: CandidatePanelLayoutMode = .adaptive,
-        aiRecommendation: AIRecommendationState = .idle
+        aiRecommendation: AIRecommendationState = .idle,
+        preferredSelection: CandidatePanelSelection? = nil
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
         let continuationCandidates = suggestion?.continuationCandidates ?? []
@@ -96,7 +97,8 @@ public struct CandidatePanelState: Sendable, Equatable {
             rawInput: rawInput,
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates,
-            viewModel: viewModel
+            viewModel: viewModel,
+            preferredSelection: preferredSelection
         ) : nil
         let paging = pagingState(for: selection, in: viewModel, pageSize: pageSize)
         windowState = CandidatePanelWindowState(
@@ -224,8 +226,13 @@ public struct CandidatePanelState: Sendable, Equatable {
         rawInput: String,
         prefixCandidates: [CorrectionCandidate],
         continuationCandidates: [ContinuationCandidate],
-        viewModel: CandidatePanelViewModel
+        viewModel: CandidatePanelViewModel,
+        preferredSelection: CandidatePanelSelection?
     ) -> CandidatePanelSelection? {
+        if let preferredSelection,
+           canPreserveSelection(preferredSelection, in: viewModel) {
+            return preferredSelection
+        }
         if windowState.viewModel.rawInput == rawInput,
            let selection = windowState.selection,
            canPreserveSelection(selection, in: viewModel) {
@@ -421,7 +428,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         case .prefixCandidate, .fullCandidate, .segmentCandidate:
             return true
         case .aiRecommendation:
-            return viewModel.aiRecommendation.isSelectableRecommendation
+            return false
         case .rawInput, .continuationCandidate:
             return false
         }

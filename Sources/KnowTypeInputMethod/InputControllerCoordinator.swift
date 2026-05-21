@@ -129,7 +129,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func composedString() -> Any {
-        compositionBuffer.displayText
+        nativeMarkedText() ?? compositionBuffer.displayText
     }
 
     func originalString() -> NSAttributedString {
@@ -147,10 +147,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func candidateSelectionChanged(_ text: String?) {
         selectNativeCandidate(matching: text)
+        if let selectedNativeCandidate {
+            _ = highlightNativeSelectionIfNeeded(selectedNativeCandidate, client: host?.currentClient)
+        }
     }
 
     func candidateSelected(_ text: String?, client: InputControllerClient?) {
         selectNativeCandidate(matching: text)
+        if let selectedNativeCandidate,
+           commitNativeSelectionIfNeeded(selectedNativeCandidate, client: client) {
+            return
+        }
         commit(action: .space, client: client)
     }
 
@@ -162,6 +169,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             for: selection,
             in: candidatePanelState.windowState.viewModel
         )
+        if let selectedNativeCandidate,
+           highlightNativeSelectionIfNeeded(selectedNativeCandidate, client: host?.currentClient) {
+            return
+        }
         host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
     }
 
@@ -174,6 +185,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
         selectedNativeCandidate = inputSelection
+        if commitNativeSelectionIfNeeded(inputSelection, client: client) {
+            return
+        }
         let result = resultForNumberSelection(inputSelection, client: client)
         learnSelectedPrefix(action: .space, result: result, client: client)
         _ = applyCommitResult(result, client: client)
@@ -190,6 +204,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func commitComposition(client: InputControllerClient?) {
+        if conversionEngine.isNativeActive,
+           conversionEngine.snapshot.hasComposition {
+            let result = conversionEngine.process(.commitComposition)
+            _ = handleNativeConversionResult(result, client: client)
+            return
+        }
         let text = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
         _ = applyCommitResult(text.isEmpty ? .noAction : .commit(text), client: client)
     }
@@ -216,8 +236,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .append(let text):
             return appendComposition(text, client: client)
         case .symbol(let text):
-            if handleNativePagingSymbol(text, client: client) {
-                return true
+            if conversionEngine.isNativeActive,
+               !rawBuffer.isEmpty {
+                let result = conversionEngine.process(.text(text))
+                if result.handled {
+                    return handleNativeConversionResult(result, client: client)
+                }
+                if handleNativePagingSymbol(text, client: client) {
+                    return true
+                }
             }
             if rawBuffer.isEmpty {
                 reloadInputModeDefaultsIfNeeded(client: client)
@@ -261,6 +288,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             refreshComposition(client: client)
             return true
         case .selectCandidate(let number):
+            if conversionEngine.isNativeActive,
+               !rawBuffer.isEmpty,
+               number > 0 {
+                return selectNativeCandidateOnCurrentPage(number - 1, client: client)
+            }
             if candidatePanelState.windowState.isVisible {
                 if number == 0,
                    let result = InputSessionCommitPolicy.resultForCandidateNumber(
@@ -282,6 +314,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                        in: candidatePanelState.windowState.viewModel
                    ) {
                     selectedNativeCandidate = inputSelection
+                    if commitNativeSelectionIfNeeded(inputSelection, client: client) {
+                        return true
+                    }
                     let result = resultForNumberSelection(inputSelection, client: client)
                     learnSelectedPrefix(action: .space, result: result, client: client)
                     return applyCommitResult(result, client: client)
@@ -467,6 +502,47 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 allowsSynchronousFallback: false
             )
         }
+    }
+
+    private func selectNativeCandidateOnCurrentPage(_ index: Int, client: InputControllerClient?) -> Bool {
+        let snapshot = conversionEngine.snapshot
+        guard snapshot.candidates.indices.contains(index) else {
+            return true
+        }
+        let result = conversionEngine.process(.selectCandidateOnCurrentPage(index))
+        _ = handleNativeConversionResult(result, client: client)
+        return true
+    }
+
+    private func commitNativeSelectionIfNeeded(
+        _ selection: InputCandidateSelection,
+        client: InputControllerClient?
+    ) -> Bool {
+        guard conversionEngine.isNativeActive,
+              isNativeSelectablePrefixOrFull(selection),
+              let nativeIndex = nativeCandidateIndex(for: selection) else {
+            return false
+        }
+        let result = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
+        return handleNativeConversionResult(result, client: client)
+    }
+
+    private func highlightNativeSelectionIfNeeded(
+        _ selection: InputCandidateSelection,
+        client: InputControllerClient?
+    ) -> Bool {
+        guard conversionEngine.isNativeActive,
+              isNativeSelectablePrefixOrFull(selection),
+              let nativeIndex = nativeCandidateIndex(for: selection),
+              nativeIndex != conversionEngine.snapshot.highlightedIndex else {
+            return false
+        }
+        let result = conversionEngine.process(.highlightCandidateOnCurrentPage(nativeIndex))
+        guard result.handled else {
+            return false
+        }
+        publishLocalSuggestion(client: client)
+        return true
     }
 
     private func nativeCandidateIndex(for selection: InputCandidateSelection) -> Int? {
@@ -772,6 +848,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     @discardableResult
     private func commit(action: InputAction, client: InputControllerClient?) -> Bool {
+        if action == .space,
+           conversionEngine.isNativeActive,
+           rawBuffer.isEmpty == false {
+            let result = conversionEngine.process(.space)
+            if handleNativeConversionResult(result, client: client) {
+                return true
+            }
+            return applyCommitResult(rawBuffer.isEmpty ? .noAction : .commit(rawBuffer), client: client)
+        }
         let result = commitResult(for: action, client: client)
         learnSelectedPrefix(action: action, result: result, client: client)
         return applyCommitResult(result, client: client)
@@ -797,6 +882,39 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .noAction:
             return InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: !rawBuffer.isEmpty)
         }
+    }
+
+    @discardableResult
+    private func handleNativeConversionResult(
+        _ result: ConversionEngineResult,
+        client: InputControllerClient?
+    ) -> Bool {
+        if let commitText = result.commitText,
+           !commitText.isEmpty {
+            if result.snapshot.hasComposition {
+                recordTypingCommit(commitText, client: client)
+                insert(commitText, client: client)
+                syncRawBufferToNativeSnapshot(result.snapshot)
+                publishLocalSuggestion(client: client)
+                return true
+            }
+            return applyCommitResult(.commit(commitText), client: client)
+        }
+        guard result.handled else {
+            return false
+        }
+        syncRawBufferToNativeSnapshot(result.snapshot)
+        publishLocalSuggestion(client: client)
+        return true
+    }
+
+    private func syncRawBufferToNativeSnapshot(_ snapshot: ConversionEngineSnapshot) {
+        guard rawBuffer != snapshot.rawInput else {
+            return
+        }
+        rawBuffer = snapshot.rawInput
+        rawRevision += 1
+        compositionBuffer.updateRawInput(rawBuffer)
     }
 
     private func learnSelectedPrefix(action: InputAction, result: InputCommitResult, client: InputControllerClient?) {
@@ -887,6 +1005,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         }
         if action == .tab,
+           aiRecommendationState.isSelectableRecommendation {
+            return aiRecommendationCommitResult()
+        }
+        if case .optionNumber(1) = action,
            aiRecommendationState.isSelectableRecommendation {
             return aiRecommendationCommitResult()
         }
@@ -1292,7 +1414,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             isDisplayable: isDisplayable,
             pageSize: effectivePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode,
-            aiRecommendation: aiRecommendationState
+            aiRecommendation: aiRecommendationState,
+            preferredSelection: nativeHighlightedSelection(for: suggestion)
         )
         traceCandidatePanelUpdate(
             savedPageSize: runtimePreferences.candidatePageSize,
@@ -1305,6 +1428,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
             : nil
         host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+    }
+
+    private func nativeHighlightedSelection(for suggestion: SuggestionResponse?) -> CandidatePanelSelection? {
+        guard conversionEngine.isNativeActive,
+              let suggestion,
+              !suggestion.prefixCandidates.isEmpty else {
+            return nil
+        }
+        let highlightedIndex = conversionEngine.snapshot.highlightedIndex
+        guard suggestion.prefixCandidates.indices.contains(highlightedIndex) else {
+            return nil
+        }
+        let candidate = suggestion.prefixCandidates[highlightedIndex]
+        guard let range = candidate.rawRange else {
+            return .prefixCandidate(highlightedIndex)
+        }
+        return range == KnowTypeCore.TextRange(start: 0, length: rawBuffer.count)
+            ? .fullCandidate(highlightedIndex)
+            : .segmentCandidate(highlightedIndex)
     }
 
     private func hideCandidatePanel() {
@@ -1392,6 +1534,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        if conversionEngine.isNativeActive,
+           !rawBuffer.isEmpty,
+           conversionEngine.snapshot.hasComposition {
+            return moveNativeCandidateSelection(navigation, client: host?.currentClient)
+        }
         if moveNativeCandidatePage(navigation, client: host?.currentClient) {
             return true
         }
@@ -1418,6 +1565,61 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return false
         }
         return moveNativeCandidatePage(pageNavigation, client: host?.currentClient)
+    }
+
+    private func moveNativeCandidateSelection(
+        _ navigation: InputCandidateNavigation,
+        client: InputControllerClient?
+    ) -> Bool {
+        switch navigation {
+        case .pageDown, .pageUp:
+            return moveNativeCandidatePage(navigation, client: client)
+        case .right, .down:
+            return moveNativeCandidateHighlight(delta: 1, client: client)
+        case .left, .up:
+            return moveNativeCandidateHighlight(delta: -1, client: client)
+        }
+    }
+
+    private func moveNativeCandidateHighlight(delta: Int, client: InputControllerClient?) -> Bool {
+        let snapshot = conversionEngine.snapshot
+        guard !snapshot.candidates.isEmpty else {
+            return false
+        }
+        let currentIndex = min(max(snapshot.highlightedIndex, 0), snapshot.candidates.count - 1)
+        let targetIndex = currentIndex + delta
+        if snapshot.candidates.indices.contains(targetIndex) {
+            let result = conversionEngine.process(.highlightCandidateOnCurrentPage(targetIndex))
+            guard result.handled else {
+                return true
+            }
+            publishLocalSuggestion(client: client)
+            return true
+        }
+
+        if targetIndex >= snapshot.candidates.count {
+            guard moveNativeCandidatePage(.pageDown, client: client) else {
+                return true
+            }
+            let result = conversionEngine.process(.highlightCandidateOnCurrentPage(0))
+            if result.handled {
+                publishLocalSuggestion(client: client)
+            }
+            return true
+        }
+
+        guard moveNativeCandidatePage(.pageUp, client: client) else {
+            return true
+        }
+        let previousPageSnapshot = conversionEngine.snapshot
+        guard let lastIndex = previousPageSnapshot.candidates.indices.last else {
+            return true
+        }
+        let result = conversionEngine.process(.highlightCandidateOnCurrentPage(lastIndex))
+        if result.handled {
+            publishLocalSuggestion(client: client)
+        }
+        return true
     }
 
     private static func nativeBoundaryPageNavigation(
@@ -1540,7 +1742,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        let markedText = compositionBuffer.displayText
+        let markedText = nativeMarkedText() ?? compositionBuffer.displayText
         guard !markedText.isEmpty else {
             clearMarkedText(client)
             return
@@ -1577,6 +1779,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func activeMarkedRange(for client: InputControllerClient) -> NSRange? {
         client.markedRange
+    }
+
+    private func nativeMarkedText() -> String? {
+        guard conversionEngine.isNativeActive else {
+            return nil
+        }
+        let snapshot = conversionEngine.snapshot
+        guard snapshot.hasComposition else {
+            return nil
+        }
+        if !snapshot.preedit.isEmpty {
+            return snapshot.preedit
+        }
+        return snapshot.rawInput.isEmpty ? nil : snapshot.rawInput
     }
 
     private func scheduleDelayedCandidateReanchor(
