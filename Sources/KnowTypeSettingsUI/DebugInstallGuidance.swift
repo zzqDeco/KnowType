@@ -15,7 +15,7 @@ enum DebugInstallGuidance {
         ),
         DebugInstallStep(
             title: "Install bundle",
-            detail: "Copy KnowType.app into ~/Library/Input Methods. The install script purges stale .Mode development state, then launches the installed app so registration, enabling, and selection run from the app context."
+            detail: "Copy KnowType.app into ~/Library/Input Methods. The install script purges stale .Mode development state, then launches the installed app so registration, enabling, and selection run from the app context. Open KnowType Settings from the input-method menu."
         ),
         DebugInstallStep(
             title: "Diagnose installation",
@@ -43,6 +43,7 @@ enum DebugInstallGuidance {
         "./scripts/build-inputmethod-bundle.sh",
         "CODESIGN_IDENTITY=\"Apple Development: Name (TEAMID)\" ./scripts/install-inputmethod.sh",
         "./scripts/install-inputmethod.sh",
+        "./scripts/install-inputmethod.sh --with-prefpane",
         "./scripts/diagnose-inputmethod.sh --strict",
         "./scripts/diagnose-inputmethod.sh --strict --logs",
         "./scripts/repair-inputmethod-selection.sh",

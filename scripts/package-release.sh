@@ -14,7 +14,8 @@ usage() {
 Usage: scripts/package-release.sh --version X.Y.Z [--build N] [--configuration release]
 
 Builds the local MVP release zip for GitHub Releases. The package contains
-KnowType.app and KnowType.prefPane. It is ad-hoc signed and not notarized.
+KnowType.app and the compatibility KnowType.prefPane. It is ad-hoc signed and
+not notarized.
 
 Options:
   --version        Required release version, without the leading v.

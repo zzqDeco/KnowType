@@ -143,6 +143,7 @@ real host apps remains the evidence for IMK behavior.
 - The IMK controller publishes Rime preedit marked text and immediate current-page Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
 - Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
+- The input-method menu follows mature IMK inputs such as McBopomofo: common toggles appear first, user data and diagnostic folders are in the middle, and `KnowType Settings...` calls `showPreferences(_:)` to open the in-bundle settings window.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
 - `CandidatePanelWindowController` owns the AppKit panel, mouse interaction, and row accessibility.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.

@@ -14,10 +14,15 @@ inside the InputMethodKit preferences window.
 
 - The input-method menu opens KnowType settings without relying on a nib-backed
   default preferences loader.
-- The settings app, preference pane, and IMK preferences window should share the
-  same SwiftUI root view and stores.
+- The window uses native macOS settings chrome where available, including
+  preference toolbar style, autosaved frame placement, a fixed minimum size, and
+  disabled tabbing. It centers the first in-memory window before assigning the
+  autosave name so a saved frame can still take precedence.
+- The IMK preferences window is the primary user-facing settings entry. The
+  developer settings app and compatibility PreferencePane should share the same
+  SwiftUI root view and stores without becoming the default install path.
 
 ## Tests
 
-- `InputMethodBundleInfoTests`
+- `InputMethodMenuBuilderTests`
 - Settings ViewModel tests for behavior behind the hosted UI

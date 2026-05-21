@@ -6,6 +6,7 @@ final class DebugInstallGuidanceTests: XCTestCase {
         XCTAssertTrue(DebugInstallGuidance.steps.contains { $0.title == "Diagnose installation" })
         XCTAssertTrue(DebugInstallGuidance.steps.contains { $0.title == "Request selection" })
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/diagnose-inputmethod.sh --strict"))
+        XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/install-inputmethod.sh --with-prefpane"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/diagnose-inputmethod.sh --strict --logs"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/repair-inputmethod-selection.sh"))
         XCTAssertTrue(DebugInstallGuidance.commands.contains("./scripts/select-inputmethod.sh"))
@@ -39,6 +40,10 @@ final class DebugInstallGuidanceTests: XCTestCase {
     func testGuidanceKeepsAppleDevelopmentInstallCommand() {
         XCTAssertTrue(DebugInstallGuidance.commands.contains {
             $0.contains("CODESIGN_IDENTITY=\"Apple Development: Name (TEAMID)\"")
+        })
+        XCTAssertTrue(DebugInstallGuidance.steps.contains {
+            $0.title == "Install bundle"
+                && $0.detail.contains("input-method menu")
         })
     }
 }

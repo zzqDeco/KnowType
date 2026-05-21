@@ -11,7 +11,7 @@ usage() {
 Usage: scripts/uninstall-inputmethod.sh [--dry-run]
 
 Removes all local KnowType input method bundles from ~/Library/Input Methods
-and removes the installed KnowType System Settings pane.
+and removes the optional compatibility KnowType PreferencePane when installed.
 
 Options:
   --dry-run   Print removal actions without changing files or preferences.
@@ -59,10 +59,10 @@ knowtype_unregister_launchservices_records_except "" "$DRY_RUN"
 
 if [[ -d "$PREFPANE_TARGET_PATH" ]]; then
   if (( DRY_RUN == 1 )); then
-    echo "[dry-run] Would remove KnowType System Settings pane: $PREFPANE_TARGET_PATH"
+    echo "[dry-run] Would remove KnowType compatibility PreferencePane: $PREFPANE_TARGET_PATH"
   else
     rm -rf -- "$PREFPANE_TARGET_PATH"
-    echo "Removed KnowType System Settings pane: $PREFPANE_TARGET_PATH"
+    echo "Removed KnowType compatibility PreferencePane: $PREFPANE_TARGET_PATH"
   fi
 fi
 

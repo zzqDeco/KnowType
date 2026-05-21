@@ -22,7 +22,6 @@ public final class KnowTypePreferencesWindowController: NSWindowController {
 
     public override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
-        window?.center()
         window?.makeKeyAndOrderFront(sender)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -39,8 +38,16 @@ public final class KnowTypePreferencesWindowController: NSWindowController {
             defer: false
         )
         window.title = "KnowType Settings"
+        window.minSize = NSSize(width: 840, height: 560)
         window.contentView = contentView
         window.isReleasedWhenClosed = false
+        window.titlebarAppearsTransparent = false
+        window.tabbingMode = .disallowed
+        if #available(macOS 11.0, *) {
+            window.toolbarStyle = .preference
+        }
+        window.center()
+        window.setFrameAutosaveName("KnowTypePreferencesWindow")
         return window
     }
 }

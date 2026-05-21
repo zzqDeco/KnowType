@@ -96,10 +96,13 @@ final class InputMethodBundleInfoTests: XCTestCase {
         let buildRange = try XCTUnwrap(workflow.range(of: "swift build"))
         let testRange = try XCTUnwrap(workflow.range(of: "swift test"))
         let smokeRange = try XCTUnwrap(workflow.range(of: "./scripts/smoke-inputmethod-install.sh"))
+        let prefpaneSmokeRange = try XCTUnwrap(workflow.range(of: "./scripts/smoke-inputmethod-install.sh --with-prefpane"))
 
         XCTAssertLessThan(prepareRange.lowerBound, buildRange.lowerBound)
         XCTAssertLessThan(prepareRange.lowerBound, testRange.lowerBound)
         XCTAssertLessThan(prepareRange.lowerBound, smokeRange.lowerBound)
+        XCTAssertLessThan(prepareRange.lowerBound, prefpaneSmokeRange.lowerBound)
+        XCTAssertLessThan(smokeRange.lowerBound, prefpaneSmokeRange.lowerBound)
     }
 
     func testRimeConversionBypassesNativeSessionForNonASCIIComposition() throws {
@@ -152,6 +155,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(script.contains("xcrun clang -bundle"))
         XCTAssertTrue(script.contains(#"-Wl,-rpath,@loader_path/../Frameworks"#))
         XCTAssertTrue(smokeScript.contains("Contents/Frameworks/libKnowTypePreferencePane.dylib"))
+        XCTAssertTrue(smokeScript.contains("--with-prefpane"))
+        XCTAssertTrue(smokeScript.contains("WITH_PREFPANE=0"))
         XCTAssertTrue(smokeScript.contains("otool -hv"))
         XCTAssertTrue(smokeScript.contains("BUNDLE"))
         XCTAssertTrue(smokeScript.contains("bundle.principalClass"))
@@ -188,6 +193,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
             "scripts/create-local-system-policy-profile.sh",
             "scripts/smoke-inputmethod-install.sh",
             "scripts/lib/inputsource-ids.sh",
+            "scripts/lib/inputmethod-installation.sh",
             "scripts/lib/inputsource-tool.sh"
         ]
         let scripts = try scriptPaths
@@ -196,7 +202,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         XCTAssertTrue(scripts.contains("knowtype-inputsource-tool"))
         XCTAssertTrue(scripts.contains("KnowType.prefPane"))
-        XCTAssertTrue(scripts.contains("~/Library/PreferencePanes"))
+        XCTAssertTrue(scripts.contains("Library/PreferencePanes"))
         XCTAssertTrue(scripts.contains("--no-diagnostic"))
         XCTAssertTrue(scripts.contains("--logs"))
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
@@ -257,6 +263,25 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(smokeScript.contains("profiles -I"))
         XCTAssertFalse(smokeScript.contains("spctl --add"))
         XCTAssertFalse(smokeScript.contains("sudo "))
+    }
+
+    func testReleasePackageDoesNotIncludeStandaloneSettingsApp() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let packageScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/package-release.sh"),
+            encoding: .utf8
+        )
+        let releaseWorkflow = try String(
+            contentsOf: rootURL.appendingPathComponent(".github/workflows/release.yml"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(packageScript.contains("KnowType Settings.app"))
+        XCTAssertTrue(packageScript.contains("compatibility KnowType.prefPane"))
+        XCTAssertTrue(releaseWorkflow.contains("./scripts/smoke-inputmethod-install.sh --with-prefpane"))
     }
 
     func testInputSourceHelperReportsHIToolboxPreferenceState() throws {
@@ -356,6 +381,12 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("pgrep -x KnowTypeInputMethodApp"))
         XCTAssertTrue(installScript.contains("knowtype_inputsource_tool"))
         XCTAssertTrue(installScript.contains("INPUTSOURCE_TOOL"))
+        XCTAssertTrue(installScript.contains("--with-prefpane"))
+        XCTAssertTrue(installScript.contains("KNOWTYPE_INSTALL_PREFPANE"))
+        XCTAssertTrue(installScript.contains("KnowType settings are available from the input-method menu"))
+        XCTAssertTrue(installScript.contains("Stale compatibility PreferencePane that would be removed"))
+        XCTAssertTrue(installScript.contains("REMOVED_STALE_PREFPANE=1"))
+        XCTAssertTrue(installScript.contains("Removed stale KnowType compatibility PreferencePane"))
         XCTAssertTrue(installScript.contains("--add-active"))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" bootstrap --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" register --path "$TARGET_PATH""#))
@@ -384,6 +415,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains(#"find "$target_dir" -maxdepth 1 \( -type d -o -type l \) -name '*.app'"#))
         XCTAssertTrue(helperSource.contains("refusing to remove or replace"))
         XCTAssertTrue(helperSource.contains("return 1"))
+        XCTAssertTrue(uninstallScript.contains("optional compatibility KnowType PreferencePane"))
         XCTAssertTrue(uninstallScript.contains(#"elif (( DRY_RUN == 1 )); then"#))
         XCTAssertTrue(uninstallScript.contains("Would remove $bundle_count local KnowType input method bundle(s)."))
         XCTAssertTrue(uninstallScript.contains("Removed $bundle_count local KnowType input method bundle(s)."))

@@ -278,7 +278,18 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - updates only the generated section in `ENV.md`
 - sanitizes Level 0 protected content before writing logs
 
-KnowType-specific settings are hosted by three supported entry points: the standalone settings app, `KnowType.prefPane` in `~/Library/PreferencePanes`, and the InputMethodKit preferences window opened from the input-method menu. The macOS Keyboard/Input Sources page remains the enable/select surface and is not treated as a custom settings host.
+KnowType-specific settings use the InputMethodKit preferences window opened from
+the input-method menu as the primary user entry point. `KnowType Settings...`
+maps to `showPreferences(_:)`, which creates or reuses
+`KnowTypePreferencesWindowController` and hosts the shared SwiftUI settings root.
+The input-method menu also exposes `AI Continuation`, log/support folder
+shortcuts, the Rime user folder, and About. The standalone settings app target
+is a developer preview host, and `KnowType.prefPane` in
+`~/Library/PreferencePanes` is a compatibility fallback rather than the default
+installation path. Default local installs remove stale compatibility panes;
+`--with-prefpane` installs a matching fallback pane when needed. The macOS
+Keyboard/Input Sources page remains the enable/select surface and is not
+treated as a custom settings host.
 
 ## CLI And Script Contracts
 
