@@ -511,6 +511,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return true
         }
         let result = conversionEngine.process(.selectCandidateOnCurrentPage(index))
+        learnNativeCommitIfFinal(result, client: client)
         _ = handleNativeConversionResult(result, client: client)
         return true
     }
@@ -525,6 +526,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return false
         }
         let result = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
+        learnNativeCommitIfFinal(result, client: client)
         return handleNativeConversionResult(result, client: client)
     }
 
@@ -951,14 +953,28 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func learnSelectedPrefix(action: InputAction, result: InputCommitResult, client: InputControllerClient?) {
         guard case .commit(let committedText) = result,
               !committedText.isEmpty,
-              action != .optionR,
-              !(action == .tab && aiRecommendationState.isSelectableRecommendation),
+              !shouldSkipPrefixLearning(action: action),
               let prefix = selectedPrefixTextForLearning(),
               prefix != rawBuffer,
               committedText.hasPrefix(prefix) else {
             return
         }
         recordUserSelection(prefix, client: client)
+    }
+
+    private func shouldSkipPrefixLearning(action: InputAction) -> Bool {
+        if action == .optionR {
+            return true
+        }
+        if action == .tab,
+           aiRecommendationState.isSelectableRecommendation {
+            return true
+        }
+        if case .optionNumber(1) = action,
+           aiRecommendationState.isSelectableRecommendation {
+            return true
+        }
+        return false
     }
 
     private func selectedPrefixTextForLearning() -> String? {

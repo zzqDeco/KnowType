@@ -1996,6 +1996,32 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testNativeNumberSelectionRecordsSelectionHistory() {
+        let client = FakeInputControllerClient()
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, _, persistenceSpy) = makeCoordinator(
+            client: client,
+            persistence: persistence,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你", "尼"],
+                recorder: recorder
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertEqual(client.insertTextWrites.last?.text, "尼")
+        XCTAssertEqual(persistenceSpy.recordedSelections, ["尼"])
+    }
+
     @MainActor
     func testNativeNumberSelectionDoesNotCommitReadyAIRecommendation() async {
         let client = FakeInputControllerClient()
@@ -2025,6 +2051,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(recorder.selectedIndices, [1])
         XCTAssertEqual(client.insertTextWrites.last?.text, "尼")
+    }
+
+    @MainActor
+    func testOptionOneAIRecommendationDoesNotRecordPrefixSelectionHistory() async {
+        let client = FakeInputControllerClient()
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let (coordinator, host, persistenceSpy) = makeCoordinator(
+            client: client,
+            persistence: persistence,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你AI 续写"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: keyCode(forNumber: 1), modifiers: [.option]),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你AI 续写")
+        XCTAssertEqual(persistenceSpy.recordedSelections, [])
     }
 
     @MainActor

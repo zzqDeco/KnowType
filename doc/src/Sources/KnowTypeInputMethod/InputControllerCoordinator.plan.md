@@ -21,7 +21,8 @@ Current behavior:
 - handles Rime's default paging punctuation (`-`/`=`, `,`/`.`) before symbol commit fallback, but falls back to punctuation when the native snapshot does not change so page-boundary punctuation is not swallowed
 - offers composing ASCII symbols to Rime before punctuation fallback so schema keys such as apostrophe, semicolon, and slash stay available to the engine
 - highlight-only updates refresh marked text and the panel without restarting AI recommendation requests
-- native final Space commits record local selection history before composition reset; partial native commits do not
+- native final Space, numeric, and mouse/panel candidate commits record local selection history before composition reset; partial native commits do not
+- explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - native candidate mapping uses the encoded current-page index when present; ambiguous duplicate text without an index does not fall back to the retired local converter
 - records committed typing events through `AIContextEventRecording` after insert decisions, while external Delete events are logged only when no composition is active
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
