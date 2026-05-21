@@ -12,19 +12,23 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable, Sendable {
     var id: String { rawValue }
 
     var title: String {
+        title(preferredLanguages: Locale.preferredLanguages)
+    }
+
+    func title(preferredLanguages: [String]) -> String {
         switch self {
         case .input:
-            SettingsLocalization.string("settings.section.input")
+            SettingsLocalization.string("settings.section.input", preferredLanguages: preferredLanguages)
         case .candidates:
-            SettingsLocalization.string("settings.section.candidates")
+            SettingsLocalization.string("settings.section.candidates", preferredLanguages: preferredLanguages)
         case .lexicons:
-            SettingsLocalization.string("settings.section.lexicons")
+            SettingsLocalization.string("settings.section.lexicons", preferredLanguages: preferredLanguages)
         case .aiProvider:
-            SettingsLocalization.string("settings.section.ai")
+            SettingsLocalization.string("settings.section.ai", preferredLanguages: preferredLanguages)
         case .privacy:
-            SettingsLocalization.string("settings.section.privacy")
+            SettingsLocalization.string("settings.section.privacy", preferredLanguages: preferredLanguages)
         case .diagnostics:
-            SettingsLocalization.string("settings.section.diagnostics")
+            SettingsLocalization.string("settings.section.diagnostics", preferredLanguages: preferredLanguages)
         }
     }
 
@@ -66,7 +70,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable, Sendable {
 struct SettingsSidebarPresentation: Equatable, Sendable {
     var sections: [SettingsSection]
 
-    init(searchText: String) {
+    init(searchText: String, preferredLanguages: [String] = Locale.preferredLanguages) {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
             self.sections = SettingsSection.allCases
@@ -74,7 +78,7 @@ struct SettingsSidebarPresentation: Equatable, Sendable {
         }
 
         self.sections = SettingsSection.allCases.filter { section in
-            ([section.title] + section.keywords).contains { candidate in
+            ([section.title(preferredLanguages: preferredLanguages)] + section.keywords).contains { candidate in
                 candidate.localizedCaseInsensitiveContains(query)
             }
         }
@@ -150,9 +154,12 @@ struct ProviderConnectionStatusPresentation: Equatable, Sendable {
         showsProgress
     }
 
-    init(status: ProviderConnectionStatus) {
+    init(status: ProviderConnectionStatus, preferredLanguages: [String] = Locale.preferredLanguages) {
         self.sectionTitle = "连接"
-        self.testButtonLabel = SettingsLocalization.string("settings.action.testConnection")
+        self.testButtonLabel = SettingsLocalization.string(
+            "settings.action.testConnection",
+            preferredLanguages: preferredLanguages
+        )
         switch status {
         case .idle:
             self.showsProgress = false

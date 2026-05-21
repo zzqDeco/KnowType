@@ -94,7 +94,7 @@ The input-method keydown path never awaits this layer. It publishes raw marked t
 
 ## Settings Layer
 
-`KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view. The primary UI is a Simplified Chinese macOS settings surface: a sidebar with search and grouped-form detail pages for input, candidates, Rime/user data, AI continuation, privacy, and diagnostics.
+`KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view. The primary UI is a macOS settings surface with a sidebar, search, and grouped-form detail pages for input, candidates, Rime/user data, AI continuation, privacy, and diagnostics. Localized settings strings use Simplified Chinese for Chinese preferred languages and English fallback resources for non-Chinese locales.
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.

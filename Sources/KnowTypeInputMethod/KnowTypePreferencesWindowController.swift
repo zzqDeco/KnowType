@@ -37,7 +37,7 @@ public final class KnowTypePreferencesWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "KnowType 设置"
+        window.title = SettingsLocalization.string("settings.window.title")
         window.minSize = NSSize(width: 840, height: 560)
         window.contentView = contentView
         window.isReleasedWhenClosed = false

@@ -5,33 +5,50 @@ import XCTest
 
 final class ProviderProfilesPresentationTests: XCTestCase {
     func testSettingsSidebarUsesChineseNativeSectionsAndSearch() {
-        let allSections = SettingsSidebarPresentation(searchText: "")
+        let allSections = SettingsSidebarPresentation(searchText: "", preferredLanguages: ["zh-Hans-CN"])
 
         XCTAssertEqual(
-            allSections.sections.map(\.title),
+            allSections.sections.map { $0.title(preferredLanguages: ["zh-Hans-CN"]) },
             ["输入", "候选窗", "Rime 与用户数据", "AI 续写", "隐私", "诊断"]
         )
         XCTAssertEqual(SettingsSection.input.systemImage, "keyboard")
         XCTAssertEqual(SettingsSection.aiProvider.systemImage, "sparkles")
 
-        let aiSearch = SettingsSidebarPresentation(searchText: "模型")
+        let aiSearch = SettingsSidebarPresentation(searchText: "模型", preferredLanguages: ["zh-Hans-CN"])
         XCTAssertEqual(aiSearch.sections, [.aiProvider])
 
-        let lexiconSearch = SettingsSidebarPresentation(searchText: "Rime")
+        let lexiconSearch = SettingsSidebarPresentation(searchText: "Rime", preferredLanguages: ["zh-Hans-CN"])
         XCTAssertEqual(lexiconSearch.sections, [.lexicons])
 
-        let emptySearch = SettingsSidebarPresentation(searchText: "不存在")
+        let emptySearch = SettingsSidebarPresentation(searchText: "不存在", preferredLanguages: ["zh-Hans-CN"])
         XCTAssertTrue(emptySearch.sections.isEmpty)
     }
 
-    func testSettingsLocalizationLoadsChineseStringsAndEnglishFallback() {
-        XCTAssertEqual(SettingsLocalization.string("settings.window.title"), "KnowType 设置")
-        XCTAssertEqual(SettingsLocalization.string("settings.section.ai"), "AI 续写")
+    func testSettingsLocalizationRespectsPreferredLanguagesAndFallbacks() {
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.window.title", preferredLanguages: ["zh-Hans-CN"]),
+            "KnowType 设置"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.section.ai", preferredLanguages: ["zh-Hant-TW"]),
+            "AI 续写"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.section.ai", preferredLanguages: ["en-US"]),
+            "AI Continuation"
+        )
         XCTAssertEqual(
             SettingsLocalization.string("settings.section.ai", localeIdentifier: "en"),
             "AI Continuation"
         )
-        XCTAssertEqual(SettingsLocalization.string("settings.action.testConnection"), "测试连接")
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.action.testConnection", localeIdentifier: "en-US"),
+            "Test Connection"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.action.testConnection", localeIdentifier: "fr-FR"),
+            "Test Connection"
+        )
     }
 
     func testListItemUsesSavedDisplayNameAndProviderKind() {
@@ -116,7 +133,7 @@ final class ProviderProfilesPresentationTests: XCTestCase {
     }
 
     func testConnectionStatusPresentationMapsProgressSuccessAndFailure() {
-        let idle = ProviderConnectionStatusPresentation(status: .idle)
+        let idle = ProviderConnectionStatusPresentation(status: .idle, preferredLanguages: ["zh-Hans-CN"])
         XCTAssertEqual(idle.sectionTitle, "连接")
         XCTAssertEqual(idle.testButtonLabel, "测试连接")
         XCTAssertFalse(idle.showsProgress)
