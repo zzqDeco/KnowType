@@ -35,7 +35,6 @@ public struct ProviderProfilesView: View {
             SettingsSidebarView(searchText: $searchText, selectedSection: $selectedSection)
         } detail: {
             settingsDetail(for: selectedSection)
-                .navigationTitle(selectedSection.title)
         }
     }
 

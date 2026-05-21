@@ -51,6 +51,49 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         )
     }
 
+    func testSettingsLocalizationFallsBackWhenPreferredBundleLacksKey() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-settings-localization-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
+
+        let zhBundle = try makeLocalizationBundle(
+            rootURL: temporaryDirectory,
+            language: "zh-Hans",
+            strings: #""settings.window.title" = "KnowType 设置";"#
+        )
+        let englishBundle = try makeLocalizationBundle(
+            rootURL: temporaryDirectory,
+            language: "en",
+            strings: #""settings.test.englishOnly" = "English fallback";"#
+        )
+
+        let value = SettingsLocalization.string(
+            "settings.test.englishOnly",
+            preferredLanguages: ["zh-Hans-CN"],
+            bundleResolver: { identifier in
+                identifier.hasPrefix("zh") ? zhBundle : englishBundle
+            }
+        )
+
+        XCTAssertEqual(value, "English fallback")
+    }
+
+    func testSettingsDetailDoesNotReplaceWindowTitleWithSectionTitle() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeSettingsUI/ProviderProfilesView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(source.contains(".navigationTitle(selectedSection.title)"))
+        XCTAssertTrue(source.contains("SettingsForm(title: SettingsSection.input.title)"))
+    }
+
     func testListItemUsesSavedDisplayNameAndProviderKind() {
         let profile = ProviderProfile(
             id: "work",
@@ -207,4 +250,19 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             "Last Error"
         )
     }
+}
+
+private func makeLocalizationBundle(
+    rootURL: URL,
+    language: String,
+    strings: String
+) throws -> Bundle {
+    let bundleURL = rootURL.appendingPathComponent("\(language).lproj", isDirectory: true)
+    try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
+    try strings.write(
+        to: bundleURL.appendingPathComponent("Localizable.strings"),
+        atomically: true,
+        encoding: .utf8
+    )
+    return try XCTUnwrap(Bundle(url: bundleURL))
 }

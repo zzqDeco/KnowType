@@ -12,17 +12,37 @@ public enum SettingsLocalization {
     }
 
     static func string(_ key: String, preferredLanguages: [String]) -> String {
+        string(key, preferredLanguages: preferredLanguages, bundleResolver: localizedBundle(localeIdentifier:))
+    }
+
+    static func string(
+        _ key: String,
+        preferredLanguages: [String],
+        bundleResolver: (String) -> Bundle?
+    ) -> String {
         for localeIdentifier in preferredLanguages {
-            if let localizedBundle = localizedBundle(localeIdentifier: localeIdentifier) {
-                return localizedBundle.localizedString(forKey: key, value: key, table: tableName)
+            if let value = localizedValue(
+                forKey: key,
+                localeIdentifier: localeIdentifier,
+                bundleResolver: bundleResolver
+            ) {
+                return value
             }
         }
 
         let fallback = preferredLanguages.contains { languageCode(from: $0) == "zh" } ? "zh-Hans" : "en"
-        return string(key, localeIdentifier: fallback)
+        return string(key, localeIdentifier: fallback, bundleResolver: bundleResolver)
     }
 
     public static func string(_ key: String, localeIdentifier: String) -> String {
+        string(key, localeIdentifier: localeIdentifier, bundleResolver: localizedBundle(localeIdentifier:))
+    }
+
+    static func string(
+        _ key: String,
+        localeIdentifier: String,
+        bundleResolver: (String) -> Bundle?
+    ) -> String {
         let fallbackIdentifiers = [
             localeIdentifier,
             languageCode(from: localeIdentifier) == "zh" ? "zh-Hans" : "en",
@@ -31,12 +51,28 @@ public enum SettingsLocalization {
         ]
 
         for fallbackIdentifier in unique(fallbackIdentifiers) {
-            if let localizedBundle = localizedBundle(localeIdentifier: fallbackIdentifier) {
-                return localizedBundle.localizedString(forKey: key, value: key, table: tableName)
+            if let value = localizedValue(
+                forKey: key,
+                localeIdentifier: fallbackIdentifier,
+                bundleResolver: bundleResolver
+            ) {
+                return value
             }
         }
 
         return key
+    }
+
+    private static func localizedValue(
+        forKey key: String,
+        localeIdentifier: String,
+        bundleResolver: (String) -> Bundle?
+    ) -> String? {
+        guard let localizedBundle = bundleResolver(localeIdentifier) else {
+            return nil
+        }
+        let value = localizedBundle.localizedString(forKey: key, value: key, table: tableName)
+        return value == key ? nil : value
     }
 
     private static func localizedBundle(localeIdentifier: String) -> Bundle? {
