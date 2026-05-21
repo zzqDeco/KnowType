@@ -1341,7 +1341,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard let navigation = Self.nativePagingSymbolNavigation(for: text) else {
             return false
         }
-        return moveNativeCandidatePage(navigation, client: client)
+        return moveNativeCandidatePage(
+            navigation,
+            client: client,
+            consumeOnlyWhenSnapshotChanges: true
+        )
     }
 
     private static func nativePagingSymbolNavigation(for text: String) -> InputCandidateNavigation? {
@@ -1357,31 +1361,30 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func moveNativeCandidatePage(
         _ navigation: InputCandidateNavigation,
-        client: InputControllerClient?
+        client: InputControllerClient?,
+        consumeOnlyWhenSnapshotChanges: Bool = false
     ) -> Bool {
         guard conversionEngine.isNativeActive,
-              !rawBuffer.isEmpty,
-              candidatePanelState.windowState.isVisible else {
+              !rawBuffer.isEmpty else {
             return false
         }
-        let snapshot = conversionEngine.snapshot
+        let snapshotBeforePage = conversionEngine.snapshot
         let key: ConversionEngineKey
         switch navigation {
         case .pageUp:
-            guard snapshot.pageNumber > 0 else {
-                return false
-            }
             key = .pageUp
         case .pageDown:
-            guard !snapshot.isLastPage else {
-                return false
-            }
             key = .pageDown
         case .up, .down, .left, .right:
             return false
         }
         let result = conversionEngine.process(key)
         guard result.handled else {
+            return false
+        }
+        if consumeOnlyWhenSnapshotChanges,
+           result.snapshot == snapshotBeforePage,
+           result.commitText == nil {
             return false
         }
         publishLocalSuggestion(client: client)

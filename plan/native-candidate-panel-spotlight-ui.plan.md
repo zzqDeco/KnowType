@@ -7,7 +7,8 @@
 - Tighten the candidate row layout so shortcut labels use measured width instead
   of a fixed reserved slot.
 - Preserve Rime-style paging keys (`-`/`=`, `,`/`.`) by trying native page
-  movement before punctuation commit fallback while the candidate panel is open.
+  movement before punctuation commit fallback, while requiring a native snapshot
+  change before consuming punctuation.
 - Treat arrow navigation as one paged candidate list: move inside the current
   Rime page first, then page at the edge.
 - Keep the Rime-only conversion hot path unchanged; this slice does not add a
@@ -19,7 +20,9 @@
 - Update candidate panel visual metrics, layout measurements, and snapshot
   baselines.
 - Route Rime's default paging punctuation to page movement before symbol commit
-  fallback.
+  fallback without swallowing punctuation when the page does not change.
+- Keep explicit `PageUp`/`PageDown` working even when anchor resolution hides the
+  custom panel.
 - Route right/down and left/up page-edge arrow movement to Rime page movement.
 - Add tests for window level and shortcut-slot sizing.
 - Do not change input-source registration, Rime conversion, AI recommendation,

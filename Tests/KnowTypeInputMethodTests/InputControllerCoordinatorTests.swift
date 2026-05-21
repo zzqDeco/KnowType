@@ -1867,6 +1867,33 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(client.insertTextWrites.isEmpty)
     }
 
+    func testNativePageKeysUpdateRimeSnapshotWhenPanelIsHidden() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine(),
+            screenProvider: FixedInputControllerScreenProvider(screens: [])
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, false)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F72D}", keyCode: 121),
+                client: client
+            )
+        )
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第二页一")
+    }
+
     func testNativeRightArrowPagesRimeSnapshotAtCurrentPageBoundary() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
@@ -2006,6 +2033,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         runtimePreferences: InputMethodRuntimePreferences = .standard,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
+        screenProvider: any ScreenGeometryProviding = FixedInputControllerScreenProvider(),
         asyncSuggestionDelayNanoseconds: UInt64 = 0
     ) -> (
         InputControllerCoordinator,
@@ -2032,7 +2060,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             conversionEngineFactory: conversionEngineFactory,
             host: host,
             anchorResolver: CandidateAnchorResolver(
-                screenProvider: FixedInputControllerScreenProvider(),
+                screenProvider: screenProvider,
                 accessibilityProvider: NoopAccessibilityAnchorProvider(),
                 traceEnabled: false
             ),
