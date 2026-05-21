@@ -36,6 +36,10 @@ input.
 - Calls into versioned Rime API tail members, such as current-page candidate
   selection, highlight changes, composition commit, raw input, and page changes,
   must check `data_size` before reading the mirrored function pointer.
+- The C bridge treats `commit_composition`, `highlight_candidate_on_current_page`,
+  `select_candidate_on_current_page`, `get_input`, and `change_page` as
+  versioned API members; missing members must return `false`/empty snapshots
+  instead of dereferencing beyond the runtime ABI.
 - Reset clears the native composition instead of tearing down the process-global
   Rime runtime.
 - Non-ASCII composition text bypasses the native session until reset and keeps raw input without producing local fallback candidates, preventing Rime's ASCII key API from silently diverging from the coordinator raw buffer.

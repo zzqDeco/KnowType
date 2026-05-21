@@ -427,7 +427,9 @@ void ktb_rime_clear_composition(KTBRimeSession *session) {
 }
 
 bool ktb_rime_commit_composition(KTBRimeSession *session) {
-    if (!session || !session->api || !session->api->commit_composition || session->session_id == 0) {
+    if (!session || !session->api ||
+        !KTB_RIME_API_HAS(session->api, commit_composition) ||
+        !session->api->commit_composition || session->session_id == 0) {
         return false;
     }
     return session->api->commit_composition(session->session_id);

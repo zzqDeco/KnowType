@@ -17,8 +17,11 @@ Current behavior:
 - when native Rime is active, hover and arrow selection update Rime's current-page highlight instead of making the custom panel selection authoritative on its own
 - explicit native `PageUp`/`PageDown` are forwarded to the conversion engine while composition is active, independent of custom candidate-panel visibility
 - when native Rime is active, arrow navigation moves inside the current page first, then maps right/down at the page edge to Rime `.pageDown` plus row 1 highlight and left/up at the page edge to Rime `.pageUp` plus previous-page last-row highlight
+- if native highlight is unavailable, arrow navigation falls back to local panel selection and Space explicitly selects that Rime current-page index before generic native Space
 - handles Rime's default paging punctuation (`-`/`=`, `,`/`.`) before symbol commit fallback, but falls back to punctuation when the native snapshot does not change so page-boundary punctuation is not swallowed
 - offers composing ASCII symbols to Rime before punctuation fallback so schema keys such as apostrophe, semicolon, and slash stay available to the engine
+- highlight-only updates refresh marked text and the panel without restarting AI recommendation requests
+- native final Space commits record local selection history before composition reset; partial native commits do not
 - native candidate mapping uses the encoded current-page index when present; ambiguous duplicate text without an index does not fall back to the retired local converter
 - records committed typing events through `AIContextEventRecording` after insert decisions, while external Delete events are logged only when no composition is active
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation

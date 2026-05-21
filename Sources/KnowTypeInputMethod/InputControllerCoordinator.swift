@@ -207,8 +207,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if conversionEngine.isNativeActive,
            conversionEngine.snapshot.hasComposition {
             let result = conversionEngine.process(.commitComposition)
-            _ = handleNativeConversionResult(result, client: client)
-            return
+            if handleNativeConversionResult(result, client: client) {
+                return
+            }
         }
         let text = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
         _ = applyCommitResult(text.isEmpty ? .noAction : .commit(text), client: client)
@@ -541,7 +542,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard result.handled else {
             return false
         }
-        publishLocalSuggestion(client: client)
+        refreshNativeHighlightPresentation(client: client)
         return true
     }
 
@@ -629,6 +630,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
         refreshComposition(client: client)
         updateCandidatePanelImmediately(suggestion: rimeSuggestion, client: client)
         scheduleAIRecommendation(for: rimeSuggestion, client: client)
+    }
+
+    private func refreshNativeHighlightPresentation(client: InputControllerClient?) {
+        guard lastSuggestionRawInput == rawBuffer,
+              let lastSuggestion else {
+            publishLocalSuggestion(client: client)
+            return
+        }
+        refreshComposition(client: client)
+        updateCandidatePanelImmediately(suggestion: lastSuggestion, client: client)
     }
 
     private func conversionSuggestion() -> SuggestionResponse? {
@@ -851,7 +862,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if action == .space,
            conversionEngine.isNativeActive,
            rawBuffer.isEmpty == false {
+            if let selectedNativeCandidate,
+               shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate),
+               let nativeIndex = nativeCandidateIndex(for: selectedNativeCandidate) {
+                let result = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
+                learnNativeCommitIfFinal(result, client: client)
+                if handleNativeConversionResult(result, client: client) {
+                    return true
+                }
+            }
             let result = conversionEngine.process(.space)
+            learnNativeCommitIfFinal(result, client: client)
             if handleNativeConversionResult(result, client: client) {
                 return true
             }
@@ -906,6 +927,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
         syncRawBufferToNativeSnapshot(result.snapshot)
         publishLocalSuggestion(client: client)
         return true
+    }
+
+    private func learnNativeCommitIfFinal(_ result: ConversionEngineResult, client: InputControllerClient?) {
+        guard let commitText = result.commitText,
+              !commitText.isEmpty,
+              !result.snapshot.hasComposition,
+              commitText != rawBuffer else {
+            return
+        }
+        recordUserSelection(commitText, client: client)
     }
 
     private func syncRawBufferToNativeSnapshot(_ snapshot: ConversionEngineSnapshot) {
@@ -1537,7 +1568,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if conversionEngine.isNativeActive,
            !rawBuffer.isEmpty,
            conversionEngine.snapshot.hasComposition {
-            return moveNativeCandidateSelection(navigation, client: host?.currentClient)
+            if moveNativeCandidateSelection(navigation, client: host?.currentClient) {
+                return true
+            }
         }
         if moveNativeCandidatePage(navigation, client: host?.currentClient) {
             return true
@@ -1591,9 +1624,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if snapshot.candidates.indices.contains(targetIndex) {
             let result = conversionEngine.process(.highlightCandidateOnCurrentPage(targetIndex))
             guard result.handled else {
-                return true
+                return false
             }
-            publishLocalSuggestion(client: client)
+            refreshNativeHighlightPresentation(client: client)
             return true
         }
 
@@ -1603,7 +1636,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             let result = conversionEngine.process(.highlightCandidateOnCurrentPage(0))
             if result.handled {
-                publishLocalSuggestion(client: client)
+                refreshNativeHighlightPresentation(client: client)
             }
             return true
         }
@@ -1617,7 +1650,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let result = conversionEngine.process(.highlightCandidateOnCurrentPage(lastIndex))
         if result.handled {
-            publishLocalSuggestion(client: client)
+            refreshNativeHighlightPresentation(client: client)
         }
         return true
     }
