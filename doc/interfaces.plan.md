@@ -282,14 +282,15 @@ KnowType-specific settings use the InputMethodKit preferences window opened from
 the input-method menu as the primary user entry point. `KnowType Settings...`
 maps to `showPreferences(_:)`, which creates or reuses
 `KnowTypePreferencesWindowController` and hosts the shared SwiftUI settings root.
-The input-method menu also exposes `AI Continuation`, log/support folder
-shortcuts, the Rime user folder, and About. The standalone settings app target
-is a developer preview host, and `KnowType.prefPane` in
-`~/Library/PreferencePanes` is a compatibility fallback rather than the default
-installation path. Default local installs remove stale compatibility panes;
-`--with-prefpane` installs a matching fallback pane when needed. The macOS
-Keyboard/Input Sources page remains the enable/select surface and is not
-treated as a custom settings host.
+The opened window is titled `KnowType 设置` and uses a Simplified Chinese
+macOS-native sidebar/detail layout with grouped form rows. The input-method menu
+also exposes `AI Continuation`, log/support folder shortcuts, the Rime user
+folder, and About. The standalone settings app target is a developer preview
+host, and `KnowType.prefPane` in `~/Library/PreferencePanes` is a compatibility
+fallback rather than the default installation path. Default local installs
+remove stale compatibility panes; `--with-prefpane` installs a matching fallback
+pane when needed. The macOS Keyboard/Input Sources page remains the enable/select
+surface and is not treated as a custom settings host.
 
 ## CLI And Script Contracts
 

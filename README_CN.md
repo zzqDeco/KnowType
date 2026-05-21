@@ -112,7 +112,8 @@ Rime runtime 文件会打包在 `KnowType.app` 中；如果文件缺失或加载
 raw 输入可用并报告 degraded conversion state，而不是回退到已经退役的自研转换器。
 
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
-macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。本地安装默认不安装独立
+macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。它会打开中文
+`KnowType 设置` 窗口，使用 macOS 原生 sidebar 和 grouped settings 页面。本地安装默认不安装独立
 Settings app。默认安装会移除本机过期的兼容 `KnowType.prefPane`，避免它和新安装的输入法版本
 不一致；需要匹配版本的兼容 pane 时，再执行
 `./scripts/install-inputmethod.sh --with-prefpane` 构建并安装。

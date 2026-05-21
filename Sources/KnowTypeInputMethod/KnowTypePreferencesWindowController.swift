@@ -37,14 +37,14 @@ public final class KnowTypePreferencesWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "KnowType Settings"
+        window.title = "KnowType 设置"
         window.minSize = NSSize(width: 840, height: 560)
         window.contentView = contentView
         window.isReleasedWhenClosed = false
         window.titlebarAppearsTransparent = false
         window.tabbingMode = .disallowed
         if #available(macOS 11.0, *) {
-            window.toolbarStyle = .preference
+            window.toolbarStyle = .unified
         }
         window.center()
         window.setFrameAutosaveName("KnowTypePreferencesWindow")

@@ -32,16 +32,16 @@ struct LexiconSettingsPresentation: Equatable, Sendable {
         lastActionMessage: String?,
         isInstallingRecommendedPack: Bool = false
     ) {
-        self.loadedEntries = SettingsKeyValuePresentation(label: "Loaded entries", value: "\(totalLoadedEntryCount)")
-        self.lastRefreshLabel = "Last refresh"
+        self.loadedEntries = SettingsKeyValuePresentation(label: "已载入词条", value: "\(totalLoadedEntryCount)")
+        self.lastRefreshLabel = "上次刷新"
         self.lastRefreshDate = lastRefreshDate
-        self.refreshActionLabel = "Refresh"
-        self.createSampleActionLabel = "Create Sample TSV"
+        self.refreshActionLabel = "刷新"
+        self.createSampleActionLabel = "创建示例 TSV"
         self.installRecommendedPackActionLabel = isInstallingRecommendedPack
-            ? "Installing Recommended Lexicon..."
-            : "Install Recommended Lexicon"
+            ? "正在安装推荐词库..."
+            : "安装推荐词库"
         self.isInstallingRecommendedPack = isInstallingRecommendedPack
-        self.createMissingDirectoriesActionLabel = "Create Missing Directories"
+        self.createMissingDirectoriesActionLabel = "创建缺失目录"
         self.showsCreateMissingDirectoriesAction = directories.contains { !$0.exists }
         self.lastActionMessage = lastActionMessage
         self.directories = directories.map(LexiconDirectoryPresentation.init(status:))
@@ -65,20 +65,20 @@ struct LexiconDirectoryPresentation: Equatable, Identifiable, Sendable {
 
     init(status: LexiconDirectoryStatus) {
         self.id = status.id
-        self.sectionTitle = "Directory"
+        self.sectionTitle = "目录"
         self.status = SettingsKeyValuePresentation(
-            label: "Status",
-            value: status.exists ? "Available" : "Missing"
+            label: "状态",
+            value: status.exists ? "可用" : "缺失"
         )
         self.resourceFiles = SettingsKeyValuePresentation(
-            label: "Resource files",
+            label: "资源文件",
             value: "\(status.resourceFileCount)"
         )
         self.loadedEntries = SettingsKeyValuePresentation(
-            label: "Loaded entries",
+            label: "已载入词条",
             value: "\(status.loadedEntryCount)"
         )
-        self.pathLabel = "Path"
+        self.pathLabel = "路径"
         self.path = status.directory.path
         self.installedPacks = status.installedPacks.map(InstalledLexiconPackPresentation.init(status:))
         self.diagnostics = status.diagnostics.map(LexiconDiagnosticPresentation.init(diagnostic:))
@@ -96,11 +96,11 @@ struct InstalledLexiconPackPresentation: Equatable, Identifiable, Sendable {
     init(status: InstalledLexiconPackStatus) {
         self.id = status.id
         self.title = status.displayName
-        self.entries = SettingsKeyValuePresentation(label: "Entries", value: "\(status.entryCount)")
-        self.license = SettingsKeyValuePresentation(label: "License", value: status.licenseName)
-        self.source = SettingsKeyValuePresentation(label: "Source", value: status.sourceURL.absoluteString)
+        self.entries = SettingsKeyValuePresentation(label: "词条", value: "\(status.entryCount)")
+        self.license = SettingsKeyValuePresentation(label: "许可证", value: status.licenseName)
+        self.source = SettingsKeyValuePresentation(label: "来源", value: status.sourceURL.absoluteString)
         self.installedAt = SettingsKeyValuePresentation(
-            label: "Installed",
+            label: "安装时间",
             value: status.installedAt.formatted(date: .abbreviated, time: .shortened)
         )
     }

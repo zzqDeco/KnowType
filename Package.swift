@@ -70,6 +70,9 @@ let package = Package(
             name: "KnowTypeSettingsUI",
             dependencies: ["KnowTypeCore", "KnowTypeProviders"],
             path: "Sources/KnowTypeSettingsUI",
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .linkedFramework("SwiftUI", .when(platforms: [.macOS]))
             ]

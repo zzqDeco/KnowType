@@ -8,6 +8,7 @@ public struct ProviderProfilesView: View {
     @StateObject private var inputModeViewModel: InputModePreferencesViewModel
     @StateObject private var runtimePreferencesViewModel: RuntimePreferencesViewModel
     @State private var selectedSection: SettingsSection = .input
+    @State private var searchText = ""
 
     public init(
         viewModel: ProviderProfilesViewModel,
@@ -22,59 +23,61 @@ public struct ProviderProfilesView: View {
     }
 
     public var body: some View {
-        TabView(selection: $selectedSection) {
+        NavigationSplitView {
+            SettingsSidebarView(searchText: $searchText, selectedSection: $selectedSection)
+        } detail: {
+            settingsDetail(for: selectedSection)
+                .navigationTitle(selectedSection.title)
+        }
+    }
+
+    @ViewBuilder
+    private func settingsDetail(for section: SettingsSection) -> some View {
+        switch section {
+        case .input:
             InputSettingsView(
                 inputModeViewModel: inputModeViewModel,
                 runtimePreferencesViewModel: runtimePreferencesViewModel
             )
-                .tabItem {
-                    Label("Input", systemImage: "keyboard")
-                }
-                .tag(SettingsSection.input)
-
+        case .candidates:
             CandidateSettingsView(viewModel: runtimePreferencesViewModel)
-                .tabItem {
-                    Label("Candidates", systemImage: "list.bullet.rectangle")
-                }
-                .tag(SettingsSection.candidates)
-
+        case .lexicons:
             LexiconSettingsView(viewModel: lexiconViewModel)
-                .tabItem {
-                    Label("Rime/User Data", systemImage: "folder")
-                }
-                .tag(SettingsSection.lexicons)
-
+        case .aiProvider:
             AIProviderSettingsView(
                 viewModel: viewModel,
                 runtimePreferencesViewModel: runtimePreferencesViewModel
             )
-                .tabItem {
-                    Label("AI Provider", systemImage: "network")
-                }
-                .tag(SettingsSection.aiProvider)
-
+        case .privacy:
             PrivacySettingsView(runtimePreferencesViewModel: runtimePreferencesViewModel)
-                .tabItem {
-                    Label("Privacy", systemImage: "lock.shield")
-                }
-                .tag(SettingsSection.privacy)
-
+        case .diagnostics:
             DiagnosticsSettingsView()
-                .tabItem {
-                    Label("Diagnostics", systemImage: "stethoscope")
-                }
-                .tag(SettingsSection.diagnostics)
         }
     }
 }
 
-private enum SettingsSection: Hashable {
-    case input
-    case candidates
-    case lexicons
-    case aiProvider
-    case privacy
-    case diagnostics
+private struct SettingsSidebarView: View {
+    @Binding var searchText: String
+    @Binding var selectedSection: SettingsSection
+
+    var body: some View {
+        let presentation = SettingsSidebarPresentation(searchText: searchText)
+
+        List(selection: $selectedSection) {
+            ForEach(presentation.sections) { section in
+                Label(section.title, systemImage: section.systemImage)
+                    .tag(section)
+            }
+
+            if presentation.sections.isEmpty {
+                Text("没有匹配的设置")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
+        .frame(minWidth: 220)
+        .searchable(text: $searchText, prompt: SettingsLocalization.string("settings.search.prompt"))
+    }
 }
 
 private struct InputSettingsView: View {
@@ -82,37 +85,37 @@ private struct InputSettingsView: View {
     @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
 
     var body: some View {
-        SettingsForm {
-            Section("Composition") {
-                LabeledContent("Input host", value: "InputMethodKit")
-                LabeledContent("Composition mode", value: "Marked text before commit")
-                LabeledContent("Primary commit", value: "Space commits the Rime candidate")
-                LabeledContent("Continuation commit", value: "Tab commits prefix plus continuation")
+        SettingsForm(title: SettingsSection.input.title) {
+            Section("组合输入") {
+                LabeledContent("输入宿主", value: "InputMethodKit")
+                LabeledContent("组合模式", value: "提交前使用 marked text")
+                LabeledContent("基础提交", value: "Space 提交 Rime 候选")
+                LabeledContent("续写提交", value: "Tab 提交前缀与续写")
             }
 
-            Section("Punctuation") {
-                Picker("Default punctuation", selection: defaultPunctuationBinding) {
-                    Text("Chinese").tag(InputSymbolMode.chinese)
-                    Text("English").tag(InputSymbolMode.english)
+            Section("标点与宽度") {
+                Picker("默认标点", selection: defaultPunctuationBinding) {
+                    Text("中文").tag(InputSymbolMode.chinese)
+                    Text("英文").tag(InputSymbolMode.english)
                 }
-                Picker("Default width", selection: defaultWidthBinding) {
-                    Text("Half width").tag(InputSymbolWidth.halfWidth)
-                    Text("Full width").tag(InputSymbolWidth.fullWidth)
+                Picker("默认宽度", selection: defaultWidthBinding) {
+                    Text("半角").tag(InputSymbolWidth.halfWidth)
+                    Text("全角").tag(InputSymbolWidth.fullWidth)
                 }
-                Picker("Code app punctuation", selection: codeAppPunctuationBinding) {
-                    Text("Chinese").tag(InputSymbolMode.chinese)
-                    Text("English").tag(InputSymbolMode.english)
+                Picker("代码 app 标点", selection: codeAppPunctuationBinding) {
+                    Text("中文").tag(InputSymbolMode.chinese)
+                    Text("英文").tag(InputSymbolMode.english)
                 }
-                Picker("Code app width", selection: codeAppWidthBinding) {
-                    Text("Half width").tag(InputSymbolWidth.halfWidth)
-                    Text("Full width").tag(InputSymbolWidth.fullWidth)
+                Picker("代码 app 宽度", selection: codeAppWidthBinding) {
+                    Text("半角").tag(InputSymbolWidth.halfWidth)
+                    Text("全角").tag(InputSymbolWidth.fullWidth)
                 }
-                LabeledContent("Toggle", value: "Option + .")
+                LabeledContent("切换快捷键", value: "Option + .")
                 Button {
                     inputModeViewModel.resetToDefaults()
                     runtimePreferencesViewModel.resetToDefaults()
                 } label: {
-                    Label("Restore Defaults", systemImage: "arrow.counterclockwise")
+                    Label(SettingsLocalization.string("settings.action.restoreDefaults"), systemImage: "arrow.counterclockwise")
                 }
                 if let message = inputModeViewModel.lastErrorMessage ?? runtimePreferencesViewModel.lastErrorMessage {
                     Text(message)
@@ -120,8 +123,8 @@ private struct InputSettingsView: View {
                 }
             }
 
-            Section("Prefix Lock") {
-                Text("Continuation candidates append after the locked prefix. Prefix rewrites are reserved for explicit polish actions.")
+            Section("前缀锁定") {
+                Text("续写候选只会追加在已锁定前缀之后。改写前缀只允许通过显式润色操作触发。")
                     .foregroundStyle(.secondary)
             }
         }
@@ -161,34 +164,36 @@ private struct CandidateSettingsView: View {
     @ObservedObject var viewModel: RuntimePreferencesViewModel
 
     var body: some View {
-        SettingsForm {
-            Section("Display") {
-                Picker("Candidates per page", selection: candidatePageSizeBinding) {
+        SettingsForm(title: SettingsSection.candidates.title) {
+            Section("显示") {
+                Picker("每页候选数", selection: candidatePageSizeBinding) {
                     Text("6").tag(6)
                     Text("9").tag(9)
                 }
-                Picker("Panel layout", selection: candidateLayoutModeBinding) {
-                    Text("Adaptive horizontal").tag(CandidatePanelLayoutMode.adaptive)
-                    Text("Vertical list").tag(CandidatePanelLayoutMode.verticalPreferred)
+                Picker("候选窗布局", selection: candidateLayoutModeBinding) {
+                    Text("自适应横排").tag(CandidatePanelLayoutMode.adaptive)
+                    Text("竖排列表").tag(CandidatePanelLayoutMode.verticalPreferred)
                 }
-                LabeledContent("Adaptive page", value: "Up to 6 candidates")
-                LabeledContent("Vertical page", value: "Uses selected page size")
+                LabeledContent("自适应页", value: "最多 6 个候选")
+                LabeledContent("竖排页", value: "使用上方每页候选数")
                 if let message = viewModel.lastErrorMessage {
                     Text(message)
                         .foregroundStyle(.red)
                 }
             }
 
-            Section("Candidate Order") {
-                LabeledContent("Prefix candidates", value: "Shown first")
-                LabeledContent("Continuation candidates", value: "Shown after prefix candidates")
-                LabeledContent("Raw input", value: "Shown only before suggestions are available")
+            Section("候选顺序") {
+                LabeledContent("Rime 候选", value: "优先显示")
+                LabeledContent("AI 续写", value: "只在显式快捷键或点击时提交")
+                LabeledContent("原始输入", value: "仅在没有中文候选时保留")
             }
 
-            Section("Shortcuts") {
-                LabeledContent("Tab", value: "First continuation")
-                LabeledContent("Option + number", value: "Matching continuation row")
-                LabeledContent("Option + R", value: "Explicit polish")
+            Section("快捷键") {
+                LabeledContent("Space", value: "提交当前 Rime 候选")
+                LabeledContent("数字键", value: "选择当前页 Rime 候选")
+                LabeledContent("Tab", value: "提交第一条 AI 续写")
+                LabeledContent("Option + 数字", value: "提交对应 AI 续写")
+                LabeledContent("Option + R", value: "显式润色")
             }
         }
     }
@@ -214,8 +219,8 @@ private struct LexiconSettingsView: View {
     var body: some View {
         let presentation = LexiconSettingsPresentation(viewModel: viewModel)
 
-        SettingsForm {
-            Section("Local Lexicons") {
+        SettingsForm(title: SettingsSection.lexicons.title) {
+            Section("本地词库") {
                 LabeledContent(presentation.loadedEntries.label, value: presentation.loadedEntries.value)
                 if let lastRefreshDate = presentation.lastRefreshDate {
                     LabeledContent(presentation.lastRefreshLabel, value: lastRefreshDate.formatted(date: .abbreviated, time: .standard))
@@ -291,7 +296,7 @@ private struct LexiconSettingsView: View {
                 }
             }
 
-            Section("Format") {
+            Section("格式") {
                 ForEach(presentation.formatRows, id: \.label) { row in
                     LabeledContent(row.label, value: row.value)
                 }
@@ -310,27 +315,39 @@ private struct AIProviderSettingsView: View {
         let validationPresentation = ProviderValidationPresentation(errors: viewModel.validationErrors)
         let lastErrorPresentation = ProviderLastErrorPresentation(message: viewModel.lastErrorMessage)
 
-        NavigationSplitView {
-            List(selection: $viewModel.selectedProfileID) {
-                ForEach(viewModel.profiles) { profile in
-                    let item = ProviderProfileListItemPresentation(profile: profile)
+        SettingsForm(title: SettingsSection.aiProvider.title) {
+            Section("续写") {
+                Toggle("启用云端续写", isOn: cloudContinuationEnabledBinding)
+                Toggle("没有 provider 时显示本地续写", isOn: localContinuationEnabledBinding)
+                Picker("长度", selection: continuationLengthLevelBinding) {
+                    Text("短").tag(ContinuationLengthLevel.short)
+                    Text("中").tag(ContinuationLengthLevel.medium)
+                    Text("长").tag(ContinuationLengthLevel.long)
+                }
+                Stepper(value: maxContinuationCandidatesBinding, in: 1...6, step: 1) {
+                    Text("最多续写候选：\(runtimePreferencesViewModel.preferences.maxContinuationCandidates)")
+                }
+                if let message = runtimePreferencesViewModel.lastErrorMessage {
+                    Text(message)
+                        .foregroundStyle(.red)
+                }
+            }
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title)
-                            .font(.headline)
-                        Text(item.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Section("Provider") {
+                if viewModel.profiles.isEmpty {
+                    Text("尚未配置 provider。")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("当前配置", selection: profileSelectionBinding) {
+                        ForEach(viewModel.profiles) { profile in
+                            let item = ProviderProfileListItemPresentation(profile: profile)
+
+                            Text("\(item.title) · \(item.subtitle)")
+                                .tag(Optional(item.id))
+                        }
                     }
-                    .tag(item.id)
                 }
-            }
-            .onChange(of: viewModel.selectedProfileID) { id in
-                if let id {
-                    viewModel.selectProfile(id: id)
-                }
-            }
-            .toolbar {
+
                 Menu {
                     ForEach(ProviderKind.allCases, id: \.self) { kind in
                         Button(kind.rawValue) {
@@ -338,114 +355,103 @@ private struct AIProviderSettingsView: View {
                         }
                     }
                 } label: {
-                    Label("Add Profile", systemImage: "plus")
+                    Label("添加 Provider", systemImage: "plus")
                 }
+
+                TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
+                Picker(
+                    draftPresentation.kindPickerLabel,
+                    selection: Binding(
+                        get: { viewModel.draft.kind },
+                        set: { viewModel.changeDraftKind($0) }
+                    )
+                ) {
+                    ForEach(ProviderKind.allCases, id: \.self) { kind in
+                        Text(kind.rawValue).tag(kind)
+                    }
+                }
+                TextField(draftPresentation.baseURLFieldLabel, text: $viewModel.draft.baseURL)
+                TextField(draftPresentation.modelFieldLabel, text: $viewModel.draft.model)
+                Stepper(value: $viewModel.draft.timeoutSeconds, in: 1...120, step: 1) {
+                    Text(draftPresentation.timeoutLabel)
+                }
+                Toggle(draftPresentation.defaultProviderLabel, isOn: $viewModel.draft.isDefault)
             }
-        } detail: {
-            Form {
-                Section("Continuation") {
-                    Toggle("Enable cloud continuation", isOn: cloudContinuationEnabledBinding)
-                    Toggle("Show local continuations without a provider", isOn: localContinuationEnabledBinding)
-                    Picker("Length", selection: continuationLengthLevelBinding) {
-                        Text("Short").tag(ContinuationLengthLevel.short)
-                        Text("Medium").tag(ContinuationLengthLevel.medium)
-                        Text("Long").tag(ContinuationLengthLevel.long)
-                    }
-                    Stepper(value: maxContinuationCandidatesBinding, in: 1...6, step: 1) {
-                        Text("Max continuation candidates: \(runtimePreferencesViewModel.preferences.maxContinuationCandidates)")
-                    }
-                    if let message = runtimePreferencesViewModel.lastErrorMessage {
-                        Text(message)
-                            .foregroundStyle(.red)
-                    }
-                }
 
-                Section("Provider") {
-                    TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
-                    Picker(
-                        draftPresentation.kindPickerLabel,
-                        selection: Binding(
-                            get: { viewModel.draft.kind },
-                            set: { viewModel.changeDraftKind($0) }
-                        )
-                    ) {
-                        ForEach(ProviderKind.allCases, id: \.self) { kind in
-                            Text(kind.rawValue).tag(kind)
-                        }
-                    }
-                    TextField(draftPresentation.baseURLFieldLabel, text: $viewModel.draft.baseURL)
-                    TextField(draftPresentation.modelFieldLabel, text: $viewModel.draft.model)
-                    Stepper(value: $viewModel.draft.timeoutSeconds, in: 1...120, step: 1) {
-                        Text(draftPresentation.timeoutLabel)
-                    }
-                    Toggle(draftPresentation.defaultProviderLabel, isOn: $viewModel.draft.isDefault)
-                }
-
-                Section(draftPresentation.secret.sectionTitle) {
-                    SecureField(draftPresentation.secret.apiKeyFieldPrompt, text: $viewModel.draft.apiKey)
-                    if let reference = draftPresentation.secret.reference {
-                        LabeledContent(reference.label, value: reference.value)
-                            .font(.caption)
-                    }
-                    Text(draftPresentation.secret.helpText)
+            Section(draftPresentation.secret.sectionTitle) {
+                SecureField(draftPresentation.secret.apiKeyFieldPrompt, text: $viewModel.draft.apiKey)
+                if let reference = draftPresentation.secret.reference {
+                    LabeledContent(reference.label, value: reference.value)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                Text(draftPresentation.secret.helpText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-                if draftPresentation.showsCustomHTTPFields {
-                    Section(draftPresentation.customBodyTemplateLabel) {
+            if draftPresentation.showsCustomHTTPFields {
+                Section {
+                    DisclosureGroup("高级 Custom HTTP") {
                         TextEditor(text: $viewModel.draft.customBodyTemplate)
                             .font(.system(.body, design: .monospaced))
                             .frame(minHeight: 120)
                         TextField(draftPresentation.customResponsePathLabel, text: $viewModel.draft.customResponsePath)
                     }
                 }
+            }
 
-                Section(connectionPresentation.sectionTitle) {
-                    Button {
-                        Task {
-                            await viewModel.testDraftConnection()
-                        }
-                    } label: {
-                        Label(connectionPresentation.testButtonLabel, systemImage: "network")
+            Section(connectionPresentation.sectionTitle) {
+                Button {
+                    Task {
+                        await viewModel.testDraftConnection()
                     }
-                    .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
-
-                    if connectionPresentation.showsProgress {
-                        ProgressView()
-                    } else if let message = connectionPresentation.message {
-                        connectionStatusMessage(message)
-                    }
+                } label: {
+                    Label(connectionPresentation.testButtonLabel, systemImage: "network")
                 }
+                .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
 
-                if validationPresentation.isVisible {
-                    Section(validationPresentation.title) {
-                        ForEach(validationPresentation.messages, id: \.self) { error in
-                            Text(error)
-                                .foregroundStyle(.red)
-                        }
-                    }
+                Button {
+                    _ = viewModel.saveDraft()
+                } label: {
+                    Label(SettingsLocalization.string("settings.action.save"), systemImage: "square.and.arrow.down")
                 }
+                .disabled(viewModel.isPersistenceBlocked)
+                .keyboardShortcut("s", modifiers: [.command])
 
-                if let lastErrorMessage = lastErrorPresentation.message {
-                    Section(lastErrorPresentation.title) {
-                        Text(lastErrorMessage)
+                if connectionPresentation.showsProgress {
+                    ProgressView()
+                } else if let message = connectionPresentation.message {
+                    connectionStatusMessage(message)
+                }
+            }
+
+            if validationPresentation.isVisible {
+                Section(validationPresentation.title) {
+                    ForEach(validationPresentation.messages, id: \.self) { error in
+                        Text(error)
                             .foregroundStyle(.red)
                     }
                 }
             }
-            .formStyle(.grouped)
-            .toolbar {
-                Button {
-                    _ = viewModel.saveDraft()
-                } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
+
+            if let lastErrorMessage = lastErrorPresentation.message {
+                Section(lastErrorPresentation.title) {
+                    Text(lastErrorMessage)
+                        .foregroundStyle(.red)
                 }
-                .disabled(viewModel.isPersistenceBlocked)
-                .keyboardShortcut("s", modifiers: [.command])
             }
-            .padding()
         }
+    }
+
+    private var profileSelectionBinding: Binding<String?> {
+        Binding(
+            get: { viewModel.selectedProfileID },
+            set: { id in
+                if let id {
+                    viewModel.selectProfile(id: id)
+                }
+            }
+        )
     }
 
     private var cloudContinuationEnabledBinding: Binding<Bool> {
@@ -493,27 +499,27 @@ private struct PrivacySettingsView: View {
     @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
 
     var body: some View {
-        SettingsForm {
-            Section("Cloud Continuation") {
+        SettingsForm(title: SettingsSection.privacy.title) {
+            Section("云端续写") {
                 LabeledContent(
-                    "Provider calls",
-                    value: runtimePreferencesViewModel.preferences.cloudContinuationEnabled ? "Enabled for continuation" : "Disabled"
+                    "Provider 调用",
+                    value: runtimePreferencesViewModel.preferences.cloudContinuationEnabled ? "续写时启用" : "已关闭"
                 )
                 LabeledContent(
-                    "Local fallback",
-                    value: runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider ? "Enabled when no provider is configured" : "Disabled"
+                    "本地 fallback",
+                    value: runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider ? "没有 provider 时启用" : "已关闭"
                 )
             }
 
-            Section("Level 0 Local Path") {
-                LabeledContent("URLs and emails", value: "No provider call")
-                LabeledContent("Paths and commands", value: "No provider call")
-                LabeledContent("Code-like input", value: "No provider call")
-                LabeledContent("Terminal, iTerm, Xcode", value: "No provider call")
+            Section("Level 0 本地路径") {
+                LabeledContent("URL 与邮箱", value: "不调用 provider")
+                LabeledContent("路径与命令", value: "不调用 provider")
+                LabeledContent("代码形态输入", value: "不调用 provider")
+                LabeledContent("Terminal、iTerm、Xcode", value: "不调用 provider")
             }
 
-            Section("Technical Tokens") {
-                Text("API, JSON, macOS, InputMethodKit, snake_case, and camelCase are preserved by local protection rules.")
+            Section("技术 token") {
+                Text("API、JSON、macOS、InputMethodKit、snake_case 和 camelCase 会通过本地保护规则保留。")
                     .foregroundStyle(.secondary)
             }
         }
@@ -522,16 +528,18 @@ private struct PrivacySettingsView: View {
 
 private struct DiagnosticsSettingsView: View {
     var body: some View {
-        SettingsForm {
-            Section("Local Diagnostics") {
+        SettingsForm(title: SettingsSection.diagnostics.title) {
+            Section("本地诊断") {
                 ForEach(DebugInstallGuidance.steps) { step in
                     InstallStepView(title: step.title, detail: step.detail)
                 }
             }
 
-            Section("Commands") {
-                ForEach(DebugInstallGuidance.commands, id: \.self) { command in
-                    MonospacedText(command)
+            Section {
+                DisclosureGroup("命令") {
+                    ForEach(DebugInstallGuidance.commands, id: \.self) { command in
+                        MonospacedText(command)
+                    }
                 }
             }
         }
@@ -539,18 +547,30 @@ private struct DiagnosticsSettingsView: View {
 }
 
 private struct SettingsForm<Content: View>: View {
+    let title: String
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
         self.content = content()
     }
 
     var body: some View {
-        Form {
-            content
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.title2.weight(.semibold))
+                .textSelection(.enabled)
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+
+            Form {
+                content
+            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
-        .padding()
+        .padding(.bottom, 12)
+        .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

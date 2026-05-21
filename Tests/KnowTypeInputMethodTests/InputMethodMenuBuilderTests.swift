@@ -78,13 +78,13 @@ final class InputMethodMenuBuilderTests: XCTestCase {
         let controller = KnowTypePreferencesWindowController()
         let window = try XCTUnwrap(controller.window)
 
-        XCTAssertEqual(window.title, "KnowType Settings")
+        XCTAssertEqual(window.title, "KnowType 设置")
         XCTAssertGreaterThanOrEqual(window.minSize.width, 840)
         XCTAssertGreaterThanOrEqual(window.minSize.height, 560)
         XCTAssertEqual(window.tabbingMode, .disallowed)
         XCTAssertNotNil(window.contentView)
         if #available(macOS 11.0, *) {
-            XCTAssertEqual(window.toolbarStyle, .preference)
+            XCTAssertEqual(window.toolbarStyle, .unified)
         }
     }
 }

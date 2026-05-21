@@ -1,6 +1,86 @@
 import Foundation
 import KnowTypeProviders
 
+enum SettingsSection: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case input
+    case candidates
+    case lexicons
+    case aiProvider
+    case privacy
+    case diagnostics
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .input:
+            SettingsLocalization.string("settings.section.input")
+        case .candidates:
+            SettingsLocalization.string("settings.section.candidates")
+        case .lexicons:
+            SettingsLocalization.string("settings.section.lexicons")
+        case .aiProvider:
+            SettingsLocalization.string("settings.section.ai")
+        case .privacy:
+            SettingsLocalization.string("settings.section.privacy")
+        case .diagnostics:
+            SettingsLocalization.string("settings.section.diagnostics")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .input:
+            "keyboard"
+        case .candidates:
+            "list.bullet.rectangle"
+        case .lexicons:
+            "folder"
+        case .aiProvider:
+            "sparkles"
+        case .privacy:
+            "lock.shield"
+        case .diagnostics:
+            "stethoscope"
+        }
+    }
+
+    var keywords: [String] {
+        switch self {
+        case .input:
+            ["输入", "组合", "标点", "符号", "前缀", "Input", "punctuation"]
+        case .candidates:
+            ["候选", "候选窗", "翻页", "快捷键", "Candidates", "panel"]
+        case .lexicons:
+            ["Rime", "用户数据", "词库", "目录", "lexicon", "data"]
+        case .aiProvider:
+            ["AI", "续写", "Provider", "API Key", "模型", "连接"]
+        case .privacy:
+            ["隐私", "云端", "本地", "保护", "Privacy"]
+        case .diagnostics:
+            ["诊断", "安装", "日志", "命令", "Diagnostics", "logs"]
+        }
+    }
+}
+
+struct SettingsSidebarPresentation: Equatable, Sendable {
+    var sections: [SettingsSection]
+
+    init(searchText: String) {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            self.sections = SettingsSection.allCases
+            return
+        }
+
+        self.sections = SettingsSection.allCases.filter { section in
+            ([section.title] + section.keywords).contains { candidate in
+                candidate.localizedCaseInsensitiveContains(query)
+            }
+        }
+    }
+}
+
 struct SettingsKeyValuePresentation: Equatable, Sendable {
     var label: String
     var value: String
@@ -31,12 +111,12 @@ struct ProviderProfileDraftPresentation: Equatable, Sendable {
     var secret: ProviderSecretPresentation
 
     init(draft: ProviderProfileDraft) {
-        self.displayNameFieldLabel = "Display Name"
-        self.kindPickerLabel = "Kind"
+        self.displayNameFieldLabel = "显示名称"
+        self.kindPickerLabel = "Provider 类型"
         self.baseURLFieldLabel = "Base URL"
-        self.modelFieldLabel = "Model"
-        self.timeoutLabel = "Timeout: \(Int(draft.timeoutSeconds)) seconds"
-        self.defaultProviderLabel = "Default provider"
+        self.modelFieldLabel = "模型"
+        self.timeoutLabel = "超时：\(Int(draft.timeoutSeconds)) 秒"
+        self.defaultProviderLabel = "设为默认 provider"
         self.showsCustomHTTPFields = draft.kind == .customHTTP
         self.customBodyTemplateLabel = "Custom HTTP"
         self.customResponsePathLabel = "Response Path"
@@ -52,11 +132,11 @@ struct ProviderSecretPresentation: Equatable, Sendable {
 
     init(secretName: String?) {
         self.sectionTitle = "API Key"
-        self.apiKeyFieldPrompt = "Leave blank to keep existing key"
+        self.apiKeyFieldPrompt = "留空则保留现有 key"
         self.reference = secretName.map {
-            SettingsKeyValuePresentation(label: "Secret reference", value: $0)
+            SettingsKeyValuePresentation(label: "Secret 引用", value: $0)
         }
-        self.helpText = "API keys are written through the secret store. On macOS this uses Keychain; provider JSON stores secret references only."
+        self.helpText = "API Key 通过 SecretStore 写入；macOS 使用 Keychain，provider JSON 只保存 secret 引用。"
     }
 }
 
@@ -71,8 +151,8 @@ struct ProviderConnectionStatusPresentation: Equatable, Sendable {
     }
 
     init(status: ProviderConnectionStatus) {
-        self.sectionTitle = "Connection"
-        self.testButtonLabel = "Test Connection"
+        self.sectionTitle = "连接"
+        self.testButtonLabel = SettingsLocalization.string("settings.action.testConnection")
         switch status {
         case .idle:
             self.showsProgress = false
@@ -109,7 +189,7 @@ struct ProviderValidationPresentation: Equatable, Sendable {
     }
 
     init(errors: [String]) {
-        self.title = "Validation"
+        self.title = "校验"
         self.messages = errors
     }
 }
@@ -123,7 +203,7 @@ struct ProviderLastErrorPresentation: Equatable, Sendable {
     }
 
     init(message: String?) {
-        self.title = "Last Error"
+        self.title = "最近错误"
         self.message = message
     }
 }

@@ -4,6 +4,36 @@ import XCTest
 @testable import KnowTypeSettingsUI
 
 final class ProviderProfilesPresentationTests: XCTestCase {
+    func testSettingsSidebarUsesChineseNativeSectionsAndSearch() {
+        let allSections = SettingsSidebarPresentation(searchText: "")
+
+        XCTAssertEqual(
+            allSections.sections.map(\.title),
+            ["输入", "候选窗", "Rime 与用户数据", "AI 续写", "隐私", "诊断"]
+        )
+        XCTAssertEqual(SettingsSection.input.systemImage, "keyboard")
+        XCTAssertEqual(SettingsSection.aiProvider.systemImage, "sparkles")
+
+        let aiSearch = SettingsSidebarPresentation(searchText: "模型")
+        XCTAssertEqual(aiSearch.sections, [.aiProvider])
+
+        let lexiconSearch = SettingsSidebarPresentation(searchText: "Rime")
+        XCTAssertEqual(lexiconSearch.sections, [.lexicons])
+
+        let emptySearch = SettingsSidebarPresentation(searchText: "不存在")
+        XCTAssertTrue(emptySearch.sections.isEmpty)
+    }
+
+    func testSettingsLocalizationLoadsChineseStringsAndEnglishFallback() {
+        XCTAssertEqual(SettingsLocalization.string("settings.window.title"), "KnowType 设置")
+        XCTAssertEqual(SettingsLocalization.string("settings.section.ai"), "AI 续写")
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.section.ai", localeIdentifier: "en"),
+            "AI Continuation"
+        )
+        XCTAssertEqual(SettingsLocalization.string("settings.action.testConnection"), "测试连接")
+    }
+
     func testListItemUsesSavedDisplayNameAndProviderKind() {
         let profile = ProviderProfile(
             id: "work",
@@ -35,12 +65,12 @@ final class ProviderProfilesPresentationTests: XCTestCase {
 
         let customPresentation = ProviderProfileDraftPresentation(draft: customDraft)
 
-        XCTAssertEqual(customPresentation.displayNameFieldLabel, "Display Name")
-        XCTAssertEqual(customPresentation.kindPickerLabel, "Kind")
+        XCTAssertEqual(customPresentation.displayNameFieldLabel, "显示名称")
+        XCTAssertEqual(customPresentation.kindPickerLabel, "Provider 类型")
         XCTAssertEqual(customPresentation.baseURLFieldLabel, "Base URL")
-        XCTAssertEqual(customPresentation.modelFieldLabel, "Model")
-        XCTAssertEqual(customPresentation.timeoutLabel, "Timeout: 37 seconds")
-        XCTAssertEqual(customPresentation.defaultProviderLabel, "Default provider")
+        XCTAssertEqual(customPresentation.modelFieldLabel, "模型")
+        XCTAssertEqual(customPresentation.timeoutLabel, "超时：37 秒")
+        XCTAssertEqual(customPresentation.defaultProviderLabel, "设为默认 provider")
         XCTAssertTrue(customPresentation.showsCustomHTTPFields)
         XCTAssertEqual(customPresentation.customBodyTemplateLabel, "Custom HTTP")
         XCTAssertEqual(customPresentation.customResponsePathLabel, "Response Path")
@@ -73,11 +103,11 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         let presentation = ProviderProfileDraftPresentation(draft: draft)
 
         XCTAssertEqual(presentation.secret.sectionTitle, "API Key")
-        XCTAssertEqual(presentation.secret.apiKeyFieldPrompt, "Leave blank to keep existing key")
+        XCTAssertEqual(presentation.secret.apiKeyFieldPrompt, "留空则保留现有 key")
         XCTAssertEqual(
             presentation.secret.reference,
             SettingsKeyValuePresentation(
-                label: "Secret reference",
+                label: "Secret 引用",
                 value: "knowtype.provider.work.apiKey"
             )
         )
@@ -87,8 +117,8 @@ final class ProviderProfilesPresentationTests: XCTestCase {
 
     func testConnectionStatusPresentationMapsProgressSuccessAndFailure() {
         let idle = ProviderConnectionStatusPresentation(status: .idle)
-        XCTAssertEqual(idle.sectionTitle, "Connection")
-        XCTAssertEqual(idle.testButtonLabel, "Test Connection")
+        XCTAssertEqual(idle.sectionTitle, "连接")
+        XCTAssertEqual(idle.testButtonLabel, "测试连接")
         XCTAssertFalse(idle.showsProgress)
         XCTAssertFalse(idle.isTesting)
         XCTAssertNil(idle.message)
@@ -116,7 +146,7 @@ final class ProviderProfilesPresentationTests: XCTestCase {
     func testValidationAndLastErrorPresentationsControlSectionVisibility() {
         let emptyValidation = ProviderValidationPresentation(errors: [])
         XCTAssertFalse(emptyValidation.isVisible)
-        XCTAssertEqual(emptyValidation.title, "Validation")
+        XCTAssertEqual(emptyValidation.title, "校验")
 
         let validation = ProviderValidationPresentation(errors: ["Model is required."])
         XCTAssertTrue(validation.isVisible)
@@ -128,7 +158,7 @@ final class ProviderProfilesPresentationTests: XCTestCase {
 
         let error = ProviderLastErrorPresentation(message: "save failed")
         XCTAssertTrue(error.isVisible)
-        XCTAssertEqual(error.title, "Last Error")
+        XCTAssertEqual(error.title, "最近错误")
         XCTAssertEqual(error.message, "save failed")
     }
 }

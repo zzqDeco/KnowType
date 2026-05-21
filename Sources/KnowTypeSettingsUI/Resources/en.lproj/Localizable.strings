@@ -1,0 +1,11 @@
+"settings.window.title" = "KnowType Settings";
+"settings.section.input" = "Input";
+"settings.section.candidates" = "Candidates";
+"settings.section.lexicons" = "Rime & User Data";
+"settings.section.ai" = "AI Continuation";
+"settings.section.privacy" = "Privacy";
+"settings.section.diagnostics" = "Diagnostics";
+"settings.action.restoreDefaults" = "Restore Defaults";
+"settings.action.testConnection" = "Test Connection";
+"settings.action.save" = "Save";
+"settings.search.prompt" = "Search Settings";

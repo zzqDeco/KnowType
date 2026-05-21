@@ -124,8 +124,9 @@ retired clean-room converter.
 
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
-`KnowType Settings...`. The local install does not install a standalone settings
-app. The default install removes any stale local compatibility
+`KnowType Settings...`. It opens the Chinese `KnowType 设置` window with a
+macOS-native sidebar and grouped settings pages. The local install does not
+install a standalone settings app. The default install removes any stale local compatibility
 `KnowType.prefPane` so it cannot drift out of sync. A matching compatibility
 pane is only built and installed when `./scripts/install-inputmethod.sh
 --with-prefpane` is used.
