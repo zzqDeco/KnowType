@@ -1068,17 +1068,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if action == .commitRaw {
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         }
-        if action == .tab,
-           aiRecommendationState.isSelectableRecommendation {
-            return aiRecommendationCommitResult()
-        }
-        if case .optionNumber(1) = action,
-           aiRecommendationState.isSelectableRecommendation {
-            return aiRecommendationCommitResult()
-        }
-        if action == .tab,
-           case .pending = aiRecommendationState {
-            return .noAction
+        if let aiShortcutResult = InputCommitResultPolicy.aiShortcutResult(
+            for: action,
+            aiRecommendationState: aiRecommendationState
+        ) {
+            return aiShortcutResult
         }
         if action == .tab,
            let selectedNativeCandidate,

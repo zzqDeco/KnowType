@@ -24,6 +24,7 @@ Current behavior:
 - preserves an explicitly selected non-Rime row from the IMK/custom candidate window before falling back to native Rime Space
 - native final Space, numeric, and mouse/panel candidate commits record local selection history before composition reset; partial native commits do not
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
+- reserves Option+1 for the AI slot; when AI is not ready, Option+1 consumes the key without committing legacy continuation candidates
 - native candidate mapping uses the encoded current-page index when present; ambiguous duplicate text without an index does not fall back to the retired local converter
 - records committed typing events through `AIContextEventRecording` after insert decisions, while external Delete events are logged only when no composition is active
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
