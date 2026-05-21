@@ -151,6 +151,41 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertFalse(result.commitText?.isEmpty ?? true)
     }
 
+    func testNativeRimePageDownChangesCurrentPageSnapshotWhenArtifactsAreAvailable() throws {
+        let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
+            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-paging-\(UUID().uuidString)", isDirectory: true)
+        configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
+        configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
+        // librime keeps process-global state after a session is destroyed, so do
+        // not remove this sandbox before the test process exits.
+
+        var engine = RimeConversionEngine(
+            traditionalInputEngine: TraditionalInputEngine(),
+            configuration: configuration
+        )
+        guard engine.isNativeActive else {
+            throw XCTSkip("librime could not create a native session")
+        }
+
+        for character in "shi" {
+            XCTAssertTrue(engine.process(.text(String(character))).handled)
+        }
+        let firstPage = engine.snapshot.candidates.map(\.text)
+        guard !firstPage.isEmpty, !engine.snapshot.isLastPage else {
+            throw XCTSkip("Rime shared data did not expose multiple pages for paging smoke input")
+        }
+
+        let result = engine.process(.pageDown)
+
+        XCTAssertTrue(result.handled)
+        XCTAssertEqual(engine.snapshot.pageNumber, 1)
+        XCTAssertNotEqual(engine.snapshot.candidates.map(\.text), firstPage)
+    }
+
     func testNativeNonASCIIBypassPreservesRawWithoutTraditionalFallbackWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {

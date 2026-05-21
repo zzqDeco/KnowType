@@ -182,6 +182,7 @@ consume the same `CandidatePanelSelection` values so click commits match keyboar
 - `process(.text)`, `.space`, `.selectCandidateOnCurrentPage`, `.pageUp`, and `.pageDown` call the native Rime session synchronously.
 - `ConversionEngineSnapshot.suggestionResponse` maps only the current Rime page into prefix candidates; full candidate-list iteration is not part of the key path.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
+- While the native candidate panel is visible, Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when Rime reports no target page, the key falls back to the normal punctuation commit path.
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
 

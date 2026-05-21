@@ -216,6 +216,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .append(let text):
             return appendComposition(text, client: client)
         case .symbol(let text):
+            if handleNativePagingSymbol(text, client: client) {
+                return true
+            }
             if rawBuffer.isEmpty {
                 reloadInputModeDefaultsIfNeeded(client: client)
             }
@@ -1334,20 +1337,60 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
-        if conversionEngine.isNativeActive {
-            switch navigation {
-            case .pageDown, .pageUp:
-                let key: ConversionEngineKey = navigation == .pageUp ? .pageUp : .pageDown
-                let result = conversionEngine.process(key)
-                guard result.handled else {
-                    return false
-                }
-                publishLocalSuggestion(client: host?.currentClient)
-                return true
-            case .down, .up, .left, .right:
-                break
+    private func handleNativePagingSymbol(_ text: String, client: InputControllerClient?) -> Bool {
+        guard let navigation = Self.nativePagingSymbolNavigation(for: text) else {
+            return false
+        }
+        return moveNativeCandidatePage(navigation, client: client)
+    }
+
+    private static func nativePagingSymbolNavigation(for text: String) -> InputCandidateNavigation? {
+        switch text {
+        case "-", ",":
+            return .pageUp
+        case "=", ".":
+            return .pageDown
+        default:
+            return nil
+        }
+    }
+
+    private func moveNativeCandidatePage(
+        _ navigation: InputCandidateNavigation,
+        client: InputControllerClient?
+    ) -> Bool {
+        guard conversionEngine.isNativeActive,
+              !rawBuffer.isEmpty,
+              candidatePanelState.windowState.isVisible else {
+            return false
+        }
+        let snapshot = conversionEngine.snapshot
+        let key: ConversionEngineKey
+        switch navigation {
+        case .pageUp:
+            guard snapshot.pageNumber > 0 else {
+                return false
             }
+            key = .pageUp
+        case .pageDown:
+            guard !snapshot.isLastPage else {
+                return false
+            }
+            key = .pageDown
+        case .up, .down, .left, .right:
+            return false
+        }
+        let result = conversionEngine.process(key)
+        guard result.handled else {
+            return false
+        }
+        publishLocalSuggestion(client: client)
+        return true
+    }
+
+    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        if moveNativeCandidatePage(navigation, client: host?.currentClient) {
+            return true
         }
         guard candidatePanelState.moveSelection(navigation) else {
             return false

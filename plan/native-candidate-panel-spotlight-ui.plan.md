@@ -6,13 +6,18 @@
   overlays without using screen-saver or shielding window levels.
 - Tighten the candidate row layout so shortcut labels use measured width instead
   of a fixed reserved slot.
-- Keep the Rime-only hot path unchanged; this slice is AppKit presentation only.
+- Preserve Rime-style paging keys (`-`/`=`, `,`/`.`) by trying native page
+  movement before punctuation commit fallback while the candidate panel is open.
+- Keep the Rime-only conversion hot path unchanged; this slice does not add a
+  second conversion engine or any synchronous AI work.
 
 ## Scope
 
 - Change the native AppKit `NSPanel` configuration for the candidate window.
 - Update candidate panel visual metrics, layout measurements, and snapshot
   baselines.
+- Route Rime's default paging punctuation to page movement before symbol commit
+  fallback.
 - Add tests for window level and shortcut-slot sizing.
 - Do not change input-source registration, Rime conversion, AI recommendation,
   or release packaging.
@@ -31,6 +36,9 @@
   shortcut, and keep rows without shortcut labels free of shortcut spacing.
 - Switch native material to `hudWindow`, tighten insets, reduce row height, and
   keep dynamic system colors for selected and disabled rows.
+- Keep `InputKeyCommandMapper` stateless: it still emits symbol intents for
+  plain punctuation, and `InputControllerCoordinator` decides whether the active
+  Rime candidate menu can consume the key as page movement first.
 
 ## Test Plan
 

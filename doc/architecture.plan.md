@@ -176,8 +176,9 @@ constrained visible frames it compresses vertical row height and spacing, and hi
 the current page at the minimum row height.
 
 Mouse hover selects enabled visible rows, click commits the same target as keyboard selection, and scroll-wheel
-events page the panel. Pending, unavailable, or ineligible AI state rows are visible but disabled: they have muted
-text, no numeric shortcut, no hover selection, and no click commit. Row accessibility elements expose button-like
+events page the panel. `PageUp`/`PageDown` and Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) drive the
+native Rime page state before punctuation commit fallback. Pending, unavailable, or ineligible AI state rows are
+visible but disabled: they have muted text, no numeric shortcut, no hover selection, and no click commit. Row accessibility elements expose button-like
 labels for enabled candidates, static-text semantics for disabled AI status, and selected-children notifications
 when the highlighted row changes. Candidate-panel screenshot baselines live under
 `Tests/KnowTypeInputMethodTests/__Snapshots__/` and cover light horizontal, dark vertical, and AI-status examples.
