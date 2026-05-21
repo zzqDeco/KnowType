@@ -865,6 +865,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
            conversionEngine.isNativeActive,
            rawBuffer.isEmpty == false {
             if let selectedNativeCandidate,
+               shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(selectedNativeCandidate) {
+                let result = commitResult(for: action, client: client)
+                learnSelectedPrefix(action: action, result: result, client: client)
+                return applyCommitResult(result, client: client)
+            }
+            if let selectedNativeCandidate,
                shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate),
                let nativeIndex = nativeCandidateIndex(for: selectedNativeCandidate) {
                 let result = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
@@ -883,6 +889,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let result = commitResult(for: action, client: client)
         learnSelectedPrefix(action: action, result: result, client: client)
         return applyCommitResult(result, client: client)
+    }
+
+    private func shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(
+        _ selection: InputCandidateSelection
+    ) -> Bool {
+        switch selection.kind {
+        case .prefixCandidate, .fullCandidate:
+            return false
+        case .rawInput, .segmentCandidate, .aiRecommendation, .continuationCandidate:
+            return true
+        }
     }
 
     @discardableResult

@@ -2146,6 +2146,37 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(persistenceSpy.recordedSelections, ["你"])
     }
 
+    @MainActor
+    func testNativeSpaceCommitsExplicitSelectedAIRecommendationBeforeRime() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder,
+                spaceCommit: "rime-space"
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你AI 续写"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        coordinator.hoverCandidatePanelSelection(.aiRecommendation)
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .aiRecommendation)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你AI 续写")
+        XCTAssertEqual(recorder.spaceProcessCount, 0)
+    }
+
     func testNativeCommitCompositionFallsBackToRawWhenUnhandled() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(
