@@ -43,7 +43,7 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertFalse(rendered.rows[2].isSelected)
     }
 
-    func testVisibleShortcutSelectsAIRecommendationAsSecondSlot() {
+    func testVisibleShortcutSkipsReadyAIRecommendationForNumberSelection() {
         var state = CandidatePanelState()
         state.update(
             rawInput: "nihao",
@@ -60,8 +60,8 @@ final class CandidatePanelStateTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .aiRecommendation)
-        XCTAssertEqual(state.windowState.selection, .aiRecommendation)
+        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .prefixCandidate(1))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
     }
 
     func testVisibleShortcutSkipsNonReadyAIStatusRows() {

@@ -426,6 +426,15 @@ void ktb_rime_clear_composition(KTBRimeSession *session) {
     session->api->clear_composition(session->session_id);
 }
 
+bool ktb_rime_commit_composition(KTBRimeSession *session) {
+    if (!session || !session->api ||
+        !KTB_RIME_API_HAS(session->api, commit_composition) ||
+        !session->api->commit_composition || session->session_id == 0) {
+        return false;
+    }
+    return session->api->commit_composition(session->session_id);
+}
+
 char *ktb_rime_copy_commit(KTBRimeSession *session) {
     if (!session || !session->api || !session->api->get_commit || !session->api->free_commit) {
         return NULL;
@@ -457,6 +466,9 @@ KTBRimeContextSnapshot *ktb_rime_copy_context(KTBRimeSession *session) {
         return NULL;
     }
 
+    if (KTB_RIME_API_HAS(session->api, get_input) && session->api->get_input) {
+        snapshot->raw_input = ktb_strdup(session->api->get_input(session->session_id));
+    }
     snapshot->preedit = ktb_strdup(context.composition.preedit);
     snapshot->commit_text_preview = ktb_strdup(context.commit_text_preview);
     snapshot->highlighted_candidate_index = context.menu.highlighted_candidate_index;
@@ -474,6 +486,7 @@ void ktb_rime_context_snapshot_free(KTBRimeContextSnapshot *snapshot) {
     if (!snapshot) {
         return;
     }
+    free(snapshot->raw_input);
     free(snapshot->preedit);
     free(snapshot->commit_text_preview);
     ktb_rime_free_candidate_snapshots(snapshot->candidates, snapshot->candidate_count);
@@ -496,6 +509,15 @@ bool ktb_rime_select_candidate(KTBRimeSession *session, size_t index) {
         return false;
     }
     return session->api->select_candidate(session->session_id, index);
+}
+
+bool ktb_rime_highlight_candidate_on_current_page(KTBRimeSession *session, size_t index) {
+    if (!session || !session->api ||
+        !KTB_RIME_API_HAS(session->api, highlight_candidate_on_current_page) ||
+        !session->api->highlight_candidate_on_current_page) {
+        return false;
+    }
+    return session->api->highlight_candidate_on_current_page(session->session_id, index);
 }
 
 bool ktb_rime_change_page(KTBRimeSession *session, bool backward) {

@@ -202,28 +202,31 @@ AI correction instructions. Traditional input does not depend on either file.
 | Shortcut | Behavior |
 |---|---|
 | `Space` | Commit the highlighted/current Rime candidate, or raw input when Rime is unavailable. |
-| Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the visible Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. |
+| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden. |
+| Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the current Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. Left/up from the first row lands on the previous page's last row. |
 | `Return` / `Enter` | Commit the original raw composition. |
-| `Tab` / `2` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
+| `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible. |
-| Plain punctuation | Commit composition plus punctuation, or insert punctuation directly with no composition. |
+| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation or insert punctuation directly when Rime declines. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
-| `Option + number` | Commit the selected prefix plus the mapped AI continuation when available. |
+| `Option + 1` | Commit the ready AI recommendation explicitly. |
+| `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
-The candidate panel shows prefix candidates first, continuation candidates after
-them, and raw input only when no suggestion is available. It is a compact AppKit
-panel using macOS material, system highlight colors, mouse hover/click
+The candidate panel shows Rime prefix candidates, a fixed AI recommendation
+state row, and raw input only when no suggestion is available. It is a compact
+AppKit panel using macOS material, system highlight colors, mouse hover/click
 selection, scroll paging, and row accessibility labels. When a provider is
-configured, Rime prefix candidates appear immediately and provider-backed
-continuations update asynchronously. Provider failures do not show fixed local
-fallback text as if it were AI output.
+configured, Rime prefix candidates appear immediately and provider-backed AI
+recommendations update asynchronously. Provider failures do not show fixed
+local fallback text as if it were AI output.
 
 The first candidate slot is reserved for Rime conversion. The second slot is
 reserved for AI recommendation state, so async provider results update that slot
-without reordering the Rime candidate list. Pending, unavailable, or ineligible
-AI states are shown as muted status rows without numeric shortcuts or click
-commit behavior.
+without reordering the Rime candidate list. Ready AI uses Tab or explicit
+Option-number rather than ordinary digit shortcuts. Pending, unavailable, or
+ineligible AI states are shown as muted status rows without numeric shortcuts or
+click commit behavior.
 
 ## Privacy
 

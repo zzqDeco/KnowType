@@ -52,6 +52,10 @@ public struct ConversionEngineSnapshot: Sendable, Equatable {
     public var isLastPage: Bool
     public var engineName: String
 
+    public var hasComposition: Bool {
+        !rawInput.isEmpty || !preedit.isEmpty || !candidates.isEmpty
+    }
+
     public init(
         rawInput: String = "",
         preedit: String = "",
@@ -79,8 +83,10 @@ public enum ConversionEngineKey: Sendable, Equatable {
     case deleteBackward
     case selectCandidateOnCurrentPage(Int)
     case selectCandidate(Int)
+    case highlightCandidateOnCurrentPage(Int)
     case pageUp
     case pageDown
+    case commitComposition
 }
 
 public struct ConversionEngineResult: Sendable, Equatable {
@@ -141,20 +147,19 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return processUnavailable(key)
         }
 
-        let result = nativeSession.process(key)
-        if result.handled {
-            updateNativeRawInputMirror(for: key, commitText: result.commitText)
-            var nativeResult = result
-            nativeResult.snapshot.rawInput = nativeRawInputMirror
-            currentSnapshot = nativeResult.snapshot
-            return nativeResult
+        var result = nativeSession.process(key)
+        nativeRawInputMirror = NativeRawInputMirrorPolicy.updatedMirror(
+            current: nativeRawInputMirror,
+            key: key,
+            result: result
+        )
+        if result.snapshot.rawInput.isEmpty,
+           result.snapshot.hasComposition,
+           !nativeRawInputMirror.isEmpty {
+            result.snapshot.rawInput = nativeRawInputMirror
         }
-
-        updateNativeRawInputMirror(for: key, commitText: nil)
-        var nativeResult = result
-        nativeResult.snapshot.rawInput = nativeRawInputMirror
-        currentSnapshot = nativeResult.snapshot
-        return nativeResult
+        currentSnapshot = result.snapshot
+        return result
     }
 
     private mutating func processRawBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
@@ -180,7 +185,13 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             }
             currentSnapshot = Self.unavailableSnapshot(rawInput: nativeRawInputMirror, engineName: engineName)
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
-        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
             currentSnapshot = Self.unavailableSnapshot(rawInput: nativeRawInputMirror, engineName: engineName)
             return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
         }
@@ -212,28 +223,46 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         )
     }
 
-    private mutating func updateNativeRawInputMirror(for key: ConversionEngineKey, commitText: String?) {
-        if commitText?.isEmpty == false {
-            nativeRawInputMirror = ""
-            return
-        }
-        switch key {
-        case .text(let text):
-            nativeRawInputMirror += text
-        case .deleteBackward:
-            if !nativeRawInputMirror.isEmpty {
-                nativeRawInputMirror.removeLast()
-            }
-        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
-            break
-        }
-    }
-
     private static func containsNonASCIIText(_ key: ConversionEngineKey) -> Bool {
         guard case .text(let text) = key else {
             return false
         }
         return text.unicodeScalars.contains { !$0.isASCII }
+    }
+}
+
+enum NativeRawInputMirrorPolicy {
+    static func updatedMirror(
+        current: String,
+        key: ConversionEngineKey,
+        result: ConversionEngineResult
+    ) -> String {
+        guard result.handled else {
+            return current
+        }
+        if !result.snapshot.rawInput.isEmpty || !result.snapshot.hasComposition {
+            return result.snapshot.rawInput
+        }
+
+        switch key {
+        case .text(let text):
+            return current + text
+        case .deleteBackward:
+            var updated = current
+            if !updated.isEmpty {
+                updated.removeLast()
+            }
+            return updated
+        case .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown:
+            return current
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .commitComposition:
+            return result.snapshot.preedit
+        }
     }
 }
 
@@ -438,7 +467,7 @@ final class NativeRimeSession: @unchecked Sendable {
             ktb_rime_context_snapshot_free(context)
         }
 
-        let rawInput = ""
+        let rawInput = context.pointee.raw_input.map { String(cString: $0) } ?? ""
         let preedit = context.pointee.preedit.map { String(cString: $0) } ?? ""
         let candidateCount = Int(context.pointee.candidate_count)
         var candidates: [ConversionEngineCandidate] = []
@@ -487,10 +516,14 @@ final class NativeRimeSession: @unchecked Sendable {
             handled = ktb_rime_select_candidate_on_current_page(session, max(0, index))
         case .selectCandidate(let index):
             handled = ktb_rime_select_candidate(session, max(0, index))
+        case .highlightCandidateOnCurrentPage(let index):
+            handled = ktb_rime_highlight_candidate_on_current_page(session, max(0, index))
         case .pageUp:
             handled = ktb_rime_change_page(session, true)
         case .pageDown:
             handled = ktb_rime_change_page(session, false)
+        case .commitComposition:
+            handled = ktb_rime_commit_composition(session)
         }
         let commitText = consumeCommit()
         let snapshot = snapshot()

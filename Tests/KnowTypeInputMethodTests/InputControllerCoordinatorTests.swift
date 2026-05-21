@@ -562,7 +562,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(viewModel.continuationCandidates.isEmpty)
     }
 
-    func testNativeSpaceDoesNotFallbackForDuplicateTextWithoutStableNativeIndex() {
+    func testNativeSpaceUsesRimeSpaceForDuplicateTextWithoutStableNativeIndex() {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
         let (coordinator, host, _) = makeCoordinator(
@@ -588,13 +588,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
-        XCTAssertEqual(recorder.spaceProcessCount, 0)
+        XCTAssertEqual(recorder.spaceProcessCount, 1)
         XCTAssertEqual(recorder.selectedIndices, [])
-        XCTAssertTrue(client.insertTextWrites.isEmpty)
-        XCTAssertEqual(coordinator.composedString() as? String, "chongfu")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "native-space")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testNativeSpaceHonorsSelectedPrefixCandidateBeforeRimeSpace() throws {
+    func testNativeArrowSelectionUpdatesRimeHighlightBeforeSpace() throws {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
         let (coordinator, host, _) = makeCoordinator(
@@ -620,9 +620,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
-        XCTAssertEqual(recorder.selectedIndices, [1])
-        XCTAssertEqual(recorder.spaceProcessCount, 0)
-        XCTAssertEqual(client.insertTextWrites.last?.text, "候二")
+        XCTAssertEqual(recorder.highlightedIndices, [1])
+        XCTAssertEqual(recorder.selectedIndices, [])
+        XCTAssertEqual(recorder.spaceProcessCount, 1)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "native-space")
     }
 
     @MainActor
@@ -1938,6 +1939,294 @@ final class InputControllerCoordinatorTests: XCTestCase {
             host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
             ["第一页一", "第一页二"]
         )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页二")
+    }
+
+    func testNativeArrowFallsBackToPanelSelectionWhenHighlightIsUnavailable() {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["候一", "候二"],
+                recorder: recorder,
+                spaceCommit: "native-space",
+                handlesHighlight: false
+            )
+        )
+
+        for character in "hou" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
+        XCTAssertEqual(recorder.highlightedIndices, [])
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertEqual(recorder.spaceProcessCount, 0)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "候二")
+    }
+
+    func testNativeNumberSelectionWorksWhenPanelIsHidden() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine(),
+            screenProvider: FixedInputControllerScreenProvider(screens: [])
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, false)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页二")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testNativeNumberSelectionRecordsSelectionHistory() {
+        let client = FakeInputControllerClient()
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, _, persistenceSpy) = makeCoordinator(
+            client: client,
+            persistence: persistence,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你", "尼"],
+                recorder: recorder
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertEqual(client.insertTextWrites.last?.text, "尼")
+        XCTAssertEqual(persistenceSpy.recordedSelections, ["尼"])
+    }
+
+    @MainActor
+    func testNativeNumberSelectionDoesNotCommitReadyAIRecommendation() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你", "尼"],
+                recorder: recorder
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let requests = await aiProvider.requests
+        XCTAssertFalse(requests.isEmpty)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertEqual(client.insertTextWrites.last?.text, "尼")
+    }
+
+    @MainActor
+    func testOptionOneAIRecommendationDoesNotRecordPrefixSelectionHistory() async {
+        let client = FakeInputControllerClient()
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let (coordinator, host, persistenceSpy) = makeCoordinator(
+            client: client,
+            persistence: persistence,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你AI 续写"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: keyCode(forNumber: 1), modifiers: [.option]),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你AI 续写")
+        XCTAssertEqual(persistenceSpy.recordedSelections, [])
+    }
+
+    @MainActor
+    func testNativeHighlightDoesNotRestartAIRecommendation() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["候一", "候二"],
+                recorder: recorder
+            )
+        )
+
+        for character in "hou" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRequest = await waitForAIRecommendationRequest(aiProvider)
+        XCTAssertTrue(hasAIRequest)
+        let requestCountBeforeHighlight = (await aiProvider.requests).count
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: client
+            )
+        )
+        try? await Task.sleep(nanoseconds: 150_000_000)
+
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
+        XCTAssertEqual(recorder.highlightedIndices, [1])
+        let requestCountAfterHighlight = (await aiProvider.requests).count
+        XCTAssertEqual(requestCountAfterHighlight, requestCountBeforeHighlight)
+    }
+
+    func testNativeSpaceCommitRecordsSelectionHistory() {
+        let client = FakeInputControllerClient()
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, _, persistenceSpy) = makeCoordinator(
+            client: client,
+            persistence: persistence,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder,
+                spaceCommit: "你"
+            )
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertEqual(persistenceSpy.recordedSelections, ["你"])
+    }
+
+    @MainActor
+    func testNativeSpaceCommitsExplicitSelectedAIRecommendationBeforeRime() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder,
+                spaceCommit: "rime-space"
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你AI 续写"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        coordinator.hoverCandidatePanelSelection(.aiRecommendation)
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .aiRecommendation)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你AI 续写")
+        XCTAssertEqual(recorder.spaceProcessCount, 0)
+    }
+
+    func testNativeCommitCompositionFallsBackToRawWhenUnhandled() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: CommitCompositionUnhandledNativeConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        coordinator.commitComposition(client: client)
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "ni")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testNativePartialSpaceCommitKeepsRimePreeditAsMarkedText() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PartialCommitNativeConversionEngine()
+        )
+
+        for character in "woxiangceshi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "我想")
+        XCTAssertEqual(client.markedTextWrites.last?.text, "我想ceshi")
+        XCTAssertEqual(coordinator.composedString() as? String, "我想ceshi")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertEqual(client.insertTextWrites.map(\.text).suffix(2), ["我想", "测试"])
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testNativeSymbolKeyIsOfferedToRimeBeforeChinesePunctuationFallback() {
+        let client = FakeInputControllerClient()
+        let recorder = ConversionReplayRecorder()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: SymbolRecordingNativeConversionEngine(recorder: recorder)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("'", client: client))
+
+        XCTAssertEqual(recorder.processedTexts, ["n", "'"])
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "n'")
     }
 
     func testRimeDefaultPagingSymbolsRefreshNativePageBeforePunctuationCommit() {
@@ -2165,6 +2454,23 @@ final class InputControllerCoordinatorTests: XCTestCase {
         default: return -1
         }
     }
+
+    @MainActor
+    private func waitForAIRecommendationRequest(
+        _ provider: RecordingAIRecommendationProvider,
+        timeout: TimeInterval = 3
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let requests = await provider.requests
+            if !requests.isEmpty {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        let requests = await provider.requests
+        return !requests.isEmpty
+    }
 }
 
 private struct FixtureNativeConversionEngine: KnowTypeConversionEngine {
@@ -2184,10 +2490,14 @@ private struct FixtureNativeConversionEngine: KnowTypeConversionEngine {
     mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
         switch key {
         case .text(let text):
+            if InputSymbolTransformer.isSymbolInput(text) {
+                currentSnapshot = makeSnapshot()
+                return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+            }
             rawInput += text
             currentSnapshot = makeSnapshot()
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
-        case .space:
+        case .space, .commitComposition:
             let candidates = candidateTexts(for: rawInput)
             guard let commit = candidates.first else {
                 currentSnapshot = makeSnapshot()
@@ -2212,7 +2522,7 @@ private struct FixtureNativeConversionEngine: KnowTypeConversionEngine {
             }
             currentSnapshot = makeSnapshot()
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
-        case .pageUp, .pageDown:
+        case .highlightCandidateOnCurrentPage, .pageUp, .pageDown:
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
         }
     }
@@ -2304,7 +2614,7 @@ private struct SpaceUpdatingNativeConversionEngine: KnowTypeConversionEngine {
             if !rawInput.isEmpty {
                 rawInput.removeLast()
             }
-        case .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+        case .selectCandidateOnCurrentPage, .selectCandidate, .highlightCandidateOnCurrentPage, .pageUp, .pageDown, .commitComposition:
             break
         }
         return ConversionEngineResult(handled: true, snapshot: snapshot)
@@ -2357,7 +2667,7 @@ private struct BypassUntilResetConversionEngine: KnowTypeConversionEngine {
             if !rawInput.isEmpty {
                 rawInput.removeLast()
             }
-        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .highlightCandidateOnCurrentPage, .pageUp, .pageDown, .commitComposition:
             break
         }
         return ConversionEngineResult(handled: true, snapshot: snapshot)
@@ -2384,7 +2694,7 @@ private struct NativeHandledNoCommitConversionEngine: KnowTypeConversionEngine {
             rawInput += text
             currentSnapshot = makeSnapshot()
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
-        case .space, .selectCandidateOnCurrentPage, .selectCandidate:
+        case .space, .selectCandidateOnCurrentPage, .selectCandidate, .highlightCandidateOnCurrentPage, .commitComposition:
             currentSnapshot = makeSnapshot()
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
         case .deleteBackward:
@@ -2399,7 +2709,7 @@ private struct NativeHandledNoCommitConversionEngine: KnowTypeConversionEngine {
     }
 
     private func makeSnapshot() -> ConversionEngineSnapshot {
-        ConversionEngineSnapshot(
+        return ConversionEngineSnapshot(
             rawInput: rawInput,
             preedit: rawInput,
             candidates: [
@@ -2415,8 +2725,56 @@ private struct NativeHandledNoCommitConversionEngine: KnowTypeConversionEngine {
     }
 }
 
+private struct CommitCompositionUnhandledNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    private var rawInput = ""
+
+    var snapshot: ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-commit-unhandled")
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [ConversionEngineCandidate(text: "候选\(rawInput)", index: 0, source: "native-test")],
+            highlightedIndex: 0,
+            pageSize: 1,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-commit-unhandled"
+        )
+    }
+
+    mutating func reset() {
+        rawInput = ""
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .commitComposition:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
+        }
+    }
+}
+
 private final class NativeSelectionRecorder: @unchecked Sendable {
     var selectedIndices: [Int] = []
+    var highlightedIndices: [Int] = []
     var spaceProcessCount = 0
 }
 
@@ -2458,7 +2816,14 @@ private struct ReplayRecordingConversionEngine: KnowTypeConversionEngine {
             recorder.processedTexts.append(text)
             rawInput += text
             return ConversionEngineResult(handled: true, snapshot: snapshot)
-        case .space, .deleteBackward, .selectCandidateOnCurrentPage, .selectCandidate, .pageUp, .pageDown:
+        case .space,
+             .deleteBackward,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
             return ConversionEngineResult(handled: false, snapshot: snapshot)
         }
     }
@@ -2471,7 +2836,9 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
     let spaceCommit: String?
     let source: String
     let commitsSelection: Bool
+    let handlesHighlight: Bool
     private var rawInput = ""
+    private var highlightedIndex = 0
     private var currentSnapshot: ConversionEngineSnapshot
 
     init(
@@ -2479,13 +2846,15 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
         recorder: NativeSelectionRecorder,
         spaceCommit: String? = nil,
         source: String = "native-test",
-        commitsSelection: Bool = true
+        commitsSelection: Bool = true,
+        handlesHighlight: Bool = true
     ) {
         self.candidates = candidates
         self.recorder = recorder
         self.spaceCommit = spaceCommit
         self.source = source
         self.commitsSelection = commitsSelection
+        self.handlesHighlight = handlesHighlight
         currentSnapshot = Self.makeSnapshot(rawInput: "", candidates: candidates, source: source)
     }
 
@@ -2502,47 +2871,103 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
         switch key {
         case .text(let text):
             rawInput += text
-            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates, source: source)
+            highlightedIndex = 0
+            currentSnapshot = Self.makeSnapshot(
+                rawInput: rawInput,
+                candidates: candidates,
+                source: source,
+                highlightedIndex: highlightedIndex
+            )
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
-        case .space:
+        case .space, .commitComposition:
             recorder.spaceProcessCount += 1
-            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates, source: source)
+            currentSnapshot = Self.makeSnapshot(
+                rawInput: rawInput,
+                candidates: candidates,
+                source: source,
+                highlightedIndex: highlightedIndex
+            )
             guard let spaceCommit else {
                 return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
             }
             rawInput = ""
-            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates, source: source)
+            highlightedIndex = 0
+            currentSnapshot = Self.makeSnapshot(
+                rawInput: rawInput,
+                candidates: candidates,
+                source: source,
+                highlightedIndex: highlightedIndex
+            )
             return ConversionEngineResult(handled: true, commitText: spaceCommit, snapshot: currentSnapshot)
         case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
             recorder.selectedIndices.append(index)
-            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates, source: source)
+            currentSnapshot = Self.makeSnapshot(
+                rawInput: rawInput,
+                candidates: candidates,
+                source: source,
+                highlightedIndex: highlightedIndex
+            )
             guard commitsSelection,
                   candidates.indices.contains(index) else {
                 return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
             }
             let commit = candidates[index]
             rawInput = ""
-            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates, source: source)
+            highlightedIndex = 0
+            currentSnapshot = Self.makeSnapshot(
+                rawInput: rawInput,
+                candidates: candidates,
+                source: source,
+                highlightedIndex: highlightedIndex
+            )
             return ConversionEngineResult(handled: true, commitText: commit, snapshot: currentSnapshot)
+        case .highlightCandidateOnCurrentPage(let index):
+            guard handlesHighlight,
+                  candidates.indices.contains(index) else {
+                return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+            }
+            recorder.highlightedIndices.append(index)
+            highlightedIndex = index
+            currentSnapshot = Self.makeSnapshot(
+                rawInput: rawInput,
+                candidates: candidates,
+                source: source,
+                highlightedIndex: highlightedIndex
+            )
+            return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
         case .deleteBackward:
             if !rawInput.isEmpty {
                 rawInput.removeLast()
             }
-            currentSnapshot = Self.makeSnapshot(rawInput: rawInput, candidates: candidates, source: source)
+            highlightedIndex = 0
+            currentSnapshot = Self.makeSnapshot(
+                rawInput: rawInput,
+                candidates: candidates,
+                source: source,
+                highlightedIndex: highlightedIndex
+            )
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
         case .pageUp, .pageDown:
             return ConversionEngineResult(handled: true, snapshot: currentSnapshot)
         }
     }
 
-    private static func makeSnapshot(rawInput: String, candidates: [String], source: String) -> ConversionEngineSnapshot {
-        ConversionEngineSnapshot(
+    private static func makeSnapshot(
+        rawInput: String,
+        candidates: [String],
+        source: String,
+        highlightedIndex: Int = 0
+    ) -> ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-test")
+        }
+        return ConversionEngineSnapshot(
             rawInput: rawInput,
             preedit: rawInput,
             candidates: candidates.enumerated().map { index, text in
                 ConversionEngineCandidate(text: text, index: index, source: source)
             },
-            highlightedIndex: 0,
+            highlightedIndex: highlightedIndex,
             pageSize: max(candidates.count, 1),
             pageNumber: 0,
             isLastPage: true,
@@ -2555,6 +2980,7 @@ private struct PagedNativeConversionEngine: KnowTypeConversionEngine {
     var isNativeActive = true
     private var rawInput = ""
     private var currentPage = 0
+    private var highlightedIndex = 0
     private let pages = [
         ["第一页一", "第一页二"],
         ["第二页一", "第二页二"]
@@ -2567,30 +2993,44 @@ private struct PagedNativeConversionEngine: KnowTypeConversionEngine {
     mutating func reset() {
         rawInput = ""
         currentPage = 0
+        highlightedIndex = 0
     }
 
     mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
         switch key {
         case .text(let text):
+            if InputSymbolTransformer.isSymbolInput(text) {
+                return ConversionEngineResult(handled: false, snapshot: snapshot)
+            }
             rawInput += text
             currentPage = 0
+            highlightedIndex = 0
             return ConversionEngineResult(handled: true, snapshot: snapshot)
         case .pageDown:
             guard currentPage < pages.count - 1 else {
                 return ConversionEngineResult(handled: false, snapshot: snapshot)
             }
             currentPage += 1
+            highlightedIndex = 0
             return ConversionEngineResult(handled: true, snapshot: snapshot)
         case .pageUp:
             guard currentPage > 0 else {
                 return ConversionEngineResult(handled: false, snapshot: snapshot)
             }
             currentPage -= 1
+            highlightedIndex = 0
             return ConversionEngineResult(handled: true, snapshot: snapshot)
-        case .space:
-            guard let candidate = pages[currentPage].first else {
+        case .highlightCandidateOnCurrentPage(let index):
+            guard pages[currentPage].indices.contains(index) else {
                 return ConversionEngineResult(handled: false, snapshot: snapshot)
             }
+            highlightedIndex = index
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space, .commitComposition:
+            guard pages[currentPage].indices.contains(highlightedIndex) else {
+                return ConversionEngineResult(handled: false, snapshot: snapshot)
+            }
+            let candidate = pages[currentPage][highlightedIndex]
             reset()
             return ConversionEngineResult(handled: true, commitText: candidate, snapshot: snapshot)
         case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
@@ -2621,12 +3061,137 @@ private struct PagedNativeConversionEngine: KnowTypeConversionEngine {
             candidates: pages[currentPage].enumerated().map { index, text in
                 ConversionEngineCandidate(text: text, index: index, source: "native-test")
             },
-            highlightedIndex: 0,
+            highlightedIndex: highlightedIndex,
             pageSize: pages[currentPage].count,
             pageNumber: currentPage,
             isLastPage: currentPage == pages.count - 1,
             engineName: "native-test"
         )
+    }
+}
+
+private struct PartialCommitNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    private var rawInput = ""
+    private var stage = 0
+
+    var snapshot: ConversionEngineSnapshot {
+        makeSnapshot()
+    }
+
+    mutating func reset() {
+        rawInput = ""
+        stage = 0
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space:
+            if stage == 0 {
+                stage = 1
+                rawInput = "ceshi"
+                return ConversionEngineResult(
+                    handled: true,
+                    commitText: "我想",
+                    snapshot: snapshot
+                )
+            }
+            reset()
+            return ConversionEngineResult(
+                handled: true,
+                commitText: "测试",
+                snapshot: snapshot
+            )
+        case .commitComposition:
+            reset()
+            return ConversionEngineResult(
+                handled: true,
+                commitText: "我想测试",
+                snapshot: snapshot
+            )
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .selectCandidateOnCurrentPage, .selectCandidate, .highlightCandidateOnCurrentPage, .pageUp, .pageDown:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
+        }
+    }
+
+    private func makeSnapshot() -> ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-partial")
+        }
+        let preedit = stage == 1 ? "我想\(rawInput)" : rawInput
+        let candidates = stage == 1
+            ? [ConversionEngineCandidate(text: "测试", index: 0, source: "native-partial")]
+            : [ConversionEngineCandidate(text: "我想测试", index: 0, source: "native-partial")]
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: preedit,
+            candidates: candidates,
+            highlightedIndex: 0,
+            pageSize: candidates.count,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-partial"
+        )
+    }
+}
+
+private struct SymbolRecordingNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    let recorder: ConversionReplayRecorder
+    private var rawInput = ""
+
+    init(recorder: ConversionReplayRecorder) {
+        self.recorder = recorder
+    }
+
+    var snapshot: ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-symbol")
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [ConversionEngineCandidate(text: "候选\(rawInput)", index: 0, source: "native-symbol")],
+            highlightedIndex: 0,
+            pageSize: 1,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-symbol"
+        )
+    }
+
+    mutating func reset() {
+        rawInput = ""
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            recorder.processedTexts.append(text)
+            rawInput += text
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
+        }
     }
 }
 

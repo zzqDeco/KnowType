@@ -17,6 +17,7 @@ typedef struct {
 } KTBRimeCandidateSnapshot;
 
 typedef struct {
+    char *raw_input;
     char *preedit;
     char *commit_text_preview;
     int highlighted_candidate_index;
@@ -43,6 +44,8 @@ bool ktb_rime_process_key(KTBRimeSession *session, int keycode, int mask);
 
 void ktb_rime_clear_composition(KTBRimeSession *session);
 
+bool ktb_rime_commit_composition(KTBRimeSession *session);
+
 char *ktb_rime_copy_commit(KTBRimeSession *session);
 
 KTBRimeContextSnapshot *ktb_rime_copy_context(KTBRimeSession *session);
@@ -52,6 +55,8 @@ void ktb_rime_context_snapshot_free(KTBRimeContextSnapshot *snapshot);
 bool ktb_rime_select_candidate_on_current_page(KTBRimeSession *session, size_t index);
 
 bool ktb_rime_select_candidate(KTBRimeSession *session, size_t index);
+
+bool ktb_rime_highlight_candidate_on_current_page(KTBRimeSession *session, size_t index);
 
 bool ktb_rime_change_page(KTBRimeSession *session, bool backward);
 

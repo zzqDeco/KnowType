@@ -54,6 +54,113 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.engineName, "rime-raw-bypass")
     }
 
+    func testNativeRawInputMirrorUsesPreeditAfterHandledTextChangingNativeActionWithoutRawInput() {
+        let partialSnapshot = ConversionEngineSnapshot(
+            rawInput: "",
+            preedit: "ceshi",
+            candidates: [
+                ConversionEngineCandidate(text: "测试", index: 0, source: "rime-native")
+            ],
+            highlightedIndex: 0,
+            pageSize: 5,
+            pageNumber: 0,
+            isLastPage: false,
+            engineName: "rime-native"
+        )
+        let result = ConversionEngineResult(handled: true, snapshot: partialSnapshot)
+
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "woxiangceshi",
+                key: .space,
+                result: result
+            ),
+            "ceshi"
+        )
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "woxiangceshi",
+                key: .selectCandidateOnCurrentPage(0),
+                result: result
+            ),
+            "ceshi"
+        )
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "woxiangceshi",
+                key: .selectCandidate(0),
+                result: result
+            ),
+            "ceshi"
+        )
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "woxiangceshi",
+                key: .commitComposition,
+                result: result
+            ),
+            "ceshi"
+        )
+    }
+
+    func testNativeRawInputMirrorKeepsCurrentMirrorForHighlightAndPagingWithoutRawInput() {
+        let pageSnapshot = ConversionEngineSnapshot(
+            rawInput: "",
+            preedit: "shi",
+            candidates: [
+                ConversionEngineCandidate(text: "是", index: 0, source: "rime-native")
+            ],
+            highlightedIndex: 1,
+            pageSize: 5,
+            pageNumber: 1,
+            isLastPage: false,
+            engineName: "rime-native"
+        )
+        let result = ConversionEngineResult(handled: true, snapshot: pageSnapshot)
+
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "shi",
+                key: .highlightCandidateOnCurrentPage(1),
+                result: result
+            ),
+            "shi"
+        )
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "shi",
+                key: .pageDown,
+                result: result
+            ),
+            "shi"
+        )
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "shi",
+                key: .pageUp,
+                result: result
+            ),
+            "shi"
+        )
+    }
+
+    func testNativeRawInputMirrorClearsWhenHandledNativeActionClearsComposition() {
+        let result = ConversionEngineResult(
+            handled: true,
+            commitText: "我",
+            snapshot: ConversionEngineSnapshot(rawInput: "", preedit: "", engineName: "rime-native")
+        )
+
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "wo",
+                key: .space,
+                result: result
+            ),
+            ""
+        )
+    }
+
     func testNativeConfigurationExpandsTildeEnvironmentPaths() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let url = NativeRimeConfiguration.environmentFileURL(

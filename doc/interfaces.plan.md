@@ -129,7 +129,7 @@ Core candidate types:
 - `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
-- `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, and engine name.
+- `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.
 
 Raw input is tracked outside `SuggestionResponse` by the input-method session, for example through stale-result guards such as `latestSuggestionRawInput`. Protection metadata lives on correction candidates, locked prefixes, and protected ranges rather than on the top-level suggestion response.
 
@@ -170,21 +170,25 @@ Input-method presentation maps `SuggestionResponse` into compact candidate rows:
 - production IMK key handling first shows raw marked text, then publishes current-page Rime candidates synchronously while the AI slot resolves separately
 - no-provider fallback continuation rows are not added synchronously to the IMK panel
 
-Ready AI recommendations are selectable and keep the second numeric shortcut. Pending, unavailable, and ineligible AI
-states are rendered as disabled status rows: they preserve the visible slot but have no selection identity, no numeric
-shortcut, and no commit behavior. Mouse hover, click commit, keyboard selection, and accessibility selected children all
-consume the same `CandidatePanelSelection` values so click commits match keyboard commits.
+Ready AI recommendations are selectable through Tab, explicit Option-number, and mouse click, but they do not take
+ordinary numeric shortcuts from Rime candidates. Pending, unavailable, and ineligible AI states are rendered as
+disabled status rows: they preserve the visible slot but have no selection identity, no numeric shortcut, and no
+commit behavior. Mouse hover, click commit, keyboard selection, and accessibility selected children all consume the
+same `CandidatePanelSelection` values so click commits match keyboard commits.
 
 ## Rime Hot Path
 
 `KnowTypeConversionEngine` is the IMK boundary for base conversion. `RimeConversionEngine` is the production implementation:
 
-- `process(.text)`, `.space`, `.selectCandidateOnCurrentPage`, `.pageUp`, and `.pageDown` call the native Rime session synchronously.
+- `process(.text)`, `.space`, `.commitComposition`, `.selectCandidateOnCurrentPage`, `.highlightCandidateOnCurrentPage`, `.pageUp`, and `.pageDown` call the native Rime session synchronously.
 - `ConversionEngineSnapshot.suggestionResponse` maps only the current Rime page into prefix candidates; full candidate-list iteration is not part of the key path.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
+- Marked text mirrors `ConversionEngineSnapshot.preedit` while Rime has composition. If Rime commits part of a long input and keeps composition active, KnowType inserts the commit text and keeps showing the remaining Rime preedit instead of reverting to raw pinyin.
+- Ordinary digits `1...9` select Rime current-page candidates whenever native composition is active, even if the custom panel is hidden. Out-of-range digits are consumed by the active composition and do not commit AI or append a literal digit.
+- Arrow navigation updates Rime's current-page highlight. Right/down at the current page end moves to the next page and highlights row 1; left/up at the current page start moves to the previous page and highlights its last row.
 - Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, the key falls back to the normal punctuation commit path so page shortcuts do not swallow punctuation at page boundaries.
+- Other composing ASCII symbols are offered to Rime before KnowType punctuation fallback so schema keys such as apostrophe, semicolon, and slash can be handled by the engine.
 - Explicit `PageUp`/`PageDown` are forwarded to the native engine whenever composition is active, even if the custom panel is hidden because anchoring failed.
-- Arrow navigation moves selection inside the current Rime page first. At a page edge, left/up attempts `.pageUp` and right/down attempts `.pageDown` so the custom panel behaves like a single paged candidate list even though snapshots contain only the current Rime page.
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
 
@@ -229,17 +233,17 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 
 - `Space` commits the highlighted/current Rime candidate for the current raw input.
 - when Rime is unavailable, `Space` commits raw input instead of blocking to compute hidden local candidates.
-- `1` commits the first Rime candidate when visible.
+- `1...9` select Rime current-page candidates during native composition, independent of candidate-panel visibility.
 - `Return` / `Enter` commits the original raw composition.
 - `Tab` commits the AI recommendation only when the AI slot is ready; pending, unavailable, disabled, or ineligible AI keeps the composition.
-- `2` commits the ready AI recommendation when the AI slot is visible.
 - `Tab` does not trigger AI continuation while the composition is in a legacy partial-segment state.
 - `0` commits raw composition when correction candidates are visible.
 - visible numeric shortcuts commit rows on the current Rime candidate page only; after the AI slot, native alternatives keep their visible row numbers.
-- unmatched digit keys continue composing as literal digits.
-- plain punctuation commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
+- unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
+- plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
-- `Option + number` commits prefix plus the globally mapped continuation.
+- `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
+- `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
 
 Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries and preserves session-local toggles while preferences are unchanged.

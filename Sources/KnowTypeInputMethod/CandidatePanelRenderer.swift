@@ -123,8 +123,7 @@ public struct CandidatePanelRenderer: Sendable {
                 nextNumberShortcut += 1
             case .some(.aiRecommendation):
                 if viewModel.aiRecommendation.isSelectableRecommendation {
-                    shortcutLabel = "\(nextNumberShortcut)"
-                    nextNumberShortcut += 1
+                    shortcutLabel = "⇥"
                 } else {
                     shortcutLabel = nil
                 }
