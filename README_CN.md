@@ -184,7 +184,7 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 | 快捷键 | 行为 |
 |---|---|
 | `Space` | 提交 Rime 当前高亮候选；Rime 不可用时提交原始输入。 |
-| `PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 当前 Rime 候选菜单还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。 |
+| 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` / `2` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时，提交原始 composition。 |

@@ -15,6 +15,7 @@ Current behavior:
 - keeps `Space` tied to the visible candidate snapshot for the current raw input; while candidates are still pending it commits the current raw/composition display instead of synchronously computing a hidden fallback
 - keeps `Tab` and visible shortcut `2` tied to a ready AI recommendation only; pending, disabled, unavailable, and ineligible AI states keep the composition
 - when native Rime is active, keeps visible candidate selection authoritative: a non-highlighted prefix/full row selected in the custom panel is committed through Rime's current-page candidate index before the generic native Space path
+- when native Rime is active, arrow navigation moves inside the current page first, then maps right/down at the page edge to Rime `.pageDown` and left/up at the page edge to Rime `.pageUp`
 - when the native candidate panel is visible, handles Rime's default paging punctuation (`-`/`=`, `,`/`.`) before symbol commit fallback so mature Rime page shortcuts are not swallowed by KnowType punctuation handling
 - native candidate mapping uses the encoded current-page index when present; ambiguous duplicate text without an index does not fall back to the retired local converter
 - records committed typing events through `AIContextEventRecording` after insert decisions, while external Delete events are logged only when no composition is active

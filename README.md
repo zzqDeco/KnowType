@@ -202,7 +202,7 @@ AI correction instructions. Traditional input does not depend on either file.
 | Shortcut | Behavior |
 |---|---|
 | `Space` | Commit the highlighted/current Rime candidate, or raw input when Rime is unavailable. |
-| `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Page the current Rime candidate menu when another page is available; otherwise punctuation falls back to the normal commit path. |
+| Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the visible Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` / `2` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible. |

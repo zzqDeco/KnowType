@@ -8,6 +8,8 @@
   of a fixed reserved slot.
 - Preserve Rime-style paging keys (`-`/`=`, `,`/`.`) by trying native page
   movement before punctuation commit fallback while the candidate panel is open.
+- Treat arrow navigation as one paged candidate list: move inside the current
+  Rime page first, then page at the edge.
 - Keep the Rime-only conversion hot path unchanged; this slice does not add a
   second conversion engine or any synchronous AI work.
 
@@ -18,6 +20,7 @@
   baselines.
 - Route Rime's default paging punctuation to page movement before symbol commit
   fallback.
+- Route right/down and left/up page-edge arrow movement to Rime page movement.
 - Add tests for window level and shortcut-slot sizing.
 - Do not change input-source registration, Rime conversion, AI recommendation,
   or release packaging.
@@ -39,6 +42,9 @@
 - Keep `InputKeyCommandMapper` stateless: it still emits symbol intents for
   plain punctuation, and `InputControllerCoordinator` decides whether the active
   Rime candidate menu can consume the key as page movement first.
+- Keep arrow-key semantics in the coordinator so the same `CandidatePanelState`
+  selection model can serve both full local row lists and Rime current-page
+  snapshots.
 
 ## Test Plan
 

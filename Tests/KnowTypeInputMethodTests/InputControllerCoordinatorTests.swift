@@ -1867,6 +1867,52 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(client.insertTextWrites.isEmpty)
     }
 
+    func testNativeRightArrowPagesRimeSnapshotAtCurrentPageBoundary() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第一页一", "第一页二"]
+        )
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: client
+            )
+        )
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第二页一", "第二页二"]
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(0))
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F702}", keyCode: 123),
+                client: client
+            )
+        )
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.prefixCandidates.map(\.text),
+            ["第一页一", "第一页二"]
+        )
+    }
+
     func testRimeDefaultPagingSymbolsRefreshNativePageBeforePunctuationCommit() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(

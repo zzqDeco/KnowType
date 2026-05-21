@@ -1392,15 +1392,42 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if moveNativeCandidatePage(navigation, client: host?.currentClient) {
             return true
         }
-        guard candidatePanelState.moveSelection(navigation) else {
+        if conversionEngine.isNativeActive,
+           navigation == .pageDown || navigation == .pageUp {
             return false
         }
-        selectedNativeCandidate = inputCandidateSelection(
-            for: candidatePanelState.windowState.selection,
-            in: candidatePanelState.windowState.viewModel
-        )
-        host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
-        return true
+        let previousWindowState = candidatePanelState.windowState
+        if candidatePanelState.moveSelection(navigation) {
+            if conversionEngine.isNativeActive,
+               candidatePanelState.windowState == previousWindowState,
+               let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation),
+               moveNativeCandidatePage(pageNavigation, client: host?.currentClient) {
+                return true
+            }
+            selectedNativeCandidate = inputCandidateSelection(
+                for: candidatePanelState.windowState.selection,
+                in: candidatePanelState.windowState.viewModel
+            )
+            host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+            return true
+        }
+        guard let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation) else {
+            return false
+        }
+        return moveNativeCandidatePage(pageNavigation, client: host?.currentClient)
+    }
+
+    private static func nativeBoundaryPageNavigation(
+        for navigation: InputCandidateNavigation
+    ) -> InputCandidateNavigation? {
+        switch navigation {
+        case .right, .down:
+            return .pageDown
+        case .left, .up:
+            return .pageUp
+        case .pageDown, .pageUp:
+            return nil
+        }
     }
 
     private func candidateAnchorResult(client: InputControllerClient?) -> CandidateAnchorResult {
