@@ -850,13 +850,80 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(hasScheduled)
 
         XCTAssertTrue(coordinator.handleText("h", client: client))
-        let hasCancellationAndDrop = await waitUntilOnMainActor {
+        let hasCancellation = await waitUntilOnMainActor {
             let stages = diagnosticSink.events.map(\.stage)
             return stages.contains(.cancelPrevious)
-                && stages.contains(.staleResultDropped)
+                && stages.contains(.cancelled)
         }
 
-        XCTAssertTrue(hasCancellationAndDrop, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertTrue(hasCancellation, "\(diagnosticSink.events.map(\.stage))")
+    }
+
+    @MainActor
+    func testAIRecommendationDiagnosticsRecordReleasedCoordinatorStaleDrop() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = DelayedAIRecommendationProvider(delayNanoseconds: 20_000_000)
+        let diagnosticSink = RecordingDiagnosticSink()
+        var coordinator: InputControllerCoordinator? = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        ).0
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator?.handleText(String(character), client: client) == true)
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+
+        coordinator = nil
+        let hasStaleDrop = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped && $0.reason == "coordinator_released"
+            }
+        }
+
+        XCTAssertTrue(hasStaleDrop, "\(diagnosticSink.events.map(\.stage))")
+    }
+
+    @MainActor
+    func testCancelledAIRecommendationDoesNotApplyAfterInputControllerWillClose() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = PendingAIRecommendationProvider()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+
+        coordinator.inputControllerWillClose()
+        let panelUpdatesAfterClose = host.panelStates.count
+        let hasCancelledBeforeApply = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelled && $0.reason == "task_cancelled_before_apply"
+            }
+        }
+
+        XCTAssertTrue(hasCancelledBeforeApply, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
     }
 
     @MainActor
@@ -3372,6 +3439,19 @@ private actor PendingAIRecommendationProvider: AIRecommendationProviding {
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private actor DelayedAIRecommendationProvider: AIRecommendationProviding {
+    private let delayNanoseconds: UInt64
+
+    init(delayNanoseconds: UInt64) {
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return .unavailable(reason: "delayed")
     }
 }
 

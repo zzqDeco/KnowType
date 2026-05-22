@@ -795,6 +795,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let diagnosticSink = aiDiagnosticSink
         let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider, diagnosticSink] in
             let state = await aiRecommendationProvider.recommendation(for: request)
+            guard !Task.isCancelled else {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .cancelled,
+                        requestID: requestID,
+                        compositionID: currentCompositionID,
+                        rawLength: rawInput.count,
+                        prefixLength: firstPrefix.text.count,
+                        appBundleID: currentAppBundleID,
+                        reason: "task_cancelled_before_apply"
+                    )
+                )
+                return
+            }
             Task { @MainActor [weak self, diagnosticSink] in
                 guard let self else {
                     diagnosticSink.record(
