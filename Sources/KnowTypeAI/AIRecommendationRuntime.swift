@@ -95,6 +95,16 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .ineligible(reason: "AI 已禁用")
         }
+        guard Self.isPrefixLongEnoughForCloudRecommendation(request.traditionalCandidate.text) else {
+            record(
+                .skippedPrefixTooShort,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "prefix_too_short"
+            )
+            return .ineligible(reason: "AI 无推荐")
+        }
 
         do {
             if debounceNanoseconds > 0 {
@@ -167,6 +177,13 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 contextDocuments: contextDocuments
             )
             record(
+                .structuredSchemaRequest,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "json_schema_preferred"
+            )
+            record(
                 .providerRequestStart,
                 request: request,
                 providerName: provider.providerName,
@@ -183,7 +200,19 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 elapsedSince: providerStartedAt,
                 candidateCount: response.candidates.count
             )
-            guard let result = Self.makeCandidate(
+            for diagnostic in response.diagnostics {
+                if diagnostic == "structured_schema_unsupported"
+                    || diagnostic == "structured_schema_unsupported_cached" {
+                    record(
+                        .structuredSchemaUnsupported,
+                        request: request,
+                        providerName: provider.providerName,
+                        elapsedSince: startedAt,
+                        reason: diagnostic
+                    )
+                }
+            }
+            let result = Self.makeCandidate(
                 response: response,
                 lockedPrefix: request.traditionalCandidate.text,
                 providerName: provider.providerName,
@@ -194,7 +223,29 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 ]
                 .compactMap { $0.map(String.init) }
                 .joined(separator: ":")
-            ) else {
+            )
+            if result.repairedCount > 0 {
+                record(
+                    .sanitizeRepair,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt,
+                    candidateCount: response.candidates.count,
+                    acceptedCount: result.acceptedCount,
+                    reason: ContinuationSanitizationReason.repeatedPrefixRepaired.rawValue
+                )
+            }
+            guard let candidate = result.candidate else {
+                let rejectionReason = Self.rejectionSummary(result.rejectionReasons)
+                record(
+                    .sanitizeReject,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt,
+                    candidateCount: response.candidates.count,
+                    acceptedCount: 0,
+                    reason: "sanitize_reject_\(rejectionReason)"
+                )
                 record(
                     .sanitizeEmpty,
                     request: request,
@@ -202,12 +253,11 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     elapsedSince: startedAt,
                     candidateCount: response.candidates.count,
                     acceptedCount: 0,
-                    reason: "no_usable_continuation"
+                    reason: rejectionReason
                 )
                 await healthMonitor.recordSuccess()
                 return .ineligible(reason: "AI 无推荐")
             }
-            let candidate = result.candidate
             cache[key] = CacheEntry(candidate: candidate, expiresAt: Date().addingTimeInterval(cacheTTL))
             await healthMonitor.recordSuccess()
             record(
@@ -240,6 +290,15 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 )
                 return .unavailable(reason: "AI 请求超时")
             }
+            if Self.diagnosticReason(for: error).hasPrefix("structured_decode_error") {
+                record(
+                    .structuredDecodeError,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt,
+                    reason: Self.diagnosticReason(for: error)
+                )
+            }
             record(
                 .providerError,
                 request: request,
@@ -256,18 +315,26 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         lockedPrefix: String,
         providerName: String,
         contextVersion: String
-    ) -> (candidate: AIRecommendationCandidate, acceptedCount: Int)? {
+    ) -> CandidateBuildResult {
         var acceptedCount = 0
         var firstCandidate: AIRecommendationCandidate?
+        var rejectionReasons: [ContinuationSanitizationReason] = []
+        var repairedCount = 0
         for rawCandidate in response.candidates {
-            guard let continuation = PrefixContinuationEngine.sanitizeContinuation(
+            let sanitized = PrefixContinuationEngine.sanitizeContinuationDetailed(
                 rawCandidate.text,
                 lockedPrefix: lockedPrefix
-            ) else {
+            )
+            guard let continuation = sanitized.text else {
+                rejectionReasons.append(sanitized.reason)
                 continue
+            }
+            if sanitized.reason == .repeatedPrefixRepaired {
+                repairedCount += 1
             }
             let displayText = join(prefix: lockedPrefix, continuation: continuation)
             guard displayText.hasPrefix(lockedPrefix) else {
+                rejectionReasons.append(.stillRepeatsPrefix)
                 continue
             }
             acceptedCount += 1
@@ -282,10 +349,12 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 )
             }
         }
-        guard let firstCandidate else {
-            return nil
-        }
-        return (firstCandidate, acceptedCount)
+        return CandidateBuildResult(
+            candidate: firstCandidate,
+            acceptedCount: acceptedCount,
+            rejectionReasons: rejectionReasons,
+            repairedCount: repairedCount
+        )
     }
 
     private static func join(prefix: String, continuation: String) -> String {
@@ -337,7 +406,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         switch providerError {
         case .httpStatus(let status, _):
             return "http_\(status)"
-        case .invalidResponse:
+        case .invalidResponse(let message):
+            if message.hasPrefix("structured_decode_error") {
+                return message
+            }
             return "invalid_response"
         case .missingAPIKey:
             return "missing_api_key"
@@ -347,6 +419,39 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             return "unsupported_kind_\(kind.rawValue)"
         }
     }
+
+    private static func isPrefixLongEnoughForCloudRecommendation(_ prefix: String) -> Bool {
+        let visibleCount = prefix.filter { !$0.isWhitespace && !$0.isNewline }.count
+        let hanCount = prefix.filter {
+            String($0).range(of: #"\p{Han}"#, options: .regularExpression) != nil
+        }.count
+        if hanCount > 0 {
+            return hanCount >= 2 || visibleCount >= 6
+        }
+        return visibleCount >= 6
+    }
+
+    private static func rejectionSummary(_ reasons: [ContinuationSanitizationReason]) -> String {
+        guard !reasons.isEmpty else {
+            return "no_usable_continuation"
+        }
+        let priority: [ContinuationSanitizationReason] = [
+            .empty,
+            .sameAsPrefix,
+            .stillRepeatsPrefix,
+            .noUsableSuffix,
+            .repeatedPrefixRepaired,
+            .accepted
+        ]
+        return priority.first(where: { reasons.contains($0) })?.rawValue ?? reasons[0].rawValue
+    }
+}
+
+private struct CandidateBuildResult {
+    var candidate: AIRecommendationCandidate?
+    var acceptedCount: Int
+    var rejectionReasons: [ContinuationSanitizationReason]
+    var repairedCount: Int
 }
 
 private func withTimeout<T: Sendable>(

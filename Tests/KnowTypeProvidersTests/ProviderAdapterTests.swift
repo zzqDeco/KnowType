@@ -64,6 +64,15 @@ private actor SequencedMockHTTPClient: HTTPClient {
     }
 }
 
+private func requestBodyObject(
+    _ request: URLRequest?,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) throws -> [String: Any] {
+    let body = try XCTUnwrap(request?.httpBody, file: file, line: line)
+    return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any], file: file, line: line)
+}
+
 final class ProviderAdapterTests: XCTestCase {
     private let llmRequest = LLMRequest(
         task: .continuation,
@@ -92,6 +101,42 @@ final class ProviderAdapterTests: XCTestCase {
 
         XCTAssertEqual(request?.url?.absoluteString, "https://api.example.com/v1/chat/completions")
         XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer key")
+        let bodyObject = try requestBodyObject(request)
+        let responseFormat = try XCTUnwrap(bodyObject["response_format"] as? [String: Any])
+        XCTAssertEqual(responseFormat["type"] as? String, "json_schema")
+        let jsonSchema = try XCTUnwrap(responseFormat["json_schema"] as? [String: Any])
+        XCTAssertEqual(jsonSchema["strict"] as? Bool, true)
+        XCTAssertEqual(response.candidates.first?.text, "还有进一步优化空间")
+    }
+
+    func testOpenAIChatFallsBackToJSONModeWhenStructuredOutputIsUnsupported() async throws {
+        await StructuredOutputCapabilityCache.shared.reset()
+        let content = #"{"candidates":[{"text":"还有进一步优化空间","confidence":0.9,"reason":"ok"}]}"#
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"error":{"message":"response_format json_schema is unsupported"}}"#, statusCode: 400),
+            (json: #"{"choices":[{"message":{"content":"\#(content.replacingOccurrences(of: "\"", with: "\\\""))"}}]}"#, statusCode: 200)
+        ])
+        let provider = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "https://fallback-chat.example.com")!,
+                apiKey: "key",
+                model: "fallback-model"
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let requests = await client.capturedRequests()
+
+        XCTAssertEqual(requests.count, 2)
+        let firstBody = try requestBodyObject(requests[0])
+        let firstFormat = try XCTUnwrap(firstBody["response_format"] as? [String: Any])
+        XCTAssertEqual(firstFormat["type"] as? String, "json_schema")
+        let secondBody = try requestBodyObject(requests[1])
+        let secondFormat = try XCTUnwrap(secondBody["response_format"] as? [String: Any])
+        XCTAssertEqual(secondFormat["type"] as? String, "json_object")
+        XCTAssertEqual(response.diagnostics, ["structured_schema_unsupported"])
         XCTAssertEqual(response.candidates.first?.text, "还有进一步优化空间")
     }
 
@@ -108,7 +153,97 @@ final class ProviderAdapterTests: XCTestCase {
         )
 
         let response = try await provider.complete(llmRequest)
+        let request = await client.capturedRequest()
+        let bodyObject = try requestBodyObject(request)
+        let text = try XCTUnwrap(bodyObject["text"] as? [String: Any])
+        let format = try XCTUnwrap(text["format"] as? [String: Any])
+        XCTAssertEqual(format["type"] as? String, "json_schema")
+        XCTAssertEqual(format["strict"] as? Bool, true)
         XCTAssertEqual(response.candidates.first?.text, "still needs more validation")
+    }
+
+    func testStructuredResponseNormalizerRejectsNonSchemaCandidateOutput() throws {
+        let valid = #"{"candidates":[{"text":"继续推进","confidence":0.9,"reason":"ok"}]}"#
+        let response = try StructuredResponseNormalizer.normalizeText(valid, task: .continuation)
+        XCTAssertEqual(response.candidates.first?.text, "继续推进")
+
+        XCTAssertThrowsError(
+            try StructuredResponseNormalizer.normalizeText("继续推进", task: .continuation)
+        ) { error in
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("structured_decode_error: invalid JSON object"))
+        }
+        XCTAssertThrowsError(
+            try StructuredResponseNormalizer.normalizeText(#"{"text":"继续推进"}"#, task: .continuation)
+        ) { error in
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("structured_decode_error: unexpected candidate response fields"))
+        }
+        XCTAssertThrowsError(
+            try StructuredResponseNormalizer.normalizeText(
+                #"{"candidates":[{"text":123,"confidence":0.9,"reason":"bad"}]}"#,
+                task: .continuation
+            )
+        ) { error in
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("structured_decode_error: candidate text is missing or not a string"))
+        }
+    }
+
+    func testStructuredResponseNormalizerParsesContextDigestMarkdownObject() throws {
+        let response = try StructuredResponseNormalizer.normalizeText(
+            "{\"markdown\":\"## Global Style\\n- Concise.\"}",
+            task: .contextDigest
+        )
+
+        XCTAssertEqual(response.candidates.first?.text, "## Global Style\n- Concise.")
+    }
+
+    func testGeminiRequestIncludesStructuredResponseSchema() async throws {
+        let content = #"{"candidates":[{"text":"继续推进","confidence":0.9,"reason":"ok"}]}"#
+        let escaped = content.replacingOccurrences(of: "\"", with: "\\\"")
+        let client = MockHTTPClient(json: #"{"candidates":[{"content":{"parts":[{"text":"\#(escaped)"}]}}]}"#)
+        let provider = GeminiNativeProvider(
+            configuration: ProviderConfiguration(
+                kind: .geminiNative,
+                baseURL: URL(string: "https://generativelanguage.googleapis.com")!,
+                apiKey: "key",
+                model: "gemini-test"
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let request = await client.capturedRequest()
+        let bodyObject = try requestBodyObject(request)
+        let generationConfig = try XCTUnwrap(bodyObject["generationConfig"] as? [String: Any])
+
+        XCTAssertEqual(generationConfig["responseMimeType"] as? String, "application/json")
+        XCTAssertNotNil(generationConfig["responseSchema"] as? [String: Any])
+        XCTAssertEqual(response.candidates.first?.text, "继续推进")
+    }
+
+    func testAnthropicRequestIncludesStructuredOutputConfig() async throws {
+        await StructuredOutputCapabilityCache.shared.reset()
+        let content = #"{"candidates":[{"text":"继续推进","confidence":0.9,"reason":"ok"}]}"#
+        let escaped = content.replacingOccurrences(of: "\"", with: "\\\"")
+        let client = MockHTTPClient(json: #"{"content":[{"type":"text","text":"\#(escaped)"}]}"#)
+        let provider = AnthropicMessagesProvider(
+            configuration: ProviderConfiguration(
+                kind: .anthropicMessages,
+                baseURL: URL(string: "https://api.anthropic.com")!,
+                apiKey: "key",
+                model: "claude-test"
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let request = await client.capturedRequest()
+        let bodyObject = try requestBodyObject(request)
+        let outputConfig = try XCTUnwrap(bodyObject["output_config"] as? [String: Any])
+        let format = try XCTUnwrap(outputConfig["format"] as? [String: Any])
+
+        XCTAssertEqual(format["type"] as? String, "json_schema")
+        XCTAssertEqual(format["strict"] as? Bool, true)
+        XCTAssertEqual(response.candidates.first?.text, "继续推进")
     }
 
     func testOpenAICompatibleBaseURLMayIncludeV1() async throws {

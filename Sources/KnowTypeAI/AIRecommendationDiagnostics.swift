@@ -13,12 +13,18 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case contextLoaded = "context_loaded"
     case providerRequestStart = "provider_request_start"
     case providerResponse = "provider_response"
+    case structuredSchemaRequest = "structured_schema_request"
+    case structuredSchemaUnsupported = "structured_schema_unsupported"
+    case structuredDecodeError = "structured_decode_error"
     case sanitizeEmpty = "sanitize_empty"
+    case sanitizeReject = "sanitize_reject"
+    case sanitizeRepair = "sanitize_repair"
     case ready
     case timeout
     case providerError = "provider_error"
     case cooldownActive = "cooldown_active"
     case cancelled
+    case skippedPrefixTooShort = "skipped_prefix_too_short"
     case scheduled
     case cancelPrevious = "cancel_previous"
     case staleResultDropped = "stale_result_dropped"

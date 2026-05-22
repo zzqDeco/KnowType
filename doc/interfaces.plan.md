@@ -31,10 +31,20 @@ LLMResponse {
   candidates: [
     { text: string, confidence?: number, reason?: string }
   ]
+  diagnostics: [string]
 }
 ```
 
 Provider adapters must not expose native OpenAI, Anthropic, Gemini, Ollama, or custom HTTP response shapes outside `KnowTypeProviders`.
+
+Provider adapters use a shared structured-output contract where the endpoint supports it. Candidate tasks
+(`correction`, `continuation`, and `polish`) use a `candidates` array with `text`, `confidence`, and `reason`.
+`contextDigest` uses a separate `{ markdown: string }` response and is normalized into an `LLMResponse` candidate
+only after strict decoding. OpenAI Chat and Responses prefer `json_schema` with `strict=true`; OpenAI-compatible
+endpoints that reject schema fields fall back once to JSON mode and report `structured_schema_unsupported` in
+`LLMResponse.diagnostics`. Gemini and Anthropic send native schema hints and also fall back when the endpoint
+rejects those fields. Ollama and custom HTTP do not claim provider-enforced schema, but their outputs still pass
+through strict local decoding instead of line-based candidate extraction.
 
 Real-time AI recommendation requests use `task: continuation`, `lockedPrefix`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
@@ -268,7 +278,9 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
 - caches by locked prefix, app bundle, locale, ENV hash, and CORRECTION hash
 - rejects stale results at the coordinator boundary
+- skips cloud requests for too-short prefixes: fewer than two Han characters, or fewer than six visible mixed/Latin characters
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
+- reports sanitizer outcomes as normalized reasons such as `same_as_prefix`, `still_repeats_prefix`, `no_usable_suffix`, and `repeated_prefix_repaired`
 - emits privacy-preserving AI diagnostics to macOS unified logging by default under subsystem `com.knowtype.inputmethod.KnowType` and category `ai`
 
 AI diagnostic events carry request/composition identifiers, lengths, counts, elapsed milliseconds, provider name, and normalized reasons only. They must not include raw user input, candidate text, context document contents, provider response bodies, or API keys. Use:

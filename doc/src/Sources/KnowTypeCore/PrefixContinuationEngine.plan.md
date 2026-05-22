@@ -17,6 +17,9 @@ locked.
 - Continuation prompts ask for continuation text only.
 - Provider output is still sanitized because providers can return full
   sentences or repeat the prefix.
+- `sanitizeContinuationDetailed` reports normalized rejection and repair
+  reasons such as `same_as_prefix`, `still_repeats_prefix`,
+  `no_usable_suffix`, and `repeated_prefix_repaired` for AI diagnostics.
 - When no provider is configured, local fallback continuation may be used.
 - When a provider is configured but fails or returns unusable output,
   continuation rows stay empty instead of showing mock AI text.

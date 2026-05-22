@@ -35,12 +35,13 @@ public struct CustomHTTPProvider: LLMProvider {
         let value = ResponseNormalizer.value(at: path.split(separator: ".").map(String.init), in: raw) ?? raw
 
         if let text = value as? String {
-            return try ResponseNormalizer.normalizeText(text, preservePlainText: request.task == .contextDigest)
+            return try StructuredResponseNormalizer.normalizeText(text, task: request.task)
         }
-        if let candidates = ResponseNormalizer.candidates(from: value) {
-            return LLMResponse(candidates: candidates)
-        }
-        throw ProviderError.invalidResponse("custom response path did not contain candidates")
+        return try StructuredResponseNormalizer.normalizeValue(
+            value,
+            task: request.task,
+            allowCandidateArrayRoot: true
+        )
     }
 
     private func render(template: String, request: LLMRequest) throws -> String {

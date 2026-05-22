@@ -46,6 +46,129 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(diagnosticSink.events.allSatisfy { $0.prefixLength == "你好".count })
     }
 
+    func testRecommendationSkipsSingleHanPrefixBeforeProviderRequest() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "wo",
+            traditionalCandidate: CorrectionCandidate(
+                text: "我",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+    }
+
+    func testRecommendationDiagnosticsRecordStructuredSchemaFallback() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(
+            candidates: [LLMCandidate(text: "继续推进", confidence: 0.88)],
+            diagnostics: ["structured_schema_unsupported"]
+        ))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        _ = await runtime.recommendation(for: request)
+
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .structuredSchemaRequest })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .structuredSchemaUnsupported && $0.reason == "structured_schema_unsupported"
+        })
+    }
+
+    func testRecommendationDiagnosticsRecordStructuredDecodeErrors() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = FailingLLMProvider(error: ProviderError.invalidResponse("structured_decode_error: missing candidates"))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        XCTAssertEqual(state, .unavailable(reason: "AI 暂不可用"))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .structuredDecodeError
+                && $0.reason == "structured_decode_error: missing candidates"
+        })
+    }
+
+    func testRecommendationDiagnosticsRecordSanitizerRejectReason() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "你好", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .sanitizeReject && $0.reason == "sanitize_reject_same_as_prefix"
+        })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .sanitizeEmpty && $0.reason == "same_as_prefix"
+        })
+    }
+
     func testRecommendationReadsContextDocumentsAndCachesResult() async throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
