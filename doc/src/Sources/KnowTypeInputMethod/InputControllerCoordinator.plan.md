@@ -30,6 +30,7 @@ Current behavior:
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
 - uses `InputTaskSupervisor` to replace stale local-candidate cancellation tokens, AI, and panel-render tasks
 - rejects stale AI publications by raw input, composition id, and AI generation
+- records AI scheduling diagnostics for scheduled requests, previous-generation cancellation, stale-result drops, and applied AI states through the shared AI diagnostic sink
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions

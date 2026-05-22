@@ -188,6 +188,9 @@ profile 可以留空 model，并通过 `/v1/models` 发现。
 AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
 记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明。传统输入引擎不依赖
 这两个文件。
+实时 AI 推荐的 runtime 超时为 10 秒，并通过 macOS unified logging 输出不含
+原文的子状态诊断。查看命令：
+`log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`。
 
 ## 输入行为
 

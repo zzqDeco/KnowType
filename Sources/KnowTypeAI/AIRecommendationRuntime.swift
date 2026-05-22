@@ -3,6 +3,10 @@ import KnowTypeCore
 import KnowTypeProviders
 
 public actor AIRecommendationRuntime: AIRecommendationProviding {
+    public enum Defaults {
+        public static let hardTimeoutMilliseconds = 10_000
+    }
+
     private struct CacheKey: Hashable {
         var lockedPrefix: String
         var rawInput: String
@@ -24,6 +28,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     private let healthMonitor: AIHealthMonitor
     private let debounceNanoseconds: UInt64
     private let hardTimeoutNanoseconds: UInt64
+    private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let cacheTTL: TimeInterval
     private var cache: [CacheKey: CacheEntry] = [:]
 
@@ -33,7 +38,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         correctionStore: CorrectionInstructionStore = CorrectionInstructionStore(),
         healthMonitor: AIHealthMonitor = AIHealthMonitor(),
         debounceMilliseconds: Int = 120,
-        hardTimeoutMilliseconds: Int = 2_500,
+        hardTimeoutMilliseconds: Int = Defaults.hardTimeoutMilliseconds,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         cacheTTL: TimeInterval = 300
     ) {
         self.provider = provider
@@ -42,32 +48,79 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         self.healthMonitor = healthMonitor
         self.debounceNanoseconds = UInt64(max(0, debounceMilliseconds)) * 1_000_000
         self.hardTimeoutNanoseconds = UInt64(max(1, hardTimeoutMilliseconds)) * 1_000_000
+        self.diagnosticSink = diagnosticSink
         self.cacheTTL = max(1, cacheTTL)
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        let startedAt = Date()
         guard let provider else {
+            record(
+                .skippedNoProvider,
+                request: request,
+                elapsedSince: startedAt,
+                reason: "missing_provider"
+            )
             return .unavailable(reason: "AI 未配置")
         }
         if let reason = await healthMonitor.unavailableReason() {
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: reason
+            )
             return .unavailable(reason: reason)
         }
         guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !request.traditionalCandidate.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            record(
+                .skippedIneligible,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "empty_raw_or_prefix"
+            )
             return .ineligible(reason: "AI 不适用")
         }
         if TextProtection.requiresNoCorrection(request.rawInput, appBundleID: request.appBundleID)
             || TextProtection.requiresNoCorrection(request.traditionalCandidate.text, appBundleID: request.appBundleID) {
+            record(
+                .skippedProtectedText,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "protected_text"
+            )
             return .ineligible(reason: "AI 已禁用")
         }
 
         do {
             if debounceNanoseconds > 0 {
+                record(
+                    .debounceStart,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt
+                )
                 try await Task.sleep(nanoseconds: debounceNanoseconds)
+                record(
+                    .debounceEnd,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt
+                )
             }
             try Task.checkCancellation()
             let environment = try environmentStore.loadSnapshot()
             let correction = try correctionStore.loadSnapshot()
+            record(
+                .contextLoaded,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt
+            )
             let key = CacheKey(
                 lockedPrefix: request.traditionalCandidate.text,
                 rawInput: request.rawInput,
@@ -78,8 +131,22 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 lexicalHash: request.lexicalContext?.sha256 ?? ""
             )
             if let cached = cache[key], cached.expiresAt > Date() {
+                record(
+                    .cacheHit,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt,
+                    candidateCount: 1,
+                    acceptedCount: 1
+                )
                 return .ready(cached.candidate)
             }
+            record(
+                .cacheMiss,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt
+            )
 
             var contextDocuments = [
                 "ENV.md": environment.content,
@@ -99,10 +166,24 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 lengthLevel: .medium,
                 contextDocuments: contextDocuments
             )
+            record(
+                .providerRequestStart,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt
+            )
+            let providerStartedAt = Date()
             let response = try await withTimeout(nanoseconds: hardTimeoutNanoseconds) {
                 try await provider.complete(llmRequest)
             }
-            guard let candidate = Self.makeCandidate(
+            record(
+                .providerResponse,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: providerStartedAt,
+                candidateCount: response.candidates.count
+            )
+            guard let result = Self.makeCandidate(
                 response: response,
                 lockedPrefix: request.traditionalCandidate.text,
                 providerName: provider.providerName,
@@ -114,19 +195,58 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 .compactMap { $0.map(String.init) }
                 .joined(separator: ":")
             ) else {
+                record(
+                    .sanitizeEmpty,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt,
+                    candidateCount: response.candidates.count,
+                    acceptedCount: 0,
+                    reason: "no_usable_continuation"
+                )
                 await healthMonitor.recordSuccess()
                 return .ineligible(reason: "AI 无推荐")
             }
+            let candidate = result.candidate
             cache[key] = CacheEntry(candidate: candidate, expiresAt: Date().addingTimeInterval(cacheTTL))
             await healthMonitor.recordSuccess()
+            record(
+                .ready,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                candidateCount: response.candidates.count,
+                acceptedCount: result.acceptedCount
+            )
             return .ready(candidate)
         } catch is CancellationError {
+            record(
+                .cancelled,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "task_cancelled"
+            )
             return .idle
         } catch {
             await healthMonitor.recordFailure(error)
             if error is TimeoutError {
+                record(
+                    .timeout,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt,
+                    reason: "hard_timeout"
+                )
                 return .unavailable(reason: "AI 请求超时")
             }
+            record(
+                .providerError,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: Self.diagnosticReason(for: error)
+            )
             return .unavailable(reason: "AI 暂不可用")
         }
     }
@@ -136,7 +256,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         lockedPrefix: String,
         providerName: String,
         contextVersion: String
-    ) -> AIRecommendationCandidate? {
+    ) -> (candidate: AIRecommendationCandidate, acceptedCount: Int)? {
+        var acceptedCount = 0
+        var firstCandidate: AIRecommendationCandidate?
         for rawCandidate in response.candidates {
             guard let continuation = PrefixContinuationEngine.sanitizeContinuation(
                 rawCandidate.text,
@@ -148,16 +270,22 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             guard displayText.hasPrefix(lockedPrefix) else {
                 continue
             }
-            return AIRecommendationCandidate(
-                prefixText: lockedPrefix,
-                continuationText: continuation,
-                displayText: displayText,
-                confidence: rawCandidate.confidence ?? 0.7,
-                provider: providerName,
-                contextVersion: contextVersion
-            )
+            acceptedCount += 1
+            if firstCandidate == nil {
+                firstCandidate = AIRecommendationCandidate(
+                    prefixText: lockedPrefix,
+                    continuationText: continuation,
+                    displayText: displayText,
+                    confidence: rawCandidate.confidence ?? 0.7,
+                    provider: providerName,
+                    contextVersion: contextVersion
+                )
+            }
         }
-        return nil
+        guard let firstCandidate else {
+            return nil
+        }
+        return (firstCandidate, acceptedCount)
     }
 
     private static func join(prefix: String, continuation: String) -> String {
@@ -170,6 +298,54 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             return "\(prefix) \(continuation)"
         }
         return "\(prefix)\(continuation)"
+    }
+
+    private func record(
+        _ stage: AIRecommendationDiagnosticStage,
+        request: AIRecommendationRequest,
+        providerName: String? = nil,
+        elapsedSince start: Date? = nil,
+        candidateCount: Int? = nil,
+        acceptedCount: Int? = nil,
+        reason: String? = nil
+    ) {
+        diagnosticSink.record(
+            AIRecommendationDiagnosticEvent(
+                stage: stage,
+                requestID: request.requestID,
+                compositionID: request.compositionID,
+                rawLength: request.rawInput.count,
+                prefixLength: request.traditionalCandidate.text.count,
+                appBundleID: request.appBundleID,
+                providerName: providerName,
+                elapsedMilliseconds: start.map(Self.elapsedMilliseconds(since:)),
+                candidateCount: candidateCount,
+                acceptedCount: acceptedCount,
+                reason: reason
+            )
+        )
+    }
+
+    private static func elapsedMilliseconds(since start: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(start) * 1_000))
+    }
+
+    private static func diagnosticReason(for error: Error) -> String {
+        guard let providerError = error as? ProviderError else {
+            return String(describing: type(of: error))
+        }
+        switch providerError {
+        case .httpStatus(let status, _):
+            return "http_\(status)"
+        case .invalidResponse:
+            return "invalid_response"
+        case .missingAPIKey:
+            return "missing_api_key"
+        case .invalidTemplate:
+            return "invalid_template"
+        case .unsupportedKind(let kind):
+            return "unsupported_kind_\(kind.rawValue)"
+        }
     }
 }
 

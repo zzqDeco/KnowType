@@ -5,6 +5,47 @@ import KnowTypeCore
 import KnowTypeProviders
 
 final class AIRecommendationRuntimeTests: XCTestCase {
+    func testDefaultHardTimeoutIsTenSeconds() {
+        XCTAssertEqual(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds, 10_000)
+    }
+
+    func testRecommendationDiagnosticsRecordSuccessAndCacheHit() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        _ = await runtime.recommendation(for: request)
+        _ = await runtime.recommendation(for: request)
+
+        let stages = diagnosticSink.events.map(\.stage)
+        XCTAssertTrue(stages.contains(.contextLoaded))
+        XCTAssertTrue(stages.contains(.cacheMiss))
+        XCTAssertTrue(stages.contains(.providerRequestStart))
+        XCTAssertTrue(stages.contains(.providerResponse))
+        XCTAssertTrue(stages.contains(.ready))
+        XCTAssertTrue(stages.contains(.cacheHit))
+        XCTAssertTrue(diagnosticSink.events.allSatisfy { $0.requestID == request.requestID })
+        XCTAssertTrue(diagnosticSink.events.allSatisfy { $0.rawLength == "nihao".count })
+        XCTAssertTrue(diagnosticSink.events.allSatisfy { $0.prefixLength == "你好".count })
+    }
+
     func testRecommendationReadsContextDocumentsAndCachesResult() async throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -210,6 +251,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     }
 
     func testEmptyRecommendationDoesNotEnterCooldown() async {
+        let diagnosticSink = RecordingDiagnosticSink()
         let provider = QueuedLLMProvider(responses: [
             LLMResponse(candidates: []),
             LLMResponse(candidates: [
@@ -219,7 +261,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
-            debounceMilliseconds: 0
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -242,14 +285,20 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(candidate.displayText, "你好继续推进")
         XCTAssertEqual(requestCount, 2)
+        let sanitizeEmptyEvents = diagnosticSink.events.filter { $0.stage == .sanitizeEmpty }
+        XCTAssertEqual(sanitizeEmptyEvents.count, 1)
+        XCTAssertEqual(sanitizeEmptyEvents.first?.candidateCount, 0)
+        XCTAssertEqual(sanitizeEmptyEvents.first?.acceptedCount, 0)
     }
 
     func testHardTimeoutReturnsWithoutWaitingForCancellationResistantProvider() async {
+        let diagnosticSink = RecordingDiagnosticSink()
         let provider = SlowCancellationResistantLLMProvider()
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            hardTimeoutMilliseconds: 20
+            hardTimeoutMilliseconds: 20,
+            diagnosticSink: diagnosticSink
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -269,6 +318,9 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(state, .unavailable(reason: "AI 请求超时"))
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.5)
         XCTAssertEqual(requestCount, 1)
+        let timeoutEvent = diagnosticSink.events.first { $0.stage == .timeout }
+        XCTAssertEqual(timeoutEvent?.reason, "hard_timeout")
+        XCTAssertNotNil(timeoutEvent?.elapsedMilliseconds)
     }
 
     func testDocumentStoresCreateDefaultsAndPreserveUserNotes() throws {
@@ -391,6 +443,24 @@ private actor SlowCancellationResistantLLMProvider: LLMProvider {
 
     var requestCount: Int {
         count
+    }
+}
+
+private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [AIRecommendationDiagnosticEvent] = []
+
+    func record(_ event: AIRecommendationDiagnosticEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+
+    var events: [AIRecommendationDiagnosticEvent] {
+        lock.lock()
+        let events = recordedEvents
+        lock.unlock()
+        return events
     }
 }
 

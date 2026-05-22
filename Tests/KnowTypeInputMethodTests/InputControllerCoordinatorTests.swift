@@ -828,6 +828,38 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAIRecommendationDiagnosticsRecordCancellationAndStaleDrop() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = PendingAIRecommendationProvider()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+
+        XCTAssertTrue(coordinator.handleText("h", client: client))
+        let hasCancellationAndDrop = await waitUntilOnMainActor {
+            let stages = diagnosticSink.events.map(\.stage)
+            return stages.contains(.cancelPrevious)
+                && stages.contains(.staleResultDropped)
+        }
+
+        XCTAssertTrue(hasCancellationAndDrop, "\(diagnosticSink.events.map(\.stage))")
+    }
+
+    @MainActor
     func testAsyncRawIdentityVisibleSpaceDoesNotCommitHiddenAlternative() async {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
@@ -2346,6 +2378,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         provider: (any LLMProvider)? = nil,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         enablesAsyncSuggestionRefresh: Bool = false,
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferences: InputModePreferences = .standard,
@@ -2376,6 +2409,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
+            aiDiagnosticSink: aiDiagnosticSink,
             conversionEngine: effectiveConversionEngine,
             conversionEngineFactory: conversionEngineFactory,
             host: host,
@@ -3338,6 +3372,24 @@ private actor PendingAIRecommendationProvider: AIRecommendationProviding {
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [AIRecommendationDiagnosticEvent] = []
+
+    func record(_ event: AIRecommendationDiagnosticEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+
+    var events: [AIRecommendationDiagnosticEvent] {
+        lock.lock()
+        let events = recordedEvents
+        lock.unlock()
+        return events
     }
 }
 

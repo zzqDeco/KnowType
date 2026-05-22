@@ -89,8 +89,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, preserving the user's notes outside the generated section.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
+- `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 
-The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. Stale AI results are dropped by composition id and raw input before they can update the panel.
+The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime has a 10-second hard timeout; continuing to type still cancels older requests immediately.
 
 ## Settings Layer
 

@@ -39,6 +39,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var delayedReanchorGeneration = 0
     private let aiRecommendationProvider: (any AIRecommendationProviding)?
     private let aiContextEventRecorder: (any AIContextEventRecording)?
+    private let aiDiagnosticSink: any AIRecommendationDiagnosticSink
     private var aiRecommendationTask: Task<Void, Never>?
     private var aiRecommendationState: AIRecommendationState = .idle
     private var aiRecommendationGeneration = 0
@@ -66,6 +67,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
         host: InputControllerHost,
@@ -97,6 +99,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             .loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
         self.aiRecommendationProvider = aiRecommendationProvider
         self.aiContextEventRecorder = aiContextEventRecorder
+        self.aiDiagnosticSink = aiDiagnosticSink
         self.host = host
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
@@ -670,6 +673,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
+        let requestID = UUID()
+        let currentAppBundleID = appBundleIdentifier(client: client)
+        if aiRecommendationTask != nil {
+            recordAIDiagnostic(
+                .cancelPrevious,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                appBundleID: currentAppBundleID,
+                reason: "new_schedule"
+            )
+        }
         aiRecommendationTask?.cancel()
         taskSupervisor.cancel(.aiRecommendation)
         aiRecommendationGeneration += 1
@@ -678,26 +693,61 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard let firstPrefix = suggestion.prefixCandidates.first,
               !isPartialSegmentCandidate(firstPrefix),
               !compositionBuffer.hasResolvedSegments || compositionBuffer.isFullyResolved else {
+            recordAIDiagnostic(
+                .skippedIneligible,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: suggestion.prefixCandidates.first?.text.count,
+                appBundleID: currentAppBundleID,
+                reason: "no_stable_prefix"
+            )
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
 
-        let currentAppBundleID = appBundleIdentifier(client: client)
         guard !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: currentAppBundleID),
               !TextProtection.requiresNoCorrection(firstPrefix.text, appBundleID: currentAppBundleID) else {
+            recordAIDiagnostic(
+                .skippedProtectedText,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: firstPrefix.text.count,
+                appBundleID: currentAppBundleID,
+                reason: "protected_text"
+            )
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
 
         guard runtimePreferences.cloudContinuationEnabled else {
+            recordAIDiagnostic(
+                .skippedDisabled,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: firstPrefix.text.count,
+                appBundleID: currentAppBundleID,
+                reason: "cloud_continuation_disabled"
+            )
             aiRecommendationState = .ineligible(reason: "AI 已关闭")
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
 
         guard hasProvider else {
+            recordAIDiagnostic(
+                .skippedNoProvider,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: firstPrefix.text.count,
+                appBundleID: currentAppBundleID,
+                reason: "provider_not_configured"
+            )
             aiRecommendationState = aiRecommendationProvider == nil
                 ? .idle
                 : .unavailable(reason: "AI 未配置")
@@ -706,12 +756,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
 
         guard let aiRecommendationProvider else {
+            recordAIDiagnostic(
+                .skippedNoProvider,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: firstPrefix.text.count,
+                appBundleID: currentAppBundleID,
+                reason: "recommendation_provider_missing"
+            )
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
 
-        let requestID = UUID()
         let rawInput = rawBuffer
         let currentCompositionID = compositionID
         let request = AIRecommendationRequest(
@@ -721,28 +779,107 @@ final class InputControllerCoordinator: @unchecked Sendable {
             appName: currentAppBundleID,
             locale: locale,
             compositionID: currentCompositionID,
+            requestID: requestID,
             lexicalContext: lexicalContextSnapshot(for: suggestion)
+        )
+        recordAIDiagnostic(
+            .scheduled,
+            requestID: requestID,
+            compositionID: currentCompositionID,
+            rawLength: rawInput.count,
+            prefixLength: firstPrefix.text.count,
+            appBundleID: currentAppBundleID
         )
         aiRecommendationState = .pending(requestID: requestID)
         updateCandidatePanel(suggestion: suggestion, client: client)
-        let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider] in
+        let diagnosticSink = aiDiagnosticSink
+        let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider, diagnosticSink] in
             let state = await aiRecommendationProvider.recommendation(for: request)
-            guard !Task.isCancelled else {
-                return
-            }
-            Task { @MainActor [weak self] in
-                guard let self,
-                      self.aiRecommendationGeneration == generation,
+            Task { @MainActor [weak self, diagnosticSink] in
+                guard let self else {
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .staleResultDropped,
+                            requestID: requestID,
+                            compositionID: currentCompositionID,
+                            rawLength: rawInput.count,
+                            prefixLength: firstPrefix.text.count,
+                            appBundleID: currentAppBundleID,
+                            reason: "coordinator_released"
+                        )
+                    )
+                    return
+                }
+                guard self.aiRecommendationGeneration == generation,
                       self.rawBuffer == rawInput,
                       self.compositionID == currentCompositionID else {
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .staleResultDropped,
+                            requestID: requestID,
+                            compositionID: currentCompositionID,
+                            rawLength: rawInput.count,
+                            prefixLength: firstPrefix.text.count,
+                            appBundleID: currentAppBundleID,
+                            reason: Self.aiDiagnosticReason(for: state)
+                        )
+                    )
                     return
                 }
                 self.aiRecommendationState = state
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .stateApplied,
+                        requestID: requestID,
+                        compositionID: currentCompositionID,
+                        rawLength: rawInput.count,
+                        prefixLength: firstPrefix.text.count,
+                        appBundleID: currentAppBundleID,
+                        reason: Self.aiDiagnosticReason(for: state)
+                    )
+                )
                 self.updateCandidatePanel(suggestion: self.lastSuggestion, client: self.host?.currentClient)
             }
         }
         aiRecommendationTask = task
         taskSupervisor.replace(.aiRecommendation, with: task)
+    }
+
+    private func recordAIDiagnostic(
+        _ stage: AIRecommendationDiagnosticStage,
+        requestID: UUID?,
+        compositionID: Int?,
+        rawLength: Int?,
+        prefixLength: Int? = nil,
+        appBundleID: String? = nil,
+        reason: String? = nil
+    ) {
+        aiDiagnosticSink.record(
+            AIRecommendationDiagnosticEvent(
+                stage: stage,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawLength,
+                prefixLength: prefixLength,
+                appBundleID: appBundleID,
+                reason: reason
+            )
+        )
+    }
+
+    private static func aiDiagnosticReason(for state: AIRecommendationState) -> String {
+        switch state {
+        case .idle:
+            return "idle"
+        case .pending:
+            return "pending"
+        case .ready:
+            return "ready"
+        case .ineligible(let reason):
+            return "ineligible:\(reason)"
+        case .unavailable(let reason):
+            return "unavailable:\(reason)"
+        }
     }
 
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
@@ -1415,6 +1552,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         suggestionTask?.cancel()
         suggestionTask = nil
         taskSupervisor.cancel(.localCandidates)
+        if aiRecommendationTask != nil {
+            recordAIDiagnostic(
+                .cancelPrevious,
+                requestID: nil,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                reason: "composition_invalidated"
+            )
+        }
         aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
