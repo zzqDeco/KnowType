@@ -235,6 +235,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawLength: rawBuffer.count,
             reason: "input_controller_will_close"
         )
+        aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
         panelUpdateTask?.cancel()
@@ -833,9 +834,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     )
                     return
                 }
-                guard self.aiRecommendationGeneration == generation,
+                guard self.activeAIRecommendationRequestID == requestID,
+                      self.aiRecommendationGeneration == generation,
                       self.rawBuffer == rawInput,
                       self.compositionID == currentCompositionID else {
+                    let reason = self.activeAIRecommendationRequestID == requestID
+                        ? Self.aiDiagnosticReason(for: state)
+                        : "request_inactive"
                     if self.activeAIRecommendationRequestID == requestID {
                         self.activeAIRecommendationRequestID = nil
                     }
@@ -847,7 +852,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                             rawLength: rawInput.count,
                             prefixLength: firstPrefix.text.count,
                             appBundleID: currentAppBundleID,
-                            reason: Self.aiDiagnosticReason(for: state)
+                            reason: reason
                         )
                     )
                     return

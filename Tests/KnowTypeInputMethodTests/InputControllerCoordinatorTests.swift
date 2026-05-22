@@ -1014,6 +1014,56 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testReturnedAIRecommendationDoesNotApplyAfterInputControllerWillClose() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let returnSignal = RecommendationReturnSignal()
+        let aiProvider = SignaledAIRecommendationProvider(returnSignal: returnSignal)
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+
+        XCTAssertTrue(returnSignal.wait(timeout: .now() + 1))
+        usleep(20_000)
+        coordinator.inputControllerWillClose()
+        let panelUpdatesAfterClose = host.panelStates.count
+
+        let hasTerminalEvent = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelled && $0.requestID == cancelledRequestID
+            } || diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped
+                    && $0.requestID == cancelledRequestID
+                    && $0.reason == "request_inactive"
+            }
+        }
+
+        XCTAssertTrue(hasTerminalEvent, "\(diagnosticSink.events)")
+        XCTAssertFalse(
+            diagnosticSink.events.contains {
+                $0.stage == .stateApplied && $0.requestID == cancelledRequestID
+            },
+            "\(diagnosticSink.events)"
+        )
+        XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
+    @MainActor
     func testAsyncRawIdentityVisibleSpaceDoesNotCommitHiddenAlternative() async {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
@@ -3512,6 +3562,39 @@ private actor RecordingAIRecommendationProvider: AIRecommendationProviding {
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private final class RecommendationReturnSignal: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+
+    func signal() {
+        semaphore.signal()
+    }
+
+    func wait(timeout: DispatchTime) -> Bool {
+        semaphore.wait(timeout: timeout) == .success
+    }
+}
+
+private actor SignaledAIRecommendationProvider: AIRecommendationProviding {
+    private let returnSignal: RecommendationReturnSignal
+
+    init(returnSignal: RecommendationReturnSignal) {
+        self.returnSignal = returnSignal
+    }
+
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        let candidate = AIRecommendationCandidate(
+            prefixText: request.traditionalCandidate.text,
+            continuationText: "继续推进",
+            displayText: request.traditionalCandidate.text + "继续推进",
+            confidence: 0.91,
+            provider: "ai-test",
+            contextVersion: "test"
+        )
+        returnSignal.signal()
+        return .ready(candidate)
     }
 }
 
