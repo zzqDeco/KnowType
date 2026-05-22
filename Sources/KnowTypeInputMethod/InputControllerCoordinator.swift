@@ -42,6 +42,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let aiDiagnosticSink: any AIRecommendationDiagnosticSink
     private var aiRecommendationTask: Task<Void, Never>?
     private var aiRecommendationState: AIRecommendationState = .idle
+    private var activeAIRecommendationRequestID: UUID?
     private var aiRecommendationGeneration = 0
     private var deleteCountBeforeCommit = 0
     private var recentLexicalCommits: [String] = []
@@ -229,7 +230,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
+        cancelActiveAIRecommendationForDiagnostics(
+            compositionID: compositionID,
+            rawLength: rawBuffer.count,
+            reason: "input_controller_will_close"
+        )
         aiRecommendationTask?.cancel()
+        aiRecommendationTask = nil
         panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
         hideCandidatePanel()
@@ -673,12 +680,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
-        let requestID = UUID()
         let currentAppBundleID = appBundleIdentifier(client: client)
-        if aiRecommendationTask != nil {
+        if let cancelledRequestID = activeAIRecommendationRequestID {
             recordAIDiagnostic(
                 .cancelPrevious,
-                requestID: requestID,
+                requestID: cancelledRequestID,
                 compositionID: compositionID,
                 rawLength: rawBuffer.count,
                 appBundleID: currentAppBundleID,
@@ -686,9 +692,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
         }
         aiRecommendationTask?.cancel()
+        activeAIRecommendationRequestID = nil
         taskSupervisor.cancel(.aiRecommendation)
         aiRecommendationGeneration += 1
         let generation = aiRecommendationGeneration
+        let requestID = UUID()
 
         guard let firstPrefix = suggestion.prefixCandidates.first,
               !isPartialSegmentCandidate(firstPrefix),
@@ -791,6 +799,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             appBundleID: currentAppBundleID
         )
         aiRecommendationState = .pending(requestID: requestID)
+        activeAIRecommendationRequestID = requestID
         updateCandidatePanel(suggestion: suggestion, client: client)
         let diagnosticSink = aiDiagnosticSink
         let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider, diagnosticSink] in
@@ -827,6 +836,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 guard self.aiRecommendationGeneration == generation,
                       self.rawBuffer == rawInput,
                       self.compositionID == currentCompositionID else {
+                    if self.activeAIRecommendationRequestID == requestID {
+                        self.activeAIRecommendationRequestID = nil
+                    }
                     diagnosticSink.record(
                         AIRecommendationDiagnosticEvent(
                             stage: .staleResultDropped,
@@ -841,6 +853,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     return
                 }
                 self.aiRecommendationState = state
+                if self.activeAIRecommendationRequestID == requestID {
+                    self.activeAIRecommendationRequestID = nil
+                }
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(
                         stage: .stateApplied,
@@ -1566,20 +1581,34 @@ final class InputControllerCoordinator: @unchecked Sendable {
         suggestionTask?.cancel()
         suggestionTask = nil
         taskSupervisor.cancel(.localCandidates)
-        if aiRecommendationTask != nil {
-            recordAIDiagnostic(
-                .cancelPrevious,
-                requestID: nil,
-                compositionID: compositionID,
-                rawLength: rawBuffer.count,
-                reason: "composition_invalidated"
-            )
-        }
+        cancelActiveAIRecommendationForDiagnostics(
+            compositionID: compositionID,
+            rawLength: rawBuffer.count,
+            reason: "composition_invalidated"
+        )
         aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
         taskSupervisor.cancel(.aiRecommendation)
         aiRecommendationState = .idle
+    }
+
+    private func cancelActiveAIRecommendationForDiagnostics(
+        compositionID: Int?,
+        rawLength: Int?,
+        reason: String
+    ) {
+        guard let requestID = activeAIRecommendationRequestID else {
+            return
+        }
+        recordAIDiagnostic(
+            .cancelPrevious,
+            requestID: requestID,
+            compositionID: compositionID,
+            rawLength: rawLength,
+            reason: reason
+        )
+        activeAIRecommendationRequestID = nil
     }
 
     private func updateCandidatePanelImmediately(suggestion: SuggestionResponse?, client: InputControllerClient?) {
