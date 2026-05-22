@@ -256,6 +256,7 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 
 - `AIRecommendationProviding.recommendation(for:)`
 - `AIContextEventRecording.record(_:)`
+- `AIRecommendationDiagnosticSink.record(_:)`
 
 `InputControllerCoordinator` depends only on those protocols. Production uses `AIRecommendationRuntime` and `AIContextMemoryRuntime`; tests can inject fakes.
 
@@ -264,10 +265,17 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
 - creates default documents when missing
 - debounces before provider calls
-- hard-times out provider requests
+- hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
 - caches by locked prefix, app bundle, locale, ENV hash, and CORRECTION hash
 - rejects stale results at the coordinator boundary
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
+- emits privacy-preserving AI diagnostics to macOS unified logging by default under subsystem `com.knowtype.inputmethod.KnowType` and category `ai`
+
+AI diagnostic events carry request/composition identifiers, lengths, counts, elapsed milliseconds, provider name, and normalized reasons only. They must not include raw user input, candidate text, context document contents, provider response bodies, or API keys. Use:
+
+```bash
+log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact
+```
 
 `AIContextMemoryRuntime`:
 

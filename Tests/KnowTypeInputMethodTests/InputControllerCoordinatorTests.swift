@@ -828,6 +828,242 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAIRecommendationDiagnosticsRecordCancellationAndStaleDrop() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = PendingAIRecommendationProvider()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+
+        XCTAssertTrue(coordinator.handleText("h", client: client))
+        let hasCancellation = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelPrevious && $0.requestID == cancelledRequestID
+            } && diagnosticSink.events.contains {
+                $0.stage == .cancelled && $0.requestID == cancelledRequestID
+            }
+        }
+
+        XCTAssertTrue(hasCancellation, "\(diagnosticSink.events.map(\.stage))")
+    }
+
+    @MainActor
+    func testAIRecommendationDiagnosticsRecordReleasedCoordinatorStaleDrop() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = DelayedAIRecommendationProvider(delayNanoseconds: 20_000_000)
+        let diagnosticSink = RecordingDiagnosticSink()
+        var coordinator: InputControllerCoordinator? = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        ).0
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator?.handleText(String(character), client: client) == true)
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+
+        coordinator = nil
+        let hasStaleDrop = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped && $0.reason == "coordinator_released"
+            }
+        }
+
+        XCTAssertTrue(hasStaleDrop, "\(diagnosticSink.events.map(\.stage))")
+    }
+
+    @MainActor
+    func testCompletedAIRecommendationDoesNotEmitCancelPreviousOnNextSchedule() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasApplied = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .stateApplied }
+        }
+        XCTAssertTrue(hasApplied)
+        let cancelCountAfterCompletion = diagnosticSink.events.filter {
+            $0.stage == .cancelPrevious
+        }.count
+
+        XCTAssertTrue(coordinator.handleText("h", client: client))
+        let hasLaterSchedule = await waitUntilOnMainActor {
+            diagnosticSink.events.filter { $0.stage == .scheduled }.count >= 2
+        }
+        XCTAssertTrue(hasLaterSchedule)
+
+        XCTAssertEqual(
+            diagnosticSink.events.filter { $0.stage == .cancelPrevious }.count,
+            cancelCountAfterCompletion
+        )
+    }
+
+    @MainActor
+    func testInvalidatingCompositionLogsActiveAIRequestID() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = PendingAIRecommendationProvider()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: client
+            )
+        )
+        let hasInvalidationCancel = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelPrevious
+                    && $0.requestID == cancelledRequestID
+                    && $0.reason == "composition_invalidated"
+            }
+        }
+
+        XCTAssertTrue(hasInvalidationCancel, "\(diagnosticSink.events)")
+    }
+
+    @MainActor
+    func testCancelledAIRecommendationDoesNotApplyAfterInputControllerWillClose() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = PendingAIRecommendationProvider()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+
+        coordinator.inputControllerWillClose()
+        let panelUpdatesAfterClose = host.panelStates.count
+        let hasCancelledBeforeApply = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelPrevious
+                    && $0.requestID == cancelledRequestID
+                    && $0.reason == "input_controller_will_close"
+            } && diagnosticSink.events.contains {
+                $0.stage == .cancelled
+                    && $0.requestID == cancelledRequestID
+                    && $0.reason == "task_cancelled_before_apply"
+            }
+        }
+
+        XCTAssertTrue(hasCancelledBeforeApply, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
+    @MainActor
+    func testReturnedAIRecommendationDoesNotApplyAfterInputControllerWillClose() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let returnSignal = RecommendationReturnSignal()
+        let aiProvider = SignaledAIRecommendationProvider(returnSignal: returnSignal)
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+
+        XCTAssertTrue(returnSignal.wait(timeout: .now() + 1))
+        usleep(20_000)
+        coordinator.inputControllerWillClose()
+        let panelUpdatesAfterClose = host.panelStates.count
+
+        let hasTerminalEvent = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelled && $0.requestID == cancelledRequestID
+            } || diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped
+                    && $0.requestID == cancelledRequestID
+                    && $0.reason == "request_inactive"
+            }
+        }
+
+        XCTAssertTrue(hasTerminalEvent, "\(diagnosticSink.events)")
+        XCTAssertFalse(
+            diagnosticSink.events.contains {
+                $0.stage == .stateApplied && $0.requestID == cancelledRequestID
+            },
+            "\(diagnosticSink.events)"
+        )
+        XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
+    @MainActor
     func testAsyncRawIdentityVisibleSpaceDoesNotCommitHiddenAlternative() async {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(
@@ -2346,6 +2582,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         provider: (any LLMProvider)? = nil,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         enablesAsyncSuggestionRefresh: Bool = false,
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferences: InputModePreferences = .standard,
@@ -2376,6 +2613,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
+            aiDiagnosticSink: aiDiagnosticSink,
             conversionEngine: effectiveConversionEngine,
             conversionEngineFactory: conversionEngineFactory,
             host: host,
@@ -3327,6 +3565,39 @@ private actor RecordingAIRecommendationProvider: AIRecommendationProviding {
     }
 }
 
+private final class RecommendationReturnSignal: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+
+    func signal() {
+        semaphore.signal()
+    }
+
+    func wait(timeout: DispatchTime) -> Bool {
+        semaphore.wait(timeout: timeout) == .success
+    }
+}
+
+private actor SignaledAIRecommendationProvider: AIRecommendationProviding {
+    private let returnSignal: RecommendationReturnSignal
+
+    init(returnSignal: RecommendationReturnSignal) {
+        self.returnSignal = returnSignal
+    }
+
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        let candidate = AIRecommendationCandidate(
+            prefixText: request.traditionalCandidate.text,
+            continuationText: "继续推进",
+            displayText: request.traditionalCandidate.text + "继续推进",
+            confidence: 0.91,
+            provider: "ai-test",
+            contextVersion: "test"
+        )
+        returnSignal.signal()
+        return .ready(candidate)
+    }
+}
+
 private actor PendingAIRecommendationProvider: AIRecommendationProviding {
     private var recordedRequests: [AIRecommendationRequest] = []
 
@@ -3338,6 +3609,37 @@ private actor PendingAIRecommendationProvider: AIRecommendationProviding {
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private actor DelayedAIRecommendationProvider: AIRecommendationProviding {
+    private let delayNanoseconds: UInt64
+
+    init(delayNanoseconds: UInt64) {
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return .unavailable(reason: "delayed")
+    }
+}
+
+private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [AIRecommendationDiagnosticEvent] = []
+
+    func record(_ event: AIRecommendationDiagnosticEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+
+    var events: [AIRecommendationDiagnosticEvent] {
+        lock.lock()
+        let events = recordedEvents
+        lock.unlock()
+        return events
     }
 }
 

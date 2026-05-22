@@ -1,0 +1,97 @@
+import Foundation
+import OSLog
+
+public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
+    case skippedNoProvider = "skipped_no_provider"
+    case skippedDisabled = "skipped_disabled"
+    case skippedIneligible = "skipped_ineligible"
+    case skippedProtectedText = "skipped_protected_text"
+    case debounceStart = "debounce_start"
+    case debounceEnd = "debounce_end"
+    case cacheHit = "cache_hit"
+    case cacheMiss = "cache_miss"
+    case contextLoaded = "context_loaded"
+    case providerRequestStart = "provider_request_start"
+    case providerResponse = "provider_response"
+    case sanitizeEmpty = "sanitize_empty"
+    case ready
+    case timeout
+    case providerError = "provider_error"
+    case cooldownActive = "cooldown_active"
+    case cancelled
+    case scheduled
+    case cancelPrevious = "cancel_previous"
+    case staleResultDropped = "stale_result_dropped"
+    case stateApplied = "state_applied"
+}
+
+public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
+    public var stage: AIRecommendationDiagnosticStage
+    public var requestID: UUID?
+    public var compositionID: Int?
+    public var rawLength: Int?
+    public var prefixLength: Int?
+    public var appBundleID: String?
+    public var providerName: String?
+    public var elapsedMilliseconds: Int?
+    public var candidateCount: Int?
+    public var acceptedCount: Int?
+    public var reason: String?
+
+    public init(
+        stage: AIRecommendationDiagnosticStage,
+        requestID: UUID? = nil,
+        compositionID: Int? = nil,
+        rawLength: Int? = nil,
+        prefixLength: Int? = nil,
+        appBundleID: String? = nil,
+        providerName: String? = nil,
+        elapsedMilliseconds: Int? = nil,
+        candidateCount: Int? = nil,
+        acceptedCount: Int? = nil,
+        reason: String? = nil
+    ) {
+        self.stage = stage
+        self.requestID = requestID
+        self.compositionID = compositionID
+        self.rawLength = rawLength
+        self.prefixLength = prefixLength
+        self.appBundleID = appBundleID
+        self.providerName = providerName
+        self.elapsedMilliseconds = elapsedMilliseconds
+        self.candidateCount = candidateCount
+        self.acceptedCount = acceptedCount
+        self.reason = reason
+    }
+}
+
+public protocol AIRecommendationDiagnosticSink: Sendable {
+    func record(_ event: AIRecommendationDiagnosticEvent)
+}
+
+public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSink {
+    private let logger = Logger(
+        subsystem: "com.knowtype.inputmethod.KnowType",
+        category: "ai"
+    )
+
+    public init() {}
+
+    public func record(_ event: AIRecommendationDiagnosticEvent) {
+        logger.notice(
+            """
+            AI stage=\(event.stage.rawValue, privacy: .public) \
+            requestID=\(event.requestID?.uuidString ?? "-", privacy: .public) \
+            compositionID=\(event.compositionID ?? -1, privacy: .public) \
+            rawLength=\(event.rawLength ?? -1, privacy: .public) \
+            prefixLength=\(event.prefixLength ?? -1, privacy: .public) \
+            appBundleID=\(event.appBundleID ?? "-", privacy: .public) \
+            provider=\(event.providerName ?? "-", privacy: .public) \
+            elapsedMs=\(event.elapsedMilliseconds ?? -1, privacy: .public) \
+            candidateCount=\(event.candidateCount ?? -1, privacy: .public) \
+            acceptedCount=\(event.acceptedCount ?? -1, privacy: .public) \
+            reason=\(event.reason ?? "-", privacy: .public)
+            """
+        )
+    }
+}

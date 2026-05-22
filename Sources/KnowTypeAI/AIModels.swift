@@ -57,6 +57,7 @@ public enum AIRecommendationState: Sendable, Equatable {
 }
 
 public struct AIRecommendationRequest: Sendable, Equatable {
+    public var requestID: UUID
     public var rawInput: String
     public var traditionalCandidate: CorrectionCandidate
     public var appBundleID: String?
@@ -72,8 +73,10 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         appName: String? = nil,
         locale: KnowTypeLocale = .mixed,
         compositionID: Int,
+        requestID: UUID = UUID(),
         lexicalContext: LexicalContextSnapshot? = nil
     ) {
+        self.requestID = requestID
         self.rawInput = rawInput
         self.traditionalCandidate = traditionalCandidate
         self.appBundleID = appBundleID
