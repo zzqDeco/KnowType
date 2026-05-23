@@ -84,15 +84,16 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 
 `KnowTypeAI` is the only layer that owns AI-specific input-method behavior:
 
-- `AIRecommendationRuntime` builds real-time prefix-locked recommendation requests from raw input, the traditional first candidate, app context, `ENV.md`, and `CORRECTION.md`.
+- `AIRecommendationRuntime` builds real-time prefix-locked recommendation requests from raw input, the traditional first candidate, app context, `ENV.md`, `CORRECTION.md`, and optional `LEXICAL_PROFILE.md`.
 - `AIContextMemoryRuntime` records committed typing events and periodically summarizes them into the generated section of `~/.knowtype/ENV.md`.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, preserving the user's notes outside the generated section and repairing duplicate generated-section markers.
+- `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 - Provider prompts are task-specific: real-time continuation uses a suffix-only prompt, while correction, context digest, and polish keep separate instructions.
 
-The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime has a 10-second hard timeout; continuing to type still cancels older requests immediately.
+The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. Rime userdb sync and lexical-profile persistence run only from background tasks after commits/selections; keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime has a 10-second hard timeout; continuing to type still cancels older requests immediately.
 
 ## Settings Layer
 

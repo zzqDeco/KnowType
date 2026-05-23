@@ -27,6 +27,8 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         let aiContextEventRecorder: (any AIContextEventRecording)? = provider.map {
             AIContextMemoryRuntime(provider: $0)
         }
+        let lexicalProfileStore = LexicalProfileStore()
+        let rimeUserDBTextProvider = RimeUserDBTextSnapshotProvider()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
@@ -46,6 +48,8 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             userSelectionHistoryPersistence: historyPersistence,
             aiRecommendationProvider: aiRecommendationRuntime,
             aiContextEventRecorder: aiContextEventRecorder,
+            lexicalProfileStore: lexicalProfileStore,
+            rimeUserDBTextProvider: rimeUserDBTextProvider,
             host: hostAdapter,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: AppKitScreenGeometryProvider(),

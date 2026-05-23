@@ -529,6 +529,59 @@ bool ktb_rime_change_page(KTBRimeSession *session, bool backward) {
     return session->api->change_page(session->session_id, backward);
 }
 
+bool ktb_rime_sync_user_data(KTBRimeSession *session) {
+    if (!session || !session->api ||
+        !KTB_RIME_API_HAS(session->api, sync_user_data) ||
+        !session->api->sync_user_data) {
+        return false;
+    }
+    return session->api->sync_user_data();
+}
+
+char *ktb_rime_copy_user_data_dir(KTBRimeSession *session) {
+    if (!session || !session->api) {
+        return NULL;
+    }
+    if (KTB_RIME_API_HAS(session->api, get_user_data_dir_s) && session->api->get_user_data_dir_s) {
+        char buffer[4096];
+        memset(buffer, 0, sizeof(buffer));
+        session->api->get_user_data_dir_s(buffer, sizeof(buffer));
+        if (buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_user_data_dir) && session->api->get_user_data_dir) {
+        return ktb_strdup(session->api->get_user_data_dir());
+    }
+    return NULL;
+}
+
+char *ktb_rime_copy_user_data_sync_dir(KTBRimeSession *session) {
+    if (!session || !session->api) {
+        return NULL;
+    }
+    if (KTB_RIME_API_HAS(session->api, get_user_data_sync_dir) && session->api->get_user_data_sync_dir) {
+        char buffer[4096];
+        memset(buffer, 0, sizeof(buffer));
+        session->api->get_user_data_sync_dir(buffer, sizeof(buffer));
+        if (buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_sync_dir_s) && session->api->get_sync_dir_s) {
+        char buffer[4096];
+        memset(buffer, 0, sizeof(buffer));
+        session->api->get_sync_dir_s(buffer, sizeof(buffer));
+        if (buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_sync_dir) && session->api->get_sync_dir) {
+        return ktb_strdup(session->api->get_sync_dir());
+    }
+    return NULL;
+}
+
 void ktb_rime_string_free(char *value) {
     free(value);
 }

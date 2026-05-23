@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeAI
 import KnowTypeCore
 import KnowTypeRimeBridge
 
@@ -107,6 +108,12 @@ public protocol KnowTypeConversionEngine: Sendable {
 
     mutating func reset()
     mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult
+}
+
+extension KnowTypeConversionEngine {
+    func userDBTextSnapshot(schemaID _: String) async throws -> RimeUserDBTextSnapshot {
+        throw RimeUserDBTextSnapshotProviderError.unavailable
+    }
 }
 
 public struct RimeConversionEngine: KnowTypeConversionEngine {
@@ -554,6 +561,114 @@ final class NativeRimeSession: @unchecked Sendable {
         }
         let text = String(cString: commit)
         return text.isEmpty ? nil : text
+    }
+
+    func syncUserData() -> Bool {
+        ktb_rime_sync_user_data(session)
+    }
+
+    func userDataDirectory() -> URL? {
+        guard let path = ktb_rime_copy_user_data_dir(session) else {
+            return nil
+        }
+        defer {
+            ktb_rime_string_free(path)
+        }
+        return URL(fileURLWithPath: String(cString: path), isDirectory: true)
+    }
+
+    func userDataSyncDirectory() -> URL? {
+        guard let path = ktb_rime_copy_user_data_sync_dir(session) else {
+            return nil
+        }
+        defer {
+            ktb_rime_string_free(path)
+        }
+        return URL(fileURLWithPath: String(cString: path), isDirectory: true)
+    }
+}
+
+public enum RimeUserDBTextSnapshotProviderError: Error, Equatable {
+    case unavailable
+    case syncFailed
+    case snapshotNotFound(schemaID: String)
+}
+
+public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
+    private let configuration: NativeRimeConfiguration?
+    private let fileManager: FileManager
+
+    public init(
+        configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration(),
+        fileManager: FileManager = .default
+    ) {
+        self.configuration = configuration
+        self.fileManager = fileManager
+    }
+
+    public func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
+        guard let configuration,
+              let session = NativeRimeSession(configuration: configuration, fileManager: fileManager) else {
+            throw RimeUserDBTextSnapshotProviderError.unavailable
+        }
+        guard session.syncUserData() else {
+            throw RimeUserDBTextSnapshotProviderError.syncFailed
+        }
+        let roots = snapshotSearchRoots(
+            syncDirectory: session.userDataSyncDirectory(),
+            userDataDirectory: session.userDataDirectory() ?? configuration.userDataURL
+        )
+        guard let snapshotURL = findUserDBTextSnapshot(schemaID: schemaID, roots: roots) else {
+            throw RimeUserDBTextSnapshotProviderError.snapshotNotFound(schemaID: schemaID)
+        }
+        let attributes = try? fileManager.attributesOfItem(atPath: snapshotURL.path)
+        let modifiedAt = attributes?[.modificationDate] as? Date
+        let content = try String(contentsOf: snapshotURL, encoding: .utf8)
+        return RimeUserDBTextSnapshot(
+            schemaID: schemaID,
+            fileURL: snapshotURL,
+            modifiedAt: modifiedAt,
+            content: content
+        )
+    }
+
+    private func snapshotSearchRoots(syncDirectory: URL?, userDataDirectory: URL) -> [URL] {
+        var roots: [URL] = []
+        if let syncDirectory {
+            roots.append(syncDirectory)
+        }
+        roots.append(userDataDirectory.appendingPathComponent("sync", isDirectory: true))
+        roots.append(userDataDirectory)
+        var seen = Set<String>()
+        return roots.filter { root in
+            let path = root.standardizedFileURL.path
+            guard !seen.contains(path) else {
+                return false
+            }
+            seen.insert(path)
+            return fileManager.fileExists(atPath: path)
+        }
+    }
+
+    private func findUserDBTextSnapshot(schemaID: String, roots: [URL]) -> URL? {
+        let filename = "\(schemaID).userdb.txt"
+        for root in roots {
+            let direct = root.appendingPathComponent(filename, isDirectory: false)
+            if fileManager.fileExists(atPath: direct.path) {
+                return direct
+            }
+            guard let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+            for case let url as URL in enumerator where url.lastPathComponent == filename {
+                return url
+            }
+        }
+        return nil
     }
 }
 

@@ -29,6 +29,12 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case cancelPrevious = "cancel_previous"
     case staleResultDropped = "stale_result_dropped"
     case stateApplied = "state_applied"
+    case lexicalProfileLoad = "lexical_profile_load"
+    case rimeUserDBSyncStart = "rime_userdb_sync_start"
+    case rimeUserDBSyncEnd = "rime_userdb_sync_end"
+    case rimeUserDBParse = "rime_userdb_parse"
+    case lexicalProfileUpdated = "lexical_profile_updated"
+    case lexicalProfileFallback = "lexical_profile_fallback"
 }
 
 public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {

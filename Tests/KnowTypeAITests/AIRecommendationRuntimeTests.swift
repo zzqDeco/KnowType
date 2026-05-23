@@ -546,7 +546,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(repaired.contains("- Keep this manual note."))
     }
 
-    func testEnvironmentLoadRepairsDuplicateGeneratedMarkersInMemoryOnly() throws {
+    func testEnvironmentLoadRepairsDuplicateGeneratedMarkersAndPersistsRepair() throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let environmentURL = directory.appendingPathComponent("ENV.md")
@@ -572,8 +572,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let snapshot = try store.loadSnapshot()
         let diskContent = try String(contentsOf: environmentURL, encoding: .utf8)
 
-        XCTAssertEqual(diskContent, polluted)
-        XCTAssertNotEqual(snapshot.content, diskContent)
+        XCTAssertNotEqual(diskContent, polluted)
+        XCTAssertEqual(snapshot.content, diskContent)
         XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
         XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
         XCTAssertFalse(snapshot.content.contains("Remove duplicate"))

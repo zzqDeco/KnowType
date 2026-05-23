@@ -144,9 +144,13 @@ public struct LexicalContextBuilder: Sendable {
     public func snapshot(
         rimeCandidates: [String] = [],
         recentCommits: [String] = [],
-        selectionHistory: [String] = []
+        selectionHistory: [String] = [],
+        persistentTerms: [LexicalContextTerm] = [],
+        persistentRecentCommits: [String] = [],
+        persistentSourceSummary: [String] = []
     ) -> LexicalContextSnapshot? {
         var scores: [String: (score: Double, source: String)] = [:]
+        addTerms(persistentTerms, to: &scores)
         addTerms(rimeCandidates, source: "rime-candidates", baseScore: 1.0, to: &scores)
         addTerms(selectionHistory.reversed(), source: "selection-history", baseScore: 0.86, to: &scores)
         addTerms(recentCommits.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
@@ -163,7 +167,7 @@ public struct LexicalContextBuilder: Sendable {
             }
             .prefix(maxTerms)
 
-        let commits = recentCommits
+        let commits = (persistentRecentCommits + recentCommits)
             .compactMap(Self.sanitizedProfileText)
             .suffix(maxRecentCommits)
 
@@ -174,7 +178,9 @@ public struct LexicalContextBuilder: Sendable {
             sourceSummary: sourceSummary(
                 rimeCandidates: rimeCandidates,
                 recentCommits: recentCommits,
-                selectionHistory: selectionHistory
+                selectionHistory: selectionHistory,
+                persistentTerms: persistentTerms,
+                persistentSourceSummary: persistentSourceSummary
             )
         )
         return snapshot.isEmpty ? nil : snapshot
@@ -196,6 +202,23 @@ public struct LexicalContextBuilder: Sendable {
                 scores[clean] = (score: existing.score + nextScore * 0.25, source: existing.source)
             } else {
                 scores[clean] = (score: nextScore, source: source)
+            }
+        }
+    }
+
+    private func addTerms(
+        _ terms: [LexicalContextTerm],
+        to scores: inout [String: (score: Double, source: String)]
+    ) {
+        for term in terms {
+            guard let clean = Self.sanitizedProfileText(term.text) else {
+                continue
+            }
+            let nextScore = max(0, min(1, term.score)) * 0.58
+            if let existing = scores[clean] {
+                scores[clean] = (score: existing.score + nextScore * 0.25, source: existing.source)
+            } else {
+                scores[clean] = (score: nextScore, source: term.source)
             }
         }
     }
@@ -247,13 +270,18 @@ public struct LexicalContextBuilder: Sendable {
     private func sourceSummary(
         rimeCandidates: [String],
         recentCommits: [String],
-        selectionHistory: [String]
+        selectionHistory: [String],
+        persistentTerms: [LexicalContextTerm],
+        persistentSourceSummary: [String]
     ) -> [String] {
-        [
+        var summary = [
             "rime-candidates: \(rimeCandidates.count)",
             "recent-commits: \(recentCommits.count)",
-            "selection-history: \(selectionHistory.count)"
+            "selection-history: \(selectionHistory.count)",
+            "rime-userdb: \(persistentTerms.count)"
         ]
+        summary.append(contentsOf: persistentSourceSummary)
+        return summary
     }
 
     private func countSignals(_ signals: [String], in text: String) -> Int {
@@ -297,12 +325,15 @@ public struct LexicalContextBuilder: Sendable {
             .map(\.key)
     }
 
-    private static func sanitizedProfileText(_ text: String) -> String? {
+    public static func sanitizedProfileText(_ text: String) -> String? {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 48 else {
             return nil
         }
         if TextProtection.requiresNoCorrection(clean) {
+            return nil
+        }
+        if clean.range(of: #"^\d+$"#, options: .regularExpression) != nil {
             return nil
         }
         if clean.range(of: #"^(https?://|[A-Za-z]:/|/|~\/)"#, options: .regularExpression) != nil {

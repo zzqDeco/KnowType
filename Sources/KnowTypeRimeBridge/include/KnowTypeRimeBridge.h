@@ -60,6 +60,12 @@ bool ktb_rime_highlight_candidate_on_current_page(KTBRimeSession *session, size_
 
 bool ktb_rime_change_page(KTBRimeSession *session, bool backward);
 
+bool ktb_rime_sync_user_data(KTBRimeSession *session);
+
+char *ktb_rime_copy_user_data_dir(KTBRimeSession *session);
+
+char *ktb_rime_copy_user_data_sync_dir(KTBRimeSession *session);
+
 void ktb_rime_string_free(char *value);
 
 #ifdef __cplusplus
