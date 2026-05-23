@@ -1587,6 +1587,43 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testRimeUserDBSyncUsesActiveConversionSchemaID() async throws {
+        let client = FakeInputControllerClient()
+        let rimeProvider = CountingRimeUserDBTextSnapshotProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            rimeUserDBTextProvider: rimeProvider,
+            conversionEngine: FixtureNativeConversionEngine(activeSchemaID: "custom_schema")
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        for _ in 0..<30 {
+            if await rimeProvider.requestCount > 0 {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        let requestedSchemaIDs = await rimeProvider.requestedSchemaIDs
+        XCTAssertEqual(requestedSchemaIDs, ["custom_schema"])
+    }
+
+    func testLexicalProfileRefreshGateRejectsStaleGenerations() {
+        let gate = LexicalProfileRefreshGate()
+        let first = gate.next()
+        XCTAssertTrue(gate.isCurrent(first))
+
+        let second = gate.next()
+
+        XCTAssertFalse(gate.isCurrent(first))
+        XCTAssertTrue(gate.isCurrent(second))
+    }
+
+    @MainActor
     func testProtectedAppInputDoesNotReachAIRecommendationOrLaterLexicalProfile() async throws {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
@@ -3007,8 +3044,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
 private struct FixtureNativeConversionEngine: KnowTypeConversionEngine {
     var isNativeActive = true
+    var activeSchemaID = "pinyin_simp"
     private var rawInput = ""
     private var currentSnapshot = ConversionEngineSnapshot(engineName: "native-test")
+
+    init(activeSchemaID: String = "pinyin_simp") {
+        self.activeSchemaID = activeSchemaID
+    }
 
     var snapshot: ConversionEngineSnapshot {
         currentSnapshot
@@ -4165,9 +4207,11 @@ private final class FakeUserSelectionHistoryPersistence: InputControllerUserSele
 
 private actor CountingRimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
     private var count = 0
+    private var schemaIDs: [String] = []
 
     func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
         count += 1
+        schemaIDs.append(schemaID)
         return RimeUserDBTextSnapshot(
             schemaID: schemaID,
             fileURL: URL(fileURLWithPath: "/tmp/\(schemaID).userdb.txt"),
@@ -4177,6 +4221,10 @@ private actor CountingRimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProv
 
     var requestCount: Int {
         count
+    }
+
+    var requestedSchemaIDs: [String] {
+        schemaIDs
     }
 }
 

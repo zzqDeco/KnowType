@@ -52,7 +52,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let lexicalProfileStore: LexicalProfileStore
     private let rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)?
     private var lexicalProfileRefreshTask: Task<Void, Never>?
-    private var lexicalProfileRefreshGeneration = 0
+    private let lexicalProfileRefreshGate = LexicalProfileRefreshGate()
     private let taskSupervisor = InputTaskSupervisor()
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
@@ -1541,8 +1541,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard let rimeUserDBTextProvider else {
             return
         }
-        lexicalProfileRefreshGeneration += 1
-        let generation = lexicalProfileRefreshGeneration
+        let generation = lexicalProfileRefreshGate.next()
         lexicalProfileRefreshTask?.cancel()
 
         let recentCommits = recentLexicalCommits
@@ -1551,7 +1550,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let diagnosticSink = aiDiagnosticSink
         let builder = lexicalContextBuilder
         let parser = RimeUserDBTextParser(maxTerms: 64)
-        let schemaID = "pinyin_simp"
+        let schemaID = conversionEngine.activeSchemaID
+        let refreshGate = lexicalProfileRefreshGate
 
         let task = Task.detached(priority: .utility) { [rimeUserDBTextProvider, diagnosticSink] in
             do {
@@ -1603,6 +1603,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                             reason: "empty_after_parse"
                         )
                     )
+                    return
+                }
+                guard !Task.isCancelled, refreshGate.isCurrent(generation) else {
                     return
                 }
                 _ = try store.save(
@@ -2350,6 +2353,28 @@ private enum CompositionLifecycleFinishReason: String {
 private enum CompositionLifecycleCommitPolicy {
     case none
     case commitRawIfNeeded
+}
+
+final class LexicalProfileRefreshGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+
+    func next() -> Int {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        generation += 1
+        return generation
+    }
+
+    func isCurrent(_ candidate: Int) -> Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return generation == candidate
+    }
 }
 
 private extension Collection {

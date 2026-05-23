@@ -39,6 +39,20 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.rawInput, "ni")
     }
 
+    func testEngineExposesConfiguredSchemaIDForLexicalProfile() {
+        let configuration = NativeRimeConfiguration(
+            libraryURL: URL(fileURLWithPath: "/tmp/missing-librime.dylib"),
+            sharedDataURL: URL(fileURLWithPath: "/tmp/missing-rime-data", isDirectory: true),
+            userDataURL: URL(fileURLWithPath: "/tmp/missing-rime-user", isDirectory: true),
+            logURL: URL(fileURLWithPath: "/tmp/missing-rime-logs", isDirectory: true),
+            schemaID: "custom_schema"
+        )
+
+        let engine = RimeConversionEngine(configuration: configuration)
+
+        XCTAssertEqual(engine.activeSchemaID, "custom_schema")
+    }
+
     func testUnavailableSessionPreservesRawBypassForNonASCIIInput() {
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),

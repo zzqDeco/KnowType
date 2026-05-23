@@ -28,7 +28,7 @@ input.
 - `commitComposition` is exposed for IMK lifecycle commits and uses Rime's native composition commit when available.
 - Native snapshots include Rime raw input and preedit; the coordinator uses preedit as marked text and syncs raw input after partial commits.
 - Native snapshots copy only the current Rime menu page on the synchronous key path; full candidate-list iteration is intentionally absent from the bridge.
-- Userdb frequency refresh uses Rime sync from a background provider, then scans for the schema's `*.userdb.txt`; it never parses `.ldb` files and is not called from the synchronous key path.
+- Userdb frequency refresh uses Rime sync from a background provider, then scans for the active schema's `*.userdb.txt`; it never parses `.ldb` files and is not called from the synchronous key path.
 - Explicit segment-candidate selection is retired from the production IMK path.
 - The SwiftPM target does not link to librime at build time; `KnowTypeRimeBridge`
   loads `librime.1.dylib` dynamically.

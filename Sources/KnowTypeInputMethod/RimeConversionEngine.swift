@@ -105,12 +105,17 @@ public struct ConversionEngineResult: Sendable, Equatable {
 public protocol KnowTypeConversionEngine: Sendable {
     var isNativeActive: Bool { get }
     var snapshot: ConversionEngineSnapshot { get }
+    var activeSchemaID: String { get }
 
     mutating func reset()
     mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult
 }
 
-extension KnowTypeConversionEngine {
+public extension KnowTypeConversionEngine {
+    var activeSchemaID: String {
+        "pinyin_simp"
+    }
+
     func userDBTextSnapshot(schemaID _: String) async throws -> RimeUserDBTextSnapshot {
         throw RimeUserDBTextSnapshotProviderError.unavailable
     }
@@ -121,6 +126,7 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     private var currentSnapshot: ConversionEngineSnapshot
     private var nativeBypassUntilReset = false
     private var nativeRawInputMirror = ""
+    private let configuredSchemaID: String
 
     public var isNativeActive: Bool {
         nativeSession != nil && !nativeBypassUntilReset
@@ -130,10 +136,15 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         currentSnapshot
     }
 
+    public var activeSchemaID: String {
+        configuredSchemaID
+    }
+
     public init(
         traditionalInputEngine _: TraditionalInputEngine? = nil,
         configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration()
     ) {
+        self.configuredSchemaID = configuration?.schemaID ?? "pinyin_simp"
         self.nativeSession = configuration.flatMap { NativeRimeSession(configuration: $0) }
         self.currentSnapshot = nativeSession?.snapshot() ?? Self.unavailableSnapshot(rawInput: "")
     }
@@ -345,7 +356,8 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
             userDataURL: userDataURL,
             logURL: logURL,
             distributionVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0",
-            appName: "rime.knowtype"
+            appName: "rime.knowtype",
+            schemaID: environment["KNOWTYPE_RIME_SCHEMA_ID"].flatMap { $0.isEmpty ? nil : $0 } ?? "pinyin_simp"
         )
     }
 

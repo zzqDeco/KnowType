@@ -327,9 +327,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - never stores full Rime userdb exports, raw provider responses, or API keys
 
 Rime userdb profile refresh is a background-only input-method task. It calls
-librime sync, scans for the current schema's `*.userdb.txt`, parses
+librime sync, scans for the active conversion schema's `*.userdb.txt`, parses
 `text<TAB>code<TAB>frequency` rows, and falls back to the last stored lexical
-profile when sync or parsing fails.
+profile when sync or parsing fails. Refreshes are generation-guarded before
+persisting so a stale background task cannot overwrite a newer lexical profile.
 
 KnowType-specific settings use the InputMethodKit preferences window opened from
 the input-method menu as the primary user entry point. `KnowType Settings...`

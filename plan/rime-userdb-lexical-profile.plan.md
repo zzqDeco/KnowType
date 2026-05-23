@@ -22,6 +22,9 @@ keydown hot path.
 - Merge current Rime candidates, selection history, recent commits, and Rime
   userdb terms into a top-K lexical snapshot whose hash participates in AI cache
   keys.
+- Derive the userdb snapshot name from the active Rime schema and guard writes
+  with a refresh generation so stale background tasks cannot overwrite newer
+  profiles.
 - Repair duplicate `ENV.md` generated markers during load so polluted context
   files are cleaned before prompt use.
 
