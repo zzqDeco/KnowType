@@ -104,12 +104,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let (coordinator, host, _) = makeCoordinator(client: client)
 
         for number in [1, 2, 3] {
-            XCTAssertTrue(
-                coordinator.handle(
-                    stroke: InputKeyStroke(text: "\(number)", keyCode: keyCode(forNumber: number)),
-                    client: client
-                )
-            )
+            XCTAssertTrue(coordinator.handleText("\(number)", client: client))
         }
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["1", "2", "3"])
@@ -120,6 +115,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(client.markedTextWrites.isEmpty)
         XCTAssertTrue(host.panelStates.isEmpty)
         XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testIdleDigitKeyCodesInsertDirectPassthroughTextWithoutComposition() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        for number in [0, 1, 2] {
+            XCTAssertTrue(
+                coordinator.handle(
+                    stroke: InputKeyStroke(text: "\(number)", keyCode: keyCode(forNumber: number)),
+                    client: client
+                )
+            )
+        }
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["0", "1", "2"])
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(host.panelStates.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testIdlePassthroughReplacesStaleMarkedRange() {
+        let client = FakeInputControllerClient()
+        client.markedRangeValue = NSRange(location: 7, length: 2)
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, " ")
+        XCTAssertEqual(
+            client.insertTextWrites.last?.replacementRange,
+            NSRange(location: 7, length: 2)
+        )
     }
 
     func testCompositionDisplaysRawPinyinUntilCandidateIsConfirmed() {
@@ -2424,6 +2452,28 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "尼")
     }
 
+    func testNativeCandidateOnlySnapshotKeepsNumberSelectionActive() {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: CandidateOnlyNativeConversionEngine(
+                candidates: ["候一", "候二"],
+                recorder: recorder
+            )
+        )
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [1])
+        XCTAssertEqual(client.insertTextWrites.last?.text, "候二")
+    }
+
     func testNativeOutOfRangeNumberIsConsumedWithoutAppendingDigit() {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
@@ -3452,6 +3502,57 @@ private struct RecordingNativeConversionEngine: KnowTypeConversionEngine {
             pageNumber: 0,
             isLastPage: true,
             engineName: "native-test"
+        )
+    }
+}
+
+private struct CandidateOnlyNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    let candidates: [String]
+    let recorder: NativeSelectionRecorder
+    private var currentSnapshot: ConversionEngineSnapshot
+
+    init(candidates: [String], recorder: NativeSelectionRecorder) {
+        self.candidates = candidates
+        self.recorder = recorder
+        currentSnapshot = Self.makeSnapshot(candidates: candidates)
+    }
+
+    var snapshot: ConversionEngineSnapshot {
+        currentSnapshot
+    }
+
+    mutating func reset() {
+        currentSnapshot = Self.makeSnapshot(candidates: candidates)
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .selectCandidateOnCurrentPage(let index), .selectCandidate(let index):
+            recorder.selectedIndices.append(index)
+            guard candidates.indices.contains(index) else {
+                return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+            }
+            let commit = candidates[index]
+            currentSnapshot = ConversionEngineSnapshot(engineName: "candidate-only-test")
+            return ConversionEngineResult(handled: true, commitText: commit, snapshot: currentSnapshot)
+        default:
+            return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+        }
+    }
+
+    private static func makeSnapshot(candidates: [String]) -> ConversionEngineSnapshot {
+        ConversionEngineSnapshot(
+            rawInput: "",
+            preedit: "",
+            candidates: candidates.enumerated().map { index, text in
+                ConversionEngineCandidate(text: text, index: index, source: "candidate-only-test")
+            },
+            highlightedIndex: 0,
+            pageSize: max(candidates.count, 1),
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "candidate-only-test"
         )
     }
 }

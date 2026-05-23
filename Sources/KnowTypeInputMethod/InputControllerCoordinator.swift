@@ -260,6 +260,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
         switch intent {
         case .append(let text):
+            if !hasActiveTextComposition(),
+               Self.isDirectPassthroughDigitText(text) {
+                return insertDirectPassthroughText(text, client: client)
+            }
             return appendComposition(text, client: client)
         case .symbol(let text):
             if conversionEngine.isNativeActive,
@@ -318,7 +322,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 return insertDirectPassthroughText(String(number), client: client)
             }
             if conversionEngine.isNativeActive,
-               nativeSnapshotHasActiveInput(conversionEngine.snapshot),
+               conversionEngine.snapshot.hasComposition,
                number > 0 {
                 return selectNativeCandidateOnCurrentPage(number - 1, client: client)
             }
@@ -1156,7 +1160,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func hasActiveTextComposition() -> Bool {
         !rawBuffer.isEmpty
             || compositionBuffer.hasResolvedSegments
-            || nativeSnapshotHasActiveInput(conversionEngine.snapshot)
+            || conversionEngine.snapshot.hasComposition
     }
 
     private func learnNativeCommitIfFinal(_ result: ConversionEngineResult, client: InputControllerClient?) {
@@ -1458,11 +1462,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func insertDirectPassthroughText(_ text: String, client: InputControllerClient?) -> Bool {
-        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
         guard let lifecycleClient = client ?? host?.currentClient else {
             return false
         }
-        lifecycleClient.insertText(text, replacementRange: Self.noReplacementRange)
+        let replacementRange = replacementRangeForCommit(lifecycleClient)
+        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
+        lifecycleClient.insertText(text, replacementRange: replacementRange)
         return true
     }
 
@@ -2196,7 +2201,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5
     private static let preferenceReloadInterval: TimeInterval = 1
-    private static let noReplacementRange = NSRange(location: NSNotFound, length: NSNotFound)
+
+    private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
+        !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
+            scalar.value >= 48 && scalar.value <= 57
+        }
+    }
 }
 
 private enum CompositionLifecycleFinishReason: String {
