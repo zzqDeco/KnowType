@@ -25,8 +25,9 @@ keydown hot path.
   keys.
 - Prefer the local `installation_id` sync snapshot, use deterministic fallback
   ordering for parallel sync folders, and guard writes with a refresh generation.
-  Profile JSON/Markdown bytes are staged to temporary files before the gate is
-  acquired; only the final publish/rename runs under the generation guard.
+  Profile JSON/Markdown bytes are staged outside the gate; conditional publish
+  re-checks freshness without holding the gate lock during filesystem operations
+  and rolls back promoted files if a refresh becomes stale mid-publish.
 - Detect the text column in metadata snapshot rows so code strings are not
   persisted as lexical terms when row order differs across Rime exports.
 - Treat Rime sync as best-effort: if sync fails but a matching exported snapshot

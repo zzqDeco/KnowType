@@ -336,10 +336,10 @@ ASCII lowercase code strings, so both `code<TAB>text<TAB>c=...` snapshots and
 reversed metadata fixtures avoid persisting code strings as user terms.
 Snapshot selection prefers the local `installation_id` sync folder, then chooses
 deterministically by root, mtime, and path. Refreshes use a process-wide store
-and generation gate shared by IMK sessions. JSON/Markdown bytes are staged to
-temporary files before acquiring the gate; stale generations are discarded before
-the final profile paths are touched, and only the short final publish runs under
-the generation guard.
+and generation gate shared by IMK sessions. JSON/Markdown bytes are staged
+outside the generation gate, and conditional publish re-checks freshness without
+holding the gate lock across filesystem operations. If a refresh becomes stale
+mid-publish, any promoted profile files are rolled back before the task returns.
 AI requests merge persisted `LEXICAL_PROFILE.md` terms only when the stored
 profile schema matches the active Rime schema.
 

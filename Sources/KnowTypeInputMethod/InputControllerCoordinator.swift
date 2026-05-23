@@ -1622,10 +1622,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     store.discardPreparedSave(transaction)
                     return
                 }
-                guard let _ = try refreshGate.commitIfCurrent(generation, {
-                    try store.commitPreparedSave(transaction)
+                guard let _ = try store.commitPreparedSaveIfCurrent(transaction, shouldCommit: {
+                    !Task.isCancelled && refreshGate.isCurrent(generation)
                 }) else {
-                    store.discardPreparedSave(transaction)
                     return
                 }
                 diagnosticSink.record(
@@ -2388,17 +2387,6 @@ final class LexicalProfileRefreshGate: @unchecked Sendable {
             lock.unlock()
         }
         return generation == candidate
-    }
-
-    func commitIfCurrent<T>(_ candidate: Int, _ operation: () throws -> T) throws -> T? {
-        lock.lock()
-        defer {
-            lock.unlock()
-        }
-        guard generation == candidate else {
-            return nil
-        }
-        return try operation()
     }
 
 }

@@ -89,18 +89,23 @@ public struct RimeUserDBTextParser: Sendable {
     }
 
     private func metadataRowText(_ firstColumn: Substring, _ secondColumn: Substring) -> String? {
-        let first = String(firstColumn)
-        let second = String(secondColumn)
-        let firstText = LexicalContextBuilder.sanitizedProfileText(first)
-        let secondText = LexicalContextBuilder.sanitizedProfileText(second)
-        switch (looksLikeRimeCode(first), looksLikeRimeCode(second)) {
-        case (true, false):
-            return secondText
-        case (false, true):
-            return firstText
-        default:
-            return secondText ?? firstText
-        }
+        [firstColumn, secondColumn]
+            .enumerated()
+            .compactMap { index, column -> (text: String, score: Int, index: Int)? in
+                let raw = String(column).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let text = LexicalContextBuilder.sanitizedProfileText(raw) else {
+                    return nil
+                }
+                return (text, metadataTextScore(raw), index)
+            }
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.index < rhs.index
+                }
+                return lhs.score > rhs.score
+            }
+            .first { $0.score >= 0 }?
+            .text
     }
 
     private func looksLikeRimeCode(_ value: String) -> Bool {
@@ -111,11 +116,26 @@ public struct RimeUserDBTextParser: Sendable {
         return trimmed.unicodeScalars.allSatisfy { scalar in
             let value = scalar.value
             return (97...122).contains(value)
+                || (48...57).contains(value)
                 || value == 0x20
                 || value == 0x27
                 || value == 0x2D
                 || value == 0x5F
         }
+    }
+
+    private func metadataTextScore(_ value: String) -> Int {
+        var score = 0
+        if value.range(of: #"\p{Han}"#, options: .regularExpression) != nil {
+            score += 6
+        }
+        if value.unicodeScalars.contains(where: { $0.value > 127 }) {
+            score += 2
+        }
+        if looksLikeRimeCode(value) {
+            score -= 4
+        }
+        return score
     }
 
     private func metadataFrequency(_ metadata: String) -> Double? {
@@ -161,6 +181,11 @@ public struct LexicalProfileSaveTransaction: Sendable {
 private struct StagedLexicalProfileWrite: Sendable {
     var temporaryURL: URL
     var destinationURL: URL
+}
+
+private struct PublishedLexicalProfileBackup: Sendable {
+    var destinationURL: URL
+    var backupURL: URL?
 }
 
 public final class LexicalProfileStore: @unchecked Sendable {
@@ -257,7 +282,7 @@ public final class LexicalProfileStore: @unchecked Sendable {
             discardPreparedSave(transaction)
             return nil
         }
-        return try commitPreparedSave(transaction)
+        return try commitPreparedSaveIfCurrent(transaction, shouldCommit: shouldCommit)
     }
 
     public func prepareSave(
@@ -291,13 +316,24 @@ public final class LexicalProfileStore: @unchecked Sendable {
 
     @discardableResult
     public func commitPreparedSave(_ transaction: LexicalProfileSaveTransaction) throws -> PersistentLexicalProfile {
-        do {
-            for stagedWrite in transaction.stagedWrites {
-                try promote(stagedWrite)
-            }
-        } catch {
-            cleanup(transaction.stagedWrites)
-            throw error
+        _ = try publish(transaction, shouldContinue: { true })
+        lock.lock()
+        profile = transaction.profile
+        lock.unlock()
+        return transaction.profile
+    }
+
+    @discardableResult
+    public func commitPreparedSaveIfCurrent(
+        _ transaction: LexicalProfileSaveTransaction,
+        shouldCommit: () -> Bool
+    ) throws -> PersistentLexicalProfile? {
+        guard shouldCommit() else {
+            discardPreparedSave(transaction)
+            return nil
+        }
+        guard try publish(transaction, shouldContinue: shouldCommit) else {
+            return nil
         }
         lock.lock()
         profile = transaction.profile
@@ -350,6 +386,69 @@ public final class LexicalProfileStore: @unchecked Sendable {
             _ = try fileManager.replaceItemAt(url, withItemAt: stagedWrite.temporaryURL)
         } else {
             try fileManager.moveItem(at: stagedWrite.temporaryURL, to: url)
+        }
+    }
+
+    private func publish(
+        _ transaction: LexicalProfileSaveTransaction,
+        shouldContinue: () -> Bool
+    ) throws -> Bool {
+        var backups: [PublishedLexicalProfileBackup] = []
+        do {
+            for stagedWrite in transaction.stagedWrites {
+                guard shouldContinue() else {
+                    rollback(backups)
+                    cleanup(transaction.stagedWrites)
+                    return false
+                }
+                let backup = try backupDestination(stagedWrite.destinationURL)
+                backups.append(backup)
+                try promote(stagedWrite)
+            }
+            guard shouldContinue() else {
+                rollback(backups)
+                cleanup(transaction.stagedWrites)
+                return false
+            }
+            cleanupBackups(backups)
+            return true
+        } catch {
+            rollback(backups)
+            cleanup(transaction.stagedWrites)
+            throw error
+        }
+    }
+
+    private func backupDestination(_ destinationURL: URL) throws -> PublishedLexicalProfileBackup {
+        guard fileManager.fileExists(atPath: destinationURL.path) else {
+            return PublishedLexicalProfileBackup(destinationURL: destinationURL, backupURL: nil)
+        }
+        let directory = destinationURL.deletingLastPathComponent()
+        let backupURL = directory.appendingPathComponent(".\(destinationURL.lastPathComponent).\(UUID().uuidString).bak")
+        try fileManager.copyItem(at: destinationURL, to: backupURL)
+        return PublishedLexicalProfileBackup(destinationURL: destinationURL, backupURL: backupURL)
+    }
+
+    private func rollback(_ backups: [PublishedLexicalProfileBackup]) {
+        for backup in backups.reversed() {
+            if fileManager.fileExists(atPath: backup.destinationURL.path) {
+                try? fileManager.removeItem(at: backup.destinationURL)
+            }
+            if let backupURL = backup.backupURL {
+                try? fileManager.moveItem(at: backupURL, to: backup.destinationURL)
+            }
+        }
+    }
+
+    private func cleanupBackup(_ backup: PublishedLexicalProfileBackup) {
+        if let backupURL = backup.backupURL {
+            try? fileManager.removeItem(at: backupURL)
+        }
+    }
+
+    private func cleanupBackups(_ backups: [PublishedLexicalProfileBackup]) {
+        for backup in backups {
+            cleanupBackup(backup)
         }
     }
 
