@@ -78,7 +78,8 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public func loadSnapshot() throws -> AIDocumentSnapshot {
         try ensureExists(defaultContent: Self.defaultContent)
         let content = try String(contentsOf: fileURL, encoding: .utf8)
-        return AIDocumentSnapshot(content: content)
+        let repaired = Self.repairingGeneratedSectionMarkers(in: content)
+        return AIDocumentSnapshot(content: repaired)
     }
 
     public func replaceGeneratedSection(with generatedMarkdown: String) throws -> AIDocumentSnapshot {
@@ -90,6 +91,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     public static func replacingGeneratedSection(in content: String, with generatedMarkdown: String) -> String {
+        let content = repairingGeneratedSectionMarkers(in: content)
         let generated = generatedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let startRange = content.range(of: generatedStart),
               let endRange = content.range(of: generatedEnd),
@@ -109,6 +111,87 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         let replacement = "\n\(generated)\n"
         next.replaceSubrange(startRange.upperBound..<endRange.lowerBound, with: replacement)
         return next
+    }
+
+    public static func repairingGeneratedSectionMarkers(in content: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+        var repaired: [String] = []
+        var index = 0
+        var completedFirstSection = false
+        var reachedUserNotes = false
+
+        while index < lines.count {
+            let line = lines[index]
+            let marker = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !completedFirstSection {
+                repaired.append(line)
+                if marker == generatedStart {
+                    index += 1
+                    while index < lines.count {
+                        let generatedLine = lines[index]
+                        let generatedMarker = generatedLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if generatedMarker == generatedEnd {
+                            repaired.append(generatedLine)
+                            completedFirstSection = true
+                            break
+                        } else if generatedMarker != generatedStart {
+                            repaired.append(generatedLine)
+                        }
+                        index += 1
+                    }
+                }
+                index += 1
+                continue
+            }
+
+            if marker == "## User Notes" {
+                reachedUserNotes = true
+            }
+
+            if !reachedUserNotes,
+               marker == generatedStart,
+               let duplicateEndIndex = matchingGeneratedEndIndex(in: lines, from: index + 1) {
+                removeTrailingDuplicateEnvironmentHeader(from: &repaired)
+                index = duplicateEndIndex + 1
+                continue
+            }
+
+            repaired.append(line)
+            index += 1
+        }
+
+        guard completedFirstSection else {
+            return content
+        }
+        return repaired.joined(separator: "\n")
+    }
+
+    private static func matchingGeneratedEndIndex(in lines: [String], from startIndex: Int) -> Int? {
+        var index = startIndex
+        while index < lines.count {
+            let marker = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            switch marker {
+            case generatedEnd:
+                return index
+            case generatedStart:
+                return nil
+            default:
+                index += 1
+            }
+        }
+        return nil
+    }
+
+    private static func removeTrailingDuplicateEnvironmentHeader(from lines: inout [String]) {
+        var cursor = lines.count
+        while cursor > 0, lines[cursor - 1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            cursor -= 1
+        }
+        guard cursor > 0,
+              lines[cursor - 1].trimmingCharacters(in: .whitespacesAndNewlines) == "# KnowType Environment" else {
+            return
+        }
+        lines.removeSubrange((cursor - 1)..<lines.count)
     }
 
     private func ensureExists(defaultContent: String) throws {

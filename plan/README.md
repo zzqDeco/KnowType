@@ -65,6 +65,7 @@ when converting a shipped plan into a short record.
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Avoid replacing provider failures with local mock continuation text | Active |
 | [ai-timeout-diagnostics.plan.md](ai-timeout-diagnostics.plan.md) | AI recommendation 10-second runtime timeout and privacy-preserving substate diagnostics | Active |
 | [ai-structured-output-contract.plan.md](ai-structured-output-contract.plan.md) | Provider-level structured output contract and diagnosable AI no-recommendation reasons | Active |
+| [ai-continuation-prompt-reliability.plan.md](ai-continuation-prompt-reliability.plan.md) | Task-specific suffix-generation prompt and ENV marker repair for reliable AI continuation | Active |
 | [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
 | [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persisted punctuation and symbol-width preferences | Active |
 | [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Active |

@@ -83,6 +83,24 @@ final class ProviderAdapterTests: XCTestCase {
         lengthLevel: .medium
     )
 
+    func testPromptBuilderUsesContinuationSpecificSuffixPrompt() {
+        let continuation = PromptBuilder.systemPrompt(for: .continuation)
+        let correction = PromptBuilder.systemPrompt(for: .correction)
+        let contextDigest = PromptBuilder.systemPrompt(for: .contextDigest)
+        let polish = PromptBuilder.systemPrompt(for: .polish)
+
+        XCTAssertTrue(continuation.contains("suffix generator"))
+        XCTAssertTrue(continuation.contains("lockedPrefix"))
+        XCTAssertTrue(continuation.contains("Empty candidates are allowed only"))
+        XCTAssertTrue(continuation.contains("same language as lockedPrefix and locale"))
+        XCTAssertTrue(continuation.contains(#"lockedPrefix="我觉得这个方案" text="还可以再细化一下。""#))
+        XCTAssertTrue(continuation.contains(#"lockedPrefix="This approach" text="keeps the hot path simple.""#))
+        XCTAssertFalse(continuation.contains("Chinese continuation"))
+        XCTAssertFalse(correction.contains("suffix generator"))
+        XCTAssertFalse(contextDigest.contains("suffix only"))
+        XCTAssertFalse(polish.contains("suffix generator"))
+    }
+
     func testOpenAIChatMapsRequestAndParsesCandidates() async throws {
         let content = #"{"candidates":[{"text":"还有进一步优化空间","confidence":0.9}]}"#
         let client = MockHTTPClient(json: #"{"choices":[{"message":{"content":"\#(content.replacingOccurrences(of: "\"", with: "\\\""))"}}]}"#)
@@ -106,6 +124,8 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(responseFormat["type"] as? String, "json_schema")
         let jsonSchema = try XCTUnwrap(responseFormat["json_schema"] as? [String: Any])
         XCTAssertEqual(jsonSchema["strict"] as? Bool, true)
+        let messages = try XCTUnwrap(bodyObject["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.first?["content"] as? String, PromptBuilder.systemPrompt(for: .continuation))
         XCTAssertEqual(response.candidates.first?.text, "还有进一步优化空间")
     }
 
@@ -227,6 +247,7 @@ final class ProviderAdapterTests: XCTestCase {
         let format = try XCTUnwrap(text["format"] as? [String: Any])
         XCTAssertEqual(format["type"] as? String, "json_schema")
         XCTAssertEqual(format["strict"] as? Bool, true)
+        XCTAssertEqual(bodyObject["instructions"] as? String, PromptBuilder.systemPrompt(for: .continuation))
         XCTAssertEqual(response.candidates.first?.text, "still needs more validation")
     }
 
@@ -338,9 +359,13 @@ final class ProviderAdapterTests: XCTestCase {
         let request = await client.capturedRequest()
         let bodyObject = try requestBodyObject(request)
         let generationConfig = try XCTUnwrap(bodyObject["generationConfig"] as? [String: Any])
+        let contents = try XCTUnwrap(bodyObject["contents"] as? [[String: Any]])
+        let parts = try XCTUnwrap(contents.first?["parts"] as? [[String: Any]])
+        let prompt = try XCTUnwrap(parts.first?["text"] as? String)
 
         XCTAssertEqual(generationConfig["responseMimeType"] as? String, "application/json")
         XCTAssertNotNil(generationConfig["responseSchema"] as? [String: Any])
+        XCTAssertTrue(prompt.hasPrefix(PromptBuilder.systemPrompt(for: .continuation)))
         XCTAssertEqual(response.candidates.first?.text, "继续推进")
     }
 
@@ -367,6 +392,7 @@ final class ProviderAdapterTests: XCTestCase {
 
         XCTAssertEqual(format["type"] as? String, "json_schema")
         XCTAssertEqual(format["strict"] as? Bool, true)
+        XCTAssertEqual(bodyObject["system"] as? String, PromptBuilder.systemPrompt(for: .continuation))
         XCTAssertEqual(response.candidates.first?.text, "继续推进")
     }
 
@@ -721,8 +747,11 @@ final class ProviderAdapterTests: XCTestCase {
 
         let response = try await provider.complete(llmRequest)
         let request = await client.capturedRequest()
+        let bodyObject = try requestBodyObject(request)
+        let messages = try XCTUnwrap(bodyObject["messages"] as? [[String: Any]])
 
         XCTAssertEqual(request?.url?.absoluteString, "http://localhost:11434/api/chat")
+        XCTAssertEqual(messages.first?["content"] as? String, PromptBuilder.systemPrompt(for: .continuation))
         XCTAssertEqual(response.candidates.first?.text, "may introduce extra complexity")
     }
 

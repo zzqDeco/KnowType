@@ -48,6 +48,11 @@ through strict local decoding instead of line-based candidate extraction.
 
 Real-time AI recommendation requests use `task: continuation`, `lockedPrefix`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
+Provider prompts are task-specific. Continuation requests use a short suffix-generation prompt where candidate `text`
+must be directly appendable after `lockedPrefix`; it must not repeat, paraphrase, translate, rewrite, or polish the locked
+prefix. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into
+those tasks. The local prefix-lock sanitizer remains authoritative even when a provider follows the prompt.
+
 ## Provider Kinds
 
 - `openai_chat`
@@ -305,6 +310,7 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - archives processed event files under `~/.knowtype/events/processed/`
 - summarizes after a batch threshold or interval
 - updates only the generated section in `ENV.md`
+- normalizes duplicate generated-section markers in loaded snapshots without writing during read, and persists repaired generated sections only during explicit replacement; unmatched markers and literal marker text in user notes are preserved
 - sanitizes Level 0 protected content before writing logs
 
 KnowType-specific settings use the InputMethodKit preferences window opened from
