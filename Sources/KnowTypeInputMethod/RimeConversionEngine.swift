@@ -137,7 +137,7 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     public var activeSchemaID: String {
-        configuredSchemaID
+        nativeSession?.currentSchemaID() ?? configuredSchemaID
     }
 
     public init(
@@ -604,6 +604,17 @@ final class NativeRimeSession: RimeUserDBSnapshotSession, @unchecked Sendable {
             ktb_rime_string_free(path)
         }
         return URL(fileURLWithPath: String(cString: path), isDirectory: true)
+    }
+
+    func currentSchemaID() -> String? {
+        guard let schemaID = ktb_rime_copy_current_schema(session) else {
+            return nil
+        }
+        defer {
+            ktb_rime_string_free(schemaID)
+        }
+        let value = String(cString: schemaID).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 
     func userDictionaryName(schemaID: String) -> String? {

@@ -16,7 +16,8 @@ keydown hot path.
 
 - Extend the Rime bridge with guarded `sync_user_data`, user-data-dir, and
   sync-dir accessors.
-- Resolve the active schema's Rime user dictionary name and parse its
+- Read the live active schema from the Rime session, resolve that schema's Rime
+  user dictionary name, and parse its
   `*.userdb.txt` sync snapshot rather than `.ldb` files.
 - Persist canonical profile JSON under Application Support and mirror readable
   markdown to `~/.knowtype/LEXICAL_PROFILE.md`.

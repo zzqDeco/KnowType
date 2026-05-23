@@ -327,8 +327,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - never stores full Rime userdb exports, raw provider responses, or API keys
 
 Rime userdb profile refresh is a background-only input-method task. It calls
-librime sync as a best-effort freshness step, resolves the schema's
-`translator/user_dict` or `translator/dictionary`, scans for that dictionary's
+librime sync as a best-effort freshness step, reads the live active schema from
+the Rime session, resolves that schema's `translator/user_dict` or
+`translator/dictionary`, scans for that dictionary's
 `*.userdb.txt`, and parses standard `code<TAB>text<TAB>c=... d=... t=...` rows
 while keeping compatibility with legacy `text<TAB>code<TAB>frequency` fixtures.
 Metadata rows identify the lexical text column by treating Rime code columns as

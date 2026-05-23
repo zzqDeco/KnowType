@@ -261,6 +261,11 @@ static void ktb_rime_context_init(RimeContext_stdbool *context) {
     context->data_size = (int)(sizeof(RimeContext_stdbool) - sizeof(context->data_size));
 }
 
+static void ktb_rime_status_init(RimeStatus_stdbool *status) {
+    memset(status, 0, sizeof(RimeStatus_stdbool));
+    status->data_size = (int)(sizeof(RimeStatus_stdbool) - sizeof(status->data_size));
+}
+
 static char *ktb_strdup(const char *value) {
     if (!value) {
         return NULL;
@@ -578,6 +583,34 @@ char *ktb_rime_copy_user_data_sync_dir(KTBRimeSession *session) {
     }
     if (KTB_RIME_API_HAS(session->api, get_sync_dir) && session->api->get_sync_dir) {
         return ktb_strdup(session->api->get_sync_dir());
+    }
+    return NULL;
+}
+
+char *ktb_rime_copy_current_schema(KTBRimeSession *session) {
+    if (!session || !session->api || session->session_id == 0) {
+        return NULL;
+    }
+    if (KTB_RIME_API_HAS(session->api, get_current_schema) &&
+        session->api->get_current_schema) {
+        char buffer[1024];
+        memset(buffer, 0, sizeof(buffer));
+        if (session->api->get_current_schema(session->session_id, buffer, sizeof(buffer)) &&
+            buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_status) &&
+        KTB_RIME_API_HAS(session->api, free_status) &&
+        session->api->get_status &&
+        session->api->free_status) {
+        RimeStatus_stdbool status;
+        ktb_rime_status_init(&status);
+        if (session->api->get_status(session->session_id, &status)) {
+            char *copy = ktb_strdup(status.schema_id);
+            session->api->free_status(&status);
+            return copy;
+        }
     }
     return NULL;
 }

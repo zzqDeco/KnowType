@@ -21,28 +21,35 @@ input.
 
 - The native bridge follows the mature Squirrel pattern: process a key, consume
   commit text, then read context/candidates.
-- Native sessions explicitly select `pinyin_simp`, matching the bundled
-  shared-data recipe set.
+- Native sessions initially select the configured schema, but
+  `activeSchemaID` is read back from the live Rime session through
+  `get_current_schema`/status so runtime schema switches feed the correct
+  lexical-profile refresh and merge gates.
 - Numeric selection maps displayed rows to Rime's current-page index before calling `select_candidate_on_current_page`.
 - Current-page highlight changes call Rime's `highlight_candidate_on_current_page` so arrow movement and hover keep the engine context authoritative.
 - `commitComposition` is exposed for IMK lifecycle commits and uses Rime's native composition commit when available.
 - Native snapshots include Rime raw input and preedit; the coordinator uses preedit as marked text and syncs raw input after partial commits.
 - Native snapshots copy only the current Rime menu page on the synchronous key path; full candidate-list iteration is intentionally absent from the bridge.
-- Userdb frequency refresh uses Rime sync as a best-effort background freshness step, resolves the active schema's user dictionary name, then scans deterministically for that dictionary's `*.userdb.txt`; it never parses `.ldb` files and is not called from the synchronous key path.
+- Userdb frequency refresh uses Rime sync as a best-effort background freshness
+  step, resolves the live active schema's user dictionary name, then scans
+  deterministically for that dictionary's `*.userdb.txt`; it never parses `.ldb`
+  files and is not called from the synchronous key path.
 - Explicit segment-candidate selection is retired from the production IMK path.
 - The SwiftPM target does not link to librime at build time; `KnowTypeRimeBridge`
   loads `librime.1.dylib` dynamically.
 - The bridge requires `rime_get_api_stdbool`; it does not fall back to the
   non-`stdbool` ABI because the local context/status structs use bool fields.
 - Calls into versioned Rime API tail members, such as current-page candidate
-  selection, highlight changes, composition commit, raw input, and page changes,
-  must check `data_size` before reading the mirrored function pointer.
+  selection, highlight changes, composition commit, raw input, current schema,
+  and page changes, must check `data_size` before reading the mirrored function
+  pointer.
 - Sync/user-data directory bridge calls also guard versioned API members before
   dereferencing function pointers and return fallback errors when unavailable.
 - The C bridge treats `commit_composition`, `highlight_candidate_on_current_page`,
-  `select_candidate_on_current_page`, `get_input`, and `change_page` as
-  versioned API members; missing members must return `false`/empty snapshots
-  instead of dereferencing beyond the runtime ABI.
+  `select_candidate_on_current_page`, `get_input`, `get_current_schema`, and
+  `change_page` as versioned API members; missing members must return
+  `false`/empty snapshots or fall back to status/configured values instead of
+  dereferencing beyond the runtime ABI.
 - Reset clears the native composition instead of tearing down the process-global
   Rime runtime.
 - Non-ASCII composition text bypasses the native session until reset and keeps raw input without producing local fallback candidates, preventing Rime's ASCII key API from silently diverging from the coordinator raw buffer.
