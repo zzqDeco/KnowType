@@ -19,23 +19,64 @@ public struct OpenAIChatProvider: LLMProvider {
 
     public func complete(_ request: LLMRequest) async throws -> LLMResponse {
         let model = try await modelDiscovery.resolvedModel(for: configuration)
+        let cacheKey = StructuredOutputFallback.capabilityKey(
+            providerName: providerName,
+            configuration: configuration,
+            model: model
+        )
+        if await StructuredOutputCapabilityCache.shared.fallbackMode(for: cacheKey) != nil {
+            return try await complete(
+                request,
+                model: model,
+                structuredOutput: false,
+                diagnostics: [StructuredOutputFallback.unsupportedCachedDiagnostic]
+            )
+        }
+
+        do {
+            return try await complete(request, model: model, structuredOutput: true)
+        } catch {
+            guard StructuredOutputFallback.isStructuredSchemaUnsupported(error) else {
+                throw error
+            }
+            let fallbackMode = StructuredOutputFallback.fallbackMode(for: error) ?? .jsonObject
+            await StructuredOutputCapabilityCache.shared.markUnsupported(cacheKey, mode: fallbackMode)
+            return try await complete(
+                request,
+                model: model,
+                structuredOutput: false,
+                diagnostics: [StructuredOutputFallback.unsupportedDiagnostic]
+            )
+        }
+    }
+
+    private func complete(
+        _ request: LLMRequest,
+        model: String,
+        structuredOutput: Bool,
+        diagnostics: [String] = []
+    ) async throws -> LLMResponse {
         var urlRequest = URLRequest(url: configuration.endpoint(path: "/v1/chat/completions"))
         applyCommonHeaders(&urlRequest, configuration: configuration)
         if let apiKey = configuration.apiKey, !apiKey.isEmpty {
             urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
+        let userPayload = try PromptBuilder.userPayload(for: request)
 
-        urlRequest.httpBody = try jsonData([
+        var body: [String: Any] = [
             "model": model,
             "stream": false,
             "temperature": 0.2,
             "max_tokens": 256,
-            "response_format": ["type": "json_object"],
             "messages": [
                 ["role": "system", "content": PromptBuilder.systemPrompt],
-                ["role": "user", "content": PromptBuilder.userPayload(for: request)]
+                ["role": "user", "content": userPayload]
             ]
-        ])
+        ]
+        body["response_format"] = structuredOutput
+            ? LLMOutputContract.openAIChatResponseFormat(for: request.task)
+            : LLMOutputContract.legacyJSONModeResponseFormat()
+        urlRequest.httpBody = try jsonData(body)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)
@@ -43,6 +84,10 @@ public struct OpenAIChatProvider: LLMProvider {
         guard let content = ResponseNormalizer.string(at: ["choices", "0", "message", "content"], in: raw) else {
             throw ProviderError.invalidResponse("missing choices[0].message.content")
         }
-        return try ResponseNormalizer.normalizeText(content, preservePlainText: request.task == .contextDigest)
+        return try StructuredResponseNormalizer.normalizeText(
+            content,
+            task: request.task,
+            diagnostics: diagnostics
+        )
     }
 }

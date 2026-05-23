@@ -40,6 +40,7 @@ required for every test file.
 - [GeminiNativeProvider](Sources/KnowTypeProviders/GeminiNativeProvider.plan.md)
 - [HTTPClient](Sources/KnowTypeProviders/HTTPClient.plan.md)
 - [KeychainSecretStore](Sources/KnowTypeProviders/KeychainSecretStore.plan.md)
+- [LLMOutputContract](Sources/KnowTypeProviders/LLMOutputContract.plan.md)
 - [Local OpenAI-Compatible Provider Runtime](Sources/KnowTypeProviders/provider-runtime-local.plan.md)
 - [OllamaNativeProvider](Sources/KnowTypeProviders/OllamaNativeProvider.plan.md)
 - [OpenAIChatProvider](Sources/KnowTypeProviders/OpenAIChatProvider.plan.md)
@@ -52,6 +53,7 @@ required for every test file.
 - [ProviderProfileTemplates](Sources/KnowTypeProviders/ProviderProfileTemplates.plan.md)
 - [ProviderRuntimeLoader](Sources/KnowTypeProviders/ProviderRuntimeLoader.plan.md)
 - [ResponseNormalizer](Sources/KnowTypeProviders/ResponseNormalizer.plan.md)
+- [StructuredResponseNormalizer](Sources/KnowTypeProviders/StructuredResponseNormalizer.plan.md)
 
 ## Sources/KnowTypeAI
 

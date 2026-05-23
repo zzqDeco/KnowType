@@ -50,6 +50,38 @@ final class PrefixContinuationEngineTests: XCTestCase {
         XCTAssertEqual(continuations.first?.text, "还有进一步优化空间")
     }
 
+    func testDetailedSanitizerReportsRejectionAndRepairReasons() {
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案还有进一步优化空间",
+                lockedPrefix: "我觉得这个方案"
+            ),
+            ContinuationSanitizationResult(
+                text: "还有进一步优化空间",
+                reason: .repeatedPrefixRepaired
+            )
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed("我觉得这个方案", lockedPrefix: "我觉得这个方案"),
+            ContinuationSanitizationResult(text: nil, reason: .sameAsPrefix)
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed("   ", lockedPrefix: "我觉得这个方案"),
+            ContinuationSanitizationResult(text: nil, reason: .empty)
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案，我觉得这个方案还有问题",
+                lockedPrefix: "我觉得这个方案"
+            ),
+            ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix)
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed("我觉得这个方案，", lockedPrefix: "我觉得这个方案"),
+            ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
+        )
+    }
+
     func testFallbackDoesNotBlockWhenProviderIsUnavailable() async {
         let engine = PrefixContinuationEngine()
         let continuations = await engine.continuations(

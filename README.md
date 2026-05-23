@@ -213,9 +213,12 @@ discovery.
 AI context files live under `~/.knowtype/`. `ENV.md` stores local context
 memory for the AI recommendation slot, and `CORRECTION.md` stores user-editable
 AI correction instructions. Traditional input does not depend on either file.
-Real-time AI recommendations have a 10-second runtime timeout and emit
-privacy-preserving substate diagnostics through macOS unified logging. To inspect
-them, run `log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`.
+Real-time AI recommendations have a 10-second runtime timeout, prefer
+provider-level structured JSON schema output when available, and emit
+privacy-preserving substate diagnostics through macOS unified logging. The logs
+distinguish schema fallback, structured decode failures, prefix-lock sanitizer
+rejections, and too-short prefixes without recording raw text. To inspect them,
+run `log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`.
 
 ## Input Behavior
 

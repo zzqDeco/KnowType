@@ -29,11 +29,18 @@ public struct ProviderConnectionDiagnostic: Sendable {
     public func test(configuration: ProviderConfiguration) async throws -> ProviderConnectionDiagnosticResult {
         let provider = try providerBuilder(configuration)
         let response = try await provider.complete(Self.diagnosticRequest)
-        let usableCandidates = response.candidates.filter { candidate in
-            !candidate.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let lockedPrefix = Self.diagnosticRequest.lockedPrefix ?? ""
+        let usableCandidates = response.candidates.compactMap { candidate -> LLMCandidate? in
+            guard PrefixContinuationEngine.sanitizeContinuation(
+                candidate.text,
+                lockedPrefix: lockedPrefix
+            ) != nil else {
+                return nil
+            }
+            return candidate
         }
         guard !usableCandidates.isEmpty else {
-            throw ProviderError.invalidResponse("diagnostic returned no usable candidates")
+            throw ProviderError.invalidResponse("diagnostic returned no usable continuation candidates")
         }
         return ProviderConnectionDiagnosticResult(
             providerName: provider.providerName,

@@ -63,6 +63,7 @@ when converting a shipped plan into a short record.
 | [provider-connection-diagnostics.plan.md](provider-connection-diagnostics.plan.md) | Settings-side provider connection tests without saving draft secrets | Active |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Avoid replacing provider failures with local mock continuation text | Active |
 | [ai-timeout-diagnostics.plan.md](ai-timeout-diagnostics.plan.md) | AI recommendation 10-second runtime timeout and privacy-preserving substate diagnostics | Active |
+| [ai-structured-output-contract.plan.md](ai-structured-output-contract.plan.md) | Provider-level structured output contract and diagnosable AI no-recommendation reasons | Active |
 | [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
 | [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persisted punctuation and symbol-width preferences | Active |
 | [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Active |

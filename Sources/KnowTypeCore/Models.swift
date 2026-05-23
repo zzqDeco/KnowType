@@ -258,9 +258,30 @@ public struct LLMRequest: Codable, Sendable, Equatable {
 
 public struct LLMResponse: Codable, Sendable, Equatable {
     public var candidates: [LLMCandidate]
+    public var diagnostics: [String]
 
-    public init(candidates: [LLMCandidate]) {
+    public init(candidates: [LLMCandidate], diagnostics: [String] = []) {
         self.candidates = candidates
+        self.diagnostics = diagnostics
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case candidates
+        case diagnostics
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.candidates = try container.decode([LLMCandidate].self, forKey: .candidates)
+        self.diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(candidates, forKey: .candidates)
+        if !diagnostics.isEmpty {
+            try container.encode(diagnostics, forKey: .diagnostics)
+        }
     }
 }
 

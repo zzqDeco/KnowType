@@ -12,6 +12,40 @@ public struct AnthropicMessagesProvider: LLMProvider {
     }
 
     public func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        let cacheKey = StructuredOutputFallback.capabilityKey(
+            providerName: providerName,
+            configuration: configuration,
+            model: configuration.model
+        )
+        if await StructuredOutputCapabilityCache.shared.fallbackMode(for: cacheKey) != nil {
+            return try await complete(
+                request,
+                structuredOutput: false,
+                diagnostics: [StructuredOutputFallback.unsupportedCachedDiagnostic]
+            )
+        }
+
+        do {
+            return try await complete(request, structuredOutput: true)
+        } catch {
+            guard StructuredOutputFallback.isStructuredSchemaUnsupported(error) else {
+                throw error
+            }
+            let fallbackMode = StructuredOutputFallback.fallbackMode(for: error) ?? .jsonObject
+            await StructuredOutputCapabilityCache.shared.markUnsupported(cacheKey, mode: fallbackMode)
+            return try await complete(
+                request,
+                structuredOutput: false,
+                diagnostics: [StructuredOutputFallback.unsupportedDiagnostic]
+            )
+        }
+    }
+
+    private func complete(
+        _ request: LLMRequest,
+        structuredOutput: Bool,
+        diagnostics: [String] = []
+    ) async throws -> LLMResponse {
         var urlRequest = URLRequest(url: configuration.endpoint(path: "/v1/messages"))
         applyCommonHeaders(&urlRequest, configuration: configuration)
         if let apiKey = configuration.apiKey, !apiKey.isEmpty {
@@ -20,16 +54,21 @@ public struct AnthropicMessagesProvider: LLMProvider {
         if urlRequest.value(forHTTPHeaderField: "anthropic-version") == nil {
             urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         }
+        let userPayload = try PromptBuilder.userPayload(for: request)
 
-        urlRequest.httpBody = try jsonData([
+        var body: [String: Any] = [
             "model": configuration.model,
             "system": PromptBuilder.systemPrompt,
             "max_tokens": 256,
             "temperature": 0.2,
             "messages": [
-                ["role": "user", "content": PromptBuilder.userPayload(for: request)]
+                ["role": "user", "content": userPayload]
             ]
-        ])
+        ]
+        if structuredOutput {
+            body["output_config"] = LLMOutputContract.anthropicOutputConfig(for: request.task)
+        }
+        urlRequest.httpBody = try jsonData(body)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)
@@ -37,6 +76,10 @@ public struct AnthropicMessagesProvider: LLMProvider {
         guard let content = ResponseNormalizer.string(at: ["content", "0", "text"], in: raw) else {
             throw ProviderError.invalidResponse("missing content[0].text")
         }
-        return try ResponseNormalizer.normalizeText(content, preservePlainText: request.task == .contextDigest)
+        return try StructuredResponseNormalizer.normalizeText(
+            content,
+            task: request.task,
+            diagnostics: diagnostics
+        )
     }
 }
