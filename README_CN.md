@@ -198,12 +198,12 @@ prefix-lock sanitizer 拒绝、prefix 太短等原因。查看命令：
 
 | 快捷键 | 行为 |
 |---|---|
-| `Space` | 提交 Rime 当前高亮候选；Rime 不可用时提交原始输入。 |
-| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏。 |
+| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时插入普通空格。 |
+| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时插入普通数字。 |
 | 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。第一页首项按左/上会到上一页最后一项。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
-| `0` | 有纠错候选可见时，提交原始 composition。 |
+| `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时插入 `0`。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |

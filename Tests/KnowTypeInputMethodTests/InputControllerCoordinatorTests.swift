@@ -83,6 +83,45 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testIdleSpaceInsertsDirectPassthroughText() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), [" "])
+        XCTAssertEqual(
+            client.insertTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(host.panelStates.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testIdleDigitsInsertDirectPassthroughTextWithoutComposition() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        for number in [1, 2, 3] {
+            XCTAssertTrue(
+                coordinator.handle(
+                    stroke: InputKeyStroke(text: "\(number)", keyCode: keyCode(forNumber: number)),
+                    client: client
+                )
+            )
+        }
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["1", "2", "3"])
+        XCTAssertEqual(
+            client.insertTextWrites.map(\.replacementRange),
+            Array(repeating: NSRange(location: NSNotFound, length: NSNotFound), count: 3)
+        )
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(host.panelStates.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
     func testCompositionDisplaysRawPinyinUntilCandidateIsConfirmed() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(client: client)
@@ -145,11 +184,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(" ", client: client))
         let updatesAfterCommit = host.panelStates.count
 
-        XCTAssertFalse(coordinator.handleText(" ", client: client))
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
         host.runScheduledOperations()
 
-        XCTAssertEqual(client.insertTextWrites.count, 1)
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["你", " "])
         XCTAssertEqual(host.panelStates.count, updatesAfterCommit)
         XCTAssertEqual(coordinator.composedString() as? String, "")
         XCTAssertGreaterThanOrEqual(host.hideCandidatePanelCount, 2)
@@ -2384,6 +2422,30 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(recorder.selectedIndices, [1])
         XCTAssertEqual(client.insertTextWrites.last?.text, "尼")
+    }
+
+    func testNativeOutOfRangeNumberIsConsumedWithoutAppendingDigit() {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "9", keyCode: keyCode(forNumber: 9)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(recorder.selectedIndices, [])
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "n")
     }
 
     @MainActor

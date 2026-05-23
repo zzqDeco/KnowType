@@ -43,6 +43,7 @@ when converting a shipped plan into a short record.
 | [rime-conversion-lexical-ai.plan.md](rime-conversion-lexical-ai.plan.md) | Optional librime bridge, synchronous base candidate hot path, and AI lexical profile context | Active |
 | [rime-only-hotpath-performance.plan.md](rime-only-hotpath-performance.plan.md) | Retire production local conversion fallback and enforce Rime-only hot-path performance budgets | Active |
 | [rime-native-interaction-polish.plan.md](rime-native-interaction-polish.plan.md) | Align marked text, arrows, pages, numbers, symbols, and AI shortcuts with Rime-native IME behavior | Active |
+| [direct-space-digit-passthrough.plan.md](direct-space-digit-passthrough.plan.md) | Pass idle Space and digits through while preserving active Rime candidate shortcuts | Active |
 | [native-imk-settings-menu.plan.md](native-imk-settings-menu.plan.md) | Native IMK input-menu settings entry and compatibility prefPane fallback | Active |
 | [system-settings-prefpane-cache-cleanup.plan.md](system-settings-prefpane-cache-cleanup.plan.md) | Remove stale System Settings prefPane cache after default local installs | Active |
 | [native-settings-ui-polish.plan.md](native-settings-ui-polish.plan.md) | Chinese macOS-native sidebar settings UI for the IMK preferences window | Active |

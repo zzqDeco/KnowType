@@ -200,6 +200,7 @@ same `CandidatePanelSelection` values so click commits match keyboard commits.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
 - Marked text mirrors `ConversionEngineSnapshot.preedit` while Rime has composition. If Rime commits part of a long input and keeps composition active, KnowType inserts the commit text and keeps showing the remaining Rime preedit instead of reverting to raw pinyin.
 - Ordinary digits `1...9` select Rime current-page candidates whenever native composition is active, even if the custom panel is hidden. Out-of-range digits are consumed by the active composition and do not commit AI or append a literal digit.
+- With no active raw/preedit composition, ordinary Space and `0...9` are direct passthrough text insertions. Stale candidate-panel or AI state must not capture those keys.
 - Arrow navigation updates Rime's current-page highlight. Right/down at the current page end moves to the next page and highlights row 1; left/up at the current page start moves to the previous page and highlights its last row.
 - Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, the key falls back to the normal punctuation commit path so page shortcuts do not swallow punctuation at page boundaries.
 - Other composing ASCII symbols are offered to Rime before KnowType punctuation fallback so schema keys such as apostrophe, semicolon, and slash can be handled by the engine.
@@ -256,8 +257,10 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 ## Shortcut Contract
 
 - `Space` commits the highlighted/current Rime candidate for the current raw input.
+- with no active composition, `Space` inserts a normal space instead of being consumed by the input method.
 - when Rime is unavailable, `Space` commits raw input instead of blocking to compute hidden local candidates.
 - `1...9` select Rime current-page candidates during native composition, independent of candidate-panel visibility.
+- with no active composition, `0...9` are inserted as ordinary digits and do not open the candidate panel.
 - `Return` / `Enter` commits the original raw composition.
 - `Tab` commits the AI recommendation only when the AI slot is ready; pending, unavailable, disabled, or ineligible AI keeps the composition.
 - `Tab` does not trigger AI continuation while the composition is in a legacy partial-segment state.
