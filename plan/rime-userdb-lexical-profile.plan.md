@@ -25,7 +25,9 @@ keydown hot path.
   keys.
 - Prefer the local `installation_id` sync snapshot, use deterministic fallback
   ordering for parallel sync folders, and guard writes with a refresh generation
-  so stale background tasks cannot overwrite newer profiles.
+  without holding the gate lock across filesystem writes.
+- Detect the text column in metadata snapshot rows so code strings are not
+  persisted as lexical terms when row order differs across Rime exports.
 - Treat Rime sync as best-effort: if sync fails but a matching exported snapshot
   already exists, parse that snapshot instead of disabling profile refresh.
 - Share the lexical profile store and refresh gate process-wide across IMK

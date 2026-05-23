@@ -8,6 +8,7 @@ final class LexicalProfileStoreTests: XCTestCase {
         # Rime user dictionary export
         方案\tfang an\t8
         ce shi\t测试\tc=12 d=0 t=1700000000
+        回退方案\tfallback\tc=9 d=0 t=1700000000
         接口\tjie kou\t3
         123456\tshu zi\t99
         shu zi\t123456\tc=99 d=0 t=1700000000
@@ -18,7 +19,7 @@ final class LexicalProfileStoreTests: XCTestCase {
 
         let terms = RimeUserDBTextParser(maxTerms: 4).parse(content)
 
-        XCTAssertEqual(terms.map(\.text), ["测试", "方案", "接口"])
+        XCTAssertEqual(terms.map(\.text), ["测试", "方案", "回退方案", "接口"])
         XCTAssertEqual(terms.first?.source, "rime-userdb")
         XCTAssertEqual(terms.first?.score, 1)
         XCTAssertLessThan(terms[1].score, 1)
@@ -53,6 +54,33 @@ final class LexicalProfileStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.currentSnapshot()?.sha256, snapshot.sha256)
         XCTAssertTrue(markdown.contains("方案"))
         XCTAssertTrue(markdown.contains("rime-userdb"))
+    }
+
+    func testLexicalProfileStoreSkipsConditionalSaveWhenGenerationIsStale() throws {
+        let directory = temporaryDirectory()
+        let jsonURL = directory.appendingPathComponent("lexical-profile.json")
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let store = LexicalProfileStore(jsonURL: jsonURL, markdownURL: markdownURL)
+        let snapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                persistentTerms: [
+                    LexicalContextTerm(text: "不会写入", score: 1, source: "rime-userdb")
+                ]
+            )
+        )
+
+        let profile = try store.saveIfCurrent(
+            snapshot: snapshot,
+            schemaID: "pinyin_simp",
+            rimeSnapshotURL: nil,
+            rimeSnapshotModifiedAt: nil,
+            shouldCommit: { false }
+        )
+
+        XCTAssertNil(profile)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: jsonURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: markdownURL.path))
+        XCTAssertNil(store.currentProfile())
     }
 
     func testLexicalMergeKeepsCurrentRimeCandidatesAheadOfUserDBTerms() throws {

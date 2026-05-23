@@ -331,10 +331,14 @@ librime sync as a best-effort freshness step, resolves the schema's
 `translator/user_dict` or `translator/dictionary`, scans for that dictionary's
 `*.userdb.txt`, and parses standard `code<TAB>text<TAB>c=... d=... t=...` rows
 while keeping compatibility with legacy `text<TAB>code<TAB>frequency` fixtures.
+Metadata rows identify the lexical text column by treating Rime code columns as
+ASCII lowercase code strings, so both `code<TAB>text<TAB>c=...` snapshots and
+reversed metadata fixtures avoid persisting code strings as user terms.
 Snapshot selection prefers the local `installation_id` sync folder, then chooses
 deterministically by root, mtime, and path. Refreshes use a process-wide store
-and generation gate shared by IMK sessions, and the gate is rechecked at the save
-boundary so stale background tasks cannot overwrite a newer lexical profile.
+and generation gate shared by IMK sessions; stale checks are evaluated before
+and during persistence without holding the generation lock across filesystem
+writes, so new commits do not block on profile I/O.
 AI requests merge persisted `LEXICAL_PROFILE.md` terms only when the stored
 profile schema matches the active Rime schema.
 

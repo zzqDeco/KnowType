@@ -82,10 +82,40 @@ public struct RimeUserDBTextParser: Sendable {
             .map { String($0) }
             .joined(separator: " ")
         guard let frequency = metadataFrequency(metadata),
-              let text = LexicalContextBuilder.sanitizedProfileText(String(columns[1])) else {
+              let text = metadataRowText(columns[0], columns[1]) else {
             return nil
         }
         return (text, frequency)
+    }
+
+    private func metadataRowText(_ firstColumn: Substring, _ secondColumn: Substring) -> String? {
+        let first = String(firstColumn)
+        let second = String(secondColumn)
+        let firstText = LexicalContextBuilder.sanitizedProfileText(first)
+        let secondText = LexicalContextBuilder.sanitizedProfileText(second)
+        switch (looksLikeRimeCode(first), looksLikeRimeCode(second)) {
+        case (true, false):
+            return secondText
+        case (false, true):
+            return firstText
+        default:
+            return secondText ?? firstText
+        }
+    }
+
+    private func looksLikeRimeCode(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return false
+        }
+        return trimmed.unicodeScalars.allSatisfy { scalar in
+            let value = scalar.value
+            return (97...122).contains(value)
+                || value == 0x20
+                || value == 0x27
+                || value == 0x2D
+                || value == 0x5F
+        }
     }
 
     private func metadataFrequency(_ metadata: String) -> Double? {
@@ -184,6 +214,25 @@ public final class LexicalProfileStore: @unchecked Sendable {
         rimeSnapshotModifiedAt: Date?,
         generatedAt: Date = Date()
     ) throws -> PersistentLexicalProfile {
+        try saveIfCurrent(
+            snapshot: snapshot,
+            schemaID: schemaID,
+            rimeSnapshotURL: rimeSnapshotURL,
+            rimeSnapshotModifiedAt: rimeSnapshotModifiedAt,
+            generatedAt: generatedAt,
+            shouldCommit: { true }
+        )!
+    }
+
+    @discardableResult
+    public func saveIfCurrent(
+        snapshot: LexicalContextSnapshot,
+        schemaID: String,
+        rimeSnapshotURL: URL?,
+        rimeSnapshotModifiedAt: Date?,
+        generatedAt: Date = Date(),
+        shouldCommit: () -> Bool
+    ) throws -> PersistentLexicalProfile? {
         let next = PersistentLexicalProfile(
             generatedAt: generatedAt,
             schemaID: schemaID,
@@ -191,11 +240,21 @@ public final class LexicalProfileStore: @unchecked Sendable {
             rimeSnapshotModifiedAt: rimeSnapshotModifiedAt,
             lexicalContext: snapshot
         )
+        guard shouldCommit() else {
+            return nil
+        }
         if let jsonURL {
-            try writeJSON(next, to: jsonURL)
+            guard try writeJSON(next, to: jsonURL, shouldCommit: shouldCommit) else {
+                return nil
+            }
         }
         if let markdownURL {
-            try atomicWrite(snapshot.markdown, to: markdownURL)
+            guard try atomicWrite(snapshot.markdown, to: markdownURL, shouldCommit: shouldCommit) else {
+                return nil
+            }
+        }
+        guard shouldCommit() else {
+            return nil
         }
         lock.lock()
         profile = next
@@ -213,27 +272,55 @@ public final class LexicalProfileStore: @unchecked Sendable {
         return try? decoder.decode(PersistentLexicalProfile.self, from: data)
     }
 
-    private func writeJSON(_ profile: PersistentLexicalProfile, to url: URL) throws {
+    private func writeJSON(
+        _ profile: PersistentLexicalProfile,
+        to url: URL,
+        shouldCommit: () -> Bool
+    ) throws -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(profile)
-        try atomicWrite(data, to: url)
+        return try atomicWrite(data, to: url, shouldCommit: shouldCommit)
     }
 
     private func atomicWrite(_ content: String, to url: URL) throws {
-        try atomicWrite(Data(content.utf8), to: url)
+        _ = try atomicWrite(content, to: url, shouldCommit: { true })
+    }
+
+    private func atomicWrite(
+        _ content: String,
+        to url: URL,
+        shouldCommit: () -> Bool
+    ) throws -> Bool {
+        try atomicWrite(Data(content.utf8), to: url, shouldCommit: shouldCommit)
     }
 
     private func atomicWrite(_ data: Data, to url: URL) throws {
+        _ = try atomicWrite(data, to: url, shouldCommit: { true })
+    }
+
+    private func atomicWrite(
+        _ data: Data,
+        to url: URL,
+        shouldCommit: () -> Bool
+    ) throws -> Bool {
+        guard shouldCommit() else {
+            return false
+        }
         let directory = url.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let temporaryURL = directory.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
         try data.write(to: temporaryURL, options: .atomic)
+        guard shouldCommit() else {
+            try? fileManager.removeItem(at: temporaryURL)
+            return false
+        }
         if fileManager.fileExists(atPath: url.path) {
             _ = try fileManager.replaceItemAt(url, withItemAt: temporaryURL)
         } else {
             try fileManager.moveItem(at: temporaryURL, to: url)
         }
+        return true
     }
 }
