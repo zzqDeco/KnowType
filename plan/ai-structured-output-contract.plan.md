@@ -18,6 +18,8 @@ Active
 - Gemini and Anthropic send provider-native schema hints and fall back to prompt-only JSON when the endpoint rejects the schema fields.
 - Ollama and custom HTTP do not claim provider-enforced schema; they still use strict local decoding.
 - `AIRecommendationRuntime` rejects too-short prefixes before cloud calls and records structured-output fallback, decode failure, sanitizer repair, and sanitizer reject reasons without logging raw text.
+- Review hardening scopes schema fallback cache by auth/header fingerprint and only treats schema-specific 400/422 failures as capability downgrades.
+- OpenAI Responses has two fallback forms: `json_object` when only `json_schema` is rejected, and prompt-only strict local decoding when an OpenAI-compatible runtime rejects the `text` field itself.
 
 ## Validation
 

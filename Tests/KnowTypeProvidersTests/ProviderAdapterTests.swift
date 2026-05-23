@@ -140,6 +140,74 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(response.candidates.first?.text, "还有进一步优化空间")
     }
 
+    func testStructuredFallbackClassifierRequiresSchemaSpecificError() {
+        XCTAssertFalse(StructuredOutputFallback.isStructuredSchemaUnsupported(
+            ProviderError.httpStatus(400, #"{"error":{"message":"unsupported model: model-x"}}"#)
+        ))
+        XCTAssertEqual(
+            StructuredOutputFallback.fallbackMode(
+                for: ProviderError.httpStatus(
+                    400,
+                    #"{"error":{"message":"response_format json_schema is unsupported"}}"#
+                )
+            ),
+            .jsonObject
+        )
+        XCTAssertEqual(
+            StructuredOutputFallback.fallbackMode(
+                for: ProviderError.httpStatus(
+                    400,
+                    #"{"error":{"message":"Unknown parameter: 'text'"}}"#
+                )
+            ),
+            .promptOnly
+        )
+        XCTAssertEqual(
+            StructuredOutputFallback.fallbackMode(
+                for: ProviderError.httpStatus(
+                    400,
+                    #"{"error":{"message":"Unknown parameter: 'text.format'"}}"#
+                )
+            ),
+            .promptOnly
+        )
+    }
+
+    func testStructuredFallbackCapabilityKeyIsScopedByAuthContext() {
+        let baseConfiguration = ProviderConfiguration(
+            kind: .openAIChat,
+            baseURL: URL(string: "https://capability.example.com")!,
+            apiKey: "key-a",
+            model: "model",
+            headers: ["X-Tenant": "tenant-a"]
+        )
+        var differentKey = baseConfiguration
+        differentKey.apiKey = "key-b"
+        var differentHeader = baseConfiguration
+        differentHeader.headers = ["X-Tenant": "tenant-b"]
+
+        let baseKey = StructuredOutputFallback.capabilityKey(
+            providerName: "openai_chat",
+            configuration: baseConfiguration,
+            model: "model"
+        )
+        let keyScoped = StructuredOutputFallback.capabilityKey(
+            providerName: "openai_chat",
+            configuration: differentKey,
+            model: "model"
+        )
+        let headerScoped = StructuredOutputFallback.capabilityKey(
+            providerName: "openai_chat",
+            configuration: differentHeader,
+            model: "model"
+        )
+
+        XCTAssertNotEqual(baseKey, keyScoped)
+        XCTAssertNotEqual(baseKey, headerScoped)
+        XCTAssertFalse(baseKey.contains("key-a"))
+        XCTAssertFalse(baseKey.contains("tenant-a"))
+    }
+
     func testOpenAIResponsesParsesOutputText() async throws {
         let client = MockHTTPClient(json: #"{"output_text":"{\"candidates\":[{\"text\":\"still needs more validation\"}]}"}"#)
         let provider = OpenAIResponsesProvider(
@@ -160,6 +228,62 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(format["type"] as? String, "json_schema")
         XCTAssertEqual(format["strict"] as? Bool, true)
         XCTAssertEqual(response.candidates.first?.text, "still needs more validation")
+    }
+
+    func testOpenAIResponsesFallsBackToJSONModeWhenSchemaFormatIsUnsupported() async throws {
+        await StructuredOutputCapabilityCache.shared.reset()
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"error":{"message":"text.format json_schema is unsupported"}}"#, statusCode: 400),
+            (json: #"{"output_text":"{\"candidates\":[{\"text\":\"fallback response\"}]}"}"#, statusCode: 200)
+        ])
+        let provider = OpenAIResponsesProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIResponses,
+                baseURL: URL(string: "https://responses-json-fallback.example.com")!,
+                apiKey: "key",
+                model: "model"
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let requests = await client.capturedRequests()
+        let retryBody = try requestBodyObject(requests[1])
+        let text = try XCTUnwrap(retryBody["text"] as? [String: Any])
+        let format = try XCTUnwrap(text["format"] as? [String: Any])
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(format["type"] as? String, "json_object")
+        XCTAssertEqual(response.diagnostics, ["structured_schema_unsupported"])
+        XCTAssertEqual(response.candidates.first?.text, "fallback response")
+    }
+
+    func testOpenAIResponsesFallsBackToPromptOnlyWhenTextFieldIsUnsupported() async throws {
+        await StructuredOutputCapabilityCache.shared.reset()
+        let client = SequencedMockHTTPClient(responses: [
+            (json: #"{"error":{"message":"Unknown parameter: 'text'"}}"#, statusCode: 400),
+            (json: #"{"output_text":"{\"candidates\":[{\"text\":\"prompt only fallback\"}]}"}"#, statusCode: 200)
+        ])
+        let provider = OpenAIResponsesProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIResponses,
+                baseURL: URL(string: "https://responses-prompt-fallback.example.com")!,
+                apiKey: "key",
+                model: "model"
+            ),
+            httpClient: client
+        )
+
+        let response = try await provider.complete(llmRequest)
+        let requests = await client.capturedRequests()
+        let firstBody = try requestBodyObject(requests[0])
+        let retryBody = try requestBodyObject(requests[1])
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertNotNil(firstBody["text"] as? [String: Any])
+        XCTAssertNil(retryBody["text"])
+        XCTAssertEqual(response.diagnostics, ["structured_schema_unsupported"])
+        XCTAssertEqual(response.candidates.first?.text, "prompt only fallback")
     }
 
     func testStructuredResponseNormalizerRejectsNonSchemaCandidateOutput() throws {

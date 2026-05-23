@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import KnowTypeCore
 
@@ -123,14 +124,14 @@ enum LLMOutputContract {
 actor StructuredOutputCapabilityCache {
     static let shared = StructuredOutputCapabilityCache()
 
-    private var unsupportedKeys: Set<String> = []
+    private var unsupportedKeys: [String: StructuredOutputFallback.Mode] = [:]
 
-    func isUnsupported(_ key: String) -> Bool {
-        unsupportedKeys.contains(key)
+    func fallbackMode(for key: String) -> StructuredOutputFallback.Mode? {
+        unsupportedKeys[key]
     }
 
-    func markUnsupported(_ key: String) {
-        unsupportedKeys.insert(key)
+    func markUnsupported(_ key: String, mode: StructuredOutputFallback.Mode) {
+        unsupportedKeys[key] = mode
     }
 
     func reset() {
@@ -139,6 +140,11 @@ actor StructuredOutputCapabilityCache {
 }
 
 enum StructuredOutputFallback {
+    enum Mode: Equatable, Sendable {
+        case jsonObject
+        case promptOnly
+    }
+
     static let unsupportedDiagnostic = "structured_schema_unsupported"
     static let unsupportedCachedDiagnostic = "structured_schema_unsupported_cached"
 
@@ -150,24 +156,90 @@ enum StructuredOutputFallback {
         [
             providerName,
             configuration.baseURL.absoluteString,
-            model
+            model,
+            apiKeyFingerprint(configuration.apiKey),
+            headersFingerprint(configuration.headers)
         ]
         .joined(separator: "|")
     }
 
     static func isStructuredSchemaUnsupported(_ error: Error) -> Bool {
+        fallbackMode(for: error) != nil
+    }
+
+    static func fallbackMode(for error: Error) -> Mode? {
         guard case .httpStatus(let status, let body) = error as? ProviderError,
               status == 400 || status == 422 else {
-            return false
+            return nil
         }
         let lowercased = body.lowercased()
-        return lowercased.contains("json_schema")
+        guard hasStructuredOutputMarker(lowercased),
+              hasSchemaCapabilityFailureMarker(lowercased) else {
+            return nil
+        }
+        return hasPromptOnlyFallbackMarker(lowercased) ? .promptOnly : .jsonObject
+    }
+
+    private static func hasStructuredOutputMarker(_ lowercased: String) -> Bool {
+        lowercased.contains("json_schema")
             || lowercased.contains("response_format")
             || lowercased.contains("responseformat")
             || lowercased.contains("response_schema")
             || lowercased.contains("responseschema")
             || lowercased.contains("output_config")
-            || lowercased.contains("unsupported")
+            || lowercased.contains("outputconfig")
+            || lowercased.contains("text.format")
+            || lowercased.contains("'text'")
+            || lowercased.contains("\"text\"")
+    }
+
+    private static func hasSchemaCapabilityFailureMarker(_ lowercased: String) -> Bool {
+        lowercased.contains("unsupported")
+            || lowercased.contains("not supported")
             || lowercased.contains("unknown field")
+            || lowercased.contains("unknown parameter")
+            || lowercased.contains("unrecognized field")
+            || lowercased.contains("unrecognized request argument")
+            || lowercased.contains("invalid parameter")
+            || lowercased.contains("unexpected field")
+            || lowercased.contains("extra inputs are not permitted")
+            || lowercased.contains("extra_forbidden")
+    }
+
+    private static func hasPromptOnlyFallbackMarker(_ lowercased: String) -> Bool {
+        (
+            lowercased.contains("'text'")
+                || lowercased.contains("\"text\"")
+                || lowercased.contains("text.format")
+        )
+            && !lowercased.contains("json_schema")
+            && !lowercased.contains("response_format")
+            && !lowercased.contains("responseformat")
+            && !lowercased.contains("response_schema")
+            && !lowercased.contains("responseschema")
+    }
+
+    private static func apiKeyFingerprint(_ apiKey: String?) -> String {
+        guard let apiKey,
+              !apiKey.isEmpty else {
+            return "api-key:none"
+        }
+        return "api-key:\(sha256(apiKey))"
+    }
+
+    private static func headersFingerprint(_ headers: [String: String]) -> String {
+        guard !headers.isEmpty else {
+            return "headers:none"
+        }
+        return headers
+            .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
+            .map { "\($0.key):\(sha256($0.value))" }
+            .joined(separator: ",")
+    }
+
+    private static func sha256(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 }

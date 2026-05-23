@@ -20,6 +20,12 @@ outputs.
   hint fields.
 - Unsupported schema fields fall back to JSON mode or prompt-only JSON with a
   diagnostic marker.
+- Fallback detection requires both a structured-output field marker and a
+  capability-style error marker, so unrelated 400/422 errors such as unsupported
+  models are not cached as schema failures.
+- Fallback capability is scoped by provider, base URL, model, API-key
+  fingerprint, and header-value fingerprints. Raw secrets are not written into
+  the cache key.
 
 ## Tests
 

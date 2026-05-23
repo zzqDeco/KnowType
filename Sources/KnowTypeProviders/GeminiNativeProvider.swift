@@ -17,7 +17,7 @@ public struct GeminiNativeProvider: LLMProvider {
             configuration: configuration,
             model: configuration.model
         )
-        if await StructuredOutputCapabilityCache.shared.isUnsupported(cacheKey) {
+        if await StructuredOutputCapabilityCache.shared.fallbackMode(for: cacheKey) != nil {
             return try await complete(
                 request,
                 structuredOutput: false,
@@ -31,7 +31,8 @@ public struct GeminiNativeProvider: LLMProvider {
             guard StructuredOutputFallback.isStructuredSchemaUnsupported(error) else {
                 throw error
             }
-            await StructuredOutputCapabilityCache.shared.markUnsupported(cacheKey)
+            let fallbackMode = StructuredOutputFallback.fallbackMode(for: error) ?? .jsonObject
+            await StructuredOutputCapabilityCache.shared.markUnsupported(cacheKey, mode: fallbackMode)
             return try await complete(
                 request,
                 structuredOutput: false,

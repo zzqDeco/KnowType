@@ -24,35 +24,51 @@ public struct OpenAIResponsesProvider: LLMProvider {
             configuration: configuration,
             model: model
         )
-        if await StructuredOutputCapabilityCache.shared.isUnsupported(cacheKey) {
+        if let fallbackMode = await StructuredOutputCapabilityCache.shared.fallbackMode(for: cacheKey) {
             return try await complete(
                 request,
                 model: model,
-                structuredOutput: false,
+                outputFormatMode: .fallback(fallbackMode),
                 diagnostics: [StructuredOutputFallback.unsupportedCachedDiagnostic]
             )
         }
 
         do {
-            return try await complete(request, model: model, structuredOutput: true)
+            return try await complete(request, model: model, outputFormatMode: .jsonSchema)
         } catch {
             guard StructuredOutputFallback.isStructuredSchemaUnsupported(error) else {
                 throw error
             }
-            await StructuredOutputCapabilityCache.shared.markUnsupported(cacheKey)
+            let fallbackMode = StructuredOutputFallback.fallbackMode(for: error) ?? .jsonObject
+            await StructuredOutputCapabilityCache.shared.markUnsupported(cacheKey, mode: fallbackMode)
             return try await complete(
                 request,
                 model: model,
-                structuredOutput: false,
+                outputFormatMode: .fallback(fallbackMode),
                 diagnostics: [StructuredOutputFallback.unsupportedDiagnostic]
             )
+        }
+    }
+
+    private enum OutputFormatMode {
+        case jsonSchema
+        case jsonObject
+        case promptOnly
+
+        static func fallback(_ mode: StructuredOutputFallback.Mode) -> Self {
+            switch mode {
+            case .jsonObject:
+                return .jsonObject
+            case .promptOnly:
+                return .promptOnly
+            }
         }
     }
 
     private func complete(
         _ request: LLMRequest,
         model: String,
-        structuredOutput: Bool,
+        outputFormatMode: OutputFormatMode,
         diagnostics: [String] = []
     ) async throws -> LLMResponse {
         var urlRequest = URLRequest(url: configuration.endpoint(path: "/v1/responses"))
@@ -61,19 +77,27 @@ public struct OpenAIResponsesProvider: LLMProvider {
             urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
 
-        let textFormat = structuredOutput
-            ? LLMOutputContract.openAIResponsesTextFormat(for: request.task)
-            : LLMOutputContract.legacyJSONModeResponseFormat()
-        urlRequest.httpBody = try jsonData([
+        let userPayload = try PromptBuilder.userPayload(for: request)
+        var body: [String: Any] = [
             "model": model,
             "instructions": PromptBuilder.systemPrompt,
-            "input": PromptBuilder.userPayload(for: request),
+            "input": userPayload,
             "temperature": 0.2,
-            "max_output_tokens": 256,
-            "text": [
-                "format": textFormat
+            "max_output_tokens": 256
+        ]
+        switch outputFormatMode {
+        case .jsonSchema:
+            body["text"] = [
+                "format": LLMOutputContract.openAIResponsesTextFormat(for: request.task)
             ]
-        ])
+        case .jsonObject:
+            body["text"] = [
+                "format": LLMOutputContract.legacyJSONModeResponseFormat()
+            ]
+        case .promptOnly:
+            break
+        }
+        urlRequest.httpBody = try jsonData(body)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)
