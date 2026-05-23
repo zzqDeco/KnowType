@@ -69,7 +69,7 @@ public struct OpenAIChatProvider: LLMProvider {
             "temperature": 0.2,
             "max_tokens": 256,
             "messages": [
-                ["role": "system", "content": PromptBuilder.systemPrompt],
+                ["role": "system", "content": PromptBuilder.systemPrompt(for: request.task)],
                 ["role": "user", "content": userPayload]
             ]
         ]

@@ -80,7 +80,7 @@ public struct OpenAIResponsesProvider: LLMProvider {
         let userPayload = try PromptBuilder.userPayload(for: request)
         var body: [String: Any] = [
             "model": model,
-            "instructions": PromptBuilder.systemPrompt,
+            "instructions": PromptBuilder.systemPrompt(for: request.task),
             "input": userPayload,
             "temperature": 0.2,
             "max_output_tokens": 256

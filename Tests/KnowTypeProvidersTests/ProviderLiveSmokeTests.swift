@@ -49,12 +49,12 @@ final class ProviderLiveSmokeTests: XCTestCase {
     func testLocalOpenAICompatibleContinuationLiveSmoke() async throws {
         try requireLiveSmokeEnabled()
         let client = LiveRecordingHTTPClient()
-        let lockedPrefix = "This approach"
+        let lockedPrefix = "我觉得这个方案"
         let request = LLMRequest(
             task: .continuation,
             lockedPrefix: lockedPrefix,
-            rawInput: "this approach",
-            locale: .enUS,
+            rawInput: "wojuedezhegefangan",
+            locale: .zhCN,
             maxCandidates: 2,
             lengthLevel: .short
         )
@@ -72,9 +72,7 @@ final class ProviderLiveSmokeTests: XCTestCase {
         XCTAssertEqual(paths, ["/v1/models", "/v1/chat/completions"])
         XCTAssertFalse(response.candidates.isEmpty)
         XCTAssertFalse(sanitized.isEmpty)
-        XCTAssertTrue(sanitized.allSatisfy { continuation in
-            continuation.range(of: lockedPrefix, options: [.anchored, .caseInsensitive]) == nil
-        })
+        XCTAssertTrue(sanitized.allSatisfy { !$0.hasPrefix(lockedPrefix) })
     }
 
     func testProviderFailureDoesNotReturnLocalFallbackContinuation() async {

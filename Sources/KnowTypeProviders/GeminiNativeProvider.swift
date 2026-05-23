@@ -53,7 +53,7 @@ public struct GeminiNativeProvider: LLMProvider {
         var urlRequest = URLRequest(url: components.url!)
         applyCommonHeaders(&urlRequest, configuration: configuration)
 
-        let prompt = "\(PromptBuilder.systemPrompt)\n\n\(try PromptBuilder.userPayload(for: request))"
+        let prompt = "\(PromptBuilder.systemPrompt(for: request.task))\n\n\(try PromptBuilder.userPayload(for: request))"
         var generationConfig: [String: Any] = [
             "temperature": 0.2,
             "maxOutputTokens": 256,

@@ -78,7 +78,11 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public func loadSnapshot() throws -> AIDocumentSnapshot {
         try ensureExists(defaultContent: Self.defaultContent)
         let content = try String(contentsOf: fileURL, encoding: .utf8)
-        return AIDocumentSnapshot(content: content)
+        let repaired = Self.repairingGeneratedSectionMarkers(in: content)
+        if repaired != content {
+            try atomicWrite(repaired, to: fileURL)
+        }
+        return AIDocumentSnapshot(content: repaired)
     }
 
     public func replaceGeneratedSection(with generatedMarkdown: String) throws -> AIDocumentSnapshot {
@@ -90,6 +94,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     public static func replacingGeneratedSection(in content: String, with generatedMarkdown: String) -> String {
+        let content = repairingGeneratedSectionMarkers(in: content)
         let generated = generatedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let startRange = content.range(of: generatedStart),
               let endRange = content.range(of: generatedEnd),
@@ -109,6 +114,67 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         let replacement = "\n\(generated)\n"
         next.replaceSubrange(startRange.upperBound..<endRange.lowerBound, with: replacement)
         return next
+    }
+
+    public static func repairingGeneratedSectionMarkers(in content: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+        var repaired: [String] = []
+        var mode = RepairMode.beforeFirstGeneratedSection
+        var completedFirstSection = false
+
+        for line in lines {
+            let marker = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch mode {
+            case .beforeFirstGeneratedSection:
+                repaired.append(line)
+                if marker == generatedStart {
+                    mode = .insideFirstGeneratedSection
+                }
+            case .insideFirstGeneratedSection:
+                if marker == generatedEnd {
+                    repaired.append(line)
+                    completedFirstSection = true
+                    mode = .afterFirstGeneratedSection
+                } else if marker != generatedStart {
+                    repaired.append(line)
+                }
+            case .afterFirstGeneratedSection:
+                if marker == generatedStart {
+                    removeTrailingDuplicateEnvironmentHeader(from: &repaired)
+                    mode = .insideDuplicateGeneratedSection
+                } else if marker != generatedEnd {
+                    repaired.append(line)
+                }
+            case .insideDuplicateGeneratedSection:
+                if marker == generatedEnd {
+                    mode = .afterFirstGeneratedSection
+                }
+            }
+        }
+
+        guard completedFirstSection else {
+            return content
+        }
+        return repaired.joined(separator: "\n")
+    }
+
+    private enum RepairMode {
+        case beforeFirstGeneratedSection
+        case insideFirstGeneratedSection
+        case afterFirstGeneratedSection
+        case insideDuplicateGeneratedSection
+    }
+
+    private static func removeTrailingDuplicateEnvironmentHeader(from lines: inout [String]) {
+        var cursor = lines.count
+        while cursor > 0, lines[cursor - 1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            cursor -= 1
+        }
+        guard cursor > 0,
+              lines[cursor - 1].trimmingCharacters(in: .whitespacesAndNewlines) == "# KnowType Environment" else {
+            return
+        }
+        lines.removeSubrange((cursor - 1)..<lines.count)
     }
 
     private func ensureExists(defaultContent: String) throws {

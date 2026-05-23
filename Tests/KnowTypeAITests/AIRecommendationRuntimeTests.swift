@@ -483,6 +483,74 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(updated.contains("## User Notes"))
         XCTAssertTrue(updated.contains("- Keep this manual note."))
     }
+
+    func testEnvironmentReplacementRepairsDuplicateGeneratedMarkers() {
+        let current = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Old generated section.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Duplicate generated section.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        - Keep this manual note.
+        """
+
+        let updated = EnvironmentDocumentStore.replacingGeneratedSection(
+            in: current,
+            with: "## Global Style\n- Learned style."
+        )
+
+        XCTAssertEqual(updated.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
+        XCTAssertEqual(updated.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
+        XCTAssertTrue(updated.contains("## Global Style\n- Learned style."))
+        XCTAssertFalse(updated.contains("Duplicate generated section"))
+        XCTAssertTrue(updated.contains("## User Notes"))
+        XCTAssertTrue(updated.contains("- Keep this manual note."))
+    }
+
+    func testEnvironmentLoadRepairsDuplicateGeneratedMarkersOnDisk() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let polluted = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Keep generated.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Remove duplicate.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        - Keep user note.
+        """
+        try Data(polluted.utf8).write(to: environmentURL, options: .atomic)
+
+        let store = EnvironmentDocumentStore(fileURL: environmentURL)
+        let snapshot = try store.loadSnapshot()
+        let diskContent = try String(contentsOf: environmentURL, encoding: .utf8)
+
+        XCTAssertEqual(snapshot.content, diskContent)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
+        XCTAssertFalse(snapshot.content.contains("Remove duplicate"))
+        XCTAssertTrue(snapshot.content.contains("- Keep user note."))
+    }
 }
 
 private actor RecordingLLMProvider: LLMProvider {

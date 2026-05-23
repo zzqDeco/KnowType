@@ -19,7 +19,7 @@ public struct OllamaNativeProvider: LLMProvider {
             "model": configuration.model,
             "stream": false,
             "messages": [
-                ["role": "system", "content": PromptBuilder.systemPrompt],
+                ["role": "system", "content": PromptBuilder.systemPrompt(for: request.task)],
                 ["role": "user", "content": PromptBuilder.userPayload(for: request)]
             ],
             "options": [

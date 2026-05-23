@@ -58,7 +58,7 @@ public struct AnthropicMessagesProvider: LLMProvider {
 
         var body: [String: Any] = [
             "model": configuration.model,
-            "system": PromptBuilder.systemPrompt,
+            "system": PromptBuilder.systemPrompt(for: request.task),
             "max_tokens": 256,
             "temperature": 0.2,
             "messages": [
