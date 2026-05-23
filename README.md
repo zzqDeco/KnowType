@@ -225,12 +225,12 @@ recording raw text. To inspect them, run
 
 | Shortcut | Behavior |
 |---|---|
-| `Space` | Commit the highlighted/current Rime candidate, or raw input when Rime is unavailable. |
-| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden. |
+| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, insert a normal space. |
+| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, insert ordinary digits. |
 | Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the current Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. Left/up from the first row lands on the previous page's last row. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
-| `0` | Commit the raw composition when correction candidates are visible. |
+| `0` | Commit the raw composition when correction candidates are visible; with no active composition, insert `0`. |
 | Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation or insert punctuation directly when Rime declines. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |

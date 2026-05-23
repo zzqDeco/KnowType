@@ -13,6 +13,7 @@ Current behavior:
 - cancels any pending retired local-candidate task before synchronous native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
 - coalesces candidate panel refreshes so anchor resolution and AppKit panel layout run after the key event returns
 - keeps `Space` tied to Rime's highlighted/current candidate for the current raw input; while Rime handles composition without commit, the key is consumed and the marked text refreshes
+- passes idle `Space` and idle `0...9` through with explicit `insertText` so ordinary spaces and numbers are not swallowed by stale candidate state; native candidate-only snapshots still count as active composition for number selection
 - keeps AI recommendation explicit: Tab, Option-number, and mouse click can commit a ready AI row, but ordinary digits are reserved for Rime candidates
 - when native Rime is active, hover and arrow selection update Rime's current-page highlight instead of making the custom panel selection authoritative on its own
 - explicit native `PageUp`/`PageDown` are forwarded to the conversion engine while composition is active, independent of custom candidate-panel visibility
