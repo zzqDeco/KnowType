@@ -23,11 +23,12 @@ enum PromptBuilder {
     Rules:
     - Do not include lockedPrefix or any paraphrase, translation, rewrite, or polish of it.
     - Do not return full sentences that begin before lockedPrefix.
-    - Prefer one concise, immediately useful Chinese continuation.
+    - Prefer one concise, immediately useful continuation in the same language as lockedPrefix and locale.
     - Empty candidates are allowed only when lockedPrefix is unsafe, impossible, or nonsensical.
     - Preserve English technical tokens exactly, including API, JSON, macOS, InputMethodKit, snake_case, and camelCase.
     Good: lockedPrefix="我觉得这个方案" text="还可以再细化一下。"
     Good: lockedPrefix="这个 API 的延迟" text="主要卡在网络和序列化两段。"
+    Good: lockedPrefix="This approach" text="keeps the hot path simple."
     Bad: text="我觉得这个方案还可以" because it repeats lockedPrefix.
     """
 

@@ -310,7 +310,7 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - archives processed event files under `~/.knowtype/events/processed/`
 - summarizes after a batch threshold or interval
 - updates only the generated section in `ENV.md`
-- repairs duplicate generated-section markers on load and replacement, preserving user notes while collapsing generated content to one guarded block
+- normalizes duplicate generated-section markers in loaded snapshots without writing during read, and persists repaired generated sections only during explicit replacement; unmatched markers and literal marker text in user notes are preserved
 - sanitizes Level 0 protected content before writing logs
 
 KnowType-specific settings use the InputMethodKit preferences window opened from

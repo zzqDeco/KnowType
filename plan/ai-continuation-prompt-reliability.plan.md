@@ -15,7 +15,7 @@ Active
 - `PromptBuilder` exposes `systemPrompt(for:)` and keeps separate prompts for continuation, correction, context digest, and polish.
 - The continuation prompt is short and explicit: provider output must be JSON, candidate `text` is suffix-only, `lockedPrefix` must not be repeated or rewritten, and empty candidates are reserved for unsafe, impossible, or nonsensical prefixes.
 - Provider adapters pass the task-specific prompt into OpenAI Chat, OpenAI Responses, Anthropic Messages, Gemini native, and Ollama native request bodies while preserving strict schema and fallback behavior.
-- `EnvironmentDocumentStore` repairs duplicate generated marker blocks on load and before generated-section replacement, preserving user notes while collapsing generated content to one guarded section.
+- `EnvironmentDocumentStore` normalizes duplicate generated marker blocks on load without writing during read, and persists repaired content only when replacing the generated section. Unmatched duplicate markers and literal marker text in user notes are preserved.
 
 ## Test Plan
 

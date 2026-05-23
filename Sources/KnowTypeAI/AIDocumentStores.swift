@@ -79,9 +79,6 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         try ensureExists(defaultContent: Self.defaultContent)
         let content = try String(contentsOf: fileURL, encoding: .utf8)
         let repaired = Self.repairingGeneratedSectionMarkers(in: content)
-        if repaired != content {
-            try atomicWrite(repaired, to: fileURL)
-        }
         return AIDocumentSnapshot(content: repaired)
     }
 
@@ -119,37 +116,48 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public static func repairingGeneratedSectionMarkers(in content: String) -> String {
         let lines = content.components(separatedBy: "\n")
         var repaired: [String] = []
-        var mode = RepairMode.beforeFirstGeneratedSection
+        var index = 0
         var completedFirstSection = false
+        var reachedUserNotes = false
 
-        for line in lines {
+        while index < lines.count {
+            let line = lines[index]
             let marker = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            switch mode {
-            case .beforeFirstGeneratedSection:
+            if !completedFirstSection {
                 repaired.append(line)
                 if marker == generatedStart {
-                    mode = .insideFirstGeneratedSection
+                    index += 1
+                    while index < lines.count {
+                        let generatedLine = lines[index]
+                        let generatedMarker = generatedLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if generatedMarker == generatedEnd {
+                            repaired.append(generatedLine)
+                            completedFirstSection = true
+                            break
+                        } else if generatedMarker != generatedStart {
+                            repaired.append(generatedLine)
+                        }
+                        index += 1
+                    }
                 }
-            case .insideFirstGeneratedSection:
-                if marker == generatedEnd {
-                    repaired.append(line)
-                    completedFirstSection = true
-                    mode = .afterFirstGeneratedSection
-                } else if marker != generatedStart {
-                    repaired.append(line)
-                }
-            case .afterFirstGeneratedSection:
-                if marker == generatedStart {
-                    removeTrailingDuplicateEnvironmentHeader(from: &repaired)
-                    mode = .insideDuplicateGeneratedSection
-                } else if marker != generatedEnd {
-                    repaired.append(line)
-                }
-            case .insideDuplicateGeneratedSection:
-                if marker == generatedEnd {
-                    mode = .afterFirstGeneratedSection
-                }
+                index += 1
+                continue
             }
+
+            if marker == "## User Notes" {
+                reachedUserNotes = true
+            }
+
+            if !reachedUserNotes,
+               marker == generatedStart,
+               let duplicateEndIndex = matchingGeneratedEndIndex(in: lines, from: index + 1) {
+                removeTrailingDuplicateEnvironmentHeader(from: &repaired)
+                index = duplicateEndIndex + 1
+                continue
+            }
+
+            repaired.append(line)
+            index += 1
         }
 
         guard completedFirstSection else {
@@ -158,11 +166,20 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         return repaired.joined(separator: "\n")
     }
 
-    private enum RepairMode {
-        case beforeFirstGeneratedSection
-        case insideFirstGeneratedSection
-        case afterFirstGeneratedSection
-        case insideDuplicateGeneratedSection
+    private static func matchingGeneratedEndIndex(in lines: [String], from startIndex: Int) -> Int? {
+        var index = startIndex
+        while index < lines.count {
+            let marker = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            switch marker {
+            case generatedEnd:
+                return index
+            case generatedStart:
+                return nil
+            default:
+                index += 1
+            }
+        }
+        return nil
     }
 
     private static func removeTrailingDuplicateEnvironmentHeader(from lines: inout [String]) {
