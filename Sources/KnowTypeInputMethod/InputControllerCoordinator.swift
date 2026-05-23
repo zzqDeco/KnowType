@@ -216,16 +216,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
         }
         let text = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
-        _ = applyCommitResult(text.isEmpty ? .noAction : .commit(text), client: client)
+        guard !text.isEmpty else {
+            _ = finishCompositionLifecycle(reason: .commit, client: client, commitPolicy: .none)
+            return
+        }
+        _ = applyCommitResult(.commit(text), client: client)
     }
 
     func hidePalettes() {
         hideCandidatePanel()
     }
 
-    func deactivateServer() {
+    func deactivateServer(client: InputControllerClient?) {
         flushUserSelectionHistory()
-        resetAnchorState()
+        _ = finishCompositionLifecycle(reason: .deactivate, client: client, commitPolicy: .commitRawIfNeeded)
     }
 
     func inputControllerWillClose() {
@@ -240,7 +244,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationTask = nil
         panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
-        hideCandidatePanel()
+        _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
     }
 
     func reloadRuntimePreferencesForExternalChange() {
@@ -1042,6 +1046,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     @discardableResult
     private func commit(action: InputAction, client: InputControllerClient?) -> Bool {
+        if (action == .space || action == .commitRaw),
+           rawBuffer.isEmpty,
+           !compositionBuffer.hasResolvedSegments,
+           !conversionEngine.snapshot.hasComposition {
+            _ = finishCompositionLifecycle(reason: .commit, client: client, commitPolicy: .none)
+            return false
+        }
         if action == .space,
            conversionEngine.isNativeActive,
            rawBuffer.isEmpty == false {
@@ -1124,9 +1135,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard result.handled else {
             return false
         }
+        guard nativeSnapshotHasActiveInput(result.snapshot) else {
+            _ = finishCompositionLifecycle(reason: .nativeEnded, client: client, commitPolicy: .none)
+            return true
+        }
         syncRawBufferToNativeSnapshot(result.snapshot)
         publishLocalSuggestion(client: client)
         return true
+    }
+
+    private func nativeSnapshotHasActiveInput(_ snapshot: ConversionEngineSnapshot) -> Bool {
+        !snapshot.rawInput.isEmpty || !snapshot.preedit.isEmpty
     }
 
     private func learnNativeCommitIfFinal(_ result: ConversionEngineResult, client: InputControllerClient?) {
@@ -1518,6 +1537,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func resetComposition() {
+        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
+    }
+
+    @discardableResult
+    private func finishCompositionLifecycle(
+        reason: CompositionLifecycleFinishReason,
+        client: InputControllerClient?,
+        commitPolicy: CompositionLifecycleCommitPolicy
+    ) -> Bool {
+        traceCompositionLifecycleFinish(reason: reason)
+        hideCandidatePanel()
+
+        let commitText = lifecycleCommitText(for: commitPolicy)
+        if let commitText,
+           !commitText.isEmpty {
+            recordTypingCommit(commitText, client: client)
+            insert(commitText, client: client)
+        }
+
         rawBuffer = ""
         conversionEngine.reset()
         compositionBuffer = CompositionBuffer()
@@ -1525,7 +1563,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
         deleteCountBeforeCommit = 0
         resetAnchorState()
         invalidateSuggestion()
-        hideCandidatePanel()
+        return commitText?.isEmpty == false
+    }
+
+    private func lifecycleCommitText(for policy: CompositionLifecycleCommitPolicy) -> String? {
+        switch policy {
+        case .none:
+            return nil
+        case .commitRawIfNeeded:
+            if compositionBuffer.hasResolvedSegments {
+                return compositionBuffer.commitText
+            }
+            return rawBuffer.isEmpty ? nil : rawBuffer
+        }
     }
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
@@ -1621,7 +1671,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         panelUpdateTask?.cancel()
         panelUpdateTask = nil
         taskSupervisor.cancel(.panelRender)
-        guard !rawBuffer.isEmpty || suggestion != nil else {
+        guard canPublishCandidatePanel(suggestion: suggestion) else {
             hideCandidatePanel()
             return
         }
@@ -1629,7 +1679,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, client: InputControllerClient?) {
-        guard !rawBuffer.isEmpty || suggestion != nil else {
+        guard canPublishCandidatePanel(suggestion: suggestion) else {
             hideCandidatePanel()
             return
         }
@@ -1668,6 +1718,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
+        guard canPublishCandidatePanel(suggestion: suggestion) else {
+            hideCandidatePanel()
+            return
+        }
         let isDisplayable = anchorResult.source != .none
         let effectivePageSize = runtimePreferences.effectiveCandidatePageSize
         candidatePanelState.update(
@@ -1715,6 +1769,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func hideCandidatePanel() {
         panelUpdateGeneration += 1
+        delayedReanchorGeneration += 1
         panelUpdateTask?.cancel()
         panelUpdateTask = nil
         taskSupervisor.cancel(.panelRender)
@@ -1722,6 +1777,31 @@ final class InputControllerCoordinator: @unchecked Sendable {
         selectedNativeCandidate = nil
         anchorResolver.reset()
         host?.hideCandidatePanel()
+    }
+
+    private func canPublishCandidatePanel(suggestion: SuggestionResponse?) -> Bool {
+        guard !rawBuffer.isEmpty else {
+            return false
+        }
+        if suggestion != nil,
+           let lastSuggestionRawInput,
+           lastSuggestionRawInput != rawBuffer {
+            return false
+        }
+        if conversionEngine.isNativeActive {
+            return nativeSnapshotHasActiveInput(conversionEngine.snapshot)
+        }
+        return true
+    }
+
+    private func traceCompositionLifecycleFinish(reason: CompositionLifecycleFinishReason) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+            return
+        }
+        let message = "KnowType panel cleanup: reason=\(reason.rawValue)\n"
+        if let data = message.data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
     }
 
     private func traceCandidatePanelUpdate(savedPageSize: Int, effectivePageSize: Int) {
@@ -2092,6 +2172,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5
     private static let preferenceReloadInterval: TimeInterval = 1
+}
+
+private enum CompositionLifecycleFinishReason: String {
+    case commit
+    case deactivate
+    case close
+    case reset
+    case nativeEnded = "native_ended"
+}
+
+private enum CompositionLifecycleCommitPolicy {
+    case none
+    case commitRawIfNeeded
 }
 
 private extension Collection {
