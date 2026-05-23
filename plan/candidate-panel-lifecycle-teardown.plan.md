@@ -12,9 +12,9 @@ KnowType keeps its candidate panel as a non-activating high-level `NSPanel` with
 
 - Add a shared composition lifecycle teardown path for commit, deactivate, close, reset, and native-ended cases.
 - Hide the panel and invalidate panel render, delayed reanchor, local suggestion, and AI recommendation work before clearing composition state.
-- Pass the current IMK client into `deactivateServer(client:)`; deactivate commits the active raw composition through the normal insert path when needed, but does not call `setMarkedText("")`.
+- Pass the current IMK client into `deactivateServer(client:)`, falling back to the current host client when IMK sends a non-client callback sender; deactivate commits the active raw composition through the normal insert path when needed, but does not call `setMarkedText("")`.
 - Require active raw/native preedit before publishing candidate-panel updates, so stale suggestions or delayed reanchors cannot show the panel after composition ends.
-- Treat native handled/no-commit results with empty raw/preedit as ended composition and run teardown instead of publishing candidates.
+- Treat native handled/no-commit results with empty raw/preedit as ended composition, clear stale marked text, and run teardown instead of publishing candidates.
 
 ## Validation
 

@@ -36,7 +36,8 @@ Current behavior:
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
 - rejects candidate-panel publication unless the current raw/native preedit composition is active, so stale suggestions, AI results, or delayed reanchors cannot revive a hidden panel
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions
-- flushes user selection history on deactivate and close; deactivate commits active raw composition through the normal insert path and then tears down panel state without calling `setMarkedText("")`
+- flushes user selection history on deactivate and close; deactivate falls back to the current IMK client before committing active raw composition through the normal insert path, then tears down panel state without calling `setMarkedText("")`
+- clears marked text when native handled/no-commit output ends with no active raw/preedit, because composition ended without inserted text
 - schedules delayed candidate re-anchor through `InputControllerHost` and applies only the latest same-raw-input, same-composition reanchor
 - keeps provider-backed suggestion publication guarded by `SuggestionPublicationGuard`
 - suppresses AI recommendation while the composition is only partially resolved, so half-pinyin marked text is not sent as a locked prefix

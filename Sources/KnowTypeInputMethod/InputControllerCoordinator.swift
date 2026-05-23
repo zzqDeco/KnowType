@@ -1549,11 +1549,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         traceCompositionLifecycleFinish(reason: reason)
         hideCandidatePanel()
 
+        let lifecycleClient = client ?? host?.currentClient
         let commitText = lifecycleCommitText(for: commitPolicy)
         if let commitText,
            !commitText.isEmpty {
-            recordTypingCommit(commitText, client: client)
-            insert(commitText, client: client)
+            recordTypingCommit(commitText, client: lifecycleClient)
+            insert(commitText, client: lifecycleClient)
+        } else if reason.shouldClearMarkedTextWhenEndingWithoutCommit,
+                  let lifecycleClient {
+            clearMarkedText(lifecycleClient)
         }
 
         rawBuffer = ""
@@ -2180,6 +2184,15 @@ private enum CompositionLifecycleFinishReason: String {
     case close
     case reset
     case nativeEnded = "native_ended"
+
+    var shouldClearMarkedTextWhenEndingWithoutCommit: Bool {
+        switch self {
+        case .commit, .nativeEnded:
+            return true
+        case .deactivate, .close, .reset:
+            return false
+        }
+    }
 }
 
 private enum CompositionLifecycleCommitPolicy {

@@ -2026,7 +2026,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("n", client: client))
         let updatesBeforeDeactivate = host.panelStates.count
 
-        coordinator.deactivateServer(client: client)
+        coordinator.deactivateServer(client: nil)
         client.firstRectValue = CGRect(x: 200, y: 500, width: 0, height: 18)
         host.runScheduledOperations()
 
@@ -2040,6 +2040,27 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(persistenceSpy.flushCalls.count, 2)
         XCTAssertEqual(host.hideCandidatePanelCount, 2)
+    }
+
+    func testDeactivateWithoutAnyCurrentClientDoesNotCommitOrClearMarkedText() {
+        let client = FakeInputControllerClient()
+        client.markedRangeValue = NSRange(location: 10, length: 1)
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let (coordinator, host, persistenceSpy) = makeCoordinator(
+            client: client,
+            persistence: persistence
+        )
+        host.currentClientValue = nil
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        coordinator.deactivateServer(client: nil)
+
+        XCTAssertEqual(persistenceSpy.flushCalls.count, 1)
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "n")
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
     func testKeyIntentForwardingIgnoresNonComposingEventsAndHandlesAppend() {
@@ -2519,6 +2540,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         host.runScheduledOperations()
 
         XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertNil(client.markedRange)
         XCTAssertEqual(coordinator.composedString() as? String, "")
         XCTAssertEqual(host.panelStates.count, updatesBeforeCommit)
         XCTAssertEqual(host.hideCandidatePanelCount, 1)

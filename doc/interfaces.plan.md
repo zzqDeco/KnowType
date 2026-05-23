@@ -222,6 +222,9 @@ on commit, cancel, deactivate, close, reset, and native composition end. Candida
 raw/native preedit composition; stale suggestions, delayed reanchors, and AI updates must not make the panel visible
 after composition teardown. With `KNOWTYPE_PANEL_DEBUG=1`, teardown logs include cleanup reasons such as `commit`,
 `deactivate`, `close`, `reset`, and `native_ended`.
+Deactivation uses the current IMK client as a fallback when the callback sender is not an `IMKTextInput`, so pending
+raw text is not dropped. It still avoids `setMarkedText("")` on deactivate; native handled/no-commit end states clear
+marked text through the normal client path because composition has ended without inserted text.
 
 The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
 that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use
