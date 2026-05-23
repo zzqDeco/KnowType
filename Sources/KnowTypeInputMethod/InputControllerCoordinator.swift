@@ -52,7 +52,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let lexicalProfileStore: LexicalProfileStore
     private let rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)?
     private var lexicalProfileRefreshTask: Task<Void, Never>?
-    private let lexicalProfileRefreshGate = LexicalProfileRefreshGate()
+    private let lexicalProfileRefreshGate: LexicalProfileRefreshGate
     private let taskSupervisor = InputTaskSupervisor()
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
@@ -75,6 +75,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
+        lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
         rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)? = nil,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
@@ -109,6 +110,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.aiContextEventRecorder = aiContextEventRecorder
         self.aiDiagnosticSink = aiDiagnosticSink
         self.lexicalProfileStore = lexicalProfileStore
+        self.lexicalProfileRefreshGate = lexicalProfileRefreshGate
         self.rimeUserDBTextProvider = rimeUserDBTextProvider
         self.host = host
         self.anchorResolver = anchorResolver
@@ -699,14 +701,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func lexicalContextSnapshot(for suggestion: SuggestionResponse) -> LexicalContextSnapshot? {
-        let persisted = lexicalProfileStore.currentSnapshot()
+        let currentSchemaID = conversionEngine.activeSchemaID
+        let persisted = lexicalProfileStore.currentProfile()
+        let persistedLexicalContext = persisted?.schemaID == currentSchemaID ? persisted?.lexicalContext : nil
         return lexicalContextBuilder.snapshot(
             rimeCandidates: suggestion.prefixCandidates.map(\.text),
             recentCommits: recentLexicalCommits,
             selectionHistory: recentLexicalSelections,
-            persistentTerms: persisted?.terms ?? [],
-            persistentRecentCommits: persisted?.recentCommits ?? [],
-            persistentSourceSummary: persisted?.sourceSummary ?? []
+            persistentTerms: persistedLexicalContext?.terms ?? [],
+            persistentRecentCommits: persistedLexicalContext?.recentCommits ?? [],
+            persistentSourceSummary: persistedLexicalContext?.sourceSummary ?? []
         )
     }
 

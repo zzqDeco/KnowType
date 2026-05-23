@@ -108,6 +108,41 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(selected?.standardizedFileURL.path, newerSnapshot.standardizedFileURL.path)
     }
 
+    func testUserDBTextSnapshotProviderUsesExistingSnapshotWhenSyncFails() async throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-userdb-sync-fallback")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let sync = userData.appendingPathComponent("sync", isDirectory: true)
+        try fileManager.createDirectory(at: sync, withIntermediateDirectories: true)
+        let snapshotURL = sync.appendingPathComponent("pinyin_simp.userdb.txt")
+        try "ni\t你\tc=12 d=0\n".write(to: snapshotURL, atomically: true, encoding: .utf8)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("share", isDirectory: true),
+            userDataURL: userData,
+            logURL: root.appendingPathComponent("logs", isDirectory: true),
+            schemaID: "pinyin_simp"
+        )
+        let session = FakeRimeUserDBSnapshotSession(
+            syncResult: false,
+            userDataDirectory: userData,
+            userDataSyncDirectory: sync,
+            userDictionaryName: nil
+        )
+        let provider = RimeUserDBTextSnapshotProvider(
+            configuration: configuration,
+            sessionFactory: { _ in session }
+        )
+
+        let snapshot = try await provider.userDBTextSnapshot(schemaID: "pinyin_simp")
+
+        XCTAssertEqual(snapshot.fileURL.standardizedFileURL.path, snapshotURL.standardizedFileURL.path)
+        XCTAssertTrue(snapshot.content.contains("你"))
+    }
+
     func testUnavailableSessionPreservesRawBypassForNonASCIIInput() {
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),
@@ -401,4 +436,39 @@ final class RimeConversionEngineTests: XCTestCase {
 private func temporaryDirectory(name: String) -> URL {
     FileManager.default.temporaryDirectory
         .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
+}
+
+private final class FakeRimeUserDBSnapshotSession: RimeUserDBSnapshotSession, @unchecked Sendable {
+    private let syncResult: Bool
+    private let userDataDirectoryURL: URL?
+    private let userDataSyncDirectoryURL: URL?
+    private let dictionaryName: String?
+
+    init(
+        syncResult: Bool,
+        userDataDirectory: URL?,
+        userDataSyncDirectory: URL?,
+        userDictionaryName: String?
+    ) {
+        self.syncResult = syncResult
+        self.userDataDirectoryURL = userDataDirectory
+        self.userDataSyncDirectoryURL = userDataSyncDirectory
+        self.dictionaryName = userDictionaryName
+    }
+
+    func syncUserData() -> Bool {
+        syncResult
+    }
+
+    func userDataDirectory() -> URL? {
+        userDataDirectoryURL
+    }
+
+    func userDataSyncDirectory() -> URL? {
+        userDataSyncDirectoryURL
+    }
+
+    func userDictionaryName(schemaID _: String) -> String? {
+        dictionaryName
+    }
 }

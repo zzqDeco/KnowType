@@ -316,7 +316,7 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - archives processed event files under `~/.knowtype/events/processed/`
 - summarizes after a batch threshold or interval
 - updates only the generated section in `ENV.md`
-- normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically; unmatched markers and literal marker text in user notes are preserved
+- normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically on a best-effort basis; read-only or transient write failures still return the repaired in-memory snapshot
 - sanitizes Level 0 protected content before writing logs
 
 `LexicalProfileStore`:
@@ -327,13 +327,16 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - never stores full Rime userdb exports, raw provider responses, or API keys
 
 Rime userdb profile refresh is a background-only input-method task. It calls
-librime sync, resolves the schema's `translator/user_dict` or
-`translator/dictionary`, scans for that dictionary's `*.userdb.txt`, and parses
-standard `code<TAB>text<TAB>c=... d=... t=...` rows while keeping compatibility
-with legacy `text<TAB>code<TAB>frequency` fixtures. Snapshot selection prefers
-the local `installation_id` sync folder, then chooses deterministically by root,
-mtime, and path. Refreshes are generation-guarded at the save boundary so a
-stale background task cannot overwrite a newer lexical profile.
+librime sync as a best-effort freshness step, resolves the schema's
+`translator/user_dict` or `translator/dictionary`, scans for that dictionary's
+`*.userdb.txt`, and parses standard `code<TAB>text<TAB>c=... d=... t=...` rows
+while keeping compatibility with legacy `text<TAB>code<TAB>frequency` fixtures.
+Snapshot selection prefers the local `installation_id` sync folder, then chooses
+deterministically by root, mtime, and path. Refreshes use a process-wide store
+and generation gate shared by IMK sessions, and the gate is rechecked at the save
+boundary so stale background tasks cannot overwrite a newer lexical profile.
+AI requests merge persisted `LEXICAL_PROFILE.md` terms only when the stored
+profile schema matches the active Rime schema.
 
 KnowType-specific settings use the InputMethodKit preferences window opened from
 the input-method menu as the primary user entry point. `KnowType Settings...`

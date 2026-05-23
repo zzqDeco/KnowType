@@ -13,6 +13,12 @@ private let inputControllerLogger = Logger(
     category: "input-controller"
 )
 
+enum InputMethodLexicalProfileRuntime {
+    static let store = LexicalProfileStore()
+    static let refreshGate = LexicalProfileRefreshGate()
+    static let rimeUserDBTextProvider = RimeUserDBTextSnapshotProvider()
+}
+
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, CandidatePanelInteractionHandling, @unchecked Sendable {
     private let coordinator: InputControllerCoordinator
@@ -27,8 +33,6 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         let aiContextEventRecorder: (any AIContextEventRecording)? = provider.map {
             AIContextMemoryRuntime(provider: $0)
         }
-        let lexicalProfileStore = LexicalProfileStore()
-        let rimeUserDBTextProvider = RimeUserDBTextSnapshotProvider()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
@@ -48,8 +52,9 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             userSelectionHistoryPersistence: historyPersistence,
             aiRecommendationProvider: aiRecommendationRuntime,
             aiContextEventRecorder: aiContextEventRecorder,
-            lexicalProfileStore: lexicalProfileStore,
-            rimeUserDBTextProvider: rimeUserDBTextProvider,
+            lexicalProfileStore: InputMethodLexicalProfileRuntime.store,
+            lexicalProfileRefreshGate: InputMethodLexicalProfileRuntime.refreshGate,
+            rimeUserDBTextProvider: InputMethodLexicalProfileRuntime.rimeUserDBTextProvider,
             host: hostAdapter,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: AppKitScreenGeometryProvider(),

@@ -26,12 +26,19 @@ keydown hot path.
 - Prefer the local `installation_id` sync snapshot, use deterministic fallback
   ordering for parallel sync folders, and guard writes with a refresh generation
   so stale background tasks cannot overwrite newer profiles.
+- Treat Rime sync as best-effort: if sync fails but a matching exported snapshot
+  already exists, parse that snapshot instead of disabling profile refresh.
+- Share the lexical profile store and refresh gate process-wide across IMK
+  controller sessions, and merge persisted terms only when their schema matches
+  the active Rime schema.
 - Repair duplicate `ENV.md` generated markers during load so polluted context
-  files are cleaned before prompt use.
+  files are cleaned before prompt use; repair write-back is best-effort so reads
+  still succeed on read-only or transiently restricted filesystems.
 
 ## Validation
 
-- Parser, store, merge, protected-filtering, ENV repair, and coordinator
+- Parser, store, merge, protected-filtering, ENV repair, schema filtering,
+  sync-failure snapshot fallback, shared IMK runtime, and coordinator
   no-hot-path-sync tests.
 - Required commands: `swift test --quiet`,
   `./scripts/smoke-inputmethod-install.sh`, `./scripts/perf-input-hotpath.sh`,

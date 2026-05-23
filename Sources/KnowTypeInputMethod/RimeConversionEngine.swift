@@ -445,7 +445,14 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
     }
 }
 
-final class NativeRimeSession: @unchecked Sendable {
+protocol RimeUserDBSnapshotSession: Sendable {
+    func syncUserData() -> Bool
+    func userDataDirectory() -> URL?
+    func userDataSyncDirectory() -> URL?
+    func userDictionaryName(schemaID: String) -> String?
+}
+
+final class NativeRimeSession: RimeUserDBSnapshotSession, @unchecked Sendable {
     private let session: OpaquePointer
 
     init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
@@ -621,30 +628,45 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
     private let configuration: NativeRimeConfiguration?
     private let fileManager: FileManager
     private let locator: RimeUserDBSnapshotLocator
+    private let sessionFactory: @Sendable (NativeRimeConfiguration) -> (any RimeUserDBSnapshotSession)?
 
     public init(
         configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration(),
         fileManager: FileManager = .default
     ) {
+        self.init(
+            configuration: configuration,
+            fileManager: fileManager,
+            sessionFactory: { NativeRimeSession(configuration: $0) }
+        )
+    }
+
+    init(
+        configuration: NativeRimeConfiguration?,
+        fileManager: FileManager = .default,
+        sessionFactory: @escaping @Sendable (NativeRimeConfiguration) -> (any RimeUserDBSnapshotSession)?
+    ) {
         self.configuration = configuration
         self.fileManager = fileManager
         self.locator = RimeUserDBSnapshotLocator(fileManager: fileManager)
+        self.sessionFactory = sessionFactory
     }
 
     public func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
         guard let configuration,
-              let session = NativeRimeSession(configuration: configuration, fileManager: fileManager) else {
+              let session = sessionFactory(configuration) else {
             throw RimeUserDBTextSnapshotProviderError.unavailable
         }
-        guard session.syncUserData() else {
-            throw RimeUserDBTextSnapshotProviderError.syncFailed
-        }
+        let syncSucceeded = session.syncUserData()
         let roots = snapshotSearchRoots(
             syncDirectory: session.userDataSyncDirectory(),
             userDataDirectory: session.userDataDirectory() ?? configuration.userDataURL
         )
         let userDictionaryName = session.userDictionaryName(schemaID: schemaID) ?? schemaID
         guard let snapshotURL = locator.findUserDBTextSnapshot(userDBName: userDictionaryName, roots: roots) else {
+            if !syncSucceeded {
+                throw RimeUserDBTextSnapshotProviderError.syncFailed
+            }
             throw RimeUserDBTextSnapshotProviderError.snapshotNotFound(schemaID: schemaID)
         }
         let attributes = try? fileManager.attributesOfItem(atPath: snapshotURL.path)

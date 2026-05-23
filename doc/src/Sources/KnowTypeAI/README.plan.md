@@ -14,7 +14,7 @@ Current responsibilities:
   recommendation requests.
 - `AIContextMemoryRuntime` records committed typing events and periodically asks the provider to summarize them into `ENV.md`.
 - `TypingEventStore` stores event batches as JSONL and archives processed batches after a successful digest.
-- `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, replacing only the generated section. Loaded snapshots normalize duplicate generated markers and persist the repair immediately.
+- `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, replacing only the generated section. Loaded snapshots normalize duplicate generated markers and persist the repair best-effort while still returning the repaired in-memory content if write-back fails.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; deterministic traditional input does not read this file.
 - `AIHealthMonitor` keeps transient provider failures from hammering the provider or blocking input.
 

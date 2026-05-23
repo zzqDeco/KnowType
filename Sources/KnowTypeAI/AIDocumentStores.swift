@@ -84,7 +84,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         let content = try String(contentsOf: fileURL, encoding: .utf8)
         let repaired = Self.repairingGeneratedSectionMarkers(in: content)
         if repaired != content {
-            try atomicWrite(repaired, to: fileURL)
+            try? atomicWrite(repaired, to: fileURL)
         }
         return AIDocumentSnapshot(content: repaired)
     }
