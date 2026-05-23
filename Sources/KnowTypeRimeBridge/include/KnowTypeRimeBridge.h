@@ -66,6 +66,8 @@ char *ktb_rime_copy_user_data_dir(KTBRimeSession *session);
 
 char *ktb_rime_copy_user_data_sync_dir(KTBRimeSession *session);
 
+char *ktb_rime_copy_schema_user_dict(KTBRimeSession *session, const char *schema_id);
+
 void ktb_rime_string_free(char *value);
 
 #ifdef __cplusplus

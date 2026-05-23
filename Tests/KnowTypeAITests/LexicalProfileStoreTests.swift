@@ -7,8 +7,10 @@ final class LexicalProfileStoreTests: XCTestCase {
         let content = """
         # Rime user dictionary export
         方案\tfang an\t8
+        ce shi\t测试\tc=12 d=0 t=1700000000
         接口\tjie kou\t3
         123456\tshu zi\t99
+        shu zi\t123456\tc=99 d=0 t=1700000000
         API\tapi\t20
         malformed
         方案\tfang an\t10
@@ -16,7 +18,7 @@ final class LexicalProfileStoreTests: XCTestCase {
 
         let terms = RimeUserDBTextParser(maxTerms: 4).parse(content)
 
-        XCTAssertEqual(terms.map(\.text), ["方案", "接口"])
+        XCTAssertEqual(terms.map(\.text), ["测试", "方案", "接口"])
         XCTAssertEqual(terms.first?.source, "rime-userdb")
         XCTAssertEqual(terms.first?.score, 1)
         XCTAssertLessThan(terms[1].score, 1)

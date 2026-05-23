@@ -1605,15 +1605,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     )
                     return
                 }
-                guard !Task.isCancelled, refreshGate.isCurrent(generation) else {
+                guard !Task.isCancelled else {
                     return
                 }
-                _ = try store.save(
-                    snapshot: lexical,
-                    schemaID: schemaID,
-                    rimeSnapshotURL: snapshot.fileURL,
-                    rimeSnapshotModifiedAt: snapshot.modifiedAt
-                )
+                guard let _ = try refreshGate.commitIfCurrent(generation, {
+                    try store.save(
+                        snapshot: lexical,
+                        schemaID: schemaID,
+                        rimeSnapshotURL: snapshot.fileURL,
+                        rimeSnapshotModifiedAt: snapshot.modifiedAt
+                    )
+                }) else {
+                    return
+                }
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(
                         stage: .lexicalProfileUpdated,
@@ -2374,6 +2378,17 @@ final class LexicalProfileRefreshGate: @unchecked Sendable {
             lock.unlock()
         }
         return generation == candidate
+    }
+
+    func commitIfCurrent<T>(_ candidate: Int, _ operation: () throws -> T) throws -> T? {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        guard generation == candidate else {
+            return nil
+        }
+        return try operation()
     }
 }
 

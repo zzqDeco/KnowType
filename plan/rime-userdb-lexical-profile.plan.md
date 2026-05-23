@@ -16,15 +16,16 @@ keydown hot path.
 
 - Extend the Rime bridge with guarded `sync_user_data`, user-data-dir, and
   sync-dir accessors.
-- Parse Rime `*.userdb.txt` sync snapshots rather than `.ldb` files.
+- Resolve the active schema's Rime user dictionary name and parse its
+  `*.userdb.txt` sync snapshot rather than `.ldb` files.
 - Persist canonical profile JSON under Application Support and mirror readable
   markdown to `~/.knowtype/LEXICAL_PROFILE.md`.
 - Merge current Rime candidates, selection history, recent commits, and Rime
   userdb terms into a top-K lexical snapshot whose hash participates in AI cache
   keys.
-- Derive the userdb snapshot name from the active Rime schema and guard writes
-  with a refresh generation so stale background tasks cannot overwrite newer
-  profiles.
+- Prefer the local `installation_id` sync snapshot, use deterministic fallback
+  ordering for parallel sync folders, and guard writes with a refresh generation
+  so stale background tasks cannot overwrite newer profiles.
 - Repair duplicate `ENV.md` generated markers during load so polluted context
   files are cleaned before prompt use.
 

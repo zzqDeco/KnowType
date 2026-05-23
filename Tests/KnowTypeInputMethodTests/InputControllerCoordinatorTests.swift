@@ -1621,6 +1621,18 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertFalse(gate.isCurrent(first))
         XCTAssertTrue(gate.isCurrent(second))
+        var staleCommitted = false
+        let staleResult = try? gate.commitIfCurrent(first) {
+            staleCommitted = true
+            return "stale"
+        }
+        let currentResult = try? gate.commitIfCurrent(second) {
+            "current"
+        }
+
+        XCTAssertNil(staleResult ?? nil)
+        XCTAssertFalse(staleCommitted)
+        XCTAssertEqual(currentResult ?? nil, "current")
     }
 
     @MainActor

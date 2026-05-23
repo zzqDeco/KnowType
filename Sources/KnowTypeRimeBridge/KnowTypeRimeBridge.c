@@ -582,6 +582,43 @@ char *ktb_rime_copy_user_data_sync_dir(KTBRimeSession *session) {
     return NULL;
 }
 
+char *ktb_rime_copy_schema_user_dict(KTBRimeSession *session, const char *schema_id) {
+    if (!session || !session->api || !schema_id || schema_id[0] == '\0' ||
+        !KTB_RIME_API_HAS(session->api, schema_open) ||
+        !KTB_RIME_API_HAS(session->api, config_close) ||
+        !KTB_RIME_API_HAS(session->api, config_get_string) ||
+        !session->api->schema_open ||
+        !session->api->config_close ||
+        !session->api->config_get_string) {
+        return NULL;
+    }
+
+    RimeConfig config;
+    memset(&config, 0, sizeof(config));
+    if (!session->api->schema_open(schema_id, &config)) {
+        return NULL;
+    }
+
+    char buffer[1024];
+    const char *keys[] = {
+        "translator/user_dict",
+        "translator/dictionary",
+        NULL
+    };
+    char *result = NULL;
+    for (int i = 0; keys[i] != NULL; i++) {
+        memset(buffer, 0, sizeof(buffer));
+        if (session->api->config_get_string(&config, keys[i], buffer, sizeof(buffer)) &&
+            buffer[0] != '\0') {
+            result = ktb_strdup(buffer);
+            break;
+        }
+    }
+
+    session->api->config_close(&config);
+    return result;
+}
+
 void ktb_rime_string_free(char *value) {
     free(value);
 }

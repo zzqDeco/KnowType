@@ -42,13 +42,11 @@ public struct RimeUserDBTextParser: Sendable {
                 continue
             }
             let columns = trimmed.split(separator: "\t", omittingEmptySubsequences: false)
-            guard columns.count >= 3,
-                  let text = LexicalContextBuilder.sanitizedProfileText(String(columns[0])),
-                  let frequency = Double(columns[2].trimmingCharacters(in: .whitespacesAndNewlines)),
-                  frequency > 0 else {
+            guard let row = parsedRow(columns: columns),
+                  row.frequency > 0 else {
                 continue
             }
-            bestFrequencyByText[text] = max(bestFrequencyByText[text] ?? 0, frequency)
+            bestFrequencyByText[row.text] = max(bestFrequencyByText[row.text] ?? 0, row.frequency)
         }
 
         let maxFrequency = max(bestFrequencyByText.values.max() ?? 1, 1)
@@ -68,6 +66,36 @@ public struct RimeUserDBTextParser: Sendable {
             }
             .prefix(maxTerms)
             .map { $0 }
+    }
+
+    private func parsedRow(columns: [Substring]) -> (text: String, frequency: Double)? {
+        guard columns.count >= 3 else {
+            return nil
+        }
+        let thirdColumn = columns[2].trimmingCharacters(in: .whitespacesAndNewlines)
+        if let frequency = Double(thirdColumn),
+           let text = LexicalContextBuilder.sanitizedProfileText(String(columns[0])) {
+            return (text, frequency)
+        }
+
+        let metadata = columns[2...]
+            .map { String($0) }
+            .joined(separator: " ")
+        guard let frequency = metadataFrequency(metadata),
+              let text = LexicalContextBuilder.sanitizedProfileText(String(columns[1])) else {
+            return nil
+        }
+        return (text, frequency)
+    }
+
+    private func metadataFrequency(_ metadata: String) -> Double? {
+        for token in metadata.split(whereSeparator: \.isWhitespace) {
+            guard token.hasPrefix("c=") else {
+                continue
+            }
+            return Double(token.dropFirst(2))
+        }
+        return nil
     }
 }
 

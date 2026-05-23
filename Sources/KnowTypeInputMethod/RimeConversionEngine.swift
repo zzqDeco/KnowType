@@ -598,6 +598,17 @@ final class NativeRimeSession: @unchecked Sendable {
         }
         return URL(fileURLWithPath: String(cString: path), isDirectory: true)
     }
+
+    func userDictionaryName(schemaID: String) -> String? {
+        guard let name = schemaID.withCString({ ktb_rime_copy_schema_user_dict(session, $0) }) else {
+            return nil
+        }
+        defer {
+            ktb_rime_string_free(name)
+        }
+        let value = String(cString: name).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
 }
 
 public enum RimeUserDBTextSnapshotProviderError: Error, Equatable {
@@ -609,6 +620,7 @@ public enum RimeUserDBTextSnapshotProviderError: Error, Equatable {
 public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
     private let configuration: NativeRimeConfiguration?
     private let fileManager: FileManager
+    private let locator: RimeUserDBSnapshotLocator
 
     public init(
         configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration(),
@@ -616,6 +628,7 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
     ) {
         self.configuration = configuration
         self.fileManager = fileManager
+        self.locator = RimeUserDBSnapshotLocator(fileManager: fileManager)
     }
 
     public func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
@@ -630,7 +643,8 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
             syncDirectory: session.userDataSyncDirectory(),
             userDataDirectory: session.userDataDirectory() ?? configuration.userDataURL
         )
-        guard let snapshotURL = findUserDBTextSnapshot(schemaID: schemaID, roots: roots) else {
+        let userDictionaryName = session.userDictionaryName(schemaID: schemaID) ?? schemaID
+        guard let snapshotURL = locator.findUserDBTextSnapshot(userDBName: userDictionaryName, roots: roots) else {
             throw RimeUserDBTextSnapshotProviderError.snapshotNotFound(schemaID: schemaID)
         }
         let attributes = try? fileManager.attributesOfItem(atPath: snapshotURL.path)
@@ -645,11 +659,27 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
     }
 
     private func snapshotSearchRoots(syncDirectory: URL?, userDataDirectory: URL) -> [URL] {
+        locator.snapshotSearchRoots(syncDirectory: syncDirectory, userDataDirectory: userDataDirectory)
+    }
+}
+
+struct RimeUserDBSnapshotLocator: @unchecked Sendable {
+    var fileManager: FileManager
+
+    func snapshotSearchRoots(syncDirectory: URL?, userDataDirectory: URL) -> [URL] {
+        let installationID = installationID(in: userDataDirectory)
+        let syncUnderUserData = userDataDirectory.appendingPathComponent("sync", isDirectory: true)
         var roots: [URL] = []
+        if let syncDirectory, let installationID {
+            roots.append(syncDirectory.appendingPathComponent(installationID, isDirectory: true))
+        }
+        if let installationID {
+            roots.append(syncUnderUserData.appendingPathComponent(installationID, isDirectory: true))
+        }
         if let syncDirectory {
             roots.append(syncDirectory)
         }
-        roots.append(userDataDirectory.appendingPathComponent("sync", isDirectory: true))
+        roots.append(syncUnderUserData)
         roots.append(userDataDirectory)
         var seen = Set<String>()
         return roots.filter { root in
@@ -662,12 +692,14 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
         }
     }
 
-    private func findUserDBTextSnapshot(schemaID: String, roots: [URL]) -> URL? {
-        let filename = "\(schemaID).userdb.txt"
-        for root in roots {
+    func findUserDBTextSnapshot(userDBName: String, roots: [URL]) -> URL? {
+        let filename = "\(userDBName).userdb.txt"
+        var candidates: [SnapshotCandidate] = []
+        var seen = Set<String>()
+        for (rootIndex, root) in roots.enumerated() {
             let direct = root.appendingPathComponent(filename, isDirectory: false)
             if fileManager.fileExists(atPath: direct.path) {
-                return direct
+                appendCandidate(direct, rootIndex: rootIndex, isDirect: true, candidates: &candidates, seen: &seen)
             }
             guard let enumerator = fileManager.enumerator(
                 at: root,
@@ -677,10 +709,79 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
                 continue
             }
             for case let url as URL in enumerator where url.lastPathComponent == filename {
-                return url
+                appendCandidate(url, rootIndex: rootIndex, isDirect: false, candidates: &candidates, seen: &seen)
             }
         }
+        return candidates.sorted().first?.url
+    }
+
+    func installationID(in userDataDirectory: URL) -> String? {
+        let installationURL = userDataDirectory.appendingPathComponent("installation.yaml", isDirectory: false)
+        guard let content = try? String(contentsOf: installationURL, encoding: .utf8) else {
+            return nil
+        }
+        for line in content.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("installation_id:"),
+                  let separator = trimmed.firstIndex(of: ":") else {
+                continue
+            }
+            let rawValue = trimmed[trimmed.index(after: separator)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return rawValue.isEmpty ? nil : rawValue
+        }
         return nil
+    }
+
+    private func appendCandidate(
+        _ url: URL,
+        rootIndex: Int,
+        isDirect: Bool,
+        candidates: inout [SnapshotCandidate],
+        seen: inout Set<String>
+    ) {
+        let standardizedURL = url.standardizedFileURL
+        guard !seen.contains(standardizedURL.path) else {
+            return
+        }
+        seen.insert(standardizedURL.path)
+        let modifiedAt = (try? standardizedURL.resourceValues(forKeys: [.contentModificationDateKey]))
+            .flatMap(\.contentModificationDate)
+        candidates.append(
+            SnapshotCandidate(
+                url: standardizedURL,
+                rootIndex: rootIndex,
+                isDirect: isDirect,
+                modifiedAt: modifiedAt
+            )
+        )
+    }
+
+    private struct SnapshotCandidate: Comparable {
+        var url: URL
+        var rootIndex: Int
+        var isDirect: Bool
+        var modifiedAt: Date?
+
+        static func < (lhs: SnapshotCandidate, rhs: SnapshotCandidate) -> Bool {
+            if lhs.rootIndex != rhs.rootIndex {
+                return lhs.rootIndex < rhs.rootIndex
+            }
+            if lhs.isDirect != rhs.isDirect {
+                return lhs.isDirect && !rhs.isDirect
+            }
+            switch (lhs.modifiedAt, rhs.modifiedAt) {
+            case (.some(let lhsDate), .some(let rhsDate)) where lhsDate != rhsDate:
+                return lhsDate > rhsDate
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            default:
+                return lhs.url.path < rhs.url.path
+            }
+        }
     }
 }
 
