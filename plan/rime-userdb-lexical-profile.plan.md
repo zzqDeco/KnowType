@@ -24,8 +24,9 @@ keydown hot path.
   userdb terms into a top-K lexical snapshot whose hash participates in AI cache
   keys.
 - Prefer the local `installation_id` sync snapshot, use deterministic fallback
-  ordering for parallel sync folders, and guard writes with a refresh generation
-  without holding the gate lock across filesystem writes.
+  ordering for parallel sync folders, and guard writes with a refresh generation.
+  Profile JSON/Markdown bytes are staged to temporary files before the gate is
+  acquired; only the final publish/rename runs under the generation guard.
 - Detect the text column in metadata snapshot rows so code strings are not
   persisted as lexical terms when row order differs across Rime exports.
 - Treat Rime sync as best-effort: if sync fails but a matching exported snapshot

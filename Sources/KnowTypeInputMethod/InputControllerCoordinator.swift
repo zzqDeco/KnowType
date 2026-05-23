@@ -1612,15 +1612,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 guard !Task.isCancelled else {
                     return
                 }
-                guard let _ = try store.saveIfCurrent(
+                let transaction = try store.prepareSave(
                     snapshot: lexical,
                     schemaID: schemaID,
                     rimeSnapshotURL: snapshot.fileURL,
-                    rimeSnapshotModifiedAt: snapshot.modifiedAt,
-                    shouldCommit: {
-                        refreshGate.isCurrent(generation)
-                    }
-                ) else {
+                    rimeSnapshotModifiedAt: snapshot.modifiedAt
+                )
+                guard !Task.isCancelled else {
+                    store.discardPreparedSave(transaction)
+                    return
+                }
+                guard let _ = try refreshGate.commitIfCurrent(generation, {
+                    try store.commitPreparedSave(transaction)
+                }) else {
+                    store.discardPreparedSave(transaction)
                     return
                 }
                 diagnosticSink.record(
@@ -2383,6 +2388,17 @@ final class LexicalProfileRefreshGate: @unchecked Sendable {
             lock.unlock()
         }
         return generation == candidate
+    }
+
+    func commitIfCurrent<T>(_ candidate: Int, _ operation: () throws -> T) throws -> T? {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        guard generation == candidate else {
+            return nil
+        }
+        return try operation()
     }
 
 }

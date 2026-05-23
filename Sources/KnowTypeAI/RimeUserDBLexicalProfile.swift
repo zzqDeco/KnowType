@@ -153,6 +153,16 @@ public struct PersistentLexicalProfile: Codable, Sendable, Equatable {
     }
 }
 
+public struct LexicalProfileSaveTransaction: Sendable {
+    public let profile: PersistentLexicalProfile
+    fileprivate let stagedWrites: [StagedLexicalProfileWrite]
+}
+
+private struct StagedLexicalProfileWrite: Sendable {
+    var temporaryURL: URL
+    var destinationURL: URL
+}
+
 public final class LexicalProfileStore: @unchecked Sendable {
     private let jsonURL: URL?
     private let markdownURL: URL?
@@ -214,14 +224,14 @@ public final class LexicalProfileStore: @unchecked Sendable {
         rimeSnapshotModifiedAt: Date?,
         generatedAt: Date = Date()
     ) throws -> PersistentLexicalProfile {
-        try saveIfCurrent(
+        let transaction = try prepareSave(
             snapshot: snapshot,
             schemaID: schemaID,
             rimeSnapshotURL: rimeSnapshotURL,
             rimeSnapshotModifiedAt: rimeSnapshotModifiedAt,
-            generatedAt: generatedAt,
-            shouldCommit: { true }
-        )!
+            generatedAt: generatedAt
+        )
+        return try commitPreparedSave(transaction)
     }
 
     @discardableResult
@@ -233,6 +243,30 @@ public final class LexicalProfileStore: @unchecked Sendable {
         generatedAt: Date = Date(),
         shouldCommit: () -> Bool
     ) throws -> PersistentLexicalProfile? {
+        guard shouldCommit() else {
+            return nil
+        }
+        let transaction = try prepareSave(
+            snapshot: snapshot,
+            schemaID: schemaID,
+            rimeSnapshotURL: rimeSnapshotURL,
+            rimeSnapshotModifiedAt: rimeSnapshotModifiedAt,
+            generatedAt: generatedAt
+        )
+        guard shouldCommit() else {
+            discardPreparedSave(transaction)
+            return nil
+        }
+        return try commitPreparedSave(transaction)
+    }
+
+    public func prepareSave(
+        snapshot: LexicalContextSnapshot,
+        schemaID: String,
+        rimeSnapshotURL: URL?,
+        rimeSnapshotModifiedAt: Date?,
+        generatedAt: Date = Date()
+    ) throws -> LexicalProfileSaveTransaction {
         let next = PersistentLexicalProfile(
             generatedAt: generatedAt,
             schemaID: schemaID,
@@ -240,26 +274,39 @@ public final class LexicalProfileStore: @unchecked Sendable {
             rimeSnapshotModifiedAt: rimeSnapshotModifiedAt,
             lexicalContext: snapshot
         )
-        guard shouldCommit() else {
-            return nil
-        }
-        if let jsonURL {
-            guard try writeJSON(next, to: jsonURL, shouldCommit: shouldCommit) else {
-                return nil
+        var stagedWrites: [StagedLexicalProfileWrite] = []
+        do {
+            if let jsonURL {
+                stagedWrites.append(try stageJSON(next, to: jsonURL))
             }
-        }
-        if let markdownURL {
-            guard try atomicWrite(snapshot.markdown, to: markdownURL, shouldCommit: shouldCommit) else {
-                return nil
+            if let markdownURL {
+                stagedWrites.append(try stageWrite(Data(snapshot.markdown.utf8), to: markdownURL))
             }
+            return LexicalProfileSaveTransaction(profile: next, stagedWrites: stagedWrites)
+        } catch {
+            cleanup(stagedWrites)
+            throw error
         }
-        guard shouldCommit() else {
-            return nil
+    }
+
+    @discardableResult
+    public func commitPreparedSave(_ transaction: LexicalProfileSaveTransaction) throws -> PersistentLexicalProfile {
+        do {
+            for stagedWrite in transaction.stagedWrites {
+                try promote(stagedWrite)
+            }
+        } catch {
+            cleanup(transaction.stagedWrites)
+            throw error
         }
         lock.lock()
-        profile = next
+        profile = transaction.profile
         lock.unlock()
-        return next
+        return transaction.profile
+    }
+
+    public func discardPreparedSave(_ transaction: LexicalProfileSaveTransaction) {
+        cleanup(transaction.stagedWrites)
     }
 
     private static func loadProfile(from url: URL, fileManager: FileManager) -> PersistentLexicalProfile? {
@@ -272,55 +319,43 @@ public final class LexicalProfileStore: @unchecked Sendable {
         return try? decoder.decode(PersistentLexicalProfile.self, from: data)
     }
 
-    private func writeJSON(
-        _ profile: PersistentLexicalProfile,
-        to url: URL,
-        shouldCommit: () -> Bool
-    ) throws -> Bool {
+    private func stageJSON(_ profile: PersistentLexicalProfile, to url: URL) throws -> StagedLexicalProfileWrite {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(profile)
-        return try atomicWrite(data, to: url, shouldCommit: shouldCommit)
+        return try stageWrite(data, to: url)
     }
 
     private func atomicWrite(_ content: String, to url: URL) throws {
-        _ = try atomicWrite(content, to: url, shouldCommit: { true })
-    }
-
-    private func atomicWrite(
-        _ content: String,
-        to url: URL,
-        shouldCommit: () -> Bool
-    ) throws -> Bool {
-        try atomicWrite(Data(content.utf8), to: url, shouldCommit: shouldCommit)
+        try atomicWrite(Data(content.utf8), to: url)
     }
 
     private func atomicWrite(_ data: Data, to url: URL) throws {
-        _ = try atomicWrite(data, to: url, shouldCommit: { true })
+        let stagedWrite = try stageWrite(data, to: url)
+        try promote(stagedWrite)
     }
 
-    private func atomicWrite(
-        _ data: Data,
-        to url: URL,
-        shouldCommit: () -> Bool
-    ) throws -> Bool {
-        guard shouldCommit() else {
-            return false
-        }
+    private func stageWrite(_ data: Data, to url: URL) throws -> StagedLexicalProfileWrite {
         let directory = url.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let temporaryURL = directory.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
         try data.write(to: temporaryURL, options: .atomic)
-        guard shouldCommit() else {
-            try? fileManager.removeItem(at: temporaryURL)
-            return false
-        }
+        return StagedLexicalProfileWrite(temporaryURL: temporaryURL, destinationURL: url)
+    }
+
+    private func promote(_ stagedWrite: StagedLexicalProfileWrite) throws {
+        let url = stagedWrite.destinationURL
         if fileManager.fileExists(atPath: url.path) {
-            _ = try fileManager.replaceItemAt(url, withItemAt: temporaryURL)
+            _ = try fileManager.replaceItemAt(url, withItemAt: stagedWrite.temporaryURL)
         } else {
-            try fileManager.moveItem(at: temporaryURL, to: url)
+            try fileManager.moveItem(at: stagedWrite.temporaryURL, to: url)
         }
-        return true
+    }
+
+    private func cleanup(_ stagedWrites: [StagedLexicalProfileWrite]) {
+        for stagedWrite in stagedWrites {
+            try? fileManager.removeItem(at: stagedWrite.temporaryURL)
+        }
     }
 }

@@ -15,6 +15,8 @@ frequency data and provider context documents.
 - Does not read Rime `.ldb` files or retain complete userdb exports.
 - Persists canonical profile JSON under Application Support and a readable
   `~/.knowtype/LEXICAL_PROFILE.md` mirror.
+- Stages JSON/Markdown writes to temporary files first; stale refreshes can be
+  discarded before replacing the canonical profile paths.
 - Carries the Rime schema id with the persisted profile; the input method merges
   persisted terms into AI requests only when it matches the active schema.
 - Filters protected text, technical-only tokens, paths, URLs, and numeric-only

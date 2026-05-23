@@ -83,6 +83,56 @@ final class LexicalProfileStoreTests: XCTestCase {
         XCTAssertNil(store.currentProfile())
     }
 
+    func testLexicalProfileStoreDiscardsPreparedSaveWhenGenerationTurnsStale() throws {
+        let directory = temporaryDirectory()
+        let jsonURL = directory.appendingPathComponent("lexical-profile.json")
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let store = LexicalProfileStore(jsonURL: jsonURL, markdownURL: markdownURL)
+        let oldSnapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                persistentTerms: [
+                    LexicalContextTerm(text: "旧画像", score: 1, source: "rime-userdb")
+                ]
+            )
+        )
+        let oldProfile = try store.save(
+            snapshot: oldSnapshot,
+            schemaID: "pinyin_simp",
+            rimeSnapshotURL: nil,
+            rimeSnapshotModifiedAt: nil
+        )
+        let newSnapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                persistentTerms: [
+                    LexicalContextTerm(text: "不应覆盖", score: 1, source: "rime-userdb")
+                ]
+            )
+        )
+        var checks = 0
+
+        let profile = try store.saveIfCurrent(
+            snapshot: newSnapshot,
+            schemaID: "pinyin_simp",
+            rimeSnapshotURL: nil,
+            rimeSnapshotModifiedAt: nil,
+            shouldCommit: {
+                checks += 1
+                return checks == 1
+            }
+        )
+
+        XCTAssertNil(profile)
+        XCTAssertEqual(store.currentProfile()?.sha256, oldProfile.sha256)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        XCTAssertEqual(
+            try decoder.decode(PersistentLexicalProfile.self, from: Data(contentsOf: jsonURL)).sha256,
+            oldProfile.sha256
+        )
+        XCTAssertTrue(try String(contentsOf: markdownURL, encoding: .utf8).contains("旧画像"))
+        XCTAssertFalse(try String(contentsOf: markdownURL, encoding: .utf8).contains("不应覆盖"))
+    }
+
     func testLexicalMergeKeepsCurrentRimeCandidatesAheadOfUserDBTerms() throws {
         let snapshot = try XCTUnwrap(
             LexicalContextBuilder().snapshot(
