@@ -8,6 +8,7 @@ KNOWTYPE_LSREGISTER="${KNOWTYPE_LSREGISTER:-/System/Library/Frameworks/CoreServi
 KNOWTYPE_PLIST_BUDDY="${KNOWTYPE_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 KNOWTYPE_SYSTEM_SETTINGS_APP_PATH="/System/Applications/System Settings.app/Contents/MacOS/System Settings"
 KNOWTYPE_SYSTEM_PREFERENCES_APP_PATH="/System/Applications/System Preferences.app/Contents/MacOS/System Preferences"
+KNOWTYPE_DEFAULT_BACKUP_RETENTION=3
 
 knowtype_inputmethod_target_dir() {
   printf '%s' "${KNOWTYPE_INPUTMETHOD_TARGET_DIR:-$HOME/Library/Input Methods}"
@@ -23,6 +24,26 @@ knowtype_preferencepane_target_dir() {
 
 knowtype_preferencepane_target_path() {
   printf '%s/KnowType.prefPane' "$(knowtype_preferencepane_target_dir)"
+}
+
+knowtype_app_support_dir() {
+  printf '%s' "${KNOWTYPE_APP_SUPPORT_DIR:-$HOME/Library/Application Support/KnowType}"
+}
+
+knowtype_install_state_path() {
+  printf '%s' "${KNOWTYPE_INSTALL_STATE_PATH:-$(knowtype_app_support_dir)/install-state.json}"
+}
+
+knowtype_backup_root_dir() {
+  printf '%s' "${KNOWTYPE_BACKUP_ROOT_DIR:-$(knowtype_app_support_dir)/Backups}"
+}
+
+knowtype_iso_timestamp() {
+  date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+knowtype_backup_id_timestamp() {
+  date -u '+%Y%m%dT%H%M%SZ'
 }
 
 knowtype_preferencepane_cache_paths() {
@@ -140,6 +161,330 @@ knowtype_plist_value() {
   local output
   if output="$(/usr/bin/plutil -extract "$key" raw -o - "$plist" 2>/dev/null)"; then
     printf '%s' "$output"
+  fi
+}
+
+knowtype_bundle_short_version() {
+  local bundle_path="$1"
+  knowtype_plist_value "CFBundleShortVersionString" "$bundle_path/Contents/Info.plist"
+}
+
+knowtype_bundle_build_version() {
+  local bundle_path="$1"
+  knowtype_plist_value "CFBundleVersion" "$bundle_path/Contents/Info.plist"
+}
+
+knowtype_bundle_identifier() {
+  local bundle_path="$1"
+  knowtype_plist_value "CFBundleIdentifier" "$bundle_path/Contents/Info.plist"
+}
+
+knowtype_sanitize_backup_component() {
+  local value="$1"
+  value="${value:-unknown}"
+  printf '%s' "$value" | tr -c 'A-Za-z0-9._-+' '-'
+}
+
+knowtype_path_checksum() {
+  local path="$1"
+  if [[ ! -e "$path" ]]; then
+    return 1
+  fi
+
+  if [[ -f "$path" ]]; then
+    shasum -a 256 "$path" | awk '{print $1}'
+    return 0
+  fi
+
+  (
+    cd "$path" || exit 1
+    find . -type f -print 2>/dev/null |
+      LC_ALL=C sort |
+      while IFS= read -r file_path; do
+        shasum -a 256 "$file_path"
+      done |
+      shasum -a 256 |
+      awk '{print $1}'
+  )
+}
+
+knowtype_json_escape() {
+  local value="$1"
+  KNOWTYPE_JSON_VALUE="$value" python3 - <<'PY'
+import json
+import os
+print(json.dumps(os.environ.get("KNOWTYPE_JSON_VALUE", ""))[1:-1])
+PY
+}
+
+knowtype_write_json_file() {
+  local output_path="$1"
+  shift
+  local directory
+  directory="$(dirname "$output_path")"
+  mkdir -p "$directory"
+  KNOWTYPE_OUTPUT_PATH="$output_path" "$@" python3 - <<'PY'
+import json
+import os
+
+def env(name, default=""):
+    value = os.environ.get(name)
+    return default if value is None else value
+
+def optional(name):
+    value = os.environ.get(name)
+    return value if value else None
+
+payload = json.loads(env("KNOWTYPE_JSON_PAYLOAD", "{}"))
+output_path = env("KNOWTYPE_OUTPUT_PATH")
+tmp_path = f"{output_path}.tmp"
+with open(tmp_path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    handle.write("\n")
+os.replace(tmp_path, output_path)
+PY
+}
+
+knowtype_write_install_state() {
+  local source="$1"
+  local bundle_path="$2"
+  local prefpane_path="$3"
+  local backup_id="$4"
+  local git_commit="$5"
+  local git_tag="$6"
+  local release_manifest_digest="$7"
+  local state_path
+  state_path="$(knowtype_install_state_path)"
+
+  local version
+  local build
+  local bundle_id
+  version="$(knowtype_bundle_short_version "$bundle_path")"
+  build="$(knowtype_bundle_build_version "$bundle_path")"
+  bundle_id="$(knowtype_bundle_identifier "$bundle_path")"
+
+  KNOWTYPE_JSON_PAYLOAD="$(
+    KNOWTYPE_STATE_SOURCE="$source" \
+    KNOWTYPE_STATE_INSTALLED_AT="$(knowtype_iso_timestamp)" \
+    KNOWTYPE_STATE_VERSION="$version" \
+    KNOWTYPE_STATE_BUILD="$build" \
+    KNOWTYPE_STATE_GIT_COMMIT="$git_commit" \
+    KNOWTYPE_STATE_GIT_TAG="$git_tag" \
+    KNOWTYPE_STATE_BUNDLE_PATH="$bundle_path" \
+    KNOWTYPE_STATE_PREFPANE_PATH="$prefpane_path" \
+    KNOWTYPE_STATE_PREVIOUS_BACKUP_ID="$backup_id" \
+    KNOWTYPE_STATE_BUNDLE_ID="$bundle_id" \
+    KNOWTYPE_STATE_MODE_ID="$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
+    KNOWTYPE_STATE_RELEASE_MANIFEST_DIGEST="$release_manifest_digest" \
+    python3 - <<'PY'
+import json
+import os
+
+def optional(name):
+    value = os.environ.get(name, "")
+    return value if value else None
+
+payload = {
+    "schemaVersion": 1,
+    "installedAt": os.environ["KNOWTYPE_STATE_INSTALLED_AT"],
+    "source": os.environ["KNOWTYPE_STATE_SOURCE"],
+    "version": os.environ.get("KNOWTYPE_STATE_VERSION", ""),
+    "build": os.environ.get("KNOWTYPE_STATE_BUILD", ""),
+    "gitCommit": optional("KNOWTYPE_STATE_GIT_COMMIT"),
+    "gitTag": optional("KNOWTYPE_STATE_GIT_TAG"),
+    "bundlePath": os.environ["KNOWTYPE_STATE_BUNDLE_PATH"],
+    "prefPanePath": optional("KNOWTYPE_STATE_PREFPANE_PATH"),
+    "previousBackupID": optional("KNOWTYPE_STATE_PREVIOUS_BACKUP_ID"),
+    "bundleIdentifier": os.environ.get("KNOWTYPE_STATE_BUNDLE_ID", ""),
+    "modeID": os.environ.get("KNOWTYPE_STATE_MODE_ID", ""),
+    "releaseManifestDigest": optional("KNOWTYPE_STATE_RELEASE_MANIFEST_DIGEST"),
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+  )" knowtype_write_json_file "$state_path" env
+}
+
+knowtype_read_install_state_field() {
+  local field="$1"
+  local state_path
+  state_path="$(knowtype_install_state_path)"
+  [[ -f "$state_path" ]] || return 0
+  KNOWTYPE_INSTALL_STATE_FIELD="$field" KNOWTYPE_INSTALL_STATE_PATH_VALUE="$state_path" python3 - <<'PY'
+import json
+import os
+path = os.environ["KNOWTYPE_INSTALL_STATE_PATH_VALUE"]
+field = os.environ["KNOWTYPE_INSTALL_STATE_FIELD"]
+try:
+    with open(path, encoding="utf-8") as handle:
+        value = json.load(handle).get(field)
+except Exception:
+    value = None
+if value is not None:
+    print(value)
+PY
+}
+
+KNOWTYPE_CREATED_BACKUP_ID=""
+KNOWTYPE_CREATED_BACKUP_DIR=""
+
+knowtype_create_install_backup() {
+  local app_path="$1"
+  local prefpane_path="$2"
+  local dry_run="${3:-0}"
+  local keep_backups="${4:-$KNOWTYPE_DEFAULT_BACKUP_RETENTION}"
+  KNOWTYPE_CREATED_BACKUP_ID=""
+  KNOWTYPE_CREATED_BACKUP_DIR=""
+
+  if [[ ! -d "$app_path" && ! -d "$prefpane_path" ]]; then
+    return 0
+  fi
+
+  local version
+  local build
+  version="$(knowtype_bundle_short_version "$app_path")"
+  build="$(knowtype_bundle_build_version "$app_path")"
+  local backup_id
+  backup_id="$(knowtype_backup_id_timestamp)-$(knowtype_sanitize_backup_component "$version")-$(knowtype_sanitize_backup_component "$build")"
+  local backup_root
+  local backup_dir
+  backup_root="$(knowtype_backup_root_dir)"
+  backup_dir="$backup_root/$backup_id"
+  KNOWTYPE_CREATED_BACKUP_ID="$backup_id"
+  KNOWTYPE_CREATED_BACKUP_DIR="$backup_dir"
+
+  if [[ "$dry_run" == "1" ]]; then
+    echo "[dry-run] Would create install backup: $backup_dir"
+    [[ -d "$app_path" ]] && echo "[dry-run] Would back up app: $app_path"
+    [[ -d "$prefpane_path" ]] && echo "[dry-run] Would back up PreferencePane: $prefpane_path"
+    return 0
+  fi
+
+  mkdir -p "$backup_dir"
+  if [[ -d "$app_path" ]]; then
+    cp -R "$app_path" "$backup_dir/KnowType.app"
+  fi
+  local included_prefpane="false"
+  if [[ -d "$prefpane_path" ]]; then
+    cp -R "$prefpane_path" "$backup_dir/KnowType.prefPane"
+    included_prefpane="true"
+  fi
+
+  local checksum=""
+  if [[ -d "$backup_dir/KnowType.app" ]]; then
+    checksum="$(knowtype_path_checksum "$backup_dir/KnowType.app" || true)"
+  fi
+
+  KNOWTYPE_JSON_PAYLOAD="$(
+    KNOWTYPE_BACKUP_ID="$backup_id" \
+    KNOWTYPE_BACKUP_CREATED_AT="$(knowtype_iso_timestamp)" \
+    KNOWTYPE_BACKUP_VERSION="$version" \
+    KNOWTYPE_BACKUP_BUILD="$build" \
+    KNOWTYPE_BACKUP_BUNDLE_ID="$(knowtype_bundle_identifier "$app_path")" \
+    KNOWTYPE_BACKUP_APP_CHECKSUM="$checksum" \
+    KNOWTYPE_BACKUP_INCLUDED_PREFPANE="$included_prefpane" \
+    KNOWTYPE_BACKUP_RESTORE_COMMAND="./scripts/rollback-inputmethod.sh --to $backup_id" \
+    python3 - <<'PY'
+import json
+import os
+payload = {
+    "schemaVersion": 1,
+    "backupID": os.environ["KNOWTYPE_BACKUP_ID"],
+    "createdAt": os.environ["KNOWTYPE_BACKUP_CREATED_AT"],
+    "sourceVersion": os.environ.get("KNOWTYPE_BACKUP_VERSION", ""),
+    "sourceBuild": os.environ.get("KNOWTYPE_BACKUP_BUILD", ""),
+    "bundleIdentifier": os.environ.get("KNOWTYPE_BACKUP_BUNDLE_ID", ""),
+    "appChecksum": os.environ.get("KNOWTYPE_BACKUP_APP_CHECKSUM", ""),
+    "includedPrefPane": os.environ.get("KNOWTYPE_BACKUP_INCLUDED_PREFPANE") == "true",
+    "restoreCommand": os.environ["KNOWTYPE_BACKUP_RESTORE_COMMAND"],
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+  )" knowtype_write_json_file "$backup_dir/manifest.json" env
+
+  echo "Created install backup: $backup_dir"
+  knowtype_prune_install_backups "$keep_backups" 0
+}
+
+knowtype_prune_install_backups() {
+  local keep_backups="${1:-$KNOWTYPE_DEFAULT_BACKUP_RETENTION}"
+  local dry_run="${2:-0}"
+  local backup_root
+  backup_root="$(knowtype_backup_root_dir)"
+  [[ -d "$backup_root" ]] || return 0
+  [[ "$keep_backups" =~ ^[0-9]+$ ]] || keep_backups="$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
+
+  local index=0
+  while IFS= read -r backup_dir; do
+    [[ -n "$backup_dir" ]] || continue
+    index=$((index + 1))
+    if (( index <= keep_backups )); then
+      continue
+    fi
+    if [[ "$dry_run" == "1" ]]; then
+      echo "[dry-run] Would prune old install backup: $backup_dir"
+    else
+      rm -rf -- "$backup_dir"
+      echo "Pruned old install backup: $backup_dir"
+    fi
+  done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r)
+}
+
+knowtype_latest_backup_dir() {
+  local backup_root
+  backup_root="$(knowtype_backup_root_dir)"
+  [[ -d "$backup_root" ]] || return 0
+  find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r | head -n 1
+}
+
+knowtype_backup_dir_for_id() {
+  local backup_id="$1"
+  local backup_dir
+  backup_dir="$(knowtype_backup_root_dir)/$backup_id"
+  [[ -d "$backup_dir" ]] && printf '%s\n' "$backup_dir"
+}
+
+knowtype_backup_manifest_field() {
+  local manifest_path="$1"
+  local field="$2"
+  [[ -f "$manifest_path" ]] || return 0
+  KNOWTYPE_BACKUP_MANIFEST_PATH="$manifest_path" KNOWTYPE_BACKUP_MANIFEST_FIELD="$field" python3 - <<'PY'
+import json
+import os
+try:
+    with open(os.environ["KNOWTYPE_BACKUP_MANIFEST_PATH"], encoding="utf-8") as handle:
+        value = json.load(handle).get(os.environ["KNOWTYPE_BACKUP_MANIFEST_FIELD"])
+except Exception:
+    value = None
+if value is not None:
+    print(value)
+PY
+}
+
+knowtype_validate_inputmethod_bundle_for_install() {
+  local bundle_path="$1"
+  local verify_codesign="${2:-1}"
+  if [[ ! -d "$bundle_path" ]]; then
+    echo "error: KnowType.app bundle is missing: $bundle_path" >&2
+    return 1
+  fi
+  if ! knowtype_bundle_matches_inputmethod_identity "$bundle_path"; then
+    echo "error: bundle does not match KnowType input-method identity: $bundle_path" >&2
+    return 1
+  fi
+  if [[ ! -x "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" ]]; then
+    echo "error: input-method executable is missing or not executable in: $bundle_path" >&2
+    return 1
+  fi
+  if [[ ! -f "$bundle_path/Contents/Frameworks/librime.1.dylib" ]]; then
+    echo "error: bundled Rime dylib is missing in: $bundle_path" >&2
+    return 1
+  fi
+  if [[ ! -d "$bundle_path/Contents/Resources/rime-data" ]]; then
+    echo "error: bundled Rime data directory is missing in: $bundle_path" >&2
+    return 1
+  fi
+  if [[ "$verify_codesign" == "1" ]] && command -v codesign >/dev/null 2>&1; then
+    codesign --verify --deep --strict "$bundle_path"
   fi
 }
 

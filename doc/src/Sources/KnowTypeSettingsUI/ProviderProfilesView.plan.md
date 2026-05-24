@@ -21,6 +21,11 @@ AI continuation/provider profiles, privacy, and diagnostics.
   provider profiles.
 - The top-level layout is a `NavigationSplitView` with searchable sidebar
   sections. Detail pages use grouped forms and native SwiftUI controls.
+- Diagnostics includes dynamic read-only install status: app version/build,
+  install source, Rime runtime files, AI provider summary, user-data file
+  timestamps, backup count, latest backup, and rollback command.
+- Diagnostics must not execute rollback or overwrite the running input-method
+  bundle from inside the settings process.
 - The AI provider page is a single grouped form rather than a nested split view;
   provider technical identifiers remain in English.
 - User-facing settings copy is Simplified Chinese for Chinese preferred

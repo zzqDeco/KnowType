@@ -12,6 +12,7 @@ source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
 STRICT=0
 REQUIRE_SELECTED=0
 SHOW_LOGS=0
+JSON_OUTPUT=0
 LOG_LOOKBACK="${KNOWTYPE_LOG_LOOKBACK:-30m}"
 
 usage() {
@@ -27,6 +28,7 @@ Options:
   --logs              Include recent KnowType, Gatekeeper, and input-source sandbox log hints.
   --log-lookback      Time window for --logs, such as 10m, 1h, or 2h. Defaults to 30m.
   --path              Inspect a specific KnowType.app bundle path.
+  --json              Print a stable machine-readable install snapshot and exit.
   -h, --help          Show this help.
 EOF
 }
@@ -43,6 +45,10 @@ while (($# > 0)); do
       ;;
     --logs)
       SHOW_LOGS=1
+      shift
+      ;;
+    --json)
+      JSON_OUTPUT=1
       shift
       ;;
     --log-lookback)
@@ -100,6 +106,173 @@ fail() {
 info() {
   printf '[info] %s\n' "$1"
 }
+
+print_json_snapshot() {
+  KNOWTYPE_DIAG_BUNDLE_PATH="$BUNDLE_PATH" \
+  KNOWTYPE_DIAG_PREFPANE_PATH="$PREFPANE_PATH" \
+  KNOWTYPE_DIAG_INSTALL_STATE_PATH="$(knowtype_install_state_path)" \
+  KNOWTYPE_DIAG_BACKUP_ROOT="$(knowtype_backup_root_dir)" \
+  KNOWTYPE_DIAG_APP_SUPPORT="$(knowtype_app_support_dir)" \
+  KNOWTYPE_DIAG_RIME_USER_DATA="${KNOWTYPE_RIME_USER_DATA_DIR:-$(knowtype_app_support_dir)/Rime}" \
+  python3 - <<'PY'
+import json
+import os
+import plistlib
+from pathlib import Path
+
+def file_mtime(path):
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return None
+
+def load_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+def bundle_info(bundle_path):
+    bundle = Path(bundle_path)
+    info_path = bundle / "Contents" / "Info.plist"
+    payload = {
+        "path": str(bundle),
+        "exists": bundle.is_dir(),
+        "version": None,
+        "build": None,
+        "bundleIdentifier": None,
+        "executableExists": (bundle / "Contents" / "MacOS" / "KnowTypeInputMethodApp").is_file(),
+    }
+    if info_path.is_file():
+        try:
+            with info_path.open("rb") as handle:
+                plist = plistlib.load(handle)
+            payload["version"] = plist.get("CFBundleShortVersionString")
+            payload["build"] = plist.get("CFBundleVersion")
+            payload["bundleIdentifier"] = plist.get("CFBundleIdentifier")
+        except Exception as error:
+            payload["plistError"] = type(error).__name__
+    return payload
+
+def default_provider(app_support):
+    provider_path = Path(app_support) / "providers.json"
+    provider_file = load_json(provider_path)
+    result = {"path": str(provider_path), "exists": provider_path.is_file(), "defaultProfile": None}
+    profiles = []
+    if isinstance(provider_file, dict):
+        profiles = provider_file.get("profiles") or []
+    default = next((profile for profile in profiles if profile.get("isDefault")), None)
+    if default:
+        result["defaultProfile"] = {
+            "displayName": default.get("displayName"),
+            "kind": default.get("kind"),
+            "model": default.get("model"),
+            "baseURL": default.get("baseURL"),
+        }
+    return result
+
+def backup_summary(root):
+    root_path = Path(root)
+    backups = []
+    if root_path.is_dir():
+        for directory in sorted([p for p in root_path.iterdir() if p.is_dir()], reverse=True):
+            manifest = load_json(directory / "manifest.json") or {}
+            backups.append({
+                "backupID": directory.name,
+                "createdAt": manifest.get("createdAt"),
+                "sourceVersion": manifest.get("sourceVersion"),
+                "sourceBuild": manifest.get("sourceBuild"),
+                "includedPrefPane": manifest.get("includedPrefPane"),
+            })
+    return {
+        "root": str(root_path),
+        "count": len(backups),
+        "latest": backups[0] if backups else None,
+    }
+
+bundle_path = os.environ["KNOWTYPE_DIAG_BUNDLE_PATH"]
+prefpane_path = os.environ["KNOWTYPE_DIAG_PREFPANE_PATH"]
+install_state_path = os.environ["KNOWTYPE_DIAG_INSTALL_STATE_PATH"]
+backup_root = os.environ["KNOWTYPE_DIAG_BACKUP_ROOT"]
+app_support = os.environ["KNOWTYPE_DIAG_APP_SUPPORT"]
+home = Path.home()
+warnings = []
+failures = []
+
+bundle = bundle_info(bundle_path)
+if not bundle["exists"]:
+    failures.append("bundle_missing")
+if not bundle["executableExists"]:
+    failures.append("executable_missing")
+
+install_state = load_json(install_state_path)
+if install_state is None:
+    warnings.append("install_state_missing")
+elif bundle.get("version") and install_state.get("version") and bundle["version"] != install_state["version"]:
+    warnings.append("install_state_version_mismatch")
+
+rime_dylib = Path(bundle_path) / "Contents" / "Frameworks" / "librime.1.dylib"
+rime_data = Path(bundle_path) / "Contents" / "Resources" / "rime-data"
+user_data = {
+    "appSupport": app_support,
+    "providerProfiles": default_provider(app_support),
+    "selectionHistoryExists": (Path(app_support) / "user-selection-history.json").is_file(),
+    "lexicalProfile": {
+        "path": str(Path(app_support) / "AI" / "lexical-profile.json"),
+        "exists": (Path(app_support) / "AI" / "lexical-profile.json").is_file(),
+        "mtime": file_mtime(Path(app_support) / "AI" / "lexical-profile.json"),
+    },
+    "environmentDocument": {
+        "path": str(home / ".knowtype" / "ENV.md"),
+        "exists": (home / ".knowtype" / "ENV.md").is_file(),
+        "mtime": file_mtime(home / ".knowtype" / "ENV.md"),
+    },
+    "correctionDocument": {
+        "path": str(home / ".knowtype" / "CORRECTION.md"),
+        "exists": (home / ".knowtype" / "CORRECTION.md").is_file(),
+        "mtime": file_mtime(home / ".knowtype" / "CORRECTION.md"),
+    },
+    "lexicalProfileMirror": {
+        "path": str(home / ".knowtype" / "LEXICAL_PROFILE.md"),
+        "exists": (home / ".knowtype" / "LEXICAL_PROFILE.md").is_file(),
+        "mtime": file_mtime(home / ".knowtype" / "LEXICAL_PROFILE.md"),
+    },
+}
+
+snapshot = {
+    "schemaVersion": 1,
+    "install": {
+        "statePath": install_state_path,
+        "state": install_state,
+    },
+    "bundle": bundle,
+    "preferencePane": {
+        "path": prefpane_path,
+        "exists": Path(prefpane_path).is_dir(),
+    },
+    "rime": {
+        "dylibPath": str(rime_dylib),
+        "dylibExists": rime_dylib.is_file(),
+        "dataPath": str(rime_data),
+        "dataExists": rime_data.is_dir(),
+        "userDataPath": os.environ["KNOWTYPE_DIAG_RIME_USER_DATA"],
+        "userDataExists": Path(os.environ["KNOWTYPE_DIAG_RIME_USER_DATA"]).is_dir(),
+    },
+    "ai": user_data["providerProfiles"],
+    "userData": user_data,
+    "backups": backup_summary(backup_root),
+    "warnings": warnings,
+    "failures": failures,
+}
+print(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True))
+PY
+}
+
+if (( JSON_OUTPUT == 1 )); then
+  print_json_snapshot
+  exit 0
+fi
 
 strip_lsregister_suffix() {
   local value="$1"
@@ -319,6 +492,43 @@ if command -v spctl >/dev/null 2>&1; then
   fi
 else
   warn "spctl command is unavailable"
+fi
+
+echo
+echo "Install state and rollback"
+
+INSTALL_STATE_PATH="$(knowtype_install_state_path)"
+BACKUP_ROOT="$(knowtype_backup_root_dir)"
+if [[ -f "$INSTALL_STATE_PATH" ]]; then
+  ok "install-state.json exists: $INSTALL_STATE_PATH"
+  install_source="$(knowtype_read_install_state_field "source")"
+  install_version="$(knowtype_read_install_state_field "version")"
+  install_build="$(knowtype_read_install_state_field "build")"
+  install_commit="$(knowtype_read_install_state_field "gitCommit")"
+  install_tag="$(knowtype_read_install_state_field "gitTag")"
+  install_backup="$(knowtype_read_install_state_field "previousBackupID")"
+  [[ -n "$install_source" ]] && info "install source: $install_source"
+  [[ -n "$install_version" || -n "$install_build" ]] && info "install-state version/build: ${install_version:-<unknown>} (${install_build:-<unknown>})"
+  [[ -n "$install_commit" ]] && info "install-state commit: $install_commit"
+  [[ -n "$install_tag" ]] && info "install-state tag: $install_tag"
+  [[ -n "$install_backup" ]] && info "previous backup id: $install_backup"
+else
+  warn "install-state.json is missing; reinstall with ./scripts/install-inputmethod.sh to record version/source metadata"
+fi
+
+if [[ -d "$BACKUP_ROOT" ]]; then
+  backup_count="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | wc -l | tr -d ' ')"
+  latest_backup="$(knowtype_latest_backup_dir)"
+  ok "install backup root exists with $backup_count backup(s): $BACKUP_ROOT"
+  if [[ -n "$latest_backup" ]]; then
+    latest_manifest="$latest_backup/manifest.json"
+    latest_version="$(knowtype_backup_manifest_field "$latest_manifest" "sourceVersion")"
+    latest_build="$(knowtype_backup_manifest_field "$latest_manifest" "sourceBuild")"
+    info "latest backup: $(basename "$latest_backup") version=${latest_version:-<unknown>} build=${latest_build:-<unknown>}"
+    info "rollback command: ./scripts/rollback-inputmethod.sh --to $(basename "$latest_backup")"
+  fi
+else
+  info "no install backups yet; the next overwrite install will create one by default"
 fi
 
 echo
@@ -647,6 +857,10 @@ APP_SUPPORT="$HOME/Library/Application Support/KnowType"
 PROVIDER_JSON="$APP_SUPPORT/providers.json"
 HISTORY_JSON="$APP_SUPPORT/user-selection-history.json"
 LEXICON_DIR="$APP_SUPPORT/Lexicons"
+AI_PROFILE_JSON="$APP_SUPPORT/AI/lexical-profile.json"
+ENV_MD="$HOME/.knowtype/ENV.md"
+CORRECTION_MD="$HOME/.knowtype/CORRECTION.md"
+LEXICAL_PROFILE_MD="$HOME/.knowtype/LEXICAL_PROFILE.md"
 
 if [[ -f "$PROVIDER_JSON" ]]; then
   ok "provider profile file exists: $PROVIDER_JSON"
@@ -666,6 +880,36 @@ if [[ -d "$LEXICON_DIR" ]]; then
 else
   warn "local lexicon directory is missing; bundled seed lexicon will be used"
 fi
+
+if [[ -f "$PROVIDER_JSON" ]]; then
+  default_provider_summary="$(
+    KNOWTYPE_PROVIDER_JSON="$PROVIDER_JSON" python3 - <<'PY'
+import json
+import os
+try:
+    with open(os.environ["KNOWTYPE_PROVIDER_JSON"], encoding="utf-8") as handle:
+        profiles = json.load(handle).get("profiles", [])
+    profile = next((item for item in profiles if item.get("isDefault")), None)
+    if profile:
+        print(f"{profile.get('displayName', '<unnamed>')} · {profile.get('kind', '<kind>')} · {profile.get('model', '<model>')} · {profile.get('baseURL', '<baseURL>')}")
+except Exception:
+    pass
+PY
+  )"
+  if [[ -n "$default_provider_summary" ]]; then
+    ok "default AI provider: $default_provider_summary"
+  else
+    warn "provider profile file exists but no default provider is configured"
+  fi
+fi
+
+for profile_path in "$AI_PROFILE_JSON" "$ENV_MD" "$CORRECTION_MD" "$LEXICAL_PROFILE_MD"; do
+  if [[ -f "$profile_path" ]]; then
+    info "user data file exists: $profile_path"
+  else
+    info "user data file has not been created yet: $profile_path"
+  fi
+done
 
 if (( SHOW_LOGS == 1 )); then
   echo

@@ -11,6 +11,8 @@ It intentionally sits after `scripts/install-inputmethod.sh` in the developer lo
 
 The script does not mutate macOS input-source state. It reports:
 
+- install-state metadata, bundle version/build, source commit/tag when known,
+  backup count, latest backup id, and the rollback command for that backup;
 - bundle existence, executable permission, and `Info.plist` identifiers;
 - the active visible component input mode `com.knowtype.inputmethod.KnowType.Hans`;
 - packaged SwiftPM resource bundle for the seed lexicon;
@@ -29,7 +31,13 @@ The script does not mutate macOS input-source state. It reports:
 - stale LaunchServices records for the same KnowType bundle id outside `~/Library/Input Methods/KnowType.app`;
 - optional compatibility `KnowType.prefPane` metadata when it is installed;
 - `KnowTypeInputMethodApp` process status;
-- provider profile, candidate history, and local lexicon directory paths.
+- provider profile, candidate history, local lexicon directory paths, AI
+  lexical profile file, and ENV/CORRECTION/LEXICAL_PROFILE document presence.
+
+`--json` prints the stable machine-readable subset used by local tooling and
+settings diagnostics. It includes `install`, `bundle`, `preferencePane`,
+`rime`, `ai`, `userData`, `backups`, `warnings`, and `failures`, and avoids API
+keys, user text, candidate text, complete lexicons, and Rime userdb contents.
 
 Use `--strict` only when a failing diagnostic should block a local smoke run. Use `--require-selected` only when this diagnostic process's current TIS context is the thing being checked. Use `--logs` when the visible symptom is "the input source is enabled but cannot be selected"; it prints recent KnowType app logs plus `GatekeeperPolicyScanError` and `user-preference-write com.apple.inputsources` entries from unified logging. For manual typing acceptance after diagnostics have already run, run `scripts/select-inputmethod.sh --require-selected --no-diagnose` while the target text app is active as a selection preflight, then type a real probe in that app. macOS can report a different current source from a later shell diagnostic than the one applied to the frontmost text client. Without `--require-selected`, selection status remains advisory because developers may intentionally keep another keyboard selected while inspecting installation state. Warnings remain advisory because macOS may start the input-method process only after selection/use, the selected input source may intentionally be another keyboard during debugging, and fresh installs may not have provider profiles, history, or local lexicon directories yet.
 

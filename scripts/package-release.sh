@@ -123,9 +123,6 @@ mkdir -p "$staging_dir"
 cp -R "$bundle_path" "$staging_dir/"
 cp -R "$prefpane_path" "$staging_dir/"
 
-ditto -c -k --sequesterRsrc --keepParent "$staging_dir" "$archive_path"
-(cd "$ROOT_DIR" && shasum -a 256 "$archive_relative" >"$checksum_path")
-
 release_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 release_tag="${GITHUB_REF_NAME:-}"
 if [[ -z "$release_tag" ]]; then
@@ -164,6 +161,11 @@ cat >"$manifest_path" <<EOF
   "distribution": "local-mvp-ad-hoc-signed-not-notarized"
 }
 EOF
+
+cp "$manifest_path" "$staging_dir/release-manifest.json"
+
+ditto -c -k --sequesterRsrc --keepParent "$staging_dir" "$archive_path"
+(cd "$ROOT_DIR" && shasum -a 256 "$archive_relative" >"$checksum_path")
 
 echo "$archive_path"
 echo "$checksum_path"

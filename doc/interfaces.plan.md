@@ -125,6 +125,27 @@ Settings connection tests:
 - preserve existing save/load errors after diagnostic success
 - avoid reusing a saved remote secret when a blank-key draft switches to a local endpoint, another remote endpoint, or another provider protocol
 
+## Local Install State
+
+Local install scripts record recoverable install metadata under the user's
+Application Support directory. `install-state.json` is schema version `1` and
+contains the install time, source (`local-build`, `release-zip`, or `bundle`),
+bundle version/build, optional git commit/tag, installed app and prefPane paths,
+and the previous backup id. It describes install artifacts only; it does not
+snapshot Rime userdb, provider profiles, Keychain secrets, or AI context files.
+
+Install backups live under `Backups/<backup-id>/`. Each backup manifest records
+schema version, backup id, creation time, app version/build, bundle identifier,
+app checksum, whether a prefPane was included, and the restore command. Rollback
+restores only `KnowType.app` and optional `KnowType.prefPane`, then refreshes
+LaunchServices and input-source preferences.
+
+`scripts/diagnose-inputmethod.sh --json` is the stable machine-readable
+diagnostic surface for local tooling. It emits top-level `install`, `bundle`,
+`preferencePane`, `rime`, `ai`, `userData`, `backups`, `warnings`, and
+`failures` objects. The JSON output must not contain API keys, user text,
+candidate text, or complete lexicon/userdb contents.
+
 ## Candidate Data
 
 Core candidate types:

@@ -23,6 +23,9 @@ Builds the local MVP GitHub Release artifact set: a zip containing
 - The zip is named `KnowType-vX.Y.Z-macos-local-mvp.zip`.
 - The manifest records tag, commit, Swift version, artifact names, bundle
   identifiers, short versions, and build versions.
+- `release-manifest.json` is written beside the archive and copied into the zip
+  staging directory so `scripts/install-inputmethod.sh --from-release-zip` can
+  record release source metadata after download.
 
 ## Tests
 

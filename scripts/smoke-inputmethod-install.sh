@@ -143,6 +143,7 @@ help_scripts=(
   "$ROOT_DIR/scripts/package-release.sh"
   "$ROOT_DIR/scripts/perf-input-hotpath.sh"
   "$ROOT_DIR/scripts/repair-inputmethod-selection.sh"
+  "$ROOT_DIR/scripts/rollback-inputmethod.sh"
   "$ROOT_DIR/scripts/select-inputmethod.sh"
   "$ROOT_DIR/scripts/smoke-inputmethod-install.sh"
   "$ROOT_DIR/scripts/uninstall-inputmethod.sh"
@@ -243,6 +244,80 @@ assert_equals "KnowTypeInputMethodApp" \
   "CFBundleExecutable"
 "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rime-smoke >/dev/null ||
   die "bundled Rime runtime smoke failed"
+
+install_state_tmp="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-install-state-smoke.XXXXXX")"
+fake_input_dir="$install_state_tmp/Input Methods"
+fake_prefpane_dir="$install_state_tmp/PreferencePanes"
+fake_support_dir="$install_state_tmp/Application Support/KnowType"
+mkdir -p "$fake_input_dir" "$fake_prefpane_dir" "$fake_support_dir"
+cp -R "$bundle_path" "$fake_input_dir/KnowType.app"
+
+install_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-bundle "$bundle_path" --keep-backups 2
+)"
+assert_contains "$install_dry_run_output" "Source mode: bundle" "install dry run output"
+assert_contains "$install_dry_run_output" "Install state: $fake_support_dir/install-state.json" "install dry run output"
+assert_contains "$install_dry_run_output" "Backup root: $fake_support_dir/Backups" "install dry run output"
+assert_contains "$install_dry_run_output" "Would create install backup" "install dry run output"
+
+release_zip_path="$install_state_tmp/KnowType-test-release.zip"
+release_zip_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-release-zip "$release_zip_path" --no-backup
+)"
+assert_contains "$release_zip_dry_run_output" "Source mode: release-zip" "release zip install dry run output"
+assert_contains "$release_zip_dry_run_output" "Source release zip: $release_zip_path" "release zip install dry run output"
+
+KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null
+backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
+[[ -n "$backup_id" ]] || die "install backup helper did not record a backup id"
+assert_file "$fake_support_dir/Backups/$backup_id/manifest.json"
+backup_manifest_id="$(
+  KNOWTYPE_BACKUP_MANIFEST_PATH="$fake_support_dir/Backups/$backup_id/manifest.json" python3 - <<'PY'
+import json, os
+with open(os.environ["KNOWTYPE_BACKUP_MANIFEST_PATH"], encoding="utf-8") as handle:
+    print(json.load(handle)["backupID"])
+PY
+)"
+assert_equals "$backup_id" "$backup_manifest_id" "backup manifest id"
+
+rollback_list_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/rollback-inputmethod.sh" --list
+)"
+assert_contains "$rollback_list_output" "$backup_id" "rollback list output"
+
+rollback_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$backup_id" --dry-run
+)"
+assert_contains "$rollback_dry_run_output" "KnowType rollback dry run" "rollback dry run output"
+assert_contains "$rollback_dry_run_output" "$backup_id" "rollback dry run output"
+
+uninstall_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/uninstall-inputmethod.sh" --dry-run
+)"
+assert_contains "$uninstall_dry_run_output" "Would create install backup" "uninstall dry run output"
+assert_contains "$uninstall_dry_run_output" "Preserved KnowType install backups" "uninstall dry run output"
+
+diagnose_json_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/diagnose-inputmethod.sh" --json --path "$fake_input_dir/KnowType.app"
+)"
+assert_contains "$diagnose_json_output" '"schemaVersion": 1' "diagnostics json output"
+assert_contains "$diagnose_json_output" '"backups"' "diagnostics json output"
+rm -rf "$install_state_tmp"
 
 if (( WITH_PREFPANE == 1 )); then
   prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"

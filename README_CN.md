@@ -112,6 +112,12 @@ Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode 形态：pare
 Rime runtime 文件会打包在 `KnowType.app` 中；如果文件缺失或加载失败，KnowType 会保留
 raw 输入可用并报告 degraded conversion state，而不是回退到已经退役的自研转换器。
 
+覆盖安装会先在 `~/Library/Application Support/KnowType/Backups/` 创建 app 级回滚备份，
+并把当前安装来源、版本、build、commit/tag 和备份 id 写入
+`~/Library/Application Support/KnowType/install-state.json`。备份只包含安装产物：
+`KnowType.app` 和可选 `KnowType.prefPane`；不会复制或回滚 Rime userdb、provider 配置、
+Keychain secret、AI 上下文文档或本地词库。
+
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
 macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。它会打开
 macOS 原生 sidebar 和 grouped settings 页面；中文 macOS locale 下使用简体中文文案，
@@ -139,15 +145,26 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 ./scripts/uninstall-inputmethod.sh
 ```
 
+列出或恢复本地回滚点：
+
+```bash
+./scripts/rollback-inputmethod.sh --list
+./scripts/rollback-inputmethod.sh --latest
+```
+
 本地 IME 行为仍需要在真实 host app 中打字验证。macOS policy、输入源选择和
 手动验收流程见 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md)
 和 [MVP Acceptance](doc/mvp-acceptance.plan.md)。
 
 使用 GitHub Release zip 时，先用发布页提供的 `.sha256` 文件校验下载的 zip。
-然后解压，把 `KnowType.app` 复制到 `~/Library/Input Methods/`，通过输入法菜单中的
-`KnowType Settings...` 修改配置。`KnowType.prefPane` 是兼容设置入口，只有需要 fallback
-时再复制到 `~/Library/PreferencePanes/`。除非已安装匹配版本的 pane，否则不要使用系统设置侧边栏里残留的
-KnowType 入口。如果手边有源码 checkout，再运行同一套本地诊断和真实打字验收流程。
+然后通过本地脚本安装，这样 release metadata、备份和诊断状态会被记录：
+
+```bash
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.0-macos-local-mvp.zip
+```
+
+只有需要兼容 System Settings pane 时才额外传 `--with-prefpane`。除非已安装匹配版本的 pane，
+否则不要使用系统设置侧边栏里残留的 KnowType 入口。
 
 ## 配置
 
