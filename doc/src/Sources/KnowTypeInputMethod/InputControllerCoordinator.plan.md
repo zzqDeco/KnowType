@@ -38,6 +38,9 @@ Current behavior:
   already been resolved by the user; while Rime is merely composing, current-page
   Rime candidates are sent as contextual `candidateHints` and the first
   candidate is not treated as locked text
+- preserves the original confirmed locked-prefix text in AI requests, including
+  intentional leading/trailing whitespace, while using trimmed text only for
+  empty-prefix eligibility checks
 - merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; current-page Rime candidates and in-memory recent history still participate regardless
 - delegates Rime userdb lexical refreshes to `LexicalProfileRuntime`; commit/selection refresh reads existing snapshots only and does not call `sync_user_data`; profile JSON/Markdown staging, stale-write gates, and userdb parse diagnostics live outside the coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source

@@ -24,6 +24,8 @@
 - `InputControllerCoordinator` derives `candidateHints` from the active Rime
   page and schedules AI only when raw input plus confirmed prefix or hints
   provide enough context.
+- `InputControllerCoordinator` forwards confirmed locked prefixes verbatim,
+  including intentional whitespace, and trims only for blank-prefix checks.
 - `AIRecommendationRuntime` forwards `candidateHints` to providers and includes
   them in the recommendation cache key.
 - With a `lockedPrefix`, runtime still sanitizes provider `text` as suffix-only

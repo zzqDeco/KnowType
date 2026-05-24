@@ -729,9 +729,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
-    private func confirmedLockedPrefixText(for suggestion: SuggestionResponse) -> String? {
-        let text = suggestion.lockedPrefix?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text?.isEmpty == false ? text : nil
+    static func confirmedLockedPrefixText(for suggestion: SuggestionResponse) -> String? {
+        let text = suggestion.lockedPrefix?.text
+        return text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil
     }
 
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
@@ -752,7 +752,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationGeneration += 1
         let generation = aiRecommendationGeneration
         let requestID = UUID()
-        let lockedPrefixText = confirmedLockedPrefixText(for: suggestion)
+        let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
         let candidateHints = candidateHints(for: suggestion)
 
         guard lockedPrefixText != nil || !candidateHints.isEmpty,

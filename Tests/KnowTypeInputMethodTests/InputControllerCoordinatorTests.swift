@@ -1502,6 +1502,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁继续推进")
     }
 
+    func testConfirmedLockedPrefixTextPreservesUserWhitespaceForAIRequest() {
+        let suggestion = SuggestionResponse(
+            prefixCandidates: [],
+            lockedPrefix: LockedPrefix(
+                text: "  我觉得这个方案 \n",
+                rawInput: "wojuedezhegefangan",
+                candidateID: "test"
+            ),
+            continuationCandidates: [],
+            latencyMs: 0
+        )
+
+        XCTAssertEqual(
+            InputControllerCoordinator.confirmedLockedPrefixText(for: suggestion),
+            "  我觉得这个方案 \n"
+        )
+    }
+
+    func testConfirmedLockedPrefixTextReturnsNilForWhitespaceOnlyPrefix() {
+        let suggestion = SuggestionResponse(
+            prefixCandidates: [],
+            lockedPrefix: LockedPrefix(
+                text: " \n\t ",
+                rawInput: " ",
+                candidateID: "test"
+            ),
+            continuationCandidates: [],
+            latencyMs: 0
+        )
+
+        XCTAssertNil(InputControllerCoordinator.confirmedLockedPrefixText(for: suggestion))
+    }
+
     @MainActor
     func testAIRecommendationRequestCarriesLexicalProfile() async throws {
         let client = FakeInputControllerClient()
