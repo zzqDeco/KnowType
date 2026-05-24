@@ -27,9 +27,12 @@
 - `AIRecommendationRuntime` forwards `candidateHints` to providers and includes
   them in the recommendation cache key.
 - With a `lockedPrefix`, runtime still sanitizes provider `text` as suffix-only
-  and joins it after the locked prefix.
+  and joins it after the original locked prefix, preserving intentional
+  whitespace in the user-confirmed text.
 - Without a `lockedPrefix`, runtime treats provider `text` as the full
   commit-ready AI recommendation; hints are only model context.
+- If a non-empty `lockedPrefix` exists, cloud eligibility uses that prefix's
+  length only; candidate hints cannot bypass the short-prefix gate.
 
 ## Test Plan
 
@@ -40,6 +43,8 @@
 - Unit tests cover hint propagation, cache invalidation when hints change, no
   first-candidate locked prefix during Rime composition, and full
   recommendation handling when no locked prefix exists.
+- Review hardening tests cover protected hints, short locked-prefix gating, and
+  whitespace preservation in the final AI display text.
 
 ## Assumptions
 

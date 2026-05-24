@@ -57,7 +57,7 @@ Provider prompts are task-specific. Continuation requests distinguish confirmed 
 - when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput`, context, and `candidateHints`
 - `candidateHints` are context only; providers do not need to choose a `base` from them and may produce a recommendation that does not copy any hint exactly
 
-Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
+When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; hints cannot make a too-short confirmed prefix eligible. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
 ## Provider Kinds
 

@@ -327,8 +327,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             let displayText: String
             let continuation: String?
             let prefixText: String
-            if let lockedPrefix = lockedPrefix?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !lockedPrefix.isEmpty {
+            if let lockedPrefix,
+               !lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let sanitized = PrefixContinuationEngine.sanitizeContinuationDetailed(
                     rawCandidate.text,
                     lockedPrefix: lockedPrefix
@@ -464,8 +464,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
 
     private static func hasLongEnoughRecommendationContextForCloud(_ request: AIRecommendationRequest) -> Bool {
         if let lockedPrefix = request.lockedPrefix,
-           isPrefixLongEnoughForCloudRecommendation(lockedPrefix) {
-            return true
+           !lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return isPrefixLongEnoughForCloudRecommendation(lockedPrefix)
         }
         return request.candidateHints.contains { isPrefixLongEnoughForCloudRecommendation($0.text) }
     }
