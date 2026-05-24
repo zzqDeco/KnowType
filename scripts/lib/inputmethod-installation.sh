@@ -185,6 +185,14 @@ knowtype_sanitize_backup_component() {
   printf '%s' "$value" | LC_ALL=C sed 's/[^A-Za-z0-9._+-]/-/g'
 }
 
+knowtype_is_valid_backup_id() {
+  local backup_id="$1"
+  [[ -n "$backup_id" ]] || return 1
+  [[ "$backup_id" != "." && "$backup_id" != ".." ]] || return 1
+  [[ "$backup_id" != *"/"* ]] || return 1
+  [[ "$backup_id" == "$(knowtype_sanitize_backup_component "$backup_id")" ]]
+}
+
 knowtype_path_checksum() {
   local path="$1"
   if [[ ! -e "$path" ]]; then
@@ -343,11 +351,13 @@ knowtype_create_install_backup() {
   local build
   version="$(knowtype_bundle_short_version "$app_path")"
   build="$(knowtype_bundle_build_version "$app_path")"
-  local backup_id
-  backup_id="$(knowtype_backup_id_timestamp)-$(knowtype_sanitize_backup_component "$version")-$(knowtype_sanitize_backup_component "$build")"
+  local backup_id_base
+  backup_id_base="$(knowtype_backup_id_timestamp)-$(knowtype_sanitize_backup_component "$version")-$(knowtype_sanitize_backup_component "$build")"
   local backup_root
   local backup_dir
   backup_root="$(knowtype_backup_root_dir)"
+  local backup_id
+  backup_id="$backup_id_base.unique"
   backup_dir="$backup_root/$backup_id"
   KNOWTYPE_CREATED_BACKUP_ID="$backup_id"
   KNOWTYPE_CREATED_BACKUP_DIR="$backup_dir"
@@ -359,7 +369,11 @@ knowtype_create_install_backup() {
     return 0
   fi
 
-  mkdir -p "$backup_dir"
+  mkdir -p "$backup_root"
+  backup_dir="$(mktemp -d "$backup_root/${backup_id_base}.XXXXXX")"
+  backup_id="$(basename "$backup_dir")"
+  KNOWTYPE_CREATED_BACKUP_ID="$backup_id"
+  KNOWTYPE_CREATED_BACKUP_DIR="$backup_dir"
   if [[ -d "$app_path" ]]; then
     cp -R "$app_path" "$backup_dir/KnowType.app"
   fi
@@ -437,6 +451,9 @@ knowtype_latest_backup_dir() {
 
 knowtype_backup_dir_for_id() {
   local backup_id="$1"
+  if ! knowtype_is_valid_backup_id "$backup_id"; then
+    return 1
+  fi
   local backup_dir
   backup_dir="$(knowtype_backup_root_dir)/$backup_id"
   [[ -d "$backup_dir" ]] && printf '%s\n' "$backup_dir"

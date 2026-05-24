@@ -276,12 +276,25 @@ assert_contains "$release_zip_dry_run_output" "Source release zip: $release_zip_
 assert_equals "0.2.0+build-bad-value" \
   "$(knowtype_sanitize_backup_component "0.2.0+build bad/value")" \
   "backup component sanitization"
+knowtype_is_valid_backup_id "20260524T100000Z-0.2.0-123.ABCdef" ||
+  die "expected safe backup ID to validate"
+if knowtype_is_valid_backup_id "../../outside"; then
+  die "traversal backup ID unexpectedly validated"
+fi
 
 KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null
 backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
 [[ -n "$backup_id" ]] || die "install backup helper did not record a backup id"
 assert_file "$fake_support_dir/Backups/$backup_id/manifest.json"
+KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null
+second_backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
+[[ -n "$second_backup_id" ]] || die "second install backup helper did not record a backup id"
+if [[ "$second_backup_id" == "$backup_id" ]]; then
+  die "rapid repeated backups reused ID: $backup_id"
+fi
+assert_file "$fake_support_dir/Backups/$second_backup_id/manifest.json"
 backup_manifest_id="$(
   KNOWTYPE_BACKUP_MANIFEST_PATH="$fake_support_dir/Backups/$backup_id/manifest.json" python3 - <<'PY'
 import json, os
@@ -305,7 +318,12 @@ rollback_dry_run_output="$(
 )"
 assert_contains "$rollback_dry_run_output" "KnowType rollback dry run" "rollback dry run output"
 assert_contains "$rollback_dry_run_output" "$backup_id" "rollback dry run output"
+if KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "../../outside" --dry-run >/dev/null 2>&1; then
+  die "rollback accepted traversal backup ID"
+fi
 
+printf '{"schemaVersion":1,"source":"bundle"}\n' >"$fake_support_dir/install-state.json"
 uninstall_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
@@ -313,6 +331,7 @@ uninstall_dry_run_output="$(
   "$ROOT_DIR/scripts/uninstall-inputmethod.sh" --dry-run
 )"
 assert_contains "$uninstall_dry_run_output" "Would create install backup" "uninstall dry run output"
+assert_contains "$uninstall_dry_run_output" "Would remove KnowType install state" "uninstall dry run output"
 assert_contains "$uninstall_dry_run_output" "Preserved KnowType install backups" "uninstall dry run output"
 
 diagnose_json_output="$(

@@ -271,6 +271,112 @@ discover_release_manifest() {
   printf '%s' "$candidate"
 }
 
+release_manifest_field() {
+  local manifest_path="$1"
+  local field_path="$2"
+  KNOWTYPE_RELEASE_MANIFEST="$manifest_path" KNOWTYPE_RELEASE_MANIFEST_FIELD="$field_path" python3 - <<'PY'
+import json
+import os
+
+with open(os.environ["KNOWTYPE_RELEASE_MANIFEST"], encoding="utf-8") as handle:
+    value = json.load(handle)
+for component in os.environ["KNOWTYPE_RELEASE_MANIFEST_FIELD"].split("."):
+    if isinstance(value, dict):
+        value = value.get(component)
+    else:
+        value = None
+        break
+if value is not None:
+    print(value)
+PY
+}
+
+validate_release_manifest_metadata() {
+  local manifest_path="$1"
+  local bundle_path="$2"
+  local prefpane_path="$3"
+  local app_bundle_id app_version app_build
+  app_bundle_id="$(knowtype_bundle_identifier "$bundle_path")"
+  app_version="$(knowtype_bundle_short_version "$bundle_path")"
+  app_build="$(knowtype_bundle_build_version "$bundle_path")"
+
+  local prefpane_bundle_id="" prefpane_version="" prefpane_build=""
+  if [[ -n "$prefpane_path" && -d "$prefpane_path" ]]; then
+    prefpane_bundle_id="$(knowtype_bundle_identifier "$prefpane_path")"
+    prefpane_version="$(knowtype_bundle_short_version "$prefpane_path")"
+    prefpane_build="$(knowtype_bundle_build_version "$prefpane_path")"
+  fi
+
+  KNOWTYPE_RELEASE_MANIFEST="$manifest_path" \
+    KNOWTYPE_RELEASE_APP_BUNDLE_ID="$app_bundle_id" \
+    KNOWTYPE_RELEASE_APP_VERSION="$app_version" \
+    KNOWTYPE_RELEASE_APP_BUILD="$app_build" \
+    KNOWTYPE_RELEASE_PREFPANE_PATH="$prefpane_path" \
+    KNOWTYPE_RELEASE_PREFPANE_BUNDLE_ID="$prefpane_bundle_id" \
+    KNOWTYPE_RELEASE_PREFPANE_VERSION="$prefpane_version" \
+    KNOWTYPE_RELEASE_PREFPANE_BUILD="$prefpane_build" \
+    python3 - <<'PY'
+import json
+import os
+import sys
+
+def fail(message: str) -> None:
+    print(f"error: release-manifest.json validation failed: {message}", file=sys.stderr)
+    sys.exit(1)
+
+with open(os.environ["KNOWTYPE_RELEASE_MANIFEST"], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+
+bundles = manifest.get("bundles")
+if not isinstance(bundles, list):
+    fail("missing bundles array")
+
+def bundle_entries(path: str):
+    return [entry for entry in bundles if isinstance(entry, dict) and entry.get("path") == path]
+
+def require_match(entry: dict, key: str, expected: str, label: str) -> None:
+    actual = entry.get(key)
+    if actual != expected:
+        fail(f"{label} mismatch for {entry.get('path', '<unknown>')}: manifest has {actual!r}, bundle has {expected!r}")
+
+app_entries = bundle_entries("KnowType.app")
+if len(app_entries) != 1:
+    fail(f"expected exactly one KnowType.app metadata entry, found {len(app_entries)}")
+app = app_entries[0]
+require_match(app, "bundleIdentifier", os.environ["KNOWTYPE_RELEASE_APP_BUNDLE_ID"], "bundleIdentifier")
+require_match(app, "shortVersion", os.environ["KNOWTYPE_RELEASE_APP_VERSION"], "shortVersion")
+require_match(app, "buildVersion", os.environ["KNOWTYPE_RELEASE_APP_BUILD"], "buildVersion")
+
+if os.environ.get("KNOWTYPE_RELEASE_PREFPANE_PATH"):
+    prefpane_entries = bundle_entries("KnowType.prefPane")
+    if len(prefpane_entries) != 1:
+        fail(f"expected exactly one KnowType.prefPane metadata entry, found {len(prefpane_entries)}")
+    pane = prefpane_entries[0]
+    require_match(pane, "bundleIdentifier", os.environ["KNOWTYPE_RELEASE_PREFPANE_BUNDLE_ID"], "prefPane bundleIdentifier")
+    require_match(pane, "shortVersion", os.environ["KNOWTYPE_RELEASE_PREFPANE_VERSION"], "prefPane shortVersion")
+    require_match(pane, "buildVersion", os.environ["KNOWTYPE_RELEASE_PREFPANE_BUILD"], "prefPane buildVersion")
+PY
+}
+
+validate_release_zip_checksum_if_available() {
+  local manifest_path="$1"
+  local zip_path="$2"
+  local checksum_name checksum_path expected actual
+  checksum_name="$(release_manifest_field "$manifest_path" "artifacts.checksum")"
+  [[ -n "$checksum_name" ]] || return 0
+  checksum_path="$(dirname "$zip_path")/$checksum_name"
+  if [[ ! -f "$checksum_path" ]]; then
+    echo "warning: release checksum file listed by manifest was not found: $checksum_path" >&2
+    return 0
+  fi
+  expected="$(awk 'NF {print $1; exit}' "$checksum_path")"
+  actual="$(shasum -a 256 "$zip_path" | awk '{print $1}')"
+  if [[ -z "$expected" || "$expected" != "$actual" ]]; then
+    echo "error: release zip checksum does not match $checksum_path" >&2
+    exit 1
+  fi
+}
+
 prepare_source_artifacts() {
   case "$SOURCE_MODE" in
     build)
@@ -291,23 +397,37 @@ prepare_source_artifacts() {
       }
       SOURCE_TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-release-install.XXXXXX")"
       ditto -x -k "$FROM_RELEASE_ZIP" "$SOURCE_TEMP_DIR"
-      SOURCE_BUNDLE_PATH="$(find "$SOURCE_TEMP_DIR" -maxdepth 4 -type d -name 'KnowType.app' -print 2>/dev/null | head -n 1)"
-      SOURCE_PREFPANE_PATH="$(find "$SOURCE_TEMP_DIR" -maxdepth 4 -type d -name 'KnowType.prefPane' -print 2>/dev/null | head -n 1)"
+      local source_bundle_count=0
+      while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] || continue
+        source_bundle_count=$((source_bundle_count + 1))
+        if [[ -z "$SOURCE_BUNDLE_PATH" ]]; then
+          SOURCE_BUNDLE_PATH="$candidate"
+        fi
+      done < <(find "$SOURCE_TEMP_DIR" -maxdepth 4 -type d -name 'KnowType.app' -print 2>/dev/null)
+      if (( source_bundle_count != 1 )); then
+        echo "error: release zip must contain exactly one KnowType.app bundle; found $source_bundle_count" >&2
+        exit 1
+      fi
+      local source_prefpane_count=0
+      while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] || continue
+        source_prefpane_count=$((source_prefpane_count + 1))
+        if [[ -z "$SOURCE_PREFPANE_PATH" ]]; then
+          SOURCE_PREFPANE_PATH="$candidate"
+        fi
+      done < <(find "$SOURCE_TEMP_DIR" -maxdepth 4 -type d -name 'KnowType.prefPane' -print 2>/dev/null)
+      if (( source_prefpane_count > 1 )); then
+        echo "error: release zip must contain at most one KnowType.prefPane bundle; found $source_prefpane_count" >&2
+        exit 1
+      fi
       SOURCE_RELEASE_MANIFEST="$(discover_release_manifest "$FROM_RELEASE_ZIP" "$SOURCE_TEMP_DIR")"
       if [[ -n "$SOURCE_RELEASE_MANIFEST" ]]; then
         SOURCE_RELEASE_MANIFEST_DIGEST="$(shasum -a 256 "$SOURCE_RELEASE_MANIFEST" | awk '{print $1}')"
-        SOURCE_GIT_COMMIT="$(KNOWTYPE_RELEASE_MANIFEST="$SOURCE_RELEASE_MANIFEST" python3 - <<'PY'
-import json, os
-with open(os.environ["KNOWTYPE_RELEASE_MANIFEST"], encoding="utf-8") as handle:
-    print(json.load(handle).get("releaseCommit", ""))
-PY
-)"
-        SOURCE_GIT_TAG="$(KNOWTYPE_RELEASE_MANIFEST="$SOURCE_RELEASE_MANIFEST" python3 - <<'PY'
-import json, os
-with open(os.environ["KNOWTYPE_RELEASE_MANIFEST"], encoding="utf-8") as handle:
-    print(json.load(handle).get("tag", ""))
-PY
-)"
+        validate_release_manifest_metadata "$SOURCE_RELEASE_MANIFEST" "$SOURCE_BUNDLE_PATH" "$SOURCE_PREFPANE_PATH"
+        validate_release_zip_checksum_if_available "$SOURCE_RELEASE_MANIFEST" "$FROM_RELEASE_ZIP"
+        SOURCE_GIT_COMMIT="$(release_manifest_field "$SOURCE_RELEASE_MANIFEST" "releaseCommit")"
+        SOURCE_GIT_TAG="$(release_manifest_field "$SOURCE_RELEASE_MANIFEST" "tag")"
       else
         echo "warning: release-manifest.json was not found in or beside the release zip; install-state will record release-zip without commit metadata" >&2
       fi
@@ -491,9 +611,11 @@ if ! "$ROOT_DIR/scripts/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH" 
 fi
 
 INSTALL_SUCCEEDED=1
-knowtype_prune_install_backups "$KEEP_BACKUPS" 0
-if [[ "$KEEP_BACKUPS" == "0" ]]; then
-  BACKUP_ID=""
+if (( BACKUP_ENABLED == 1 )); then
+  knowtype_prune_install_backups "$KEEP_BACKUPS" 0
+  if [[ "$KEEP_BACKUPS" == "0" ]]; then
+    BACKUP_ID=""
+  fi
 fi
 
 echo

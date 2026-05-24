@@ -52,6 +52,7 @@ done
 PREFPANE_TARGET_PATH="$(knowtype_preferencepane_target_path)"
 TARGET_PATH="$(knowtype_inputmethod_target_path)"
 BACKUP_ROOT="$(knowtype_backup_root_dir)"
+INSTALL_STATE_PATH="$(knowtype_install_state_path)"
 
 if (( BACKUP_ENABLED == 1 )); then
   knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" "$DRY_RUN" "$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
@@ -87,6 +88,15 @@ fi
 
 knowtype_clean_preferencepane_caches "$DRY_RUN"
 knowtype_quit_system_settings_if_running "$DRY_RUN"
+
+if [[ -f "$INSTALL_STATE_PATH" ]]; then
+  if (( DRY_RUN == 1 )); then
+    echo "[dry-run] Would remove KnowType install state: $INSTALL_STATE_PATH"
+  else
+    rm -f -- "$INSTALL_STATE_PATH"
+    echo "Removed KnowType install state: $INSTALL_STATE_PATH"
+  fi
+fi
 
 if (( PURGE_BACKUPS == 1 )); then
   if [[ -d "$BACKUP_ROOT" ]]; then
