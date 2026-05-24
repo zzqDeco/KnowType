@@ -1531,15 +1531,28 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func insert(_ text: String, client: InputControllerClient?) {
-        client?.insertText(text, replacementRange: replacementRangeForCommit(client))
+        let replacementRange = replacementRangeForCommit()
+        traceClientWrite(
+            kind: "insertText",
+            client: client,
+            chosenReplacementRange: replacementRange,
+            reason: "commit"
+        )
+        client?.insertText(text, replacementRange: replacementRange)
     }
 
     private func insertDirectPassthroughText(_ text: String, client: InputControllerClient?) -> Bool {
         guard let lifecycleClient = client ?? host?.currentClient else {
             return false
         }
-        let replacementRange = replacementRangeForCommit(lifecycleClient)
+        let replacementRange = replacementRangeForCommit()
         _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
+        traceClientWrite(
+            kind: "insertText",
+            client: lifecycleClient,
+            chosenReplacementRange: replacementRange,
+            reason: "idle_passthrough"
+        )
         lifecycleClient.insertText(text, replacementRange: replacementRange)
         return true
     }
@@ -2253,7 +2266,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        let replacement = activeMarkedRange(for: client) ?? NSRange(location: NSNotFound, length: NSNotFound)
+        let replacement = replacementRangeForMarkedText()
+        traceClientWrite(
+            kind: "setMarkedText",
+            client: client,
+            chosenReplacementRange: replacement,
+            reason: "composition_update"
+        )
         client.setMarkedText(
             markedText,
             selectionRange: NSRange(location: (markedText as NSString).length, length: 0),
@@ -2267,23 +2286,26 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func clearMarkedText(_ client: InputControllerClient) {
-        guard let markedRange = activeMarkedRange(for: client) else {
-            host?.updateComposition()
-            return
-        }
+        let replacementRange = replacementRangeForMarkedText()
+        traceClientWrite(
+            kind: "setMarkedText",
+            client: client,
+            chosenReplacementRange: replacementRange,
+            reason: "clear_marked_text"
+        )
         client.setMarkedText(
             "",
             selectionRange: NSRange(location: 0, length: 0),
-            replacementRange: markedRange
+            replacementRange: replacementRange
         )
     }
 
-    private func replacementRangeForCommit(_ client: InputControllerClient?) -> NSRange {
-        client.flatMap(activeMarkedRange(for:)) ?? NSRange(location: NSNotFound, length: NSNotFound)
+    private func replacementRangeForCommit() -> NSRange {
+        Self.noOwnedReplacementRange
     }
 
-    private func activeMarkedRange(for client: InputControllerClient) -> NSRange? {
-        client.markedRange
+    private func replacementRangeForMarkedText() -> NSRange {
+        Self.noOwnedReplacementRange
     }
 
     private func nativeMarkedText() -> String? {
@@ -2331,11 +2353,40 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5
     private static let preferenceReloadInterval: TimeInterval = 1
+    private static let noOwnedReplacementRange = NSRange(location: NSNotFound, length: NSNotFound)
 
     private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
         !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
             scalar.value >= 48 && scalar.value <= 57
         }
+    }
+
+    private func traceClientWrite(
+        kind: String,
+        client: InputControllerClient?,
+        chosenReplacementRange: NSRange,
+        reason: String
+    ) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_CLIENT_WRITE_DEBUG"] == "1" else {
+            return
+        }
+        let message = "KnowType client write: kind=\(kind) " +
+            "compositionID=\(compositionID) rawLength=\(rawBuffer.count) " +
+            "selectedRange=\(Self.describeRange(client?.selectedRange)) " +
+            "reportedMarkedRange=\(Self.describeRange(client?.markedRange)) " +
+            "chosenReplacementRange=\(Self.describeRange(chosenReplacementRange)) " +
+            "reason=\(reason)\n"
+        fputs(message, stderr)
+    }
+
+    private static func describeRange(_ range: NSRange?) -> String {
+        guard let range else {
+            return "nil"
+        }
+        if range.location == NSNotFound {
+            return "{NSNotFound,\(range.length)}"
+        }
+        return "{\(range.location),\(range.length)}"
     }
 }
 

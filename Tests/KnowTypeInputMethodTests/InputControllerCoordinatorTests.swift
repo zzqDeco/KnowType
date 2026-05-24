@@ -41,7 +41,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
     }
 
-    func testAppendWritesMarkedTextThroughClientSeam() {
+    func testAppendWritesMarkedTextWithoutTrustingStaleHostMarkedRange() {
         let client = FakeInputControllerClient()
         client.markedRangeValue = NSRange(location: 4, length: 1)
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -54,7 +54,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(handled)
         XCTAssertEqual(client.markedTextWrites.count, 1)
         XCTAssertFalse(client.markedTextWrites[0].text.isEmpty)
-        XCTAssertEqual(client.markedTextWrites[0].replacementRange, NSRange(location: 4, length: 1))
+        XCTAssertEqual(
+            client.markedTextWrites[0].replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
         XCTAssertEqual(
             client.markedTextWrites[0].selectionRange.location,
             (client.markedTextWrites[0].text as NSString).length
@@ -63,7 +66,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
     }
 
-    func testTextOnlySpaceCommitsWithActiveMarkedReplacementRange() {
+    func testTextOnlySpaceCommitIgnoresStaleHostMarkedRange() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
 
@@ -78,7 +81,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(handled)
         XCTAssertEqual(client.insertTextWrites.count, 1)
         XCTAssertEqual(client.insertTextWrites[0].text, firstCandidate)
-        XCTAssertEqual(client.insertTextWrites[0].replacementRange, NSRange(location: 7, length: 1))
+        XCTAssertEqual(
+            client.insertTextWrites[0].replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
         XCTAssertEqual(host.hideCandidatePanelCount, 1)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -136,7 +142,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testIdlePassthroughReplacesStaleMarkedRange() {
+    func testIdlePassthroughIgnoresStaleHostMarkedRange() {
         let client = FakeInputControllerClient()
         client.markedRangeValue = NSRange(location: 7, length: 2)
         let (coordinator, _, _) = makeCoordinator(client: client)
@@ -146,7 +152,22 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, " ")
         XCTAssertEqual(
             client.insertTextWrites.last?.replacementRange,
-            NSRange(location: 7, length: 2)
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
+    }
+
+    func testIdleDigitsIgnoreStaleHostMarkedRange() {
+        let client = FakeInputControllerClient()
+        client.markedRangeValue = NSRange(location: 7, length: 2)
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("1", client: client))
+        XCTAssertTrue(coordinator.handleText("2", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["1", "2"])
+        XCTAssertEqual(
+            client.insertTextWrites.map(\.replacementRange),
+            Array(repeating: NSRange(location: NSNotFound, length: NSNotFound), count: 2)
         )
     }
 
@@ -168,6 +189,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertTrue(coordinator.handleText("i", client: client))
+        client.markedRangeValue = NSRange(location: 99, length: 2)
         let handled = coordinator.handle(
             stroke: InputKeyStroke(text: "\r", keyCode: 36),
             client: client
@@ -175,6 +197,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(handled)
         XCTAssertEqual(client.insertTextWrites.last?.text, "ni")
+        XCTAssertEqual(
+            client.insertTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
         XCTAssertEqual(host.hideCandidatePanelCount, 1)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -892,6 +918,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
         let prefix = try XCTUnwrap(viewModel.prefixCandidates.first?.text)
         let continuation = try XCTUnwrap(viewModel.continuationCandidates.first?.text)
+        client.markedRangeValue = NSRange(location: 99, length: 2)
 
         XCTAssertTrue(
             coordinator.handle(
@@ -901,6 +928,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(client.insertTextWrites.last?.text, "\(prefix)\(continuation)")
+        XCTAssertEqual(
+            client.insertTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
     }
 
     @MainActor
@@ -2212,7 +2243,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(handled)
         XCTAssertEqual(client.markedTextWrites.last?.text, "")
         XCTAssertEqual(client.markedTextWrites.last?.selectionRange, NSRange(location: 0, length: 0))
-        XCTAssertEqual(client.markedTextWrites.last?.replacementRange, NSRange(location: 12, length: 1))
+        XCTAssertEqual(
+            client.markedTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
         XCTAssertEqual(host.hideCandidatePanelCount, 1)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -2713,6 +2747,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
         }
         XCTAssertTrue(hasAIRecommendation)
+        client.markedRangeValue = NSRange(location: 99, length: 2)
         XCTAssertTrue(
             coordinator.handle(
                 stroke: InputKeyStroke(text: "1", keyCode: keyCode(forNumber: 1), modifiers: [.option]),
@@ -2721,6 +2756,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(client.insertTextWrites.last?.text, "AI 续写")
+        XCTAssertEqual(
+            client.insertTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
         XCTAssertEqual(persistenceSpy.recordedSelections, [])
     }
 
