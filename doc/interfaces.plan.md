@@ -231,6 +231,9 @@ Current write contract:
 - composing `setMarkedText`, clear-marked `setMarkedText("")`, ordinary
   `insertText` commits, and idle Space/digit passthrough all use
   `NSRange(location: NSNotFound, length: NSNotFound)`
+- clear-marked writes are only issued when KnowType had an active composition
+  to end; idle Return/Enter must not clear stale host marked ranges before
+  returning the key to the app
 - KnowType has no reconversion or selected-range replacement path today
 - future reconversion must maintain an explicit KnowType-owned replacement
   range, reset it after commit, and must not directly trust `client.markedRange`

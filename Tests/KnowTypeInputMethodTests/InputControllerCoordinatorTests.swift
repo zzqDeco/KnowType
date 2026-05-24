@@ -171,6 +171,23 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
     }
 
+    func testIdleReturnDoesNotClearStaleHostMarkedRange() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 12, length: 3)
+        client.markedRangeValue = NSRange(location: 7, length: 2)
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        let handled = coordinator.handle(
+            stroke: InputKeyStroke(text: "\r", keyCode: 36),
+            client: client
+        )
+
+        XCTAssertFalse(handled)
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(client.markedRangeValue, NSRange(location: 7, length: 2))
+    }
+
     func testCompositionDisplaysRawPinyinUntilCandidateIsConfirmed() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(client: client)

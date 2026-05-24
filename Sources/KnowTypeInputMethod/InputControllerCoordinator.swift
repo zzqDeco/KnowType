@@ -1679,12 +1679,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         hideCandidatePanel(reason: reason.panelVisibilityReason)
 
         let lifecycleClient = client ?? host?.currentClient
+        let shouldClearOwnedMarkedText = reason.shouldClearMarkedTextWhenEndingWithoutCommit
+            && hasActiveTextComposition()
         let commitText = lifecycleCommitText(for: commitPolicy)
         if let commitText,
            !commitText.isEmpty {
             recordTypingCommit(commitText, client: lifecycleClient)
             insert(commitText, client: lifecycleClient)
-        } else if reason.shouldClearMarkedTextWhenEndingWithoutCommit,
+        } else if shouldClearOwnedMarkedText,
                   let lifecycleClient {
             clearMarkedText(lifecycleClient)
         }

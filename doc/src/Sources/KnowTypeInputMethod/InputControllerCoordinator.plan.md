@@ -9,6 +9,7 @@ Current behavior:
 - writes marked text through `InputControllerClient.setMarkedText`, using Rime preedit while native composition is active so partial commits can show confirmed Chinese plus remaining input
 - commits through `InputControllerClient.insertText` with a KnowType-owned replacement range; normal composition, commit, and direct passthrough writes use `NSNotFound` and do not trust stale host `markedRange`
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
+- only clears marked text when ending a KnowType-owned active composition; idle Return/Enter returns to the host without clearing stale host marked ranges
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
 - cancels any pending retired local-candidate task before synchronous native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
