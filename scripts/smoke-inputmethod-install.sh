@@ -295,6 +295,11 @@ if [[ "$second_backup_id" == "$backup_id" ]]; then
   die "rapid repeated backups reused ID: $backup_id"
 fi
 assert_file "$fake_support_dir/Backups/$second_backup_id/manifest.json"
+latest_backup_dir="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    knowtype_latest_backup_dir
+)"
+assert_equals "$second_backup_id" "$(basename "$latest_backup_dir")" "latest backup id"
 backup_manifest_id="$(
   KNOWTYPE_BACKUP_MANIFEST_PATH="$fake_support_dir/Backups/$backup_id/manifest.json" python3 - <<'PY'
 import json, os
@@ -318,6 +323,13 @@ rollback_dry_run_output="$(
 )"
 assert_contains "$rollback_dry_run_output" "KnowType rollback dry run" "rollback dry run output"
 assert_contains "$rollback_dry_run_output" "$backup_id" "rollback dry run output"
+rollback_latest_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/rollback-inputmethod.sh" --latest --dry-run
+)"
+assert_contains "$rollback_latest_dry_run_output" "$second_backup_id" "rollback latest dry run output"
 if KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "../../outside" --dry-run >/dev/null 2>&1; then
   die "rollback accepted traversal backup ID"

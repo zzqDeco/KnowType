@@ -164,37 +164,41 @@ rollback_failed_install() {
   if (( INSTALL_SUCCEEDED == 1 || DRY_RUN == 1 )); then
     return 0
   fi
-  if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR/KnowType.app" ]]; then
+  if [[ -n "$BACKUP_DIR" && ( -d "$BACKUP_DIR/KnowType.app" || -d "$BACKUP_DIR/KnowType.prefPane" ) ]]; then
     echo "Install failed; restoring previous KnowType backup: $BACKUP_ID" >&2
     local app_stage=""
     local current_stage=""
-    app_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.app.XXXXXX")" || return 0
-    if ! cp -R "$BACKUP_DIR/KnowType.app" "$app_stage/KnowType.app"; then
-      rm -rf "$app_stage"
-      return 0
-    fi
-    if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
-      if ! knowtype_is_safe_local_inputmethod_bundle_path "$TARGET_PATH"; then
+    local restored_app=0
+    if [[ -d "$BACKUP_DIR/KnowType.app" ]]; then
+      app_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.app.XXXXXX")" || return 0
+      if ! cp -R "$BACKUP_DIR/KnowType.app" "$app_stage/KnowType.app"; then
         rm -rf "$app_stage"
         return 0
       fi
-      current_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.current.XXXXXX")" || {
-        rm -rf "$app_stage"
-        return 0
-      }
-      if ! mv "$TARGET_PATH" "$current_stage/KnowType.app"; then
+      if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
+        if ! knowtype_is_safe_local_inputmethod_bundle_path "$TARGET_PATH"; then
+          rm -rf "$app_stage"
+          return 0
+        fi
+        current_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.current.XXXXXX")" || {
+          rm -rf "$app_stage"
+          return 0
+        }
+        if ! mv "$TARGET_PATH" "$current_stage/KnowType.app"; then
+          rm -rf "$app_stage" "$current_stage"
+          return 0
+        fi
+      fi
+      if ! mv "$app_stage/KnowType.app" "$TARGET_PATH"; then
+        if [[ -n "$current_stage" && -d "$current_stage/KnowType.app" && ! -e "$TARGET_PATH" ]]; then
+          mv "$current_stage/KnowType.app" "$TARGET_PATH" 2>/dev/null || true
+        fi
         rm -rf "$app_stage" "$current_stage"
         return 0
       fi
-    fi
-    if ! mv "$app_stage/KnowType.app" "$TARGET_PATH"; then
-      if [[ -n "$current_stage" && -d "$current_stage/KnowType.app" && ! -e "$TARGET_PATH" ]]; then
-        mv "$current_stage/KnowType.app" "$TARGET_PATH" 2>/dev/null || true
-      fi
       rm -rf "$app_stage" "$current_stage"
-      return 0
+      restored_app=1
     fi
-    rm -rf "$app_stage" "$current_stage"
     if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
       mkdir -p "$PREFPANE_TARGET_DIR"
       rm -rf -- "$PREFPANE_TARGET_PATH"
@@ -202,7 +206,9 @@ rollback_failed_install() {
     else
       rm -rf -- "$PREFPANE_TARGET_PATH"
     fi
-    knowtype_register_launchservices_path "$TARGET_PATH" 0
+    if (( restored_app == 1 )); then
+      knowtype_register_launchservices_path "$TARGET_PATH" 0
+    fi
   fi
 }
 

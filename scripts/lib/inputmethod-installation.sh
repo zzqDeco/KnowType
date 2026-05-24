@@ -343,7 +343,7 @@ knowtype_create_install_backup() {
   KNOWTYPE_CREATED_BACKUP_ID=""
   KNOWTYPE_CREATED_BACKUP_DIR=""
 
-  if [[ ! -d "$app_path" && ! -d "$prefpane_path" ]]; then
+  if [[ ! -d "$app_path" ]]; then
     return 0
   fi
 
@@ -351,13 +351,17 @@ knowtype_create_install_backup() {
   local build
   version="$(knowtype_bundle_short_version "$app_path")"
   build="$(knowtype_bundle_build_version "$app_path")"
-  local backup_id_base
-  backup_id_base="$(knowtype_backup_id_timestamp)-$(knowtype_sanitize_backup_component "$version")-$(knowtype_sanitize_backup_component "$build")"
+  local backup_timestamp
+  local version_component
+  local build_component
+  backup_timestamp="$(knowtype_backup_id_timestamp)"
+  version_component="$(knowtype_sanitize_backup_component "$version")"
+  build_component="$(knowtype_sanitize_backup_component "$build")"
   local backup_root
   local backup_dir
   backup_root="$(knowtype_backup_root_dir)"
   local backup_id
-  backup_id="$backup_id_base.unique"
+  backup_id="${backup_timestamp}-0000-${version_component}-${build_component}"
   backup_dir="$backup_root/$backup_id"
   KNOWTYPE_CREATED_BACKUP_ID="$backup_id"
   KNOWTYPE_CREATED_BACKUP_DIR="$backup_dir"
@@ -370,8 +374,24 @@ knowtype_create_install_backup() {
   fi
 
   mkdir -p "$backup_root"
-  backup_dir="$(mktemp -d "$backup_root/${backup_id_base}.XXXXXX")"
-  backup_id="$(basename "$backup_dir")"
+  backup_id=""
+  backup_dir=""
+  local counter
+  local counter_component
+  for counter in $(seq 0 9999); do
+    counter_component="$(printf '%04d' "$counter")"
+    backup_id="${backup_timestamp}-${counter_component}-${version_component}-${build_component}"
+    backup_dir="$backup_root/$backup_id"
+    if mkdir "$backup_dir" 2>/dev/null; then
+      break
+    fi
+    backup_id=""
+    backup_dir=""
+  done
+  if [[ -z "$backup_id" || -z "$backup_dir" ]]; then
+    echo "error: failed to allocate a unique KnowType backup directory" >&2
+    return 1
+  fi
   KNOWTYPE_CREATED_BACKUP_ID="$backup_id"
   KNOWTYPE_CREATED_BACKUP_DIR="$backup_dir"
   if [[ -d "$app_path" ]]; then
@@ -439,6 +459,8 @@ knowtype_prune_install_backups() {
       rm -rf -- "$backup_dir"
       echo "Pruned old install backup: $backup_dir"
     fi
+  # Backup IDs start with UTC timestamp plus a monotonic per-second counter, so
+  # reverse lexical order is newest-first for managed backups.
   done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r)
 }
 
@@ -446,6 +468,7 @@ knowtype_latest_backup_dir() {
   local backup_root
   backup_root="$(knowtype_backup_root_dir)"
   [[ -d "$backup_root" ]] || return 0
+  # See knowtype_prune_install_backups: IDs are sortable by creation order.
   find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r | head -n 1
 }
 
