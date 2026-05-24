@@ -217,7 +217,29 @@ same `CandidatePanelSelection` values so click commits match keyboard commits.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
 - Marked text mirrors `ConversionEngineSnapshot.preedit` while Rime has composition. If Rime commits part of a long input and keeps composition active, KnowType inserts the commit text and keeps showing the remaining Rime preedit instead of reverting to raw pinyin.
 - Ordinary digits `1...9` select Rime current-page candidates whenever native composition is active, even if the custom panel is hidden or the native snapshot currently has candidates without raw/preedit text. Out-of-range digits are consumed by the active composition and do not commit AI or append a literal digit.
-- With no active text/native composition, ordinary Space and `0...9` are direct passthrough text insertions. They replace any lingering marked range, otherwise use `NSNotFound`. Stale candidate-panel or AI state must not capture those keys.
+- With no active text/native composition, ordinary Space and `0...9` are direct passthrough text insertions at the current cursor. They ignore lingering host `markedRange` values and use `NSNotFound`; stale candidate-panel or AI state must not capture those keys.
+
+## IMK Client Writes
+
+KnowType treats host-reported `markedRange` as advisory. It may be used by
+candidate anchoring and diagnostics, but ordinary text writes must not use it as
+a replacement range because some host apps can report stale ranges after fast
+Space/Return or focus changes.
+
+Current write contract:
+
+- composing `setMarkedText`, clear-marked `setMarkedText("")`, ordinary
+  `insertText` commits, and idle Space/digit passthrough all use
+  `NSRange(location: NSNotFound, length: NSNotFound)`
+- clear-marked writes are only issued when KnowType had an active composition
+  to end; idle Return/Enter must not clear stale host marked ranges before
+  returning the key to the app
+- KnowType has no reconversion or selected-range replacement path today
+- future reconversion must maintain an explicit KnowType-owned replacement
+  range, reset it after commit, and must not directly trust `client.markedRange`
+- `KNOWTYPE_CLIENT_WRITE_DEBUG=1` logs write kind, composition id, raw length,
+  selected range, reported marked range, chosen replacement range, and reason
+  without logging user text
 - Arrow navigation updates Rime's current-page highlight. Right/down at the current page end moves to the next page and highlights row 1; left/up at the current page start moves to the previous page and highlights its last row.
 - Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, the key falls back to the normal punctuation commit path so page shortcuts do not swallow punctuation at page boundaries.
 - Other composing ASCII symbols are offered to Rime before KnowType punctuation fallback so schema keys such as apostrophe, semicolon, and slash can be handled by the engine.
