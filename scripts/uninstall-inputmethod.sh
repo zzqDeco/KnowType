@@ -55,6 +55,7 @@ BACKUP_ROOT="$(knowtype_backup_root_dir)"
 
 if (( BACKUP_ENABLED == 1 )); then
   knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" "$DRY_RUN" "$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
+  knowtype_prune_install_backups "$KNOWTYPE_DEFAULT_BACKUP_RETENTION" "$DRY_RUN"
 fi
 
 if (( DRY_RUN == 0 )); then

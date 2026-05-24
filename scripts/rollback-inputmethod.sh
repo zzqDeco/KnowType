@@ -155,10 +155,15 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
-inputsource_tool="$(knowtype_inputsource_tool "$ROOT_DIR")"
-"$inputsource_tool" switch-away \
-  --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID" >/dev/null 2>&1 || true
+inputsource_tool=""
+if inputsource_tool="$(knowtype_inputsource_tool "$ROOT_DIR" 2>/dev/null)"; then
+  "$inputsource_tool" switch-away \
+    --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID" >/dev/null 2>&1 || true
+else
+  echo "warning: input-source helper is unavailable; rollback will restore bundles and skip preference repair" >&2
+  inputsource_tool=""
+fi
 
 killall KnowTypeInputMethodApp 2>/dev/null || true
 for _ in {1..30}; do
@@ -210,11 +215,13 @@ knowtype_register_launchservices_path "$target_path" 0
 
 "$target_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-purge-legacy || true
 
-"$inputsource_tool" repair-preferences \
-  --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  --include-history \
-  --add-active >/dev/null 2>&1 || true
+if [[ -n "$inputsource_tool" ]]; then
+  "$inputsource_tool" repair-preferences \
+    --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
+    --include-history \
+    --add-active >/dev/null 2>&1 || true
+fi
 
 killall cfprefsd 2>/dev/null || true
 killall TextInputMenuAgent 2>/dev/null || true

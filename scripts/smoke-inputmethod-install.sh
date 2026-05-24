@@ -276,11 +276,6 @@ assert_contains "$release_zip_dry_run_output" "Source release zip: $release_zip_
 assert_equals "0.2.0+build-bad-value" \
   "$(knowtype_sanitize_backup_component "0.2.0+build bad/value")" \
   "backup component sanitization"
-if command -v gtr >/dev/null 2>&1; then
-  assert_equals "0.2.0+build-bad-value" \
-    "$(printf '%s' "0.2.0+build bad/value" | gtr -c 'A-Za-z0-9._+-' '-')" \
-    "GNU tr-compatible backup component sanitization set"
-fi
 
 KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null

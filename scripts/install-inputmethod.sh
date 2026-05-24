@@ -166,8 +166,35 @@ rollback_failed_install() {
   fi
   if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR/KnowType.app" ]]; then
     echo "Install failed; restoring previous KnowType backup: $BACKUP_ID" >&2
-    rm -rf -- "$TARGET_PATH"
-    cp -R "$BACKUP_DIR/KnowType.app" "$TARGET_PATH"
+    local app_stage=""
+    local current_stage=""
+    app_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.app.XXXXXX")" || return 0
+    if ! cp -R "$BACKUP_DIR/KnowType.app" "$app_stage/KnowType.app"; then
+      rm -rf "$app_stage"
+      return 0
+    fi
+    if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
+      if ! knowtype_is_safe_local_inputmethod_bundle_path "$TARGET_PATH"; then
+        rm -rf "$app_stage"
+        return 0
+      fi
+      current_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.current.XXXXXX")" || {
+        rm -rf "$app_stage"
+        return 0
+      }
+      if ! mv "$TARGET_PATH" "$current_stage/KnowType.app"; then
+        rm -rf "$app_stage" "$current_stage"
+        return 0
+      fi
+    fi
+    if ! mv "$app_stage/KnowType.app" "$TARGET_PATH"; then
+      if [[ -n "$current_stage" && -d "$current_stage/KnowType.app" && ! -e "$TARGET_PATH" ]]; then
+        mv "$current_stage/KnowType.app" "$TARGET_PATH" 2>/dev/null || true
+      fi
+      rm -rf "$app_stage" "$current_stage"
+      return 0
+    fi
+    rm -rf "$app_stage" "$current_stage"
     if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
       mkdir -p "$PREFPANE_TARGET_DIR"
       rm -rf -- "$PREFPANE_TARGET_PATH"
@@ -444,7 +471,7 @@ knowtype_write_install_state \
   "$(install_state_source)" \
   "$TARGET_PATH" \
   "$([[ "$WITH_PREFPANE" == "1" ]] && printf '%s' "$PREFPANE_TARGET_PATH" || true)" \
-  "$BACKUP_ID" \
+  "$([[ "$KEEP_BACKUPS" != "0" ]] && printf '%s' "$BACKUP_ID" || true)" \
   "$SOURCE_GIT_COMMIT" \
   "$SOURCE_GIT_TAG" \
   "$SOURCE_RELEASE_MANIFEST_DIGEST"
@@ -464,6 +491,10 @@ if ! "$ROOT_DIR/scripts/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH" 
 fi
 
 INSTALL_SUCCEEDED=1
+knowtype_prune_install_backups "$KEEP_BACKUPS" 0
+if [[ "$KEEP_BACKUPS" == "0" ]]; then
+  BACKUP_ID=""
+fi
 
 echo
 echo "KnowType install summary"

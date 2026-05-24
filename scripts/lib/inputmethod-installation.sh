@@ -182,7 +182,7 @@ knowtype_bundle_identifier() {
 knowtype_sanitize_backup_component() {
   local value="$1"
   value="${value:-unknown}"
-  printf '%s' "$value" | tr -c 'A-Za-z0-9._+-' '-'
+  printf '%s' "$value" | LC_ALL=C sed 's/[^A-Za-z0-9._+-]/-/g'
 }
 
 knowtype_path_checksum() {
@@ -402,7 +402,6 @@ PY
   )" knowtype_write_json_file "$backup_dir/manifest.json" env
 
   echo "Created install backup: $backup_dir"
-  knowtype_prune_install_backups "$keep_backups" 0
 }
 
 knowtype_prune_install_backups() {
