@@ -144,9 +144,13 @@ Core candidate types:
 - `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
 - `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
+- `RimeMaintenanceService`: background owner of explicit `sync_user_data`, userdb snapshot discovery, and idle/manual maintenance policy.
+- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with current Rime candidates and schedules background profile refresh from existing userdb snapshots.
 - `LexicalContextSnapshot`: top-K lexical/tone summary rendered as `LEXICAL_PROFILE.md` and hashed into AI cache keys.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 - `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.
+- `CandidatePanelFrame`: candidate-panel presentation intent with composition id, raw revision, raw length, anchor source, panel model, and explicit visibility reason.
+- `AIRecommendationPatch`: AI slot-only update guarded by request id, generation, composition id, raw revision, and raw input.
 
 Raw input is tracked outside `SuggestionResponse` by the input-method session, for example through stale-result guards such as `latestSuggestionRawInput`. Protection metadata lives on correction candidates, locked prefixes, and protected ranges rather than on the top-level suggestion response.
 
@@ -167,6 +171,11 @@ Core correction and traditional-input candidates may carry `rawRange` and `segme
 `InputMethodLexiconRuntime` uses the shared resolver, then creates the `TraditionalInputEngine` used by legacy package/demo paths. It is not consulted by the production IMK key path after the Rime-only transition.
 
 `InputMethodLexiconRuntime.snapshot()` reports each configured directory's existence and supported JSON/TSV resource files with modification metadata. This remains available for legacy package/demo paths and settings diagnostics. The production IMK frontend does not refresh or rebuild `TraditionalInputEngine` after the Rime-only transition.
+
+Rime userdb maintenance is separate from the conversion session. The default lexical-profile refresh path reads an
+existing `*.userdb.txt` snapshot only; it does not call `sync_user_data` on commit, Space, number selection, paging,
+or candidate-panel refresh. Explicit sync is exposed through `RimeMaintenanceService.syncUserDataIfIdle` or future
+manual diagnostics/settings actions, so userdb locking and disk IO cannot run on the IMK hot path.
 
 Interactive correction calls use `TraditionalInputQueryOptions.interactive`. The budget caps tokenization paths, recursive parse states, candidate output count, segment candidate output count, and partial-match fanout. Offline or test callers may omit the options for broader exhaustive parsing.
 
@@ -209,6 +218,8 @@ same `CandidatePanelSelection` values so click commits match keyboard commits.
 - Explicit `PageUp`/`PageDown` are forwarded to the native engine whenever composition is active, even if the custom panel is hidden because anchoring failed.
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
+- The hot path emits `InputFrame`/`CandidatePanelFrame`-style state and side-effect events. It must not call AI providers,
+  lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly.
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
 `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when
@@ -226,10 +237,13 @@ shielding levels. The visual style uses compact rows, `hudWindow` material, dyna
 corners so it stays close to macOS native candidate panels.
 
 Because the panel does not hide automatically on app deactivation, the input-method coordinator explicitly hides it
-on commit, cancel, deactivate, close, reset, and native composition end. Candidate-panel publication requires an active
-raw/native preedit composition; stale suggestions, delayed reanchors, and AI updates must not make the panel visible
-after composition teardown. With `KNOWTYPE_PANEL_DEBUG=1`, teardown logs include cleanup reasons such as `commit`,
-`deactivate`, `close`, `reset`, and `native_ended`.
+on commit, cancel, deactivate, close, reset, and native composition end. Candidate-panel publication is frame-based:
+updates carry `CandidatePanelVisibilityReason`, composition id, raw revision, raw length, and anchor source through
+`CandidatePanelPresenter`. Stale suggestions, delayed reanchors, and AI patches must not make the panel visible
+after composition teardown. A transient empty Rime snapshot does not hide the panel while KnowType still has non-empty
+raw input; the presenter keeps a raw/preedit fallback frame until Rime context recovers or composition ends. With
+`KNOWTYPE_PANEL_DEBUG=1`, panel logs include frame or cleanup reasons such as `composition_active`,
+`composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`.
 Deactivation uses the current IMK client as a fallback when the callback sender is not an `IMKTextInput`, so pending
 raw text is not dropped. It still avoids `setMarkedText("")` on deactivate; native handled/no-commit end states clear
 marked text through the normal client path because composition has ended without inserted text.

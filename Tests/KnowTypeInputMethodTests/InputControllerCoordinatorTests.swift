@@ -1614,7 +1614,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testRimeUserDBSyncDoesNotRunOnPlainKeydown() async throws {
+    func testRimeUserDBSnapshotReadDoesNotRunOnPlainKeydown() async throws {
         let client = FakeInputControllerClient()
         let rimeProvider = CountingRimeUserDBTextSnapshotProvider()
         let (coordinator, _, _) = makeCoordinator(
@@ -1630,7 +1630,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testRimeUserDBSyncUsesActiveConversionSchemaID() async throws {
+    func testLexicalProfileSnapshotReadUsesActiveConversionSchemaIDAfterCommit() async throws {
         let client = FakeInputControllerClient()
         let rimeProvider = CountingRimeUserDBTextSnapshotProvider()
         let (coordinator, _, _) = makeCoordinator(
@@ -2191,6 +2191,20 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(host.panelStates.last?.windowState.anchorSource, .safeScreenFallback)
         XCTAssertTrue(host.panelStates.last?.windowState.isVisible == true)
+    }
+
+    func testTransientEmptyNativeSnapshotKeepsRawFallbackPanelVisible() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: TransientEmptySnapshotConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.rawInput, "n")
+        XCTAssertTrue(host.panelStates.last?.windowState.isVisible == true)
+        XCTAssertEqual(host.hideCandidatePanelCount, 0)
     }
 
     func testDelayedReanchorAppliesOnlyForCurrentComposition() {
@@ -3452,6 +3466,31 @@ private struct NativeEndedNoCommitConversionEngine: KnowTypeConversionEngine {
              .pageUp,
              .pageDown:
             return ConversionEngineResult(handled: false, snapshot: currentSnapshot)
+        }
+    }
+}
+
+private struct TransientEmptySnapshotConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    var snapshot = ConversionEngineSnapshot(engineName: "native-transient-empty")
+
+    mutating func reset() {
+        snapshot = ConversionEngineSnapshot(engineName: "native-transient-empty")
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text, .deleteBackward:
+            snapshot = ConversionEngineSnapshot(engineName: "native-transient-empty")
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
         }
     }
 }

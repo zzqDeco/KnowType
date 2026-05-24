@@ -31,13 +31,16 @@ Current behavior:
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
 - uses `InputTaskSupervisor` to replace stale local-candidate cancellation tokens, AI, and panel-render tasks
 - rejects stale AI publications by raw input, composition id, and AI generation
+- applies AI publications through `AIRecommendationPatch`, which also checks request id and raw revision and is allowed
+  to update only the AI slot
 - records AI scheduling diagnostics for scheduled requests, previous-generation cancellation, stale-result drops, and applied AI states through the shared AI diagnostic sink
 - merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; current-page Rime candidates and in-memory recent history still participate regardless
-- schedules Rime userdb lexical refreshes through an injected refresh gate so production IMK sessions share stale-write protection across controllers; profile JSON/Markdown is staged outside the gate, and publish checks freshness without holding the gate lock across filesystem operations
+- delegates Rime userdb lexical refreshes to `LexicalProfileRuntime`; commit/selection refresh reads existing snapshots only and does not call `sync_user_data`; profile JSON/Markdown staging, stale-write gates, and userdb parse diagnostics live outside the coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
+- emits candidate-panel updates as `CandidatePanelFrame` values consumed by `CandidatePanelPresenter`, with explicit visibility reasons and `KNOWTYPE_PANEL_DEBUG=1` frame logs
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
-- rejects candidate-panel publication unless the current raw/native preedit composition is active, so stale suggestions, AI results, or delayed reanchors cannot revive a hidden panel
+- rejects candidate-panel publication unless the current raw/native preedit composition is active, while preserving a raw/preedit fallback frame for transient empty Rime snapshots with non-empty raw input; stale suggestions, AI results, or delayed reanchors cannot revive a hidden panel
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions
 - flushes user selection history on deactivate and close; deactivate falls back to the current IMK client before committing active raw composition through the normal insert path, then tears down panel state without calling `setMarkedText("")`
 - clears marked text when native handled/no-commit output ends with no active raw/preedit, because composition ended without inserted text
