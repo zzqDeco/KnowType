@@ -20,6 +20,8 @@ uninstall scripts.
   specific backup.
 - `--dry-run` shows target app/prefPane paths and refresh steps without changing
   files or input-source state.
+- Rollback preflights the backed-up app with the same required runtime checks
+  as install source validation before it replaces the current bundle.
 - A real rollback switches away from KnowType, stops `KnowTypeInputMethodApp`,
   restores the backup app, refreshes LaunchServices, clears stale prefPane
   caches, repairs scoped input-source preferences, and writes

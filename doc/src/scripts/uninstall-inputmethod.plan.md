@@ -18,7 +18,8 @@ machine.
   install rollback before removing local bundles. Use `--no-backup` only when a
   rollback point is not wanted.
 - Existing backups are preserved after uninstall. Use `--purge-backups`
-  explicitly to delete them; user data is still left in place.
+  explicitly to delete them; purge mode skips creating a new backup because the
+  backup root will be removed. User data is still left in place.
 - It removes stale System Settings PreferencePane caches that still reference
   `com.knowtype.preferencepane` or `KnowType.prefPane` and asks System Settings
   to quit if needed, so an already removed compatibility pane does not remain as

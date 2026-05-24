@@ -54,7 +54,7 @@ TARGET_PATH="$(knowtype_inputmethod_target_path)"
 BACKUP_ROOT="$(knowtype_backup_root_dir)"
 INSTALL_STATE_PATH="$(knowtype_install_state_path)"
 
-if (( BACKUP_ENABLED == 1 )); then
+if (( BACKUP_ENABLED == 1 && PURGE_BACKUPS == 0 )); then
   knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" "$DRY_RUN" "$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
 fi
 

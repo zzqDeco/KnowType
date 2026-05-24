@@ -363,6 +363,16 @@ missing_backup_output="$(
     "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "missing-backup" --dry-run 2>&1 || true
 )"
 assert_contains "$missing_backup_output" "requested KnowType backup was not found" "rollback missing backup output"
+corrupt_backup_id="20260524T010000Z-0000-corrupt-1"
+corrupt_backup_dir="$fake_support_dir/Backups/$corrupt_backup_id"
+mkdir -p "$corrupt_backup_dir/KnowType.app/Contents"
+cp "$fake_input_dir/KnowType.app/Contents/Info.plist" "$corrupt_backup_dir/KnowType.app/Contents/Info.plist"
+printf '{"schemaVersion":1,"backupID":"%s"}\n' "$corrupt_backup_id" >"$corrupt_backup_dir/manifest.json"
+corrupt_rollback_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$corrupt_backup_id" --dry-run 2>&1 || true
+)"
+assert_contains "$corrupt_rollback_output" "input-method executable is missing" "rollback corrupt backup output"
 
 printf '{"schemaVersion":1,"source":"bundle"}\n' >"$fake_support_dir/install-state.json"
 uninstall_dry_run_output="$(
@@ -375,6 +385,14 @@ assert_contains "$uninstall_dry_run_output" "Would create install backup" "unins
 assert_contains "$uninstall_dry_run_output" "Would remove KnowType install state" "uninstall dry run output"
 assert_contains "$uninstall_dry_run_output" "Preserved KnowType install backups" "uninstall dry run output"
 assert_not_contains "$uninstall_dry_run_output" "Would prune old install backup" "uninstall dry run output"
+uninstall_purge_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/uninstall-inputmethod.sh" --dry-run --purge-backups
+)"
+assert_not_contains "$uninstall_purge_dry_run_output" "Would create install backup" "uninstall purge dry run output"
+assert_contains "$uninstall_purge_dry_run_output" "Would delete KnowType install backups" "uninstall purge dry run output"
 
 diagnose_json_output="$(
   KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \

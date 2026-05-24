@@ -134,8 +134,7 @@ if [[ ! -d "$backup_dir/KnowType.app" ]]; then
   echo "error: backup does not contain KnowType.app: $backup_dir" >&2
   exit 1
 fi
-if ! knowtype_bundle_matches_inputmethod_identity "$backup_dir/KnowType.app"; then
-  echo "error: backup KnowType.app identity is invalid: $backup_dir/KnowType.app" >&2
+if ! knowtype_validate_inputmethod_bundle_for_install "$backup_dir/KnowType.app" 0; then
   exit 1
 fi
 
