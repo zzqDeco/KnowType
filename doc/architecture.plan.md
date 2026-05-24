@@ -113,6 +113,7 @@ The input-method keydown path never awaits this layer. It publishes raw marked t
 - `RuntimePreferencesViewModel` edits candidate paging/layout and AI continuation behavior through the same shared defaults domain. The legacy input-scheme value remains persisted for compatibility but is not exposed in the Rime-only settings UI.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 - Lexicon settings can create missing directories, create a non-overwriting sample TSV file, install the recommended managed lexicon pack, and display installed pack metadata.
+- Diagnostics settings read install-state, bundle metadata, Rime runtime presence, AI provider summary, user-data file timestamps, and backup availability. They display rollback commands but do not execute rollback from inside the running input-method/settings process.
 
 Settings status does not import the IMK frontend and does not own dictionary licensing. The macOS Keyboard/Input Sources page still only enables/selects the input method; KnowType-specific controls live in the IMK preferences window, with the prefPane retained only as an optional compatibility host.
 
@@ -131,15 +132,19 @@ development, diagnostics, and lexicon management:
 - `scripts/build-inputmethod-bundle.sh` packages the local InputMethodKit app
   bundle into `dist/KnowType.app`.
 - `scripts/install-inputmethod.sh`, `scripts/diagnose-inputmethod.sh`,
-  `scripts/select-inputmethod.sh`, `scripts/repair-inputmethod-selection.sh`,
-  and `scripts/uninstall-inputmethod.sh` form the local install and acceptance
-  workflow.
+  `scripts/rollback-inputmethod.sh`, `scripts/select-inputmethod.sh`,
+  `scripts/repair-inputmethod-selection.sh`, and
+  `scripts/uninstall-inputmethod.sh` form the local install, rollback, and
+  acceptance workflow.
 - `scripts/smoke-inputmethod-install.sh` is the CI-safe script smoke path; it
   does not mutate Text Input Source state or prove target-app typing behavior.
 
 Tooling is intentionally separate from product behavior. Scripts may prepare,
 diagnose, or repair a local development installation, but manual acceptance in
 real host apps remains the evidence for IMK behavior.
+Install and rollback scripts swap only app/prefPane artifacts and preserve user
+data in place. `install-state.json` and backup manifests provide traceability
+for local upgrade testing without becoming product runtime dependencies.
 
 ## Input Method Layer
 

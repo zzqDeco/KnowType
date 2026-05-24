@@ -123,6 +123,13 @@ tests exercise the optimized hot path. Rime runtime files are packaged inside
 usable and reports degraded conversion state instead of falling back to the
 retired clean-room converter.
 
+Overwrite installs create an app-level rollback backup under
+`~/Library/Application Support/KnowType/Backups/` and record the active install
+in `~/Library/Application Support/KnowType/install-state.json`. The backup
+contains install artifacts only: `KnowType.app` and optional `KnowType.prefPane`.
+It does not copy or restore Rime userdb, provider profiles, Keychain secrets, AI
+context documents, or local lexicons.
+
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
 `KnowType Settings...`. It opens a macOS-native sidebar and grouped settings
@@ -157,20 +164,29 @@ Remove the local bundle:
 ./scripts/uninstall-inputmethod.sh
 ```
 
+List or restore local rollback points:
+
+```bash
+./scripts/rollback-inputmethod.sh --list
+./scripts/rollback-inputmethod.sh --latest
+```
+
 Local IME behavior must still be verified by typing in real host apps. See
 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md) and
 [MVP Acceptance](doc/mvp-acceptance.plan.md) for the macOS policy, selection,
 and manual acceptance flow.
 
 For a GitHub Release zip, verify the downloaded archive with the published
-`.sha256` file first. Then expand it, copy `KnowType.app` to
-`~/Library/Input Methods/`, and use the input menu's `KnowType Settings...`
-entry for configuration. `KnowType.prefPane` is a compatibility settings host
-and may be copied to `~/Library/PreferencePanes/` when that fallback is needed.
-Do not use a stale System Settings sidebar entry unless the matching pane is
-installed.
-Run the same local diagnostics/manual typing acceptance from a source checkout
-when available.
+`.sha256` file first. Then install through the local script so release
+metadata, backups, and diagnostics are recorded:
+
+```bash
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.0-macos-local-mvp.zip
+```
+
+Pass `--with-prefpane` only when the optional compatibility System Settings
+pane is needed. Do not use a stale System Settings sidebar entry unless the
+matching pane is installed.
 
 ## Configuration
 

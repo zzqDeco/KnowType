@@ -538,8 +538,52 @@ private struct PrivacySettingsView: View {
 }
 
 private struct DiagnosticsSettingsView: View {
+    @State private var status = InstallationDiagnosticsStatus()
+
     var body: some View {
         SettingsForm(title: SettingsSection.diagnostics.title) {
+            Section(settingsString("settings.diagnostics.section.install")) {
+                ForEach(status.installRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+                Button {
+                    status = InstallationDiagnosticsStatus()
+                } label: {
+                    Label(settingsString("settings.diagnostics.refresh"), systemImage: "arrow.clockwise")
+                }
+            }
+
+            Section(settingsString("settings.diagnostics.section.runtime")) {
+                ForEach(status.runtimeRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+            }
+
+            Section(settingsString("settings.diagnostics.section.ai")) {
+                ForEach(status.aiRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+            }
+
+            Section(settingsString("settings.diagnostics.section.userData")) {
+                ForEach(status.userDataRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+            }
+
+            Section(settingsString("settings.diagnostics.section.backup")) {
+                ForEach(status.backupRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+                if let rollbackCommand = status.rollbackCommand {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(settingsString("settings.diagnostics.backup.rollbackCommand"))
+                            .foregroundStyle(.secondary)
+                        MonospacedText(rollbackCommand)
+                    }
+                }
+            }
+
             Section(settingsString("settings.diagnostics.section.local")) {
                 ForEach(DebugInstallGuidance.steps) { step in
                     InstallStepView(title: step.title, detail: step.detail)
