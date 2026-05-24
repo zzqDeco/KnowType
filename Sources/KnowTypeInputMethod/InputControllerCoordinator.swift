@@ -771,9 +771,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        guard !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: currentAppBundleID),
+        guard !TextProtection.containsSecretLikeContent(rawBuffer),
               lockedPrefixText.map({
-                  !TextProtection.requiresNoCorrection($0, appBundleID: currentAppBundleID)
+                  !TextProtection.containsSecretLikeContent($0)
               }) ?? true else {
             recordAIDiagnostic(
                 .skippedProtectedText,
@@ -782,9 +782,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 rawLength: rawBuffer.count,
                 prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
-                reason: "protected_text"
+                reason: "secret_like_text"
             )
-            aiRecommendationState = .idle
+            aiRecommendationState = .ineligible(reason: "AI 已禁用")
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }

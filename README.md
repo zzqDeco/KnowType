@@ -55,8 +55,9 @@ polish.
 - Provider compatibility: OpenAI-compatible chat, OpenAI Responses, Anthropic
   Messages, Gemini native, Ollama native, and custom HTTP profiles normalize
   into one provider interface.
-- Privacy guardrails: URLs, emails, paths, commands, code-like text, and
-  protected app contexts use the no-provider Level 0 path.
+- Privacy guardrails: correction protects URLs, emails, paths, commands,
+  code-like text, and protected app contexts from rewrite; real-time AI is hard
+  disabled only for suspected secrets and filters secret-like candidate hints.
 - Local lexicons: bundled seed lexicon plus user-owned JSON/TSV resources and a
   managed Rime Pinyin Simplified install path.
 
@@ -262,10 +263,11 @@ click commit behavior.
 
 ## Privacy
 
-Level 0 input must not call cloud providers. It uses the no-provider path and
-clears continuation candidates.
+Level 0 correction protects text that should usually commit unchanged. It
+prevents correction from rewriting protected content such as URLs, paths,
+commands, code-like text, and protected app contexts.
 
-Protected examples include:
+Correction-protected examples include:
 
 - URLs and `www.` addresses
 - email-like input
@@ -273,6 +275,12 @@ Protected examples include:
 - command-like input such as `swift test` or `git status`
 - code-like snippets containing braces, semicolons, or `=>`
 - Terminal, iTerm, and Xcode sessions by bundle identifier
+
+Real-time AI recommendation uses a narrower cloud privacy gate: `AI 已禁用`
+appears only when raw input or confirmed prefix looks like a credential, such as
+API keys, bearer tokens, JWTs, private keys, or password/token assignments.
+Secret-like Rime candidate hints are filtered without disabling the whole
+request.
 
 Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`,
 `InputMethodKit`, `snake_case`, and `camelCase` are preserved or canonicalized.

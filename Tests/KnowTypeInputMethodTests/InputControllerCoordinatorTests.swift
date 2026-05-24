@@ -1756,7 +1756,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testProtectedAppInputDoesNotReachAIRecommendationOrLaterLexicalProfile() async throws {
+    func testProtectedAppInputCanUseAIRecommendationButDoesNotReachLaterLexicalProfile() async throws {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
         let provider = RecordingContinuationProvider()
@@ -1779,7 +1779,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
         try? await Task.sleep(nanoseconds: 100_000_000)
         let protectedRequests = await aiProvider.requests
-        XCTAssertTrue(protectedRequests.isEmpty)
+        XCTAssertFalse(protectedRequests.isEmpty)
 
         for character in "wojuedezhegefagnan" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
@@ -1787,7 +1787,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(" ", client: client))
         try? await Task.sleep(nanoseconds: 100_000_000)
         let requestsAfterProtectedSelection = await aiProvider.requests
-        XCTAssertTrue(requestsAfterProtectedSelection.isEmpty)
+        XCTAssertFalse(requestsAfterProtectedSelection.isEmpty)
 
         client.bundleIdentifier = "com.example.host"
         for character in "ni" {

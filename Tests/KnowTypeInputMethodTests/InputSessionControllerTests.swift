@@ -277,7 +277,7 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(commandSuggestion.prefixCandidates.first?.text, "swift test")
     }
 
-    func testPipelineLevelZeroDoesNotAskProviderForCorrectionOrContinuation() async {
+    func testPipelineLevelZeroSkipsCorrectionButCanAskProviderForContinuation() async {
         let provider = RecordingProvider()
         let pipeline = InputMethodPipeline(provider: provider)
 
@@ -290,9 +290,10 @@ final class InputSessionControllerTests: XCTestCase {
         )
         let requests = await provider.requests
 
-        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.task, .continuation)
         XCTAssertEqual(suggestion.prefixCandidates.first?.source, "local-protection")
-        XCTAssertTrue(suggestion.continuationCandidates.isEmpty)
+        XCTAssertFalse(suggestion.continuationCandidates.isEmpty)
     }
 
     func testProviderFailureDoesNotBlockLocalPrefixSubmission() async {

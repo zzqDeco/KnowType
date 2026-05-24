@@ -130,12 +130,16 @@ final class PrefixContinuationEngineTests: XCTestCase {
         XCTAssertEqual(continuations.first?.text, "还有进一步优化空间")
     }
 
-    func testLevelZeroContinuationReturnsEmptyAndDoesNotCallProvider() async {
+    func testSecretContinuationReturnsEmptyAndDoesNotCallProvider() async {
         let provider = RecordingContinuationProvider()
         let engine = PrefixContinuationEngine(provider: provider)
         let continuations = await engine.continuations(
-            for: LockedPrefix(text: "support@example.com", rawInput: "support@example.com", candidateID: "test"),
-            context: InputContext(rawInput: "support@example.com", locale: .mixed),
+            for: LockedPrefix(
+                text: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
+                rawInput: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
+                candidateID: "test"
+            ),
+            context: InputContext(rawInput: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz", locale: .mixed),
             lengthLevel: .medium
         )
         let requests = await provider.requests
@@ -144,70 +148,18 @@ final class PrefixContinuationEngineTests: XCTestCase {
         XCTAssertTrue(continuations.isEmpty)
     }
 
-    func testNilContextLevelZeroLockedPrefixReturnsEmptyAndDoesNotCallProvider() async {
+    func testNilContextSecretLockedPrefixReturnsEmptyAndDoesNotCallProvider() async {
         let provider = RecordingContinuationProvider()
         let engine = PrefixContinuationEngine(provider: provider)
 
-        let protectedPrefixes = [
-            "https://example.com/search?q=KnowType",
-            "example.com/path?q=token",
-            "go.dev/doc",
-            "visit example.com",
-            "send to go.dev",
-            "192.168.1.1",
-            "localhost:3000",
-            "127.0.0.1:8080",
-            "api.local:8080",
-            "service.internal",
-            "example.sh",
-            "open api.local:8080",
-            "support@example.com",
-            "/Users/zq/project/KnowType",
-            "docker ps",
-            "docker login",
-            "kubectl get pods",
-            "git config user.email",
-            "git stash",
-            "brew install foo",
-            "pnpm install",
-            "curl example.com",
-            "curl staging",
-            "ssh production-box",
-            "ssh prod",
-            "ssh user@prod",
-            "> docker ps",
-            "$ docker ps",
-            "cat ./Package.swift",
-            "cat Package.swift",
-            "vim secrets.txt",
-            "rm README.md",
-            "sudo rm README.md",
-            "sudo -E rm README.md",
-            "sudo -u deploy git pull",
-            "cp .env backup.env",
-            "touch /tmp/knowtype",
-            "git status&&echo ok",
-            "docker ps|rg api",
-            "swift test>test.log",
-            "swift test > test.log",
-            "pwd",
-            "echo $GITHUB_TOKEN",
-            "unset API_KEY",
-            "env",
-            "export PATH=/usr/local/bin:$PATH",
-            "source .env",
-            "source .env.local",
-            "source .env.production",
-            "python main.py",
-            "python my-script.py",
-            "node server.js",
-            "node build-prod.js",
-            "GITHUB_TOKEN=secret npm publish",
-            "API_KEY=secret curl example.com",
-            "let appBundleID = context.appBundleID"
+        let secretPrefixes = [
+            "sk-abcdefghijklmnopqrstuvwxyz123456",
+            "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+            "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
+            "https://example.com/callback?token=abcdef123456"
         ]
 
-        for prefix in protectedPrefixes {
+        for prefix in secretPrefixes {
             let continuations = await engine.continuations(
                 for: LockedPrefix(text: prefix, rawInput: prefix, candidateID: "test"),
                 context: nil,
@@ -219,6 +171,31 @@ final class PrefixContinuationEngineTests: XCTestCase {
 
         let requests = await provider.requests
         XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testProviderBackedContinuationAllowsTechnicalCommandsAndPaths() async {
+        let provider = RecordingContinuationProvider()
+        let engine = PrefixContinuationEngine(provider: provider)
+        let prefixes = [
+            "https://example.com/search?q=KnowType",
+            "/Users/zq/project/KnowType",
+            "git status",
+            "InputMethodKit",
+            "snake_case"
+        ]
+
+        for prefix in prefixes {
+            let continuations = await engine.continuations(
+                for: LockedPrefix(text: prefix, rawInput: prefix, candidateID: "test"),
+                context: InputContext(rawInput: prefix, locale: .mixed),
+                lengthLevel: .medium
+            )
+
+            XCTAssertFalse(continuations.isEmpty, "\(prefix) should produce provider-backed continuations")
+        }
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, prefixes.count)
     }
 
     func testProseCommandAndCodeKeywordsStillProduceContinuations() async {

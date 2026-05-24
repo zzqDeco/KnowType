@@ -40,6 +40,9 @@ Current behavior:
   already been resolved by the user; while Rime is merely composing, current-page
   Rime candidates are sent as contextual `candidateHints` and the first
   candidate is not treated as locked text
+- gates real-time cloud AI scheduling only on secret-like raw input or confirmed
+  locked prefixes; normal technical tokens, commands, paths, URLs, and app
+  context do not directly set `AI 已禁用`
 - preserves the original confirmed locked-prefix text in AI requests, including
   intentional leading/trailing whitespace, while using trimmed text only for
   empty-prefix eligibility checks

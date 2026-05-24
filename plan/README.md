@@ -70,6 +70,7 @@ when converting a shipped plan into a short record.
 | [ai-structured-output-contract.plan.md](ai-structured-output-contract.plan.md) | Provider-level structured output contract and diagnosable AI no-recommendation reasons | Active |
 | [ai-continuation-prompt-reliability.plan.md](ai-continuation-prompt-reliability.plan.md) | Task-specific suffix-generation prompt and ENV marker repair for reliable AI continuation | Active |
 | [ai-candidate-hints-lock-prefix.plan.md](ai-candidate-hints-lock-prefix.plan.md) | Keep unselected Rime candidates as AI hints instead of locked prefixes | Active |
+| [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |
 | [imk-owned-marked-range-commit.plan.md](imk-owned-marked-range-commit.plan.md) | Prevent cursor misplacement by ignoring stale host marked ranges on ordinary IMK writes | Active |
 | [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
 | [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persisted punctuation and symbol-width preferences | Active |

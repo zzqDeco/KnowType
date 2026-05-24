@@ -13,16 +13,14 @@ public final class PrefixContinuationEngine: Sendable {
         lengthLevel: ContinuationLengthLevel = .medium,
         maxCandidates: Int = 3
     ) async -> [ContinuationCandidate] {
-        if TextProtection.requiresNoCorrection(lockedPrefix.text, appBundleID: context?.appBundleID) {
-            return []
-        }
-
-        if let context,
-           TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
-            return []
-        }
-
         if let provider {
+            if TextProtection.containsSecretLikeContent(lockedPrefix.text) {
+                return []
+            }
+            if let context,
+               TextProtection.containsSecretLikeContent(context.rawInput) {
+                return []
+            }
             let request = LLMRequest(
                 task: .continuation,
                 lockedPrefix: lockedPrefix.text,
@@ -52,6 +50,15 @@ public final class PrefixContinuationEngine: Sendable {
             } catch {
                 return []
             }
+        }
+
+        if TextProtection.requiresNoCorrection(lockedPrefix.text, appBundleID: context?.appBundleID) {
+            return []
+        }
+
+        if let context,
+           TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
+            return []
         }
 
         return fallbackContinuations(for: lockedPrefix.text, lengthLevel: lengthLevel, maxCandidates: maxCandidates)

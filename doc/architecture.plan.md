@@ -22,13 +22,21 @@ raw input
   -> commit
 ```
 
-Level 0 protected input exits through the no-provider path. It must not call cloud providers and must not publish cloud continuation candidates. The production IMK hot path no longer uses the clean-room `TraditionalInputEngine` as a Chinese conversion fallback; when Rime is unavailable, KnowType keeps raw input usable and reports degraded conversion state instead of synthesizing hidden local candidates.
+Level 0 protected input remains a correction/local-protection concept: it avoids
+rewriting URLs, paths, commands, code-like text, and protected app contexts.
+Real-time AI recommendation uses a narrower secret-only hard block, so normal
+technical text can still ask for AI continuation. The production IMK hot path no
+longer uses the clean-room `TraditionalInputEngine` as a Chinese conversion
+fallback; when Rime is unavailable, KnowType keeps raw input usable and reports
+degraded conversion state instead of synthesizing hidden local candidates.
 
 ## Core Layer
 
 `KnowTypeCore` owns model-neutral behavior:
 
-- `TextProtection` detects Level 0 input such as URLs, emails, paths, commands, code-like snippets, and protected app contexts.
+- `TextProtection` detects Level 0 correction-protection input such as URLs,
+  emails, paths, commands, code-like snippets, and protected app contexts, and
+  separately detects secret-like credentials for cloud AI hard blocks.
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
 - `TraditionalInputEngine` is retained for core/offline tests, package-level demos, and lexicon tooling, but it is retired from the production IMK key path.
 - `TraditionalInputEngine` raw-range segment metadata is legacy/offline behavior; the production IMK frontend no longer generates or applies those segment candidates.
@@ -206,14 +214,24 @@ Pointer location is not used as a moving candidate anchor.
 
 When a provider is configured, KnowType publishes raw marked text and local prefix candidates immediately. The second slot enters a pending AI state and is updated only when `AIRecommendationRuntime` returns a current result. If the provider fails, local correction still works and commit remains available, but KnowType does not show local mock continuation text as AI output.
 
-No-provider paths remain traditional-input usable. Production runtimes can show `AI 未配置`, disabled, pending, ready, or unavailable state in the second slot. Level 0 paths do not call providers and do not log raw protected text.
+No-provider paths remain traditional-input usable. Production runtimes can show
+`AI 未配置`, disabled, pending, ready, or unavailable state in the second slot.
+Disabled real-time AI maps to secret-like raw input or locked prefixes; ordinary
+technical text, paths, URLs, commands, and protected app contexts do not directly
+produce `AI 已禁用`.
 
 ## Privacy And App Rules
 
-Level 0 protected input takes the no-provider path:
+Level 0 correction protection keeps these inputs from being rewritten by local
+or cloud correction:
 
 - URL, email, path, command-like, and code-like text commits unchanged by default.
-- Terminal, iTerm, and Xcode contexts are protected by bundle identifier.
-- Technical-token preservation does not automatically make an input Level 0; the surrounding text still determines provider eligibility.
+- Terminal, iTerm, and Xcode contexts remain correction-protected by bundle
+  identifier.
+- Technical-token preservation does not automatically make an input Level 0;
+  secret-like content determines the real-time AI hard block.
+
+Cloud AI recommendation uses secret-only hard blocking. Candidate hints that
+look like credentials are filtered before the request; safe hints remain usable.
 
 Manual MVP acceptance must cover TextEdit, Safari, Chrome, Xcode, Terminal, WeChat, and Feishu because IMK behavior varies by host text system.
