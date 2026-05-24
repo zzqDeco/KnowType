@@ -119,7 +119,7 @@ backup_dir=""
 if (( USE_LATEST == 1 )); then
   backup_dir="$(knowtype_latest_backup_dir)"
 elif [[ -n "$TARGET_BACKUP_ID" ]]; then
-  backup_dir="$(knowtype_backup_dir_for_id "$TARGET_BACKUP_ID")"
+  backup_dir="$(knowtype_backup_dir_for_id "$TARGET_BACKUP_ID" || true)"
 else
   echo "error: choose --latest, --to BACKUP_ID, or --list" >&2
   usage >&2

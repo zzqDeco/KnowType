@@ -459,8 +459,8 @@ knowtype_prune_install_backups() {
       rm -rf -- "$backup_dir"
       echo "Pruned old install backup: $backup_dir"
     fi
-  # Backup IDs start with UTC timestamp plus a monotonic per-second counter, so
-  # reverse lexical order is newest-first for managed backups.
+    # Backup IDs start with UTC timestamp plus a monotonic per-second counter,
+    # so reverse lexical order is newest-first for managed backups.
   done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r)
 }
 

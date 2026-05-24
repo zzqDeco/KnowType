@@ -334,6 +334,11 @@ if KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "../../outside" --dry-run >/dev/null 2>&1; then
   die "rollback accepted traversal backup ID"
 fi
+missing_backup_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "missing-backup" --dry-run 2>&1 || true
+)"
+assert_contains "$missing_backup_output" "requested KnowType backup was not found" "rollback missing backup output"
 
 printf '{"schemaVersion":1,"source":"bundle"}\n' >"$fake_support_dir/install-state.json"
 uninstall_dry_run_output="$(
