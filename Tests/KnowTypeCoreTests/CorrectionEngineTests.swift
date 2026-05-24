@@ -452,6 +452,54 @@ final class CorrectionEngineTests: XCTestCase {
         XCTAssertEqual(snakeCandidates.first?.protectedRanges.first?.reason, "snake_case")
     }
 
+    func testSecretLikeContentDetectionCoversCredentialShapes() {
+        let protectedInputs = [
+            "sk-abcdefghijklmnopqrstuvwxyz123456",
+            "ghp_abcdefghijklmnopqrstuvwxyz123456",
+            "github_pat_abcdefghijklmnopqrstuvwxyz123456",
+            "AKIA1234567890ABCDEF",
+            "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+            #"{"Authorization":"Bearer abcdefghijklmnopqrstuvwxyz"}"#,
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.signature12",
+            "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+            "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
+            #"{"api_key":"sk-abcdefghijklmnopqrstuvwxyz"}"#,
+            #"{"token":"abcd1234"}"#,
+            "password=hunter2",
+            "https://example.com/callback?token=abcdef123456"
+        ]
+
+        for input in protectedInputs {
+            XCTAssertTrue(
+                TextProtection.containsSecretLikeContent(input),
+                "\(input) should be secret-like"
+            )
+        }
+    }
+
+    func testSecretLikeContentDetectionAllowsNormalTechnicalText() {
+        let allowedInputs = [
+            "ijust",
+            "InputMethodKit",
+            "iOS",
+            "JSON",
+            "API",
+            "git status",
+            "/Users/zq/project",
+            "https://example.com/path",
+            "example.com",
+            "snake_case",
+            "camelCase"
+        ]
+
+        for input in allowedInputs {
+            XCTAssertFalse(
+                TextProtection.containsSecretLikeContent(input),
+                "\(input) should not be secret-like"
+            )
+        }
+    }
+
     func testProtectedAppBundleIDsRequireNoCorrection() {
         let protectedApps = [
             "com.apple.Terminal",

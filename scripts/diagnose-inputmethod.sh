@@ -6,7 +6,9 @@ BUNDLE_PATH="${KNOWTYPE_BUNDLE_PATH:-$DEFAULT_BUNDLE_PATH}"
 DEFAULT_PREFPANE_PATH="$HOME/Library/PreferencePanes/KnowType.prefPane"
 PREFPANE_PATH="${KNOWTYPE_PREFPANE_PATH:-$DEFAULT_PREFPANE_PATH}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
+source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
 STRICT=0
 REQUIRE_SELECTED=0
 SHOW_LOGS=0
@@ -76,6 +78,10 @@ warnings=0
 gatekeeper_rejected=0
 hitoolbox_enabled_knowtype=""
 hitoolbox_selected_knowtype=""
+thirdparty_legacy_knowtype=""
+parent_select_capable=""
+parent_name=""
+mode_name=""
 
 ok() {
   printf '[ok] %s\n' "$1"
@@ -129,8 +135,14 @@ canonical_bundle_path() {
 plist_value() {
   local key="$1"
   local plist="$2"
+  knowtype_plist_value "$key" "$plist"
+}
+
+plist_buddy_value() {
+  local key="$1"
+  local plist="$2"
   local output
-  if output="$(/usr/bin/plutil -extract "$key" raw -o - "$plist" 2>/dev/null)"; then
+  if output="$(/usr/libexec/PlistBuddy -c "Print $key" "$plist" 2>/dev/null)"; then
     printf '%s' "$output"
   fi
 }
@@ -148,9 +160,22 @@ expect_plist_value() {
   fi
 }
 
+expect_plist_buddy_value() {
+  local key="$1"
+  local expected="$2"
+  local plist="$3"
+  local actual
+  actual="$(plist_buddy_value "$key" "$plist")"
+  if [[ "$actual" == "$expected" ]]; then
+    ok "Info.plist $key = $expected"
+  else
+    fail "Info.plist $key expected '$expected' but found '${actual:-<missing>}'"
+  fi
+}
+
 echo "KnowType input-method diagnostics"
 echo "Bundle: $BUNDLE_PATH"
-echo "PreferencePane: $PREFPANE_PATH"
+echo "Compatibility PreferencePane: $PREFPANE_PATH"
 echo
 
 if [[ -d "$BUNDLE_PATH" ]]; then
@@ -162,16 +187,17 @@ fi
 INFO_PLIST="$BUNDLE_PATH/Contents/Info.plist"
 EXECUTABLE="$BUNDLE_PATH/Contents/MacOS/KnowTypeInputMethodApp"
 CORE_RESOURCE_BUNDLE="$BUNDLE_PATH/Contents/Resources/KnowType_KnowTypeCore.bundle"
+SETTINGS_UI_RESOURCE_BUNDLE="$BUNDLE_PATH/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
 ICON_RESOURCE="$BUNDLE_PATH/Contents/Resources/KnowTypeInputMethodIcon.tiff"
-PARENT_ID="com.knowtype.inputmethod.KnowType"
-MODE_ID="com.knowtype.inputmethod.KnowType.Mode"
+PARENT_ID="$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+MODE_ID="$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 
 if [[ -f "$INFO_PLIST" ]]; then
   ok "Info.plist exists"
   expect_plist_value "CFBundleIdentifier" "$PARENT_ID" "$INFO_PLIST"
   expect_plist_value "CFBundleExecutable" "KnowTypeInputMethodApp" "$INFO_PLIST"
   expect_plist_value "TISInputSourceID" "$PARENT_ID" "$INFO_PLIST"
-  expect_plist_value "InputMethodConnectionName" "com.knowtype.inputmethod.KnowType_Connection" "$INFO_PLIST"
+  expect_plist_value "InputMethodConnectionName" "$KNOWTYPE_INPUT_METHOD_CONNECTION_NAME" "$INFO_PLIST"
   expect_plist_value "InputMethodServerControllerClass" "KnowTypeInputController" "$INFO_PLIST"
   expect_plist_value "InputMethodServerDelegateClass" "KnowTypeInputController" "$INFO_PLIST"
   expect_plist_value "LSBackgroundOnly" "false" "$INFO_PLIST"
@@ -179,6 +205,17 @@ if [[ -f "$INFO_PLIST" ]]; then
   expect_plist_value "LSHasLocalizedDisplayName" "true" "$INFO_PLIST"
   if [[ -n "$(plist_value "TISIconIsTemplate" "$INFO_PLIST")" ]]; then
     warn "Info.plist contains private/undocumented TISIconIsTemplate; rebuild from current sources"
+  fi
+  if [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
+    ok "Info.plist declares the single visible component input mode"
+    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:TISInputSourceID" "$MODE_ID" "$INFO_PLIST"
+    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:TISIntendedLanguage" "zh-Hans" "$INFO_PLIST"
+    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeIsVisibleKey" "true" "$INFO_PLIST"
+    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeKeyEquivalentKey" "K" "$INFO_PLIST"
+    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeKeyEquivalentModifiersKey" "4608" "$INFO_PLIST"
+    expect_plist_buddy_value ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$MODE_ID" "$INFO_PLIST"
+  else
+    fail "Info.plist is missing ComponentInputModeDict; this macOS System Settings build does not expose parent-only third-party IMK apps as addable input sources"
   fi
 else
   fail "Info.plist is missing"
@@ -243,6 +280,12 @@ else
   fail "SwiftPM core resource bundle is missing; bundled lexicon may not load"
 fi
 
+if [[ -d "$SETTINGS_UI_RESOURCE_BUNDLE" ]]; then
+  ok "SwiftPM settings UI resource bundle is packaged"
+else
+  fail "SwiftPM settings UI resource bundle is missing; input-method settings may not load localized strings"
+fi
+
 if [[ -f "$ICON_RESOURCE" ]]; then
   ok "input-source icon resource is packaged"
 else
@@ -279,51 +322,71 @@ else
 fi
 
 echo
-echo "System Settings pane"
+echo "Compatibility PreferencePane"
 
 PREFPANE_INFO_PLIST="$PREFPANE_PATH/Contents/Info.plist"
 PREFPANE_EXECUTABLE="$PREFPANE_PATH/Contents/MacOS/KnowTypePreferencePane"
 PREFPANE_LIBRARY="$PREFPANE_PATH/Contents/Frameworks/libKnowTypePreferencePane.dylib"
+PREFPANE_SETTINGS_UI_RESOURCE_BUNDLE="$PREFPANE_PATH/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
 
 if [[ -d "$PREFPANE_PATH" ]]; then
   ok "KnowType.prefPane is installed"
-else
-  warn "KnowType.prefPane is missing; run ./scripts/install-inputmethod.sh to install the System Settings pane"
-fi
+  if [[ -f "$PREFPANE_INFO_PLIST" ]]; then
+    ok "PreferencePane Info.plist exists"
+    expect_plist_value "CFBundleIdentifier" "com.knowtype.preferencepane" "$PREFPANE_INFO_PLIST"
+    expect_plist_value "CFBundleExecutable" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
+    expect_plist_value "NSPrincipalClass" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
+  else
+    fail "PreferencePane Info.plist is missing"
+  fi
 
-if [[ -f "$PREFPANE_INFO_PLIST" ]]; then
-  ok "PreferencePane Info.plist exists"
-  expect_plist_value "CFBundleIdentifier" "com.knowtype.preferencepane" "$PREFPANE_INFO_PLIST"
-  expect_plist_value "CFBundleExecutable" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
-  expect_plist_value "NSPrincipalClass" "KnowTypePreferencePane" "$PREFPANE_INFO_PLIST"
-else
-  warn "PreferencePane Info.plist is missing"
-fi
+  if [[ -x "$PREFPANE_EXECUTABLE" ]]; then
+    ok "PreferencePane executable exists and is executable"
+    if command -v otool >/dev/null 2>&1; then
+      if otool -hv "$PREFPANE_EXECUTABLE" | grep -q "BUNDLE"; then
+        ok "PreferencePane executable is a loadable bundle"
+      else
+        fail "PreferencePane executable is not an MH_BUNDLE; rebuild with scripts/build-preference-pane.sh"
+      fi
+    fi
+  else
+    fail "PreferencePane executable is missing or not executable"
+  fi
 
-if [[ -x "$PREFPANE_EXECUTABLE" ]]; then
-  ok "PreferencePane executable exists and is executable"
-  if command -v otool >/dev/null 2>&1; then
-    if otool -hv "$PREFPANE_EXECUTABLE" | grep -q "BUNDLE"; then
-      ok "PreferencePane executable is a loadable bundle"
+  if [[ -f "$PREFPANE_LIBRARY" ]]; then
+    ok "PreferencePane SwiftPM library is packaged"
+  else
+    fail "PreferencePane SwiftPM library is missing"
+  fi
+
+  if [[ -d "$PREFPANE_SETTINGS_UI_RESOURCE_BUNDLE" ]]; then
+    ok "PreferencePane settings UI resource bundle is packaged"
+  else
+    warn "PreferencePane settings UI resource bundle is missing; rebuild with scripts/build-preference-pane.sh"
+  fi
+
+  if command -v codesign >/dev/null 2>&1; then
+    if codesign --verify --deep --strict "$PREFPANE_PATH" >/dev/null 2>&1; then
+      ok "PreferencePane codesign verification passes"
     else
-      warn "PreferencePane executable is not an MH_BUNDLE; rebuild with scripts/build-preference-pane.sh"
+      fail "PreferencePane codesign verification failed"
     fi
   fi
 else
-  warn "PreferencePane executable is missing or not executable"
-fi
-
-if [[ -f "$PREFPANE_LIBRARY" ]]; then
-  ok "PreferencePane SwiftPM library is packaged"
-else
-  warn "PreferencePane SwiftPM library is missing"
-fi
-
-if [[ -d "$PREFPANE_PATH" ]] && command -v codesign >/dev/null 2>&1; then
-  if codesign --verify --deep --strict "$PREFPANE_PATH" >/dev/null 2>&1; then
-    ok "PreferencePane codesign verification passes"
+  warn "KnowType.prefPane is missing; this is optional because primary settings are opened from the input-method menu"
+  STALE_PREFPANE_CACHE_PATHS="$(knowtype_preferencepane_cache_identity_paths)"
+  if [[ -z "$STALE_PREFPANE_CACHE_PATHS" ]]; then
+    ok "System Settings PreferencePane caches do not contain stale KnowType metadata"
+  elif (( STRICT == 1 )); then
+    fail "System Settings PreferencePane caches still contain stale KnowType prefPane metadata; run ./scripts/install-inputmethod.sh or ./scripts/uninstall-inputmethod.sh to refresh caches"
+    while IFS= read -r cache_path; do
+      [[ -n "$cache_path" ]] && info "stale System Settings cache: $cache_path"
+    done <<<"$STALE_PREFPANE_CACHE_PATHS"
   else
-    warn "PreferencePane codesign verification failed"
+    warn "System Settings PreferencePane caches still contain stale KnowType prefPane metadata"
+    while IFS= read -r cache_path; do
+      [[ -n "$cache_path" ]] && info "stale System Settings cache: $cache_path"
+    done <<<"$STALE_PREFPANE_CACHE_PATHS"
   fi
 fi
 
@@ -355,15 +418,24 @@ else
         [[ "$value" == "true" ]] && ok "KnowType parent input source is registered" || fail "KnowType parent input source is not registered"
         ;;
       parent.enabled)
-        [[ "$value" == "true" ]] && ok "KnowType parent input source is enabled" || fail "KnowType parent input source is not enabled"
+        if [[ "$value" == "true" ]]; then
+          ok "KnowType parent input source is enabled"
+        else
+          info "KnowType parent input source is not enabled; the visible component mode is the selection target"
+        fi
         ;;
       parent.selectCapable)
+        parent_select_capable="$value"
         if [[ "$value" != "true" ]]; then
           info "KnowType parent record is not directly selectable; macOS should select the visible input mode instead"
         fi
         ;;
       parent.type)
         [[ -n "$value" ]] && info "KnowType parent TIS type: $value"
+        ;;
+      parent.name)
+        parent_name="$value"
+        [[ -n "$value" ]] && info "KnowType parent localized name = $value"
         ;;
       mode.found)
         [[ "$value" == "true" ]] && ok "KnowType input mode is registered" || fail "KnowType input mode is not registered"
@@ -387,6 +459,7 @@ else
         fi
         ;;
       mode.name)
+        mode_name="$value"
         if [[ -z "$value" ]]; then
           warn "KnowType input mode localized name is unavailable"
         elif [[ "$value" == "$MODE_ID" ]]; then
@@ -398,6 +471,27 @@ else
       mode.count)
         if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
           warn "TIS reports $value KnowType input mode registrations; log out or reboot if the input menu shows stale duplicates"
+        fi
+        ;;
+      active.mode.count)
+        if [[ "$value" == "1" ]]; then
+          ok "TIS reports exactly one active KnowType mode registration"
+        else
+          fail "TIS reports $value active KnowType mode registrations; run ./scripts/repair-inputmethod-selection.sh"
+        fi
+        ;;
+      active.mode.raw.count)
+        if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
+          warn "TIS raw list reports $value active KnowType mode records before de-duplication; mature IMK installers de-duplicate TIS records by input-source id, but logout/reboot may still clear stale session cache"
+        else
+          ok "TIS raw list reports one active KnowType mode record"
+        fi
+        ;;
+      legacy.mode.count)
+        if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 0 ]]; then
+          warn "TIS still reports $value legacy KnowType mode registration(s); logout or reboot may be needed after purge"
+        else
+          ok "TIS reports no legacy KnowType mode registrations"
         fi
         ;;
       preference.selected.mode)
@@ -420,12 +514,118 @@ else
         hitoolbox_enabled_knowtype="$value"
         if [[ "$value" == "true" ]]; then
           ok "HIToolbox enabled preferences include KnowType"
+        elif (( STRICT == 1 )); then
+          fail "HIToolbox enabled preferences do not include active KnowType mode; run ./scripts/repair-inputmethod-selection.sh"
         else
-          fail "HIToolbox enabled preferences do not include KnowType; enable KnowType in System Settings > Keyboard > Input Sources"
+          warn "HIToolbox enabled preferences do not include KnowType; relying on TIS enabled state and third-party input-source preferences"
+        fi
+        ;;
+      preference.enabled.legacy.knowtype)
+        if [[ "$value" == "true" ]]; then
+          if (( STRICT == 1 )); then
+            fail "HIToolbox enabled preferences still include a legacy KnowType mode; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "HIToolbox enabled preferences still include a legacy KnowType mode"
+          fi
+        else
+          ok "HIToolbox enabled preferences do not include legacy KnowType modes"
+        fi
+        ;;
+      preference.enabled.parent.knowtype)
+        if [[ "$value" == "true" ]]; then
+          if (( STRICT == 1 )); then
+            fail "HIToolbox enabled preferences still include the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "HIToolbox enabled preferences still include the non-selectable KnowType parent row"
+          fi
+        else
+          ok "HIToolbox enabled preferences do not include the non-selectable KnowType parent row"
+        fi
+        ;;
+      preference.thirdparty.enabled.knowtype)
+        if [[ "$value" == "true" ]]; then
+          ok "Third-party input source preferences include KnowType"
+        elif (( STRICT == 1 )); then
+          fail "Third-party input source preferences do not include active KnowType mode; enable KnowType in System Settings > Keyboard > Input Sources"
+        else
+          warn "Third-party input source preferences do not include KnowType; enable KnowType in System Settings > Keyboard > Input Sources"
+        fi
+        ;;
+      preference.thirdparty.enabled.legacy.knowtype)
+        thirdparty_legacy_knowtype="$value"
+        if [[ "$value" == "true" ]]; then
+          if (( STRICT == 1 )); then
+            fail "Third-party input source preferences still point at a legacy KnowType mode; remove the stale KnowType input source in System Settings and add the current one"
+          else
+            warn "Third-party input source preferences still point at a legacy KnowType mode"
+          fi
+        else
+          ok "Third-party input source preferences do not include legacy KnowType modes"
+        fi
+        ;;
+      preference.thirdparty.enabled.parent.knowtype)
+        if [[ "$value" == "true" ]]; then
+          ok "Third-party input source preferences include the KnowType parent anchor"
+        elif (( STRICT == 1 )); then
+          fail "Third-party input source preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
+        else
+          warn "Third-party input source preferences are missing the KnowType parent anchor; System Settings may hide KnowType"
+        fi
+        ;;
+      preference.history.knowtype)
+        if [[ "$value" == "true" ]]; then
+          ok "HIToolbox input-source history includes KnowType"
+        else
+          warn "HIToolbox input-source history does not include KnowType yet; macOS usually updates history after real app selection or typing"
+        fi
+        ;;
+      preference.history.parent.knowtype)
+        if [[ "$value" == "true" ]]; then
+          warn "HIToolbox input-source history still contains the non-selectable KnowType parent row"
+        fi
+        ;;
+      preference.history.index.knowtype)
+        if [[ "$value" == "0" || "$value" == "1" ]]; then
+          ok "HIToolbox input-source history has KnowType in Ctrl+Space range"
+        elif [[ "$value" =~ ^[0-9]+$ ]]; then
+          if (( STRICT == 1 )); then
+            fail "HIToolbox input-source history places KnowType at index $value; Ctrl+Space normally toggles only the current and previous sources"
+          else
+            warn "HIToolbox input-source history places KnowType at index $value; Ctrl+Space may skip it"
+          fi
+        else
+          warn "HIToolbox input-source history position for KnowType is unavailable"
         fi
         ;;
     esac
   done <<<"$TIS_OUTPUT"
+fi
+
+INPUTSOURCES_PREF="$HOME/Library/Preferences/com.apple.inputsources.plist"
+if [[ -f "$INPUTSOURCES_PREF" ]] && command -v xattr >/dev/null 2>&1; then
+  inputsources_xattrs="$(xattr -l "$INPUTSOURCES_PREF" 2>/dev/null || true)"
+  if grep -q "com.apple.macl" <<<"$inputsources_xattrs"; then
+    if [[ "$thirdparty_legacy_knowtype" == "true" ]]; then
+      if (( STRICT == 1 )); then
+        fail "com.apple.inputsources.plist has com.apple.macl while it still contains legacy KnowType .Mode; grant Full Disk Access to Terminal/Codex or log out/reboot before cleanup"
+      else
+        warn "com.apple.inputsources.plist has com.apple.macl while it still contains legacy KnowType .Mode"
+      fi
+    else
+      info "com.apple.inputsources.plist has com.apple.macl"
+    fi
+  fi
+  if grep -q "com.apple.quarantine" <<<"$inputsources_xattrs"; then
+    if [[ "$thirdparty_legacy_knowtype" == "true" ]]; then
+      if (( STRICT == 1 )); then
+        fail "com.apple.inputsources.plist has com.apple.quarantine while it still contains legacy KnowType .Mode; grant Full Disk Access to Terminal/Codex or log out/reboot before cleanup"
+      else
+        warn "com.apple.inputsources.plist has com.apple.quarantine while it still contains legacy KnowType .Mode"
+      fi
+    else
+      info "com.apple.inputsources.plist has com.apple.quarantine"
+    fi
+  fi
 fi
 
 if (( gatekeeper_rejected == 1 )) &&
@@ -471,7 +671,7 @@ if (( SHOW_LOGS == 1 )); then
   echo
   echo "Recent system log hints"
   if command -v /usr/bin/log >/dev/null 2>&1; then
-    LOG_PREDICATE='subsystem == "com.knowtype.inputmethod.KnowType" OR eventMessage CONTAINS[c] "GatekeeperPolicyScanError" OR eventMessage CONTAINS[c] "user-preference-write com.apple.inputsources"'
+    LOG_PREDICATE='subsystem == "com.knowtype.inputmethod.KnowType" OR process == "KnowTypeInputMethodApp" OR process == "TextInputMenuAgent" OR process == "TextInputSwitcher" OR eventMessage CONTAINS[c] "GatekeeperPolicyScanError" OR eventMessage CONTAINS[c] "user-preference-write com.apple.inputsources" OR eventMessage CONTAINS[c] "InputMethodKit"'
     if LOG_OUTPUT="$(/usr/bin/log show --style compact --last "$LOG_LOOKBACK" --predicate "$LOG_PREDICATE" 2>/dev/null | tail -80)"; then
       if [[ -n "$LOG_OUTPUT" ]]; then
         printf '%s\n' "$LOG_OUTPUT"

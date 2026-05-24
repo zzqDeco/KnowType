@@ -8,14 +8,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let provider: (any LLMProvider)?
     private var sessionController: InputSessionController
     private let hasProvider: Bool
-    private var traditionalInputEngine: TraditionalInputEngine
-    private var lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot
-    private let lexiconRuntime: InputMethodLexiconRuntime
+    private var conversionEngine: any KnowTypeConversionEngine
     private let keyMapper = InputKeyCommandMapper()
     private let symbolTransformer = InputSymbolTransformer()
     private let candidateListBuilder = InputCandidateListBuilder()
     private let anchorResolver: CandidateAnchorResolver
     private weak var host: InputControllerHost?
+    private let candidatePanelPresenter: CandidatePanelPresenter
+    private let inputEventBus = InputEventBus()
     private var rawBuffer = ""
     private var compositionBuffer = CompositionBuffer()
     private var compositionID = 0
@@ -34,18 +34,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?
     private var userSelectionHistory: [String]
     private let enablesAsyncSuggestionRefresh: Bool
+    private let asyncSuggestionDelayNanoseconds: UInt64
     private var suggestionGeneration = 0
-    private var runtimeReloadGeneration = 0
-    private var runtimeReloadTask: Task<Void, Never>?
     private var panelUpdateGeneration = 0
     private var panelUpdateTask: Task<Void, Never>?
     private var delayedReanchorGeneration = 0
     private let aiRecommendationProvider: (any AIRecommendationProviding)?
     private let aiContextEventRecorder: (any AIContextEventRecording)?
+    private let aiDiagnosticSink: any AIRecommendationDiagnosticSink
     private var aiRecommendationTask: Task<Void, Never>?
     private var aiRecommendationState: AIRecommendationState = .idle
+    private var activeAIRecommendationRequestID: UUID?
     private var aiRecommendationGeneration = 0
     private var deleteCountBeforeCommit = 0
+    private var recentLexicalCommits: [String] = []
+    private var recentLexicalSelections: [String] = []
+    private let lexicalProfileRuntime: LexicalProfileRuntime
     private let taskSupervisor = InputTaskSupervisor()
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
@@ -53,9 +57,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     init(
         provider: (any LLMProvider)?,
-        traditionalInputEngine: TraditionalInputEngine,
-        lexiconRuntimeSnapshot: InputMethodLexiconRuntimeSnapshot,
-        lexiconRuntime: InputMethodLexiconRuntime = .defaultRuntime(),
+        traditionalInputEngine: TraditionalInputEngine? = nil,
+        lexiconRuntimeSnapshot _: InputMethodLexiconRuntimeSnapshot = InputMethodLexiconRuntimeSnapshot(
+            directories: [],
+            scheme: .fullPinyin
+        ),
+        lexiconRuntime _: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferenceStore: any InputModePreferenceStore,
         runtimePreferenceStore: any InputMethodRuntimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore(),
         initialRuntimePreferences: InputMethodRuntimePreferences? = nil,
@@ -63,22 +70,29 @@ final class InputControllerCoordinator: @unchecked Sendable {
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        lexicalProfileStore: LexicalProfileStore = .inMemory(),
+        lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
+        rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)? = nil,
+        conversionEngine: (any KnowTypeConversionEngine)? = nil,
+        conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
         host: InputControllerHost,
         anchorResolver: CandidateAnchorResolver,
-        enablesAsyncSuggestionRefresh: Bool = true
+        enablesAsyncSuggestionRefresh: Bool = true,
+        asyncSuggestionDelayNanoseconds: UInt64 = 0
     ) {
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
         self.provider = provider
         self.hasProvider = provider != nil
-        self.traditionalInputEngine = traditionalInputEngine
-        self.lexiconRuntimeSnapshot = lexiconRuntimeSnapshot
-        self.lexiconRuntime = lexiconRuntime
-        self.sessionController = InputSessionController(
-            provider: provider,
-            traditionalInputEngine: traditionalInputEngine,
-            runtimePreferences: runtimePreferences
-        )
+        if let conversionEngine {
+            self.conversionEngine = conversionEngine
+        } else if let conversionEngineFactory {
+            self.conversionEngine = conversionEngineFactory(traditionalInputEngine)
+        } else {
+            self.conversionEngine = RimeConversionEngine()
+        }
+        self.sessionController = Self.polishOnlySessionController()
         self.inputModePreferenceStore = inputModePreferenceStore
         self.runtimePreferenceStore = runtimePreferenceStore
         self.runtimePreferences = runtimePreferences
@@ -91,11 +105,28 @@ final class InputControllerCoordinator: @unchecked Sendable {
             .loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
         self.aiRecommendationProvider = aiRecommendationProvider
         self.aiContextEventRecorder = aiContextEventRecorder
+        self.aiDiagnosticSink = aiDiagnosticSink
+        self.lexicalProfileRuntime = LexicalProfileRuntime(
+            store: lexicalProfileStore,
+            rimeMaintenanceService: rimeUserDBTextProvider,
+            diagnosticSink: aiDiagnosticSink,
+            refreshGate: lexicalProfileRefreshGate
+        )
         self.host = host
+        self.candidatePanelPresenter = CandidatePanelPresenter(host: host)
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
-        if enablesAsyncSuggestionRefresh {
-            scheduleRuntimeLexiconReloadIfNeeded()
+        self.asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
+    }
+
+    private static func polishOnlySessionController() -> InputSessionController {
+        InputSessionController { _ in
+            SuggestionResponse(
+                prefixCandidates: [],
+                lockedPrefix: nil,
+                continuationCandidates: [],
+                latencyMs: 0
+            )
         }
     }
 
@@ -114,7 +145,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func composedString() -> Any {
-        compositionBuffer.displayText
+        nativeMarkedText() ?? compositionBuffer.displayText
     }
 
     func originalString() -> NSAttributedString {
@@ -132,42 +163,132 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func candidateSelectionChanged(_ text: String?) {
         selectNativeCandidate(matching: text)
+        if let selectedNativeCandidate {
+            _ = highlightNativeSelectionIfNeeded(selectedNativeCandidate, client: host?.currentClient)
+        }
     }
 
     func candidateSelected(_ text: String?, client: InputControllerClient?) {
         selectNativeCandidate(matching: text)
+        if let selectedNativeCandidate,
+           commitNativeSelectionIfNeeded(selectedNativeCandidate, client: client) {
+            return
+        }
         commit(action: .space, client: client)
     }
 
+    func hoverCandidatePanelSelection(_ selection: CandidatePanelSelection) {
+        guard candidatePanelState.selectVisibleRow(selection) else {
+            return
+        }
+        selectedNativeCandidate = inputCandidateSelection(
+            for: selection,
+            in: candidatePanelState.windowState.viewModel
+        )
+        if let selectedNativeCandidate,
+           highlightNativeSelectionIfNeeded(selectedNativeCandidate, client: host?.currentClient) {
+            return
+        }
+        candidatePanelPresenter.apply(currentCandidatePanelFrame(reason: .compositionActive), locale: locale)
+    }
+
+    func commitCandidatePanelSelection(_ selection: CandidatePanelSelection, client: InputControllerClient?) {
+        guard candidatePanelState.selectVisibleRow(selection),
+              let inputSelection = inputCandidateSelection(
+                  for: selection,
+                  in: candidatePanelState.windowState.viewModel
+              ) else {
+            return
+        }
+        selectedNativeCandidate = inputSelection
+        if commitNativeSelectionIfNeeded(inputSelection, client: client) {
+            return
+        }
+        let result = resultForNumberSelection(inputSelection, client: client)
+        learnSelectedPrefix(action: .space, result: result, client: client)
+        _ = applyCommitResult(result, client: client)
+    }
+
+    @discardableResult
+    func scrollCandidatePanel(_ navigation: InputCandidateNavigation) -> Bool {
+        switch navigation {
+        case .pageDown, .pageUp:
+            return moveCandidateSelection(navigation)
+        case .down, .up, .left, .right:
+            return false
+        }
+    }
+
     func commitComposition(client: InputControllerClient?) {
+        if conversionEngine.isNativeActive,
+           conversionEngine.snapshot.hasComposition {
+            let result = conversionEngine.process(.commitComposition)
+            if handleNativeConversionResult(result, client: client) {
+                return
+            }
+        }
         let text = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
-        _ = applyCommitResult(text.isEmpty ? .noAction : .commit(text), client: client)
+        guard !text.isEmpty else {
+            _ = finishCompositionLifecycle(reason: .commit, client: client, commitPolicy: .none)
+            return
+        }
+        _ = applyCommitResult(.commit(text), client: client)
     }
 
     func hidePalettes() {
-        hideCandidatePanel()
+        hideCandidatePanel(reason: .escape)
     }
 
-    func deactivateServer() {
+    func deactivateServer(client: InputControllerClient?) {
         flushUserSelectionHistory()
-        resetAnchorState()
+        _ = finishCompositionLifecycle(reason: .deactivate, client: client, commitPolicy: .commitRawIfNeeded)
     }
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
-        runtimeReloadGeneration += 1
-        runtimeReloadTask?.cancel()
+        cancelActiveAIRecommendationForDiagnostics(
+            compositionID: compositionID,
+            rawLength: rawBuffer.count,
+            reason: "input_controller_will_close"
+        )
+        aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
+        aiRecommendationTask = nil
+        lexicalProfileRuntime.cancelRefresh()
         panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
-        hideCandidatePanel()
+        _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
+    }
+
+    func reloadRuntimePreferencesForExternalChange() {
+        lastRuntimePreferenceReload = .distantPast
+        guard reloadRuntimePreferencesIfNeeded() else {
+            return
+        }
+        let client = host?.currentClient
+        publishLocalSuggestionSynchronously(client: client)
+        updateCandidatePanelImmediately(suggestion: lastSuggestion, client: client)
     }
 
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
         switch intent {
         case .append(let text):
+            if !hasActiveTextComposition(),
+               Self.isDirectPassthroughDigitText(text) {
+                return insertDirectPassthroughText(text, client: client)
+            }
             return appendComposition(text, client: client)
         case .symbol(let text):
+            if conversionEngine.isNativeActive,
+               !rawBuffer.isEmpty {
+                let result = conversionEngine.process(.text(text))
+                if result.handled {
+                    return handleNativeConversionResult(result, client: client)
+                }
+                if handleNativePagingSymbol(text, client: client) {
+                    return true
+                }
+            }
             if rawBuffer.isEmpty {
                 reloadInputModeDefaultsIfNeeded(client: client)
             }
@@ -183,10 +304,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
             deleteCountBeforeCommit += 1
             if !compositionBuffer.undoLastResolvedSegment() {
                 rawBuffer.removeLast()
+                _ = conversionEngine.process(.deleteBackward)
                 rawRevision += 1
                 compositionBuffer.updateRawInput(rawBuffer)
                 if rawBuffer.isEmpty {
                     deleteCountBeforeCommit = 0
+                    conversionEngine.reset()
                     resetAnchorState()
                 }
             }
@@ -208,6 +331,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
             refreshComposition(client: client)
             return true
         case .selectCandidate(let number):
+            guard hasActiveTextComposition() else {
+                return insertDirectPassthroughText(String(number), client: client)
+            }
+            if conversionEngine.isNativeActive,
+               conversionEngine.snapshot.hasComposition,
+               number > 0 {
+                return selectNativeCandidateOnCurrentPage(number - 1, client: client)
+            }
             if candidatePanelState.windowState.isVisible {
                 if number == 0,
                    let result = InputSessionCommitPolicy.resultForCandidateNumber(
@@ -229,8 +360,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
                        in: candidatePanelState.windowState.viewModel
                    ) {
                     selectedNativeCandidate = inputSelection
+                    if commitNativeSelectionIfNeeded(inputSelection, client: client) {
+                        return true
+                    }
                     let result = resultForNumberSelection(inputSelection, client: client)
-                    learnSelectedPrefix(action: .space, result: result)
+                    learnSelectedPrefix(action: .space, result: result, client: client)
                     return applyCommitResult(result, client: client)
                 }
                 return appendComposition(String(number), client: client)
@@ -248,6 +382,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func appendComposition(_ text: String, client: InputControllerClient?) -> Bool {
         beginCompositionIfNeeded(client: client)
         rawBuffer.append(text)
+        _ = conversionEngine.process(.text(text))
         rawRevision += 1
         compositionBuffer.updateRawInput(rawBuffer)
         aiRecommendationState = .idle
@@ -302,77 +437,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard !compositionBuffer.isFullyResolved else {
             return
         }
-        let appBundleID = appBundleIdentifier(client: client)
-        let selectionHistory = userSelectionHistory
-        let currentLocale = locale
-        let currentCompositionID = compositionID
-        let compositionSnapshot = compositionBuffer
-        let engineSnapshot = traditionalInputEngine
-        let runtimePreferencesSnapshot = runtimePreferences
-        let includeLocalFallbackContinuations = !hasProvider
-            && runtimePreferencesSnapshot.localContinuationEnabledWhenNoProvider
-        suggestionGeneration += 1
-        let generation = suggestionGeneration
-        let task = Task.detached(priority: .userInitiated) { [weak self, engineSnapshot, runtimePreferencesSnapshot, compositionSnapshot] in
-            let context = InputContext(
-                rawInput: rawInput,
-                appBundleID: appBundleID,
-                locale: currentLocale,
-                userSelectionHistory: selectionHistory
-            )
-            let suggestion: SuggestionResponse
-            if compositionSnapshot.hasResolvedSegments {
-                suggestion = InputMethodPipeline.localSuggestions(
-                    for: context,
-                    includeFallbackContinuations: false,
-                    traditionalInputEngine: engineSnapshot,
-                    runtimePreferences: runtimePreferencesSnapshot
-                )
-            } else {
-                suggestion = InputMethodPipeline.localSuggestions(
-                    for: context,
-                    includeFallbackContinuations: includeLocalFallbackContinuations,
-                    traditionalInputEngine: engineSnapshot,
-                    runtimePreferences: runtimePreferencesSnapshot
-                )
-            }
-            guard !Task.isCancelled else {
-                return
-            }
-            let augmentedSuggestion = Self.augmentedSuggestion(
-                suggestion,
-                compositionBuffer: compositionSnapshot,
-                rawBuffer: rawInput,
-                locale: currentLocale,
-                traditionalInputEngine: engineSnapshot
-            )
-            guard !Task.isCancelled else {
-                return
-            }
-            Task { @MainActor [weak self, augmentedSuggestion] in
-                guard let self else {
-                    return
-                }
-                let currentClient = self.host?.currentClient
-                guard SuggestionPublicationGuard.shouldPublish(
-                    requestedRawInput: rawInput,
-                    currentRawInput: self.rawBuffer,
-                    isCancelled: Task.isCancelled
-                ),
-                    self.compositionID == currentCompositionID,
-                    self.compositionBuffer == compositionSnapshot,
-                    self.suggestionGeneration == generation else {
-                    return
-                }
-                self.lastSuggestion = augmentedSuggestion
-                self.lastSuggestionRawInput = rawInput
-                self.refreshComposition(client: currentClient)
-                self.updateCandidatePanel(suggestion: augmentedSuggestion, client: currentClient)
-                self.scheduleAIRecommendation(for: augmentedSuggestion, client: currentClient)
-            }
-        }
-        suggestionTask = task
-        taskSupervisor.replace(.localCandidates, with: task)
+        // Rime already produced the synchronous candidate state. The retired
+        // local converter must not run as a delayed second pass over the same
+        // keystroke.
     }
 
     private func refreshResolvedCompositionContinuations(client: InputControllerClient?) {
@@ -451,6 +518,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .rawInput:
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         case .prefixCandidate, .fullCandidate, .continuationCandidate:
+            if conversionEngine.isNativeActive,
+               isNativeSelectablePrefixOrFull(selection) {
+                guard let nativeIndex = nativeCandidateIndex(for: selection) else {
+                    return .noAction
+                }
+                let conversionResult = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
+                if let commitText = conversionResult.commitText,
+                   !commitText.isEmpty {
+                    return .commit(commitText)
+                }
+                if conversionResult.handled {
+                    publishLocalSuggestion(client: client)
+                    return .noAction
+                }
+                return .noAction
+            }
             guard let selectedCandidate = sessionSelection(from: selection) else {
                 return .noAction
             }
@@ -461,9 +544,91 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 suggestionRawInput: lastSuggestionRawInput,
                 selectedCandidate: selectedCandidate,
                 appBundleID: appBundleIdentifier(client: client),
-                locale: locale
+                locale: locale,
+                allowsSynchronousFallback: false
             )
         }
+    }
+
+    private func selectNativeCandidateOnCurrentPage(_ index: Int, client: InputControllerClient?) -> Bool {
+        let snapshot = conversionEngine.snapshot
+        guard snapshot.candidates.indices.contains(index) else {
+            return true
+        }
+        let result = conversionEngine.process(.selectCandidateOnCurrentPage(index))
+        learnNativeCommitIfFinal(result, client: client)
+        _ = handleNativeConversionResult(result, client: client)
+        return true
+    }
+
+    private func commitNativeSelectionIfNeeded(
+        _ selection: InputCandidateSelection,
+        client: InputControllerClient?
+    ) -> Bool {
+        guard conversionEngine.isNativeActive,
+              isNativeSelectablePrefixOrFull(selection),
+              let nativeIndex = nativeCandidateIndex(for: selection) else {
+            return false
+        }
+        let result = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
+        learnNativeCommitIfFinal(result, client: client)
+        return handleNativeConversionResult(result, client: client)
+    }
+
+    private func highlightNativeSelectionIfNeeded(
+        _ selection: InputCandidateSelection,
+        client: InputControllerClient?
+    ) -> Bool {
+        guard conversionEngine.isNativeActive,
+              isNativeSelectablePrefixOrFull(selection),
+              let nativeIndex = nativeCandidateIndex(for: selection),
+              nativeIndex != conversionEngine.snapshot.highlightedIndex else {
+            return false
+        }
+        let result = conversionEngine.process(.highlightCandidateOnCurrentPage(nativeIndex))
+        guard result.handled else {
+            return false
+        }
+        refreshNativeHighlightPresentation(client: client)
+        return true
+    }
+
+    private func nativeCandidateIndex(for selection: InputCandidateSelection) -> Int? {
+        let snapshot = conversionEngine.snapshot
+        guard !selection.text.isEmpty else {
+            return nil
+        }
+        if let nativeCandidateIndex = selection.nativeCandidateIndex,
+           snapshot.candidates.contains(where: { candidate in
+               candidate.index == nativeCandidateIndex && candidate.text == selection.text
+           }) {
+            return nativeCandidateIndex
+        }
+        let textMatches = snapshot.candidates.filter { candidate in
+            candidate.text == selection.text
+        }
+        guard textMatches.count == 1 else {
+            return nil
+        }
+        return textMatches[0].index
+    }
+
+    private func isNativeSelectablePrefixOrFull(_ selection: InputCandidateSelection) -> Bool {
+        switch selection.kind {
+        case .prefixCandidate, .fullCandidate:
+            return true
+        case .rawInput, .segmentCandidate, .continuationCandidate, .aiRecommendation:
+            return false
+        }
+    }
+
+    private func shouldSelectNativeCandidateBeforeSpace(_ selection: InputCandidateSelection) -> Bool {
+        guard isNativeSelectablePrefixOrFull(selection),
+              let nativeIndex = nativeCandidateIndex(for: selection) else {
+            return false
+        }
+        let snapshot = conversionEngine.snapshot
+        return nativeIndex != snapshot.highlightedIndex
     }
 
     private func aiRecommendationCommitResult() -> InputCommitResult {
@@ -478,30 +643,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func publishLocalSuggestion(client: InputControllerClient?) {
-        guard !enablesAsyncSuggestionRefresh else {
-            publishPendingSuggestion(client: client)
-            return
-        }
+        cancelPendingSuggestionRefresh()
         publishLocalSuggestionSynchronously(client: client)
     }
 
-    private func publishPendingSuggestion(client: InputControllerClient?) {
+    private func cancelPendingSuggestionRefresh() {
         suggestionGeneration += 1
         suggestionTask?.cancel()
-        taskSupervisor.cancel(.localCandidates)
         suggestionTask = nil
-        guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
-            lastSuggestion = nil
-            lastSuggestionRawInput = nil
-            refreshComposition(client: client)
-            updateCandidatePanel(suggestion: nil, client: client)
-            return
-        }
-        lastSuggestion = nil
-        lastSuggestionRawInput = nil
-        selectedNativeCandidate = nil
-        refreshComposition(client: client)
-        updateCandidatePanel(suggestion: nil, client: client)
+        taskSupervisor.cancel(.localCandidates)
     }
 
     private func publishLocalSuggestionSynchronously(client: InputControllerClient?) {
@@ -509,51 +659,161 @@ final class InputControllerCoordinator: @unchecked Sendable {
             lastSuggestion = nil
             lastSuggestionRawInput = nil
             refreshComposition(client: client)
-            updateCandidatePanel(suggestion: nil, client: client)
+            updateCandidatePanelImmediately(suggestion: nil, client: client)
             return
         }
 
-        let context = InputContext(
-            rawInput: rawBuffer,
-            appBundleID: appBundleIdentifier(client: client),
-            locale: locale,
-            userSelectionHistory: userSelectionHistory
-        )
-        let suggestion = InputMethodPipeline.localSuggestions(
-            for: context,
-            includeFallbackContinuations: false,
-            traditionalInputEngine: traditionalInputEngine,
-            runtimePreferences: runtimePreferences
-        )
-        let augmentedSuggestion = augmentedSuggestion(suggestion)
-        lastSuggestion = augmentedSuggestion
+        guard let suggestion = conversionSuggestion() else {
+            lastSuggestion = nil
+            lastSuggestionRawInput = nil
+            refreshComposition(client: client)
+            updateCandidatePanelImmediately(suggestion: nil, client: client)
+            return
+        }
+
+        let rimeSuggestion = augmentedSuggestion(suggestion)
+        lastSuggestion = rimeSuggestion
         lastSuggestionRawInput = rawBuffer
         refreshComposition(client: client)
-        updateCandidatePanel(suggestion: augmentedSuggestion, client: client)
-        scheduleAIRecommendation(for: augmentedSuggestion, client: client)
+        updateCandidatePanelImmediately(suggestion: rimeSuggestion, client: client)
+        scheduleAIRecommendation(for: rimeSuggestion, client: client)
+    }
+
+    private func refreshNativeHighlightPresentation(client: InputControllerClient?) {
+        guard lastSuggestionRawInput == rawBuffer,
+              let lastSuggestion else {
+            publishLocalSuggestion(client: client)
+            return
+        }
+        refreshComposition(client: client)
+        updateCandidatePanelImmediately(suggestion: lastSuggestion, client: client)
+    }
+
+    private func conversionSuggestion() -> SuggestionResponse? {
+        guard conversionEngine.isNativeActive else {
+            return nil
+        }
+        return conversionEngine.snapshot.suggestionResponse(originalRawInput: rawBuffer)
+    }
+
+    private func lexicalContextSnapshot(for suggestion: SuggestionResponse) -> LexicalContextSnapshot? {
+        lexicalProfileRuntime.lexicalContextSnapshot(
+            schemaID: conversionEngine.activeSchemaID,
+            rimeCandidates: suggestion.prefixCandidates.map(\.text),
+            recentCommits: recentLexicalCommits,
+            selectionHistory: recentLexicalSelections
+        )
+    }
+
+    private func candidateHints(for suggestion: SuggestionResponse) -> [AICandidateHint] {
+        let snapshot = conversionEngine.snapshot
+        if !snapshot.candidates.isEmpty {
+            return snapshot.candidates.map { candidate in
+                AICandidateHint(
+                    text: candidate.text,
+                    nativeIndex: candidate.index,
+                    pageNumber: snapshot.pageNumber,
+                    isHighlighted: candidate.index == snapshot.highlightedIndex,
+                    comment: candidate.comment
+                )
+            }
+        }
+        return suggestion.prefixCandidates.enumerated().map { index, candidate in
+            AICandidateHint(
+                text: candidate.text,
+                nativeIndex: nil,
+                pageNumber: 0,
+                isHighlighted: index == 0,
+                comment: nil
+            )
+        }
+    }
+
+    static func confirmedLockedPrefixText(for suggestion: SuggestionResponse) -> String? {
+        let text = suggestion.lockedPrefix?.text
+        return text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil
     }
 
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
+        let currentAppBundleID = appBundleIdentifier(client: client)
+        if let cancelledRequestID = activeAIRecommendationRequestID {
+            recordAIDiagnostic(
+                .cancelPrevious,
+                requestID: cancelledRequestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                appBundleID: currentAppBundleID,
+                reason: "new_schedule"
+            )
+        }
         aiRecommendationTask?.cancel()
+        activeAIRecommendationRequestID = nil
         taskSupervisor.cancel(.aiRecommendation)
         aiRecommendationGeneration += 1
         let generation = aiRecommendationGeneration
+        let requestID = UUID()
+        let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
+        let candidateHints = candidateHints(for: suggestion)
 
-        guard let firstPrefix = suggestion.prefixCandidates.first,
-              !isPartialSegmentCandidate(firstPrefix),
+        guard lockedPrefixText != nil || !candidateHints.isEmpty,
               !compositionBuffer.hasResolvedSegments || compositionBuffer.isFullyResolved else {
+            recordAIDiagnostic(
+                .skippedIneligible,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: lockedPrefixText?.count,
+                appBundleID: currentAppBundleID,
+                reason: "no_stable_prefix"
+            )
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
 
+        guard !TextProtection.containsSecretLikeContent(rawBuffer),
+              lockedPrefixText.map({
+                  !TextProtection.containsSecretLikeContent($0)
+              }) ?? true else {
+            recordAIDiagnostic(
+                .skippedProtectedText,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: lockedPrefixText?.count,
+                appBundleID: currentAppBundleID,
+                reason: "secret_like_text"
+            )
+            aiRecommendationState = .ineligible(reason: "AI 已禁用")
+            updateCandidatePanel(suggestion: suggestion, client: client)
+            return
+        }
+
         guard runtimePreferences.cloudContinuationEnabled else {
+            recordAIDiagnostic(
+                .skippedDisabled,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: lockedPrefixText?.count,
+                appBundleID: currentAppBundleID,
+                reason: "cloud_continuation_disabled"
+            )
             aiRecommendationState = .ineligible(reason: "AI 已关闭")
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
 
         guard hasProvider else {
+            recordAIDiagnostic(
+                .skippedNoProvider,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: lockedPrefixText?.count,
+                appBundleID: currentAppBundleID,
+                reason: "provider_not_configured"
+            )
             aiRecommendationState = aiRecommendationProvider == nil
                 ? .idle
                 : .unavailable(reason: "AI 未配置")
@@ -562,37 +822,126 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
 
         guard let aiRecommendationProvider else {
+            recordAIDiagnostic(
+                .skippedNoProvider,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: lockedPrefixText?.count,
+                appBundleID: currentAppBundleID,
+                reason: "recommendation_provider_missing"
+            )
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
 
-        let requestID = UUID()
         let rawInput = rawBuffer
         let currentCompositionID = compositionID
+        let currentRawRevision = rawRevision
         let request = AIRecommendationRequest(
             rawInput: rawInput,
-            traditionalCandidate: firstPrefix,
-            appBundleID: appBundleIdentifier(client: client),
-            appName: appBundleIdentifier(client: client),
+            lockedPrefix: lockedPrefixText,
+            candidateHints: candidateHints,
+            appBundleID: currentAppBundleID,
+            appName: currentAppBundleID,
             locale: locale,
-            compositionID: currentCompositionID
+            compositionID: currentCompositionID,
+            requestID: requestID,
+            lexicalContext: lexicalContextSnapshot(for: suggestion)
+        )
+        recordAIDiagnostic(
+            .scheduled,
+            requestID: requestID,
+            compositionID: currentCompositionID,
+            rawLength: rawInput.count,
+            prefixLength: lockedPrefixText?.count,
+            appBundleID: currentAppBundleID
         )
         aiRecommendationState = .pending(requestID: requestID)
+        activeAIRecommendationRequestID = requestID
         updateCandidatePanel(suggestion: suggestion, client: client)
-        let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider] in
+        let diagnosticSink = aiDiagnosticSink
+        let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider, diagnosticSink] in
             let state = await aiRecommendationProvider.recommendation(for: request)
+            let patch = AIRecommendationPatch(
+                requestID: requestID,
+                generation: generation,
+                compositionID: currentCompositionID,
+                rawRevision: currentRawRevision,
+                rawInput: rawInput,
+                state: state
+            )
             guard !Task.isCancelled else {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .cancelled,
+                        requestID: requestID,
+                        compositionID: currentCompositionID,
+                        rawLength: rawInput.count,
+                        prefixLength: lockedPrefixText?.count,
+                        appBundleID: currentAppBundleID,
+                        reason: "task_cancelled_before_apply"
+                    )
+                )
                 return
             }
-            Task { @MainActor [weak self] in
-                guard let self,
-                      self.aiRecommendationGeneration == generation,
-                      self.rawBuffer == rawInput,
-                      self.compositionID == currentCompositionID else {
+            Task { @MainActor [weak self, diagnosticSink] in
+                guard let self else {
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .staleResultDropped,
+                            requestID: requestID,
+                            compositionID: currentCompositionID,
+                            rawLength: rawInput.count,
+                            prefixLength: lockedPrefixText?.count,
+                            appBundleID: currentAppBundleID,
+                            reason: "coordinator_released"
+                        )
+                    )
                     return
                 }
-                self.aiRecommendationState = state
+                guard patch.matches(
+                    requestID: self.activeAIRecommendationRequestID,
+                    generation: self.aiRecommendationGeneration,
+                    compositionID: self.compositionID,
+                    rawRevision: self.rawRevision,
+                    rawInput: self.rawBuffer
+                ) else {
+                    let reason = self.activeAIRecommendationRequestID == requestID
+                        ? Self.aiDiagnosticReason(for: state)
+                        : "request_inactive"
+                    if self.activeAIRecommendationRequestID == requestID {
+                        self.activeAIRecommendationRequestID = nil
+                    }
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .staleResultDropped,
+                            requestID: requestID,
+                            compositionID: currentCompositionID,
+                            rawLength: rawInput.count,
+                            prefixLength: lockedPrefixText?.count,
+                            appBundleID: currentAppBundleID,
+                            reason: reason
+                        )
+                    )
+                    return
+                }
+                self.aiRecommendationState = patch.state
+                if self.activeAIRecommendationRequestID == requestID {
+                    self.activeAIRecommendationRequestID = nil
+                }
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .stateApplied,
+                        requestID: requestID,
+                        compositionID: currentCompositionID,
+                        rawLength: rawInput.count,
+                        prefixLength: lockedPrefixText?.count,
+                        appBundleID: currentAppBundleID,
+                        reason: Self.aiDiagnosticReason(for: patch.state)
+                    )
+                )
                 self.updateCandidatePanel(suggestion: self.lastSuggestion, client: self.host?.currentClient)
             }
         }
@@ -600,22 +949,55 @@ final class InputControllerCoordinator: @unchecked Sendable {
         taskSupervisor.replace(.aiRecommendation, with: task)
     }
 
+    private func recordAIDiagnostic(
+        _ stage: AIRecommendationDiagnosticStage,
+        requestID: UUID? = nil,
+        compositionID: Int? = nil,
+        rawLength: Int? = nil,
+        prefixLength: Int? = nil,
+        appBundleID: String? = nil,
+        reason: String? = nil
+    ) {
+        aiDiagnosticSink.record(
+            AIRecommendationDiagnosticEvent(
+                stage: stage,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawLength,
+                prefixLength: prefixLength,
+                appBundleID: appBundleID,
+                reason: reason
+            )
+        )
+    }
+
+    private static func aiDiagnosticReason(for state: AIRecommendationState) -> String {
+        switch state {
+        case .idle:
+            return "idle"
+        case .pending:
+            return "pending"
+        case .ready:
+            return "ready"
+        case .ineligible(let reason):
+            return "ineligible:\(reason)"
+        case .unavailable(let reason):
+            return "unavailable:\(reason)"
+        }
+    }
+
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
         Self.augmentedSuggestion(
             suggestion,
             compositionBuffer: compositionBuffer,
-            rawBuffer: rawBuffer,
-            locale: locale,
-            traditionalInputEngine: traditionalInputEngine
+            rawBuffer: rawBuffer
         )
     }
 
     private static func augmentedSuggestion(
         _ suggestion: SuggestionResponse,
         compositionBuffer: CompositionBuffer,
-        rawBuffer: String,
-        locale: KnowTypeLocale,
-        traditionalInputEngine: TraditionalInputEngine
+        rawBuffer: String
     ) -> SuggestionResponse {
         var prefixCandidates: [CorrectionCandidate]
         if compositionBuffer.isFullyResolved {
@@ -624,24 +1006,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
             prefixCandidates = []
         } else {
             prefixCandidates = suggestion.prefixCandidates
-        }
-        if let activeRange = compositionBuffer.activeRange {
-            let segmentCandidates = prioritizedSegmentCandidates(
-                for: activeRange,
-                compositionBuffer: compositionBuffer,
-                rawBuffer: rawBuffer,
-                locale: locale,
-                traditionalInputEngine: traditionalInputEngine
-            )
-                .filter { canApplyOrCommit(candidate: $0, compositionBuffer: compositionBuffer) }
-            if compositionBuffer.hasResolvedSegments {
-                prefixCandidates = segmentCandidates
-            } else {
-                let leadingFullCandidates = Array(prefixCandidates.prefix(Self.leadingFullCandidateCount))
-                let remainingFullCandidates = Array(prefixCandidates.dropFirst(Self.leadingFullCandidateCount))
-                let leadingMerged = mergedPrefixCandidates(leadingFullCandidates, with: segmentCandidates)
-                prefixCandidates = mergedPrefixCandidates(leadingMerged, with: remainingFullCandidates)
-            }
         }
         let continuations = shouldSuppressContinuations(
             prefixCandidates: prefixCandidates,
@@ -686,107 +1050,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawRange: compositionBuffer.rawRange,
             segments: compositionBuffer.resolvedSegments
         )
-    }
-
-    private func prioritizedSegmentCandidates(for activeRange: KnowTypeCore.TextRange) -> [CorrectionCandidate] {
-        Self.prioritizedSegmentCandidates(
-            for: activeRange,
-            compositionBuffer: compositionBuffer,
-            rawBuffer: rawBuffer,
-            locale: locale,
-            traditionalInputEngine: traditionalInputEngine
-        )
-    }
-
-    private static func prioritizedSegmentCandidates(
-        for activeRange: KnowTypeCore.TextRange,
-        compositionBuffer: CompositionBuffer,
-        rawBuffer: String,
-        locale: KnowTypeLocale,
-        traditionalInputEngine: TraditionalInputEngine
-    ) -> [CorrectionCandidate] {
-        let preserveCapitalizedPinyin = locale != .zhCN
-        let candidates = traditionalInputEngine
-            .segmentCandidates(
-                for: rawBuffer,
-                activeRange: activeRange,
-                preserveCapitalizedPinyin: preserveCapitalizedPinyin,
-                options: InputMethodPipeline.interactiveQueryOptions
-            )
-            .map { candidate in
-                CorrectionCandidate(
-                    text: candidate.text,
-                    source: candidate.rawRange == compositionBuffer.rawRange
-                        ? "local-full-input"
-                        : "local-segment-input",
-                    confidence: candidate.confidence,
-                    correctionLevel: .contextual,
-                    rawRange: candidate.rawRange,
-                    segments: candidate.segments
-                )
-            }
-
-        let grouped = Dictionary(grouping: candidates) { candidate in
-            candidate.rawRange ?? KnowTypeCore.TextRange(start: 0, length: 0)
-        }
-        let orderedRanges = grouped.keys.sorted { lhs, rhs in
-            if lhs.length == rhs.length {
-                return lhs.start < rhs.start
-            }
-            return lhs.length > rhs.length
-        }
-        let sortedGroups = orderedRanges.map { range in
-            (grouped[range] ?? [])
-                .sorted { lhs, rhs in
-                    if lhs.confidence == rhs.confidence {
-                        return lhs.text < rhs.text
-                    }
-                    return lhs.confidence > rhs.confidence
-                }
-        }
-        let primaryCandidates = sortedGroups.compactMap(\.first)
-        let alternateCandidates = sortedGroups.flatMap { group in
-            group.dropFirst().prefix(2)
-        }
-        return primaryCandidates + alternateCandidates
-    }
-
-    private func mergedPrefixCandidates(
-        _ existingCandidates: [CorrectionCandidate],
-        with additionalCandidates: [CorrectionCandidate]
-    ) -> [CorrectionCandidate] {
-        Self.mergedPrefixCandidates(existingCandidates, with: additionalCandidates)
-    }
-
-    private static func mergedPrefixCandidates(
-        _ existingCandidates: [CorrectionCandidate],
-        with additionalCandidates: [CorrectionCandidate]
-    ) -> [CorrectionCandidate] {
-        var merged = existingCandidates
-        for candidate in additionalCandidates {
-            guard !merged.contains(where: { existing in
-                existing.text == candidate.text && existing.rawRange == candidate.rawRange
-            }) else {
-                continue
-            }
-            merged.append(candidate)
-        }
-        return merged
-    }
-
-    private func canApplyOrCommit(candidate: CorrectionCandidate) -> Bool {
-        Self.canApplyOrCommit(candidate: candidate, compositionBuffer: compositionBuffer)
-    }
-
-    private static func canApplyOrCommit(
-        candidate: CorrectionCandidate,
-        compositionBuffer: CompositionBuffer
-    ) -> Bool {
-        guard candidate.rawRange != compositionBuffer.rawRange else {
-            return true
-        }
-        var probe = compositionBuffer
-        return probe.apply(candidate)
     }
 
     private func shouldSuppressContinuations(prefixCandidates: [CorrectionCandidate]) -> Bool {
@@ -849,9 +1112,54 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     @discardableResult
     private func commit(action: InputAction, client: InputControllerClient?) -> Bool {
+        if action == .space,
+           !hasActiveTextComposition() {
+            return insertDirectPassthroughText(" ", client: client)
+        }
+        if action == .commitRaw,
+           !hasActiveTextComposition() {
+            _ = finishCompositionLifecycle(reason: .commit, client: client, commitPolicy: .none)
+            return false
+        }
+        if action == .space,
+           conversionEngine.isNativeActive,
+           rawBuffer.isEmpty == false {
+            if let selectedNativeCandidate,
+               shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(selectedNativeCandidate) {
+                let result = commitResult(for: action, client: client)
+                learnSelectedPrefix(action: action, result: result, client: client)
+                return applyCommitResult(result, client: client)
+            }
+            if let selectedNativeCandidate,
+               shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate),
+               let nativeIndex = nativeCandidateIndex(for: selectedNativeCandidate) {
+                let result = conversionEngine.process(.selectCandidateOnCurrentPage(nativeIndex))
+                learnNativeCommitIfFinal(result, client: client)
+                if handleNativeConversionResult(result, client: client) {
+                    return true
+                }
+            }
+            let result = conversionEngine.process(.space)
+            learnNativeCommitIfFinal(result, client: client)
+            if handleNativeConversionResult(result, client: client) {
+                return true
+            }
+            return applyCommitResult(rawBuffer.isEmpty ? .noAction : .commit(rawBuffer), client: client)
+        }
         let result = commitResult(for: action, client: client)
-        learnSelectedPrefix(action: action, result: result)
+        learnSelectedPrefix(action: action, result: result, client: client)
         return applyCommitResult(result, client: client)
+    }
+
+    private func shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(
+        _ selection: InputCandidateSelection
+    ) -> Bool {
+        switch selection.kind {
+        case .prefixCandidate, .fullCandidate:
+            return false
+        case .rawInput, .segmentCandidate, .aiRecommendation, .continuationCandidate:
+            return true
+        }
     }
 
     @discardableResult
@@ -876,17 +1184,88 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
-    private func learnSelectedPrefix(action: InputAction, result: InputCommitResult) {
+    @discardableResult
+    private func handleNativeConversionResult(
+        _ result: ConversionEngineResult,
+        client: InputControllerClient?
+    ) -> Bool {
+        if let commitText = result.commitText,
+           !commitText.isEmpty {
+            if result.snapshot.hasComposition {
+                recordTypingCommit(commitText, client: client)
+                insert(commitText, client: client)
+                syncRawBufferToNativeSnapshot(result.snapshot)
+                publishLocalSuggestion(client: client)
+                return true
+            }
+            return applyCommitResult(.commit(commitText), client: client)
+        }
+        guard result.handled else {
+            return false
+        }
+        guard nativeSnapshotHasActiveInput(result.snapshot) else {
+            _ = finishCompositionLifecycle(reason: .nativeEnded, client: client, commitPolicy: .none)
+            return true
+        }
+        syncRawBufferToNativeSnapshot(result.snapshot)
+        publishLocalSuggestion(client: client)
+        return true
+    }
+
+    private func nativeSnapshotHasActiveInput(_ snapshot: ConversionEngineSnapshot) -> Bool {
+        !snapshot.rawInput.isEmpty || !snapshot.preedit.isEmpty
+    }
+
+    private func hasActiveTextComposition() -> Bool {
+        !rawBuffer.isEmpty
+            || compositionBuffer.hasResolvedSegments
+            || conversionEngine.snapshot.hasComposition
+    }
+
+    private func learnNativeCommitIfFinal(_ result: ConversionEngineResult, client: InputControllerClient?) {
+        guard let commitText = result.commitText,
+              !commitText.isEmpty,
+              !result.snapshot.hasComposition,
+              commitText != rawBuffer else {
+            return
+        }
+        recordUserSelection(commitText, client: client)
+    }
+
+    private func syncRawBufferToNativeSnapshot(_ snapshot: ConversionEngineSnapshot) {
+        guard rawBuffer != snapshot.rawInput else {
+            return
+        }
+        rawBuffer = snapshot.rawInput
+        rawRevision += 1
+        compositionBuffer.updateRawInput(rawBuffer)
+    }
+
+    private func learnSelectedPrefix(action: InputAction, result: InputCommitResult, client: InputControllerClient?) {
         guard case .commit(let committedText) = result,
               !committedText.isEmpty,
-              action != .optionR,
-              !(action == .tab && aiRecommendationState.isSelectableRecommendation),
+              !shouldSkipPrefixLearning(action: action),
               let prefix = selectedPrefixTextForLearning(),
               prefix != rawBuffer,
               committedText.hasPrefix(prefix) else {
             return
         }
-        recordUserSelection(prefix)
+        recordUserSelection(prefix, client: client)
+    }
+
+    private func shouldSkipPrefixLearning(action: InputAction) -> Bool {
+        if action == .optionR {
+            return true
+        }
+        if action == .tab,
+           aiRecommendationState.isSelectableRecommendation {
+            return true
+        }
+        if case .optionNumber(1) = action,
+           aiRecommendationState.isSelectableRecommendation {
+            return true
+        }
+        return false
     }
 
     private func selectedPrefixTextForLearning() -> String? {
@@ -919,11 +1298,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
-    private func recordUserSelection(_ text: String) {
+    private func recordUserSelection(_ text: String, client: InputControllerClient?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return
         }
+        let appBundleID = appBundleIdentifier(client: client)
+        guard !TextProtection.requiresNoCorrection(trimmed, appBundleID: appBundleID),
+              !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
+            return
+        }
+        publishRuntimeEvent(
+            .candidateSelected(
+                text: trimmed,
+                schemaID: conversionEngine.activeSchemaID,
+                compositionID: compositionID
+            )
+        )
+        recordLexicalSelection(trimmed)
+        scheduleLexicalProfileRefresh(reason: "selection")
         if let userSelectionHistoryPersistence {
             userSelectionHistory = userSelectionHistoryPersistence.recordSelection(
                 trimmed,
@@ -939,6 +1332,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
+    private func recordLexicalSelection(_ text: String) {
+        recentLexicalSelections.append(text)
+        if recentLexicalSelections.count > Self.maxUserSelectionHistory {
+            recentLexicalSelections.removeFirst(recentLexicalSelections.count - Self.maxUserSelectionHistory)
+        }
+    }
+
+    private func publishRuntimeEvent(_ event: InputRuntimeEvent) {
+        Task.detached(priority: .utility) { [inputEventBus] in
+            await inputEventBus.publish(event)
+        }
+    }
+
     private func flushUserSelectionHistory() {
         userSelectionHistoryPersistence?.flushHistory(
             userSelectionHistory,
@@ -950,13 +1356,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if action == .commitRaw {
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         }
-        if action == .tab,
-           aiRecommendationState.isSelectableRecommendation {
-            return aiRecommendationCommitResult()
-        }
-        if action == .tab,
-           case .pending = aiRecommendationState {
-            return .noAction
+        if let aiShortcutResult = InputCommitResultPolicy.aiShortcutResult(
+            for: action,
+            aiRecommendationState: aiRecommendationState
+        ) {
+            return aiShortcutResult
         }
         if action == .tab,
            let selectedNativeCandidate,
@@ -976,6 +1380,27 @@ final class InputControllerCoordinator: @unchecked Sendable {
            let selectedNativeCandidate,
            case .aiRecommendation = selectedNativeCandidate.kind {
             return aiRecommendationCommitResult()
+        }
+        if action == .space,
+           let selectedNativeCandidate,
+           case .segmentCandidate(let index) = selectedNativeCandidate.kind {
+            return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
+        }
+        if action == .space,
+           let selectedNativeCandidate,
+           case .continuationCandidate = selectedNativeCandidate.kind {
+            let commitSuggestion = commitSuggestionSnapshot(for: action, client: client)
+            return InputSessionCommitPolicy.result(
+                for: action,
+                rawInput: rawBuffer,
+                suggestion: commitSuggestion.suggestion,
+                suggestionRawInput: commitSuggestion.rawInput,
+                selectedCandidate: sessionSelection(from: selectedNativeCandidate),
+                appBundleID: appBundleIdentifier(client: client),
+                locale: locale,
+                runtimePreferences: runtimePreferences,
+                allowsSynchronousFallback: false
+            )
         }
         if compositionBuffer.hasResolvedSegments,
            compositionBuffer.isFullyResolved {
@@ -1009,19 +1434,37 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 break
             }
         }
-        if let selectedNativeCandidate,
-           case .segmentCandidate(let index) = selectedNativeCandidate.kind,
-           action == .space {
-            return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
+        if action == .space,
+           conversionEngine.isNativeActive,
+           let selectedNativeCandidate,
+           shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate) {
+            return resultForNumberSelection(selectedNativeCandidate, client: client)
         }
         if action == .space,
-           enablesAsyncSuggestionRefresh,
-           !SuggestionPublicationGuard.hasCurrentSuggestion(
-                suggestionRawInput: lastSuggestionRawInput,
-                currentRawInput: rawBuffer
-           ) {
-            let visibleText = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
-            return visibleText.isEmpty ? .noAction : .commit(visibleText)
+           conversionEngine.isNativeActive,
+           let selectedNativeCandidate,
+           isNativeSelectablePrefixOrFull(selectedNativeCandidate),
+           nativeCandidateIndex(for: selectedNativeCandidate) == nil {
+            return resultForNumberSelection(selectedNativeCandidate, client: client)
+        }
+        if action == .space,
+           conversionEngine.isNativeActive {
+            let conversionResult = conversionEngine.process(.space)
+            if let commitText = conversionResult.commitText,
+               !commitText.isEmpty {
+                return .commit(commitText)
+            }
+            if conversionResult.handled {
+                publishLocalSuggestion(client: client)
+                return .noAction
+            }
+            if !rawBuffer.isEmpty {
+                return .commit(rawBuffer)
+            }
+        }
+        if action == .space,
+           !conversionEngine.isNativeActive {
+            return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         }
         if case .optionNumber = action,
            !candidatePanelState.windowState.isVisible {
@@ -1039,9 +1482,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 : sessionSelection(from: selectedNativeCandidate),
             appBundleID: appBundleIdentifier(client: client),
             locale: locale,
-            traditionalInputEngine: traditionalInputEngine,
             runtimePreferences: runtimePreferences,
-            allowsSynchronousFallback: !enablesAsyncSuggestionRefresh
+            allowsSynchronousFallback: false
         )
     }
 
@@ -1089,10 +1531,39 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func insert(_ text: String, client: InputControllerClient?) {
-        client?.insertText(text, replacementRange: replacementRangeForCommit(client))
+        let replacementRange = replacementRangeForCommit()
+        traceClientWrite(
+            kind: "insertText",
+            client: client,
+            chosenReplacementRange: replacementRange,
+            reason: "commit"
+        )
+        client?.insertText(text, replacementRange: replacementRange)
+    }
+
+    private func insertDirectPassthroughText(_ text: String, client: InputControllerClient?) -> Bool {
+        guard let lifecycleClient = client ?? host?.currentClient else {
+            return false
+        }
+        let replacementRange = replacementRangeForCommit()
+        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
+        traceClientWrite(
+            kind: "insertText",
+            client: lifecycleClient,
+            chosenReplacementRange: replacementRange,
+            reason: "idle_passthrough"
+        )
+        lifecycleClient.insertText(text, replacementRange: replacementRange)
+        return true
     }
 
     private func recordTypingCommit(_ text: String, client: InputControllerClient?) {
+        let appBundleID = appBundleIdentifier(client: client)
+        guard !TextProtection.requiresNoCorrection(text, appBundleID: appBundleID),
+              !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
+            return
+        }
+        recordLexicalCommit(text)
         guard let aiContextEventRecorder,
               hasProvider,
               runtimePreferences.cloudContinuationEnabled,
@@ -1111,6 +1582,34 @@ final class InputControllerCoordinator: @unchecked Sendable {
         Task.detached(priority: .utility) { [aiContextEventRecorder] in
             await aiContextEventRecorder.record(event)
         }
+    }
+
+    private func recordLexicalCommit(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        recentLexicalCommits.append(trimmed)
+        if recentLexicalCommits.count > Self.maxRecentLexicalCommits {
+            recentLexicalCommits.removeFirst(recentLexicalCommits.count - Self.maxRecentLexicalCommits)
+        }
+        publishRuntimeEvent(
+            .compositionCommitted(
+                text: trimmed,
+                schemaID: conversionEngine.activeSchemaID,
+                compositionID: compositionID
+            )
+        )
+        scheduleLexicalProfileRefresh(reason: "commit")
+    }
+
+    private func scheduleLexicalProfileRefresh(reason: String) {
+        lexicalProfileRuntime.scheduleRefresh(
+            reason: reason,
+            schemaID: conversionEngine.activeSchemaID,
+            recentCommits: recentLexicalCommits,
+            selectionHistory: recentLexicalSelections
+        )
     }
 
     private func recordExternalDelete(client: InputControllerClient?) {
@@ -1166,13 +1665,55 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func resetComposition() {
+        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
+    }
+
+    @discardableResult
+    private func finishCompositionLifecycle(
+        reason: CompositionLifecycleFinishReason,
+        client: InputControllerClient?,
+        commitPolicy: CompositionLifecycleCommitPolicy
+    ) -> Bool {
+        traceCompositionLifecycleFinish(reason: reason)
+        let finishedCompositionID = compositionID
+        hideCandidatePanel(reason: reason.panelVisibilityReason)
+
+        let lifecycleClient = client ?? host?.currentClient
+        let shouldClearOwnedMarkedText = reason.shouldClearMarkedTextWhenEndingWithoutCommit
+            && hasActiveTextComposition()
+        let commitText = lifecycleCommitText(for: commitPolicy)
+        if let commitText,
+           !commitText.isEmpty {
+            recordTypingCommit(commitText, client: lifecycleClient)
+            insert(commitText, client: lifecycleClient)
+        } else if shouldClearOwnedMarkedText,
+                  let lifecycleClient {
+            clearMarkedText(lifecycleClient)
+        }
+
         rawBuffer = ""
+        conversionEngine.reset()
         compositionBuffer = CompositionBuffer()
         rawRevision += 1
         deleteCountBeforeCommit = 0
         resetAnchorState()
         invalidateSuggestion()
-        hideCandidatePanel()
+        publishRuntimeEvent(
+            .compositionEnded(reason: reason.panelVisibilityReason, compositionID: finishedCompositionID)
+        )
+        return commitText?.isEmpty == false
+    }
+
+    private func lifecycleCommitText(for policy: CompositionLifecycleCommitPolicy) -> String? {
+        switch policy {
+        case .none:
+            return nil
+        case .commitRawIfNeeded:
+            if compositionBuffer.hasResolvedSegments {
+                return compositionBuffer.commitText
+            }
+            return rawBuffer.isEmpty ? nil : rawBuffer
+        }
     }
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
@@ -1182,6 +1723,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reloadRuntimeLexiconEngineIfNeeded()
             compositionBuffer = CompositionBuffer()
             compositionID += 1
+            publishRuntimeEvent(
+                .compositionStarted(compositionID: compositionID, rawRevision: rawRevision)
+            )
             anchorResolver.reset()
         }
     }
@@ -1198,88 +1742,26 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func reloadRuntimePreferencesIfNeeded() {
+    @discardableResult
+    private func reloadRuntimePreferencesIfNeeded() -> Bool {
         let now = Date()
         guard now.timeIntervalSince(lastRuntimePreferenceReload) >= Self.preferenceReloadInterval else {
-            return
+            return false
         }
         lastRuntimePreferenceReload = now
         let preferences = runtimePreferenceStore.loadPreferences()
         guard preferences != runtimePreferences else {
-            return
+            return false
         }
         runtimePreferences = preferences
-        sessionController = InputSessionController(
-            provider: provider,
-            traditionalInputEngine: traditionalInputEngine,
-            runtimePreferences: runtimePreferences
-        )
+        sessionController = Self.polishOnlySessionController()
         invalidateSuggestion()
+        return true
     }
 
     private func reloadRuntimeLexiconEngineIfNeeded() {
-        guard !enablesAsyncSuggestionRefresh else {
-            scheduleRuntimeLexiconReloadIfNeeded()
-            return
-        }
-        let snapshot = lexiconRuntime.snapshot(scheme: runtimePreferences.inputScheme)
-        guard snapshot != lexiconRuntimeSnapshot else {
-            return
-        }
-
-        traditionalInputEngine = lexiconRuntime.makeEngine(scheme: runtimePreferences.inputScheme)
-        lexiconRuntimeSnapshot = snapshot
-        sessionController = InputSessionController(
-            provider: provider,
-            traditionalInputEngine: traditionalInputEngine,
-            runtimePreferences: runtimePreferences
-        )
-        invalidateSuggestion()
-    }
-
-    private func scheduleRuntimeLexiconReloadIfNeeded() {
-        let currentSnapshot = lexiconRuntimeSnapshot
-        let lexiconRuntime = lexiconRuntime
-        let scheme = runtimePreferences.inputScheme
-        let runtimePreferences = runtimePreferences
-        runtimeReloadGeneration += 1
-        let generation = runtimeReloadGeneration
-        runtimeReloadTask?.cancel()
-        taskSupervisor.cancel(.runtimeLexiconReload)
-        let task = Task.detached(priority: .utility) { [weak self, lexiconRuntime, currentSnapshot, scheme, runtimePreferences, generation] in
-            let snapshot = lexiconRuntime.snapshot(scheme: scheme)
-            guard snapshot != currentSnapshot, !Task.isCancelled else {
-                return
-            }
-            let engine = lexiconRuntime.makeEngine(scheme: scheme)
-            guard !Task.isCancelled else {
-                return
-            }
-            Task { @MainActor [weak self, engine, snapshot, currentSnapshot, generation] in
-                guard let self,
-                      self.runtimeReloadGeneration == generation,
-                      self.lexiconRuntimeSnapshot == currentSnapshot,
-                      snapshot != self.lexiconRuntimeSnapshot else {
-                    return
-                }
-                self.traditionalInputEngine = engine
-                self.lexiconRuntimeSnapshot = snapshot
-                InputMethodLexiconRuntime.cacheEngine(engine, snapshot: snapshot)
-                self.sessionController = InputSessionController(
-                    provider: self.provider,
-                    traditionalInputEngine: engine,
-                    runtimePreferences: runtimePreferences
-                )
-                self.invalidateSuggestion()
-                if !self.rawBuffer.isEmpty {
-                    let currentClient = self.host?.currentClient
-                    self.publishLocalSuggestion(client: currentClient)
-                    self.refreshSuggestion(client: currentClient)
-                }
-            }
-        }
-        runtimeReloadTask = task
-        taskSupervisor.replace(.runtimeLexiconReload, with: task)
+        // Rime is the only product conversion engine. Avoid rebuilding the
+        // retired local lexicon on the IMK key path.
     }
 
     private func resetAnchorState() {
@@ -1295,6 +1777,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         suggestionTask?.cancel()
         suggestionTask = nil
         taskSupervisor.cancel(.localCandidates)
+        cancelActiveAIRecommendationForDiagnostics(
+            compositionID: compositionID,
+            rawLength: rawBuffer.count,
+            reason: "composition_invalidated"
+        )
         aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
@@ -1302,9 +1789,39 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationState = .idle
     }
 
+    private func cancelActiveAIRecommendationForDiagnostics(
+        compositionID: Int?,
+        rawLength: Int?,
+        reason: String
+    ) {
+        guard let requestID = activeAIRecommendationRequestID else {
+            return
+        }
+        recordAIDiagnostic(
+            .cancelPrevious,
+            requestID: requestID,
+            compositionID: compositionID,
+            rawLength: rawLength,
+            reason: reason
+        )
+        activeAIRecommendationRequestID = nil
+    }
+
+    private func updateCandidatePanelImmediately(suggestion: SuggestionResponse?, client: InputControllerClient?) {
+        panelUpdateGeneration += 1
+        panelUpdateTask?.cancel()
+        panelUpdateTask = nil
+        taskSupervisor.cancel(.panelRender)
+        guard canPublishCandidatePanel(suggestion: suggestion) else {
+            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
+            return
+        }
+        updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: client))
+    }
+
     private func updateCandidatePanel(suggestion: SuggestionResponse?, client: InputControllerClient?) {
-        guard !rawBuffer.isEmpty || suggestion != nil else {
-            hideCandidatePanel()
+        guard canPublishCandidatePanel(suggestion: suggestion) else {
+            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
             return
         }
         guard enablesAsyncSuggestionRefresh else {
@@ -1342,6 +1859,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
+        guard canPublishCandidatePanel(suggestion: suggestion) else {
+            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
+            return
+        }
         let isDisplayable = anchorResult.source != .none
         let effectivePageSize = runtimePreferences.effectiveCandidatePageSize
         candidatePanelState.update(
@@ -1352,7 +1873,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             isDisplayable: isDisplayable,
             pageSize: effectivePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode,
-            aiRecommendation: aiRecommendationState
+            aiRecommendation: aiRecommendationState,
+            preferredSelection: nativeHighlightedSelection(for: suggestion)
         )
         traceCandidatePanelUpdate(
             savedPageSize: runtimePreferences.candidatePageSize,
@@ -1364,18 +1886,96 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 in: candidatePanelState.windowState.viewModel
             )
             : nil
-        host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+        candidatePanelPresenter.apply(
+            currentCandidatePanelFrame(
+                reason: candidatePanelState.windowState.isVisible ? .compositionActive : .layoutImpossible
+            ),
+            locale: locale
+        )
     }
 
-    private func hideCandidatePanel() {
+    private func nativeHighlightedSelection(for suggestion: SuggestionResponse?) -> CandidatePanelSelection? {
+        guard conversionEngine.isNativeActive,
+              let suggestion,
+              !suggestion.prefixCandidates.isEmpty else {
+            return nil
+        }
+        let highlightedIndex = conversionEngine.snapshot.highlightedIndex
+        guard suggestion.prefixCandidates.indices.contains(highlightedIndex) else {
+            return nil
+        }
+        let candidate = suggestion.prefixCandidates[highlightedIndex]
+        guard let range = candidate.rawRange else {
+            return .prefixCandidate(highlightedIndex)
+        }
+        return range == KnowTypeCore.TextRange(start: 0, length: rawBuffer.count)
+            ? .fullCandidate(highlightedIndex)
+            : .segmentCandidate(highlightedIndex)
+    }
+
+    private func hideCandidatePanel(reason: CandidatePanelVisibilityReason) {
         panelUpdateGeneration += 1
+        delayedReanchorGeneration += 1
         panelUpdateTask?.cancel()
         panelUpdateTask = nil
         taskSupervisor.cancel(.panelRender)
         candidatePanelState.hide()
         selectedNativeCandidate = nil
         anchorResolver.reset()
-        host?.hideCandidatePanel()
+        candidatePanelPresenter.hide(
+            reason: reason,
+            compositionID: compositionID,
+            rawRevision: rawRevision,
+            rawLength: rawBuffer.count
+        )
+    }
+
+    private func canPublishCandidatePanel(suggestion: SuggestionResponse?) -> Bool {
+        guard !rawBuffer.isEmpty else {
+            return false
+        }
+        if suggestion != nil,
+           let lastSuggestionRawInput,
+           lastSuggestionRawInput != rawBuffer {
+            return false
+        }
+        if conversionEngine.isNativeActive {
+            return nativeSnapshotHasActiveInput(conversionEngine.snapshot) || !rawBuffer.isEmpty
+        }
+        return true
+    }
+
+    private func candidatePanelSuppressionReason(suggestion: SuggestionResponse?) -> CandidatePanelVisibilityReason {
+        guard !rawBuffer.isEmpty else {
+            return .rawEmpty
+        }
+        if suggestion != nil,
+           let lastSuggestionRawInput,
+           lastSuggestionRawInput != rawBuffer {
+            return .staleUpdate
+        }
+        return .layoutImpossible
+    }
+
+    private func currentCandidatePanelFrame(reason: CandidatePanelVisibilityReason) -> CandidatePanelFrame {
+        CandidatePanelFrame(
+            compositionID: compositionID,
+            rawRevision: rawRevision,
+            rawLength: rawBuffer.count,
+            panelModel: candidatePanelState,
+            anchorSource: candidatePanelState.windowState.anchorSource,
+            visibilityReason: reason
+        )
+    }
+
+    private func traceCompositionLifecycleFinish(reason: CompositionLifecycleFinishReason) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+            return
+        }
+        let message = "KnowType panel cleanup: reason=\(reason.rawValue)\n"
+        if let data = message.data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
     }
 
     private func traceCandidatePanelUpdate(savedPageSize: Int, effectivePageSize: Int) {
@@ -1397,16 +1997,162 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
-        guard candidatePanelState.moveSelection(navigation) else {
+    private func handleNativePagingSymbol(_ text: String, client: InputControllerClient?) -> Bool {
+        guard let navigation = Self.nativePagingSymbolNavigation(for: text) else {
             return false
         }
-        selectedNativeCandidate = inputCandidateSelection(
-            for: candidatePanelState.windowState.selection,
-            in: candidatePanelState.windowState.viewModel
+        return moveNativeCandidatePage(
+            navigation,
+            client: client,
+            consumeOnlyWhenSnapshotChanges: true
         )
-        host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+    }
+
+    private static func nativePagingSymbolNavigation(for text: String) -> InputCandidateNavigation? {
+        switch text {
+        case "-", ",":
+            return .pageUp
+        case "=", ".":
+            return .pageDown
+        default:
+            return nil
+        }
+    }
+
+    private func moveNativeCandidatePage(
+        _ navigation: InputCandidateNavigation,
+        client: InputControllerClient?,
+        consumeOnlyWhenSnapshotChanges: Bool = false
+    ) -> Bool {
+        guard conversionEngine.isNativeActive,
+              !rawBuffer.isEmpty else {
+            return false
+        }
+        let snapshotBeforePage = conversionEngine.snapshot
+        let key: ConversionEngineKey
+        switch navigation {
+        case .pageUp:
+            key = .pageUp
+        case .pageDown:
+            key = .pageDown
+        case .up, .down, .left, .right:
+            return false
+        }
+        let result = conversionEngine.process(key)
+        guard result.handled else {
+            return false
+        }
+        if consumeOnlyWhenSnapshotChanges,
+           result.snapshot == snapshotBeforePage,
+           result.commitText == nil {
+            return false
+        }
+        publishLocalSuggestion(client: client)
         return true
+    }
+
+    private func moveCandidateSelection(_ navigation: InputCandidateNavigation) -> Bool {
+        if conversionEngine.isNativeActive,
+           !rawBuffer.isEmpty,
+           conversionEngine.snapshot.hasComposition {
+            if moveNativeCandidateSelection(navigation, client: host?.currentClient) {
+                return true
+            }
+        }
+        if moveNativeCandidatePage(navigation, client: host?.currentClient) {
+            return true
+        }
+        if conversionEngine.isNativeActive,
+           navigation == .pageDown || navigation == .pageUp {
+            return false
+        }
+        let previousWindowState = candidatePanelState.windowState
+        if candidatePanelState.moveSelection(navigation) {
+            if conversionEngine.isNativeActive,
+               candidatePanelState.windowState == previousWindowState,
+               let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation),
+               moveNativeCandidatePage(pageNavigation, client: host?.currentClient) {
+                return true
+            }
+            selectedNativeCandidate = inputCandidateSelection(
+                for: candidatePanelState.windowState.selection,
+                in: candidatePanelState.windowState.viewModel
+            )
+            host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+            return true
+        }
+        guard let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation) else {
+            return false
+        }
+        return moveNativeCandidatePage(pageNavigation, client: host?.currentClient)
+    }
+
+    private func moveNativeCandidateSelection(
+        _ navigation: InputCandidateNavigation,
+        client: InputControllerClient?
+    ) -> Bool {
+        switch navigation {
+        case .pageDown, .pageUp:
+            return moveNativeCandidatePage(navigation, client: client)
+        case .right, .down:
+            return moveNativeCandidateHighlight(delta: 1, client: client)
+        case .left, .up:
+            return moveNativeCandidateHighlight(delta: -1, client: client)
+        }
+    }
+
+    private func moveNativeCandidateHighlight(delta: Int, client: InputControllerClient?) -> Bool {
+        let snapshot = conversionEngine.snapshot
+        guard !snapshot.candidates.isEmpty else {
+            return false
+        }
+        let currentIndex = min(max(snapshot.highlightedIndex, 0), snapshot.candidates.count - 1)
+        let targetIndex = currentIndex + delta
+        if snapshot.candidates.indices.contains(targetIndex) {
+            let result = conversionEngine.process(.highlightCandidateOnCurrentPage(targetIndex))
+            guard result.handled else {
+                return false
+            }
+            refreshNativeHighlightPresentation(client: client)
+            return true
+        }
+
+        if targetIndex >= snapshot.candidates.count {
+            guard moveNativeCandidatePage(.pageDown, client: client) else {
+                return true
+            }
+            let result = conversionEngine.process(.highlightCandidateOnCurrentPage(0))
+            if result.handled {
+                refreshNativeHighlightPresentation(client: client)
+            }
+            return true
+        }
+
+        guard moveNativeCandidatePage(.pageUp, client: client) else {
+            return true
+        }
+        let previousPageSnapshot = conversionEngine.snapshot
+        guard let lastIndex = previousPageSnapshot.candidates.indices.last else {
+            return true
+        }
+        let result = conversionEngine.process(.highlightCandidateOnCurrentPage(lastIndex))
+        if result.handled {
+            refreshNativeHighlightPresentation(client: client)
+        }
+        return true
+    }
+
+    private static func nativeBoundaryPageNavigation(
+        for navigation: InputCandidateNavigation
+    ) -> InputCandidateNavigation? {
+        switch navigation {
+        case .right, .down:
+            return .pageDown
+        case .left, .up:
+            return .pageUp
+        case .pageDown, .pageUp:
+            return nil
+        }
     }
 
     private func candidateAnchorResult(client: InputControllerClient?) -> CandidateAnchorResult {
@@ -1446,25 +2192,31 @@ final class InputControllerCoordinator: @unchecked Sendable {
             guard viewModel.prefixCandidates.indices.contains(index) else {
                 return nil
             }
+            let candidate = viewModel.prefixCandidates[index]
             return InputCandidateSelection(
-                text: viewModel.prefixCandidates[index].text,
-                kind: .prefixCandidate(index: index)
+                text: candidate.text,
+                kind: .prefixCandidate(index: index),
+                nativeCandidateIndex: ConversionCandidateSource.nativeIndex(from: candidate.source)
             )
         case .fullCandidate(let index):
             guard viewModel.prefixCandidates.indices.contains(index) else {
                 return nil
             }
+            let candidate = viewModel.prefixCandidates[index]
             return InputCandidateSelection(
-                text: viewModel.prefixCandidates[index].text,
-                kind: .fullCandidate(index: index)
+                text: candidate.text,
+                kind: .fullCandidate(index: index),
+                nativeCandidateIndex: ConversionCandidateSource.nativeIndex(from: candidate.source)
             )
         case .segmentCandidate(let index):
             guard viewModel.prefixCandidates.indices.contains(index) else {
                 return nil
             }
+            let candidate = viewModel.prefixCandidates[index]
             return InputCandidateSelection(
-                text: viewModel.prefixCandidates[index].text,
-                kind: .segmentCandidate(index: index)
+                text: candidate.text,
+                kind: .segmentCandidate(index: index),
+                nativeCandidateIndex: ConversionCandidateSource.nativeIndex(from: candidate.source)
             )
         case .continuationCandidate(let index):
             guard viewModel.continuationCandidates.indices.contains(index) else {
@@ -1510,13 +2262,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        let markedText = compositionBuffer.displayText
+        let markedText = nativeMarkedText() ?? compositionBuffer.displayText
         guard !markedText.isEmpty else {
             clearMarkedText(client)
             return
         }
 
-        let replacement = activeMarkedRange(for: client) ?? NSRange(location: NSNotFound, length: NSNotFound)
+        let replacement = replacementRangeForMarkedText()
+        traceClientWrite(
+            kind: "setMarkedText",
+            client: client,
+            chosenReplacementRange: replacement,
+            reason: "composition_update"
+        )
         client.setMarkedText(
             markedText,
             selectionRange: NSRange(location: (markedText as NSString).length, length: 0),
@@ -1530,23 +2288,40 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func clearMarkedText(_ client: InputControllerClient) {
-        guard let markedRange = activeMarkedRange(for: client) else {
-            host?.updateComposition()
-            return
-        }
+        let replacementRange = replacementRangeForMarkedText()
+        traceClientWrite(
+            kind: "setMarkedText",
+            client: client,
+            chosenReplacementRange: replacementRange,
+            reason: "clear_marked_text"
+        )
         client.setMarkedText(
             "",
             selectionRange: NSRange(location: 0, length: 0),
-            replacementRange: markedRange
+            replacementRange: replacementRange
         )
     }
 
-    private func replacementRangeForCommit(_ client: InputControllerClient?) -> NSRange {
-        client.flatMap(activeMarkedRange(for:)) ?? NSRange(location: NSNotFound, length: NSNotFound)
+    private func replacementRangeForCommit() -> NSRange {
+        Self.noOwnedReplacementRange
     }
 
-    private func activeMarkedRange(for client: InputControllerClient) -> NSRange? {
-        client.markedRange
+    private func replacementRangeForMarkedText() -> NSRange {
+        Self.noOwnedReplacementRange
+    }
+
+    private func nativeMarkedText() -> String? {
+        guard conversionEngine.isNativeActive else {
+            return nil
+        }
+        let snapshot = conversionEngine.snapshot
+        guard snapshot.hasComposition else {
+            return nil
+        }
+        if !snapshot.preedit.isEmpty {
+            return snapshot.preedit
+        }
+        return snapshot.rawInput.isEmpty ? nil : snapshot.rawInput
     }
 
     private func scheduleDelayedCandidateReanchor(
@@ -1577,8 +2352,104 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private static let textOnlyKeyCode = -1
     private static let maxUserSelectionHistory = 64
+    private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5
     private static let preferenceReloadInterval: TimeInterval = 1
+    private static let noOwnedReplacementRange = NSRange(location: NSNotFound, length: NSNotFound)
+
+    private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
+        !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
+            scalar.value >= 48 && scalar.value <= 57
+        }
+    }
+
+    private func traceClientWrite(
+        kind: String,
+        client: InputControllerClient?,
+        chosenReplacementRange: NSRange,
+        reason: String
+    ) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_CLIENT_WRITE_DEBUG"] == "1" else {
+            return
+        }
+        let message = "KnowType client write: kind=\(kind) " +
+            "compositionID=\(compositionID) rawLength=\(rawBuffer.count) " +
+            "selectedRange=\(Self.describeRange(client?.selectedRange)) " +
+            "reportedMarkedRange=\(Self.describeRange(client?.markedRange)) " +
+            "chosenReplacementRange=\(Self.describeRange(chosenReplacementRange)) " +
+            "reason=\(reason)\n"
+        fputs(message, stderr)
+    }
+
+    private static func describeRange(_ range: NSRange?) -> String {
+        guard let range else {
+            return "nil"
+        }
+        if range.location == NSNotFound {
+            return "{NSNotFound,\(range.length)}"
+        }
+        return "{\(range.location),\(range.length)}"
+    }
+}
+
+private enum CompositionLifecycleFinishReason: String {
+    case commit
+    case deactivate
+    case close
+    case reset
+    case nativeEnded = "native_ended"
+
+    var shouldClearMarkedTextWhenEndingWithoutCommit: Bool {
+        switch self {
+        case .commit, .nativeEnded:
+            return true
+        case .deactivate, .close, .reset:
+            return false
+        }
+    }
+
+    var panelVisibilityReason: CandidatePanelVisibilityReason {
+        switch self {
+        case .commit:
+            return .compositionEnded
+        case .deactivate:
+            return .deactivate
+        case .close:
+            return .close
+        case .reset:
+            return .reset
+        case .nativeEnded:
+            return .nativeEnded
+        }
+    }
+}
+
+private enum CompositionLifecycleCommitPolicy {
+    case none
+    case commitRawIfNeeded
+}
+
+final class LexicalProfileRefreshGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+
+    func next() -> Int {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        generation += 1
+        return generation
+    }
+
+    func isCurrent(_ candidate: Int) -> Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return generation == candidate
+    }
+
 }
 
 private extension Collection {

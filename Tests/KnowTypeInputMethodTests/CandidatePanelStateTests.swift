@@ -43,7 +43,7 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertFalse(rendered.rows[2].isSelected)
     }
 
-    func testVisibleShortcutSelectsAIRecommendationAsSecondSlot() {
+    func testVisibleShortcutSkipsReadyAIRecommendationForNumberSelection() {
         var state = CandidatePanelState()
         state.update(
             rawInput: "nihao",
@@ -60,8 +60,8 @@ final class CandidatePanelStateTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .aiRecommendation)
-        XCTAssertEqual(state.windowState.selection, .aiRecommendation)
+        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .prefixCandidate(1))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
     }
 
     func testVisibleShortcutSkipsNonReadyAIStatusRows() {
@@ -80,6 +80,34 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", nil, "2"])
         XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 2), .prefixCandidate(1))
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
+    }
+
+    func testNavigationSkipsNonReadyAIStatusRows() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: suggestion(prefixTexts: ["你好", "你号"]),
+            aiRecommendation: .unavailable(reason: "AI 暂不可用")
+        )
+
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+        XCTAssertTrue(state.moveSelection(.down))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
+        XCTAssertTrue(state.moveSelection(.up))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+    }
+
+    func testSelectVisibleRowAcceptsOnlyVisibleEnabledRows() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "candidate",
+            suggestion: multiPagePrefixSuggestion(count: 12)
+        )
+
+        XCTAssertTrue(state.selectVisibleRow(.prefixCandidate(5)))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(5))
+        XCTAssertFalse(state.selectVisibleRow(.prefixCandidate(6)))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(5))
     }
 
     func testVisibleShortcutIgnoresLegacyContinuationRowsWithoutNumberLabels() {

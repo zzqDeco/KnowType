@@ -2,12 +2,21 @@ import KnowTypeCore
 import KnowTypeProviders
 import SwiftUI
 
+private func settingsString(_ key: String) -> String {
+    SettingsLocalization.string(key)
+}
+
+private func settingsFormat(_ key: String, _ arguments: CVarArg...) -> String {
+    String(format: settingsString(key), arguments: arguments)
+}
+
 public struct ProviderProfilesView: View {
     @ObservedObject private var viewModel: ProviderProfilesViewModel
     @StateObject private var lexiconViewModel: LexiconSettingsViewModel
     @StateObject private var inputModeViewModel: InputModePreferencesViewModel
     @StateObject private var runtimePreferencesViewModel: RuntimePreferencesViewModel
     @State private var selectedSection: SettingsSection = .input
+    @State private var searchText = ""
 
     public init(
         viewModel: ProviderProfilesViewModel,
@@ -22,59 +31,60 @@ public struct ProviderProfilesView: View {
     }
 
     public var body: some View {
-        TabView(selection: $selectedSection) {
+        NavigationSplitView {
+            SettingsSidebarView(searchText: $searchText, selectedSection: $selectedSection)
+        } detail: {
+            settingsDetail(for: selectedSection)
+        }
+    }
+
+    @ViewBuilder
+    private func settingsDetail(for section: SettingsSection) -> some View {
+        switch section {
+        case .input:
             InputSettingsView(
                 inputModeViewModel: inputModeViewModel,
                 runtimePreferencesViewModel: runtimePreferencesViewModel
             )
-                .tabItem {
-                    Label("Input", systemImage: "keyboard")
-                }
-                .tag(SettingsSection.input)
-
+        case .candidates:
             CandidateSettingsView(viewModel: runtimePreferencesViewModel)
-                .tabItem {
-                    Label("Candidates", systemImage: "list.bullet.rectangle")
-                }
-                .tag(SettingsSection.candidates)
-
+        case .lexicons:
             LexiconSettingsView(viewModel: lexiconViewModel)
-                .tabItem {
-                    Label("Lexicons", systemImage: "books.vertical")
-                }
-                .tag(SettingsSection.lexicons)
-
+        case .aiProvider:
             AIProviderSettingsView(
                 viewModel: viewModel,
                 runtimePreferencesViewModel: runtimePreferencesViewModel
             )
-                .tabItem {
-                    Label("AI Provider", systemImage: "network")
-                }
-                .tag(SettingsSection.aiProvider)
-
+        case .privacy:
             PrivacySettingsView(runtimePreferencesViewModel: runtimePreferencesViewModel)
-                .tabItem {
-                    Label("Privacy", systemImage: "lock.shield")
-                }
-                .tag(SettingsSection.privacy)
-
-            DebugInstallSettingsView()
-                .tabItem {
-                    Label("Debug Install", systemImage: "hammer")
-                }
-                .tag(SettingsSection.debugInstall)
+        case .diagnostics:
+            DiagnosticsSettingsView()
         }
     }
 }
 
-private enum SettingsSection: Hashable {
-    case input
-    case candidates
-    case lexicons
-    case aiProvider
-    case privacy
-    case debugInstall
+private struct SettingsSidebarView: View {
+    @Binding var searchText: String
+    @Binding var selectedSection: SettingsSection
+
+    var body: some View {
+        let presentation = SettingsSidebarPresentation(searchText: searchText)
+
+        List(selection: $selectedSection) {
+            ForEach(presentation.sections) { section in
+                Label(section.title, systemImage: section.systemImage)
+                    .tag(section)
+            }
+
+            if presentation.sections.isEmpty {
+                Text(settingsString("settings.sidebar.noMatches"))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
+        .frame(minWidth: 220)
+        .searchable(text: $searchText, prompt: SettingsLocalization.string("settings.search.prompt"))
+    }
 }
 
 private struct InputSettingsView: View {
@@ -82,41 +92,37 @@ private struct InputSettingsView: View {
     @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
 
     var body: some View {
-        SettingsForm {
-            Section("Composition") {
-                LabeledContent("Input host", value: "InputMethodKit")
-                LabeledContent("Composition mode", value: "Marked text before commit")
-                LabeledContent("Primary commit", value: "Space commits the corrected prefix")
-                LabeledContent("Continuation commit", value: "Tab commits prefix plus continuation")
-                Picker("Input scheme", selection: inputSchemeBinding) {
-                    Text("Full Pinyin").tag(TraditionalInputEngine.Scheme.fullPinyin)
-                    Text("Xiaohe Shuangpin").tag(TraditionalInputEngine.Scheme.xiaohe)
-                }
+        SettingsForm(title: SettingsSection.input.title) {
+            Section(settingsString("settings.input.section.composition")) {
+                LabeledContent(settingsString("settings.input.host"), value: settingsString("settings.input.host.value"))
+                LabeledContent(settingsString("settings.input.compositionMode"), value: settingsString("settings.input.compositionMode.value"))
+                LabeledContent(settingsString("settings.input.basicCommit"), value: settingsString("settings.input.basicCommit.value"))
+                LabeledContent(settingsString("settings.input.continuationCommit"), value: settingsString("settings.input.continuationCommit.value"))
             }
 
-            Section("Punctuation") {
-                Picker("Default punctuation", selection: defaultPunctuationBinding) {
-                    Text("Chinese").tag(InputSymbolMode.chinese)
-                    Text("English").tag(InputSymbolMode.english)
+            Section(settingsString("settings.input.section.symbols")) {
+                Picker(settingsString("settings.input.defaultPunctuation"), selection: defaultPunctuationBinding) {
+                    Text(settingsString("settings.input.symbol.chinese")).tag(InputSymbolMode.chinese)
+                    Text(settingsString("settings.input.symbol.english")).tag(InputSymbolMode.english)
                 }
-                Picker("Default width", selection: defaultWidthBinding) {
-                    Text("Half width").tag(InputSymbolWidth.halfWidth)
-                    Text("Full width").tag(InputSymbolWidth.fullWidth)
+                Picker(settingsString("settings.input.defaultWidth"), selection: defaultWidthBinding) {
+                    Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
+                    Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
                 }
-                Picker("Code app punctuation", selection: codeAppPunctuationBinding) {
-                    Text("Chinese").tag(InputSymbolMode.chinese)
-                    Text("English").tag(InputSymbolMode.english)
+                Picker(settingsString("settings.input.codeAppPunctuation"), selection: codeAppPunctuationBinding) {
+                    Text(settingsString("settings.input.symbol.chinese")).tag(InputSymbolMode.chinese)
+                    Text(settingsString("settings.input.symbol.english")).tag(InputSymbolMode.english)
                 }
-                Picker("Code app width", selection: codeAppWidthBinding) {
-                    Text("Half width").tag(InputSymbolWidth.halfWidth)
-                    Text("Full width").tag(InputSymbolWidth.fullWidth)
+                Picker(settingsString("settings.input.codeAppWidth"), selection: codeAppWidthBinding) {
+                    Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
+                    Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
                 }
-                LabeledContent("Toggle", value: "Option + .")
+                LabeledContent(settingsString("settings.input.toggleShortcut"), value: "Option + .")
                 Button {
                     inputModeViewModel.resetToDefaults()
                     runtimePreferencesViewModel.resetToDefaults()
                 } label: {
-                    Label("Restore Defaults", systemImage: "arrow.counterclockwise")
+                    Label(SettingsLocalization.string("settings.action.restoreDefaults"), systemImage: "arrow.counterclockwise")
                 }
                 if let message = inputModeViewModel.lastErrorMessage ?? runtimePreferencesViewModel.lastErrorMessage {
                     Text(message)
@@ -124,8 +130,8 @@ private struct InputSettingsView: View {
                 }
             }
 
-            Section("Prefix Lock") {
-                Text("Continuation candidates append after the locked prefix. Prefix rewrites are reserved for explicit polish actions.")
+            Section(settingsString("settings.input.section.prefixLock")) {
+                Text(settingsString("settings.input.prefixLock.note"))
                     .foregroundStyle(.secondary)
             }
         }
@@ -159,46 +165,42 @@ private struct InputSettingsView: View {
         )
     }
 
-    private var inputSchemeBinding: Binding<TraditionalInputEngine.Scheme> {
-        Binding(
-            get: { runtimePreferencesViewModel.preferences.inputScheme },
-            set: { runtimePreferencesViewModel.setInputScheme($0) }
-        )
-    }
 }
 
 private struct CandidateSettingsView: View {
     @ObservedObject var viewModel: RuntimePreferencesViewModel
 
     var body: some View {
-        SettingsForm {
-            Section("Display") {
-                Picker("Candidates per page", selection: candidatePageSizeBinding) {
+        SettingsForm(title: SettingsSection.candidates.title) {
+            Section(settingsString("settings.candidates.section.display")) {
+                Picker(settingsString("settings.candidates.pageSize"), selection: candidatePageSizeBinding) {
                     Text("6").tag(6)
                     Text("9").tag(9)
                 }
-                Picker("Panel layout", selection: candidateLayoutModeBinding) {
-                    Text("Adaptive horizontal").tag(CandidatePanelLayoutMode.adaptive)
-                    Text("Vertical list").tag(CandidatePanelLayoutMode.verticalPreferred)
+                Picker(settingsString("settings.candidates.layout"), selection: candidateLayoutModeBinding) {
+                    Text(settingsString("settings.candidates.layout.adaptive")).tag(CandidatePanelLayoutMode.adaptive)
+                    Text(settingsString("settings.candidates.layout.vertical")).tag(CandidatePanelLayoutMode.verticalPreferred)
                 }
-                LabeledContent("Adaptive page", value: "Up to 6 candidates")
-                LabeledContent("Vertical page", value: "Uses selected page size")
+                LabeledContent(settingsString("settings.candidates.adaptivePage"), value: settingsString("settings.candidates.adaptivePage.value"))
+                LabeledContent(settingsString("settings.candidates.verticalPage"), value: settingsString("settings.candidates.verticalPage.value"))
                 if let message = viewModel.lastErrorMessage {
                     Text(message)
                         .foregroundStyle(.red)
                 }
             }
 
-            Section("Candidate Order") {
-                LabeledContent("Prefix candidates", value: "Shown first")
-                LabeledContent("Continuation candidates", value: "Shown after prefix candidates")
-                LabeledContent("Raw input", value: "Shown only before suggestions are available")
+            Section(settingsString("settings.candidates.section.order")) {
+                LabeledContent(settingsString("settings.candidates.rimeCandidates"), value: settingsString("settings.candidates.rimeCandidates.value"))
+                LabeledContent(settingsString("settings.candidates.aiContinuation"), value: settingsString("settings.candidates.aiContinuation.value"))
+                LabeledContent(settingsString("settings.candidates.rawInput"), value: settingsString("settings.candidates.rawInput.value"))
             }
 
-            Section("Shortcuts") {
-                LabeledContent("Tab", value: "First continuation")
-                LabeledContent("Option + number", value: "Matching continuation row")
-                LabeledContent("Option + R", value: "Explicit polish")
+            Section(settingsString("settings.candidates.section.shortcuts")) {
+                LabeledContent("Space", value: settingsString("settings.candidates.shortcut.space.value"))
+                LabeledContent(settingsString("settings.candidates.shortcut.number.label"), value: settingsString("settings.candidates.shortcut.number.value"))
+                LabeledContent("Tab", value: settingsString("settings.candidates.shortcut.tab.value"))
+                LabeledContent("Option + 1...9", value: settingsString("settings.candidates.shortcut.optionNumber.value"))
+                LabeledContent("Option + R", value: settingsString("settings.candidates.shortcut.optionR.value"))
             }
         }
     }
@@ -224,8 +226,8 @@ private struct LexiconSettingsView: View {
     var body: some View {
         let presentation = LexiconSettingsPresentation(viewModel: viewModel)
 
-        SettingsForm {
-            Section("Local Lexicons") {
+        SettingsForm(title: SettingsSection.lexicons.title) {
+            Section(settingsString("settings.lexicon.section.local")) {
                 LabeledContent(presentation.loadedEntries.label, value: presentation.loadedEntries.value)
                 if let lastRefreshDate = presentation.lastRefreshDate {
                     LabeledContent(presentation.lastRefreshLabel, value: lastRefreshDate.formatted(date: .abbreviated, time: .standard))
@@ -301,7 +303,7 @@ private struct LexiconSettingsView: View {
                 }
             }
 
-            Section("Format") {
+            Section(settingsString("settings.lexicon.section.format")) {
                 ForEach(presentation.formatRows, id: \.label) { row in
                     LabeledContent(row.label, value: row.value)
                 }
@@ -320,27 +322,39 @@ private struct AIProviderSettingsView: View {
         let validationPresentation = ProviderValidationPresentation(errors: viewModel.validationErrors)
         let lastErrorPresentation = ProviderLastErrorPresentation(message: viewModel.lastErrorMessage)
 
-        NavigationSplitView {
-            List(selection: $viewModel.selectedProfileID) {
-                ForEach(viewModel.profiles) { profile in
-                    let item = ProviderProfileListItemPresentation(profile: profile)
+        SettingsForm(title: SettingsSection.aiProvider.title) {
+            Section(settingsString("settings.provider.section.continuation")) {
+                Toggle(settingsString("settings.provider.cloudContinuation"), isOn: cloudContinuationEnabledBinding)
+                Toggle(settingsString("settings.provider.localContinuation"), isOn: localContinuationEnabledBinding)
+                Picker(settingsString("settings.provider.length"), selection: continuationLengthLevelBinding) {
+                    Text(settingsString("settings.provider.length.short")).tag(ContinuationLengthLevel.short)
+                    Text(settingsString("settings.provider.length.medium")).tag(ContinuationLengthLevel.medium)
+                    Text(settingsString("settings.provider.length.long")).tag(ContinuationLengthLevel.long)
+                }
+                Stepper(value: maxContinuationCandidatesBinding, in: 1...6, step: 1) {
+                    Text(settingsFormat("settings.provider.maxCandidates", runtimePreferencesViewModel.preferences.maxContinuationCandidates))
+                }
+                if let message = runtimePreferencesViewModel.lastErrorMessage {
+                    Text(message)
+                        .foregroundStyle(.red)
+                }
+            }
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title)
-                            .font(.headline)
-                        Text(item.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Section("Provider") {
+                if viewModel.profiles.isEmpty {
+                    Text(settingsString("settings.provider.noProfiles"))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker(settingsString("settings.provider.currentProfile"), selection: profileSelectionBinding) {
+                        ForEach(viewModel.profiles) { profile in
+                            let item = ProviderProfileListItemPresentation(profile: profile)
+
+                            Text("\(item.title) · \(item.subtitle)")
+                                .tag(Optional(item.id))
+                        }
                     }
-                    .tag(item.id)
                 }
-            }
-            .onChange(of: viewModel.selectedProfileID) { id in
-                if let id {
-                    viewModel.selectProfile(id: id)
-                }
-            }
-            .toolbar {
+
                 Menu {
                     ForEach(ProviderKind.allCases, id: \.self) { kind in
                         Button(kind.rawValue) {
@@ -348,114 +362,103 @@ private struct AIProviderSettingsView: View {
                         }
                     }
                 } label: {
-                    Label("Add Profile", systemImage: "plus")
+                    Label(settingsString("settings.provider.add"), systemImage: "plus")
                 }
+
+                TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
+                Picker(
+                    draftPresentation.kindPickerLabel,
+                    selection: Binding(
+                        get: { viewModel.draft.kind },
+                        set: { viewModel.changeDraftKind($0) }
+                    )
+                ) {
+                    ForEach(ProviderKind.allCases, id: \.self) { kind in
+                        Text(kind.rawValue).tag(kind)
+                    }
+                }
+                TextField(draftPresentation.baseURLFieldLabel, text: $viewModel.draft.baseURL)
+                TextField(draftPresentation.modelFieldLabel, text: $viewModel.draft.model)
+                Stepper(value: $viewModel.draft.timeoutSeconds, in: 1...120, step: 1) {
+                    Text(draftPresentation.timeoutLabel)
+                }
+                Toggle(draftPresentation.defaultProviderLabel, isOn: $viewModel.draft.isDefault)
             }
-        } detail: {
-            Form {
-                Section("Continuation") {
-                    Toggle("Enable cloud continuation", isOn: cloudContinuationEnabledBinding)
-                    Toggle("Show local continuations without a provider", isOn: localContinuationEnabledBinding)
-                    Picker("Length", selection: continuationLengthLevelBinding) {
-                        Text("Short").tag(ContinuationLengthLevel.short)
-                        Text("Medium").tag(ContinuationLengthLevel.medium)
-                        Text("Long").tag(ContinuationLengthLevel.long)
-                    }
-                    Stepper(value: maxContinuationCandidatesBinding, in: 1...6, step: 1) {
-                        Text("Max continuation candidates: \(runtimePreferencesViewModel.preferences.maxContinuationCandidates)")
-                    }
-                    if let message = runtimePreferencesViewModel.lastErrorMessage {
-                        Text(message)
-                            .foregroundStyle(.red)
-                    }
-                }
 
-                Section("Provider") {
-                    TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
-                    Picker(
-                        draftPresentation.kindPickerLabel,
-                        selection: Binding(
-                            get: { viewModel.draft.kind },
-                            set: { viewModel.changeDraftKind($0) }
-                        )
-                    ) {
-                        ForEach(ProviderKind.allCases, id: \.self) { kind in
-                            Text(kind.rawValue).tag(kind)
-                        }
-                    }
-                    TextField(draftPresentation.baseURLFieldLabel, text: $viewModel.draft.baseURL)
-                    TextField(draftPresentation.modelFieldLabel, text: $viewModel.draft.model)
-                    Stepper(value: $viewModel.draft.timeoutSeconds, in: 1...120, step: 1) {
-                        Text(draftPresentation.timeoutLabel)
-                    }
-                    Toggle(draftPresentation.defaultProviderLabel, isOn: $viewModel.draft.isDefault)
-                }
-
-                Section(draftPresentation.secret.sectionTitle) {
-                    SecureField(draftPresentation.secret.apiKeyFieldPrompt, text: $viewModel.draft.apiKey)
-                    if let reference = draftPresentation.secret.reference {
-                        LabeledContent(reference.label, value: reference.value)
-                            .font(.caption)
-                    }
-                    Text(draftPresentation.secret.helpText)
+            Section(draftPresentation.secret.sectionTitle) {
+                SecureField(draftPresentation.secret.apiKeyFieldPrompt, text: $viewModel.draft.apiKey)
+                if let reference = draftPresentation.secret.reference {
+                    LabeledContent(reference.label, value: reference.value)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                Text(draftPresentation.secret.helpText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-                if draftPresentation.showsCustomHTTPFields {
-                    Section(draftPresentation.customBodyTemplateLabel) {
+            if draftPresentation.showsCustomHTTPFields {
+                Section {
+                    DisclosureGroup(settingsString("settings.provider.advancedCustomHTTP")) {
                         TextEditor(text: $viewModel.draft.customBodyTemplate)
                             .font(.system(.body, design: .monospaced))
                             .frame(minHeight: 120)
                         TextField(draftPresentation.customResponsePathLabel, text: $viewModel.draft.customResponsePath)
                     }
                 }
+            }
 
-                Section(connectionPresentation.sectionTitle) {
-                    Button {
-                        Task {
-                            await viewModel.testDraftConnection()
-                        }
-                    } label: {
-                        Label(connectionPresentation.testButtonLabel, systemImage: "network")
+            Section(connectionPresentation.sectionTitle) {
+                Button {
+                    Task {
+                        await viewModel.testDraftConnection()
                     }
-                    .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
-
-                    if connectionPresentation.showsProgress {
-                        ProgressView()
-                    } else if let message = connectionPresentation.message {
-                        connectionStatusMessage(message)
-                    }
+                } label: {
+                    Label(connectionPresentation.testButtonLabel, systemImage: "network")
                 }
+                .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
 
-                if validationPresentation.isVisible {
-                    Section(validationPresentation.title) {
-                        ForEach(validationPresentation.messages, id: \.self) { error in
-                            Text(error)
-                                .foregroundStyle(.red)
-                        }
-                    }
+                Button {
+                    _ = viewModel.saveDraft()
+                } label: {
+                    Label(SettingsLocalization.string("settings.action.save"), systemImage: "square.and.arrow.down")
                 }
+                .disabled(viewModel.isPersistenceBlocked)
+                .keyboardShortcut("s", modifiers: [.command])
 
-                if let lastErrorMessage = lastErrorPresentation.message {
-                    Section(lastErrorPresentation.title) {
-                        Text(lastErrorMessage)
+                if connectionPresentation.showsProgress {
+                    ProgressView()
+                } else if let message = connectionPresentation.message {
+                    connectionStatusMessage(message)
+                }
+            }
+
+            if validationPresentation.isVisible {
+                Section(validationPresentation.title) {
+                    ForEach(validationPresentation.messages, id: \.self) { error in
+                        Text(error)
                             .foregroundStyle(.red)
                     }
                 }
             }
-            .formStyle(.grouped)
-            .toolbar {
-                Button {
-                    _ = viewModel.saveDraft()
-                } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
+
+            if let lastErrorMessage = lastErrorPresentation.message {
+                Section(lastErrorPresentation.title) {
+                    Text(lastErrorMessage)
+                        .foregroundStyle(.red)
                 }
-                .disabled(viewModel.isPersistenceBlocked)
-                .keyboardShortcut("s", modifiers: [.command])
             }
-            .padding()
         }
+    }
+
+    private var profileSelectionBinding: Binding<String?> {
+        Binding(
+            get: { viewModel.selectedProfileID },
+            set: { id in
+                if let id {
+                    viewModel.selectProfile(id: id)
+                }
+            }
+        )
     }
 
     private var cloudContinuationEnabledBinding: Binding<Bool> {
@@ -503,45 +506,51 @@ private struct PrivacySettingsView: View {
     @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
 
     var body: some View {
-        SettingsForm {
-            Section("Cloud Continuation") {
+        SettingsForm(title: SettingsSection.privacy.title) {
+            Section(settingsString("settings.privacy.section.cloud")) {
                 LabeledContent(
-                    "Provider calls",
-                    value: runtimePreferencesViewModel.preferences.cloudContinuationEnabled ? "Enabled for continuation" : "Disabled"
+                    settingsString("settings.privacy.providerCalls"),
+                    value: runtimePreferencesViewModel.preferences.cloudContinuationEnabled
+                        ? settingsString("settings.privacy.providerCalls.enabled")
+                        : settingsString("settings.privacy.providerCalls.disabled")
                 )
                 LabeledContent(
-                    "Local fallback",
-                    value: runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider ? "Enabled when no provider is configured" : "Disabled"
+                    settingsString("settings.privacy.localFallback"),
+                    value: runtimePreferencesViewModel.preferences.localContinuationEnabledWhenNoProvider
+                        ? settingsString("settings.privacy.localFallback.enabled")
+                        : settingsString("settings.privacy.localFallback.disabled")
                 )
             }
 
-            Section("Level 0 Local Path") {
-                LabeledContent("URLs and emails", value: "No provider call")
-                LabeledContent("Paths and commands", value: "No provider call")
-                LabeledContent("Code-like input", value: "No provider call")
-                LabeledContent("Terminal, iTerm, Xcode", value: "No provider call")
+            Section(settingsString("settings.privacy.section.level0")) {
+                LabeledContent(settingsString("settings.privacy.urlEmail"), value: settingsString("settings.privacy.localOnly"))
+                LabeledContent(settingsString("settings.privacy.pathCommand"), value: settingsString("settings.privacy.localOnly"))
+                LabeledContent(settingsString("settings.privacy.codeInput"), value: settingsString("settings.privacy.localOnly"))
+                LabeledContent("Terminal, iTerm, Xcode", value: settingsString("settings.privacy.localOnly"))
             }
 
-            Section("Technical Tokens") {
-                Text("API, JSON, macOS, InputMethodKit, snake_case, and camelCase are preserved by local protection rules.")
+            Section(settingsString("settings.privacy.section.technicalTokens")) {
+                Text(settingsString("settings.privacy.technicalTokens.note"))
                     .foregroundStyle(.secondary)
             }
         }
     }
 }
 
-private struct DebugInstallSettingsView: View {
+private struct DiagnosticsSettingsView: View {
     var body: some View {
-        SettingsForm {
-            Section("Local Development Flow") {
+        SettingsForm(title: SettingsSection.diagnostics.title) {
+            Section(settingsString("settings.diagnostics.section.local")) {
                 ForEach(DebugInstallGuidance.steps) { step in
                     InstallStepView(title: step.title, detail: step.detail)
                 }
             }
 
-            Section("Commands") {
-                ForEach(DebugInstallGuidance.commands, id: \.self) { command in
-                    MonospacedText(command)
+            Section {
+                DisclosureGroup(settingsString("settings.diagnostics.commands")) {
+                    ForEach(DebugInstallGuidance.commands, id: \.self) { command in
+                        MonospacedText(command)
+                    }
                 }
             }
         }
@@ -549,18 +558,30 @@ private struct DebugInstallSettingsView: View {
 }
 
 private struct SettingsForm<Content: View>: View {
+    let title: String
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
         self.content = content()
     }
 
     var body: some View {
-        Form {
-            content
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.title2.weight(.semibold))
+                .textSelection(.enabled)
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+
+            Form {
+                content
+            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
-        .padding()
+        .padding(.bottom, 12)
+        .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 

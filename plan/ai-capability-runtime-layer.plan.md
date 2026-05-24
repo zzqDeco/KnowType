@@ -2,16 +2,16 @@
 
 ## Summary
 
-KnowType now treats AI as a separate capability layer instead of embedding provider continuation inside the input-method session. The traditional Chinese input path remains first and deterministic; AI owns the fixed second candidate slot and updates asynchronously after local candidates are already visible.
+KnowType now treats AI as a separate capability layer instead of embedding provider continuation inside the input-method session. The Rime Chinese input path remains first and deterministic; AI owns the fixed second candidate slot and updates asynchronously after base candidates are already visible.
 
 Default candidate order:
 
-1. traditional candidate 1
+1. Rime candidate 1
 2. AI recommendation slot
-3. traditional candidate 2
-4. traditional candidate 3...
+3. Rime candidate 2
+4. Rime candidate 3...
 
-`Space` and `1` commit the traditional first candidate. `Tab` and `2` commit the AI recommendation only when it is ready. Pending, unavailable, or ineligible AI states do not block input and do not commit mock text.
+`Space` and ordinary digits stay reserved for Rime input. `Tab` or explicit AI shortcuts commit the AI recommendation only when it is ready. Pending, unavailable, or ineligible AI states do not block input and do not commit mock text.
 
 ## Scope
 

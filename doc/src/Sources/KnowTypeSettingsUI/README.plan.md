@@ -6,7 +6,7 @@ It is intentionally separate from `KnowTypeSettingsApp` so the standalone settin
 
 Current settings cover:
 
-- input mode defaults and input scheme;
+- input mode defaults for punctuation and symbol width;
 - candidate page size and panel layout preference;
 - local lexicon status and recommended lexicon installation;
 - provider profile editing and connection diagnostics;

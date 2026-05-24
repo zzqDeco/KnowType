@@ -8,41 +8,48 @@ struct DebugInstallStep: Equatable, Identifiable {
 }
 
 enum DebugInstallGuidance {
-    static let steps: [DebugInstallStep] = [
-        DebugInstallStep(
-            title: "Build and sign",
-            detail: "Run the input method bundle build script. It auto-selects an Apple Development signing identity when one is available, and falls back to ad-hoc signing only when none is found."
-        ),
-        DebugInstallStep(
-            title: "Install bundle",
-            detail: "Copy KnowType.app into ~/Library/Input Methods. The install script launches the installed app with an activation flag so registration, enabling, and selection happen from the app context."
-        ),
-        DebugInstallStep(
-            title: "Diagnose installation",
-            detail: "Run the read-only diagnostic to verify bundle metadata, signing, packaged resources, Text Input Source registration, local data paths, and optional Gatekeeper or sandbox log hints."
-        ),
-        DebugInstallStep(
-            title: "Request selection",
-            detail: "Activate the text app you want to test, then use the selection helper only as a preflight. Final acceptance still requires typing a real probe in that app."
-        ),
-        DebugInstallStep(
-            title: "Enable input source",
-            detail: "If macOS asks to allow 知键/KnowType as an input method, click Allow. Then open System Settings > Keyboard > Text Input > Input Sources and enable or select KnowType if it does not switch automatically."
-        ),
-        DebugInstallStep(
-            title: "Refresh registrar",
-            detail: "If macOS keeps an old registration, run the repair helper to remove stale LaunchServices records, deduplicate KnowType preference entries, and relaunch the installed input method app before retesting."
-        ),
-        DebugInstallStep(
-            title: "Inspect logs",
-            detail: "Use the diagnostic log mode, Console.app, or the log command to inspect KnowTypeInputMethodApp, Gatekeeper, and input-source sandbox messages during local smoke tests."
-        )
-    ]
+    static var steps: [DebugInstallStep] {
+        steps(preferredLanguages: Locale.preferredLanguages)
+    }
+
+    static func steps(preferredLanguages: [String]) -> [DebugInstallStep] {
+        [
+            DebugInstallStep(
+                title: SettingsLocalization.string("settings.diagnostics.step.build.title", preferredLanguages: preferredLanguages),
+                detail: SettingsLocalization.string("settings.diagnostics.step.build.detail", preferredLanguages: preferredLanguages)
+            ),
+            DebugInstallStep(
+                title: SettingsLocalization.string("settings.diagnostics.step.install.title", preferredLanguages: preferredLanguages),
+                detail: SettingsLocalization.string("settings.diagnostics.step.install.detail", preferredLanguages: preferredLanguages)
+            ),
+            DebugInstallStep(
+                title: SettingsLocalization.string("settings.diagnostics.step.diagnose.title", preferredLanguages: preferredLanguages),
+                detail: SettingsLocalization.string("settings.diagnostics.step.diagnose.detail", preferredLanguages: preferredLanguages)
+            ),
+            DebugInstallStep(
+                title: SettingsLocalization.string("settings.diagnostics.step.select.title", preferredLanguages: preferredLanguages),
+                detail: SettingsLocalization.string("settings.diagnostics.step.select.detail", preferredLanguages: preferredLanguages)
+            ),
+            DebugInstallStep(
+                title: SettingsLocalization.string("settings.diagnostics.step.enable.title", preferredLanguages: preferredLanguages),
+                detail: SettingsLocalization.string("settings.diagnostics.step.enable.detail", preferredLanguages: preferredLanguages)
+            ),
+            DebugInstallStep(
+                title: SettingsLocalization.string("settings.diagnostics.step.refresh.title", preferredLanguages: preferredLanguages),
+                detail: SettingsLocalization.string("settings.diagnostics.step.refresh.detail", preferredLanguages: preferredLanguages)
+            ),
+            DebugInstallStep(
+                title: SettingsLocalization.string("settings.diagnostics.step.logs.title", preferredLanguages: preferredLanguages),
+                detail: SettingsLocalization.string("settings.diagnostics.step.logs.detail", preferredLanguages: preferredLanguages)
+            )
+        ]
+    }
 
     static let commands: [String] = [
         "./scripts/build-inputmethod-bundle.sh",
         "CODESIGN_IDENTITY=\"Apple Development: Name (TEAMID)\" ./scripts/install-inputmethod.sh",
         "./scripts/install-inputmethod.sh",
+        "./scripts/install-inputmethod.sh --with-prefpane",
         "./scripts/diagnose-inputmethod.sh --strict",
         "./scripts/diagnose-inputmethod.sh --strict --logs",
         "./scripts/repair-inputmethod-selection.sh",

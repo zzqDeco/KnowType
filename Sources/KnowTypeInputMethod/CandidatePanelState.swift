@@ -79,7 +79,8 @@ public struct CandidatePanelState: Sendable, Equatable {
         isDisplayable: Bool = true,
         pageSize: Int = CandidatePanelPagingState.defaultPageSize,
         layoutMode: CandidatePanelLayoutMode = .adaptive,
-        aiRecommendation: AIRecommendationState = .idle
+        aiRecommendation: AIRecommendationState = .idle,
+        preferredSelection: CandidatePanelSelection? = nil
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
         let continuationCandidates = suggestion?.continuationCandidates ?? []
@@ -96,7 +97,8 @@ public struct CandidatePanelState: Sendable, Equatable {
             rawInput: rawInput,
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates,
-            viewModel: viewModel
+            viewModel: viewModel,
+            preferredSelection: preferredSelection
         ) : nil
         let paging = pagingState(for: selection, in: viewModel, pageSize: pageSize)
         windowState = CandidatePanelWindowState(
@@ -119,33 +121,63 @@ public struct CandidatePanelState: Sendable, Equatable {
         guard windowState.isVisible else {
             return false
         }
-        let rows = selectableRows()
-        guard !rows.isEmpty else {
+        let renderedRows = renderRows()
+        let selectableRows = selectableRows(in: renderedRows)
+        guard !selectableRows.isEmpty else {
             return false
         }
 
-        let currentIndex = windowState.selection.flatMap { rows.firstIndex(of: $0) } ?? windowState.paging.visibleRange(totalRows: rows.count).lowerBound
-        let nextIndex: Int
+        let currentRenderedIndex = windowState.selection
+            .flatMap { renderedRows.firstIndex(of: .some($0)) }
+            ?? windowState.paging.visibleRange(totalRows: renderedRows.count).lowerBound
+        let nextRenderedIndex: Int
         switch navigation {
         case .pageDown:
-            nextIndex = firstIndex(
+            nextRenderedIndex = firstSelectableRenderedIndex(
                 onPage: windowState.paging.currentPage + 1,
-                currentIndex: currentIndex,
-                totalRows: rows.count
+                currentRenderedIndex: currentRenderedIndex,
+                renderedRows: renderedRows
             )
         case .pageUp:
-            nextIndex = firstIndex(
+            nextRenderedIndex = firstSelectableRenderedIndex(
                 onPage: windowState.paging.currentPage - 1,
-                currentIndex: currentIndex,
-                totalRows: rows.count
+                currentRenderedIndex: currentRenderedIndex,
+                renderedRows: renderedRows
             )
         case .down, .right:
-            nextIndex = clampedIndex(currentIndex + 1, upperBound: rows.count - 1)
+            nextRenderedIndex = adjacentSelectableRenderedIndex(
+                from: currentRenderedIndex,
+                step: 1,
+                renderedRows: renderedRows
+            )
         case .up, .left:
-            nextIndex = clampedIndex(currentIndex - 1, upperBound: rows.count - 1)
+            nextRenderedIndex = adjacentSelectableRenderedIndex(
+                from: currentRenderedIndex,
+                step: -1,
+                renderedRows: renderedRows
+            )
         }
-        windowState.selection = rows[nextIndex]
-        windowState.paging = pagingState(forRowIndex: nextIndex, pageSize: windowState.paging.pageSize)
+        guard renderedRows.indices.contains(nextRenderedIndex),
+              let selection = renderedRows[nextRenderedIndex] else {
+            return false
+        }
+        windowState.selection = selection
+        windowState.paging = pagingState(forRowIndex: nextRenderedIndex, pageSize: windowState.paging.pageSize)
+        return true
+    }
+
+    @discardableResult
+    public mutating func selectVisibleRow(_ selection: CandidatePanelSelection) -> Bool {
+        guard windowState.isVisible else {
+            return false
+        }
+        let renderedRows = renderRows()
+        let visibleRange = windowState.paging.visibleRange(totalRows: renderedRows.count)
+        guard let rowIndex = renderedRows[visibleRange].firstIndex(of: .some(selection)) else {
+            return false
+        }
+        windowState.selection = selection
+        windowState.paging = pagingState(forRowIndex: rowIndex, pageSize: windowState.paging.pageSize)
         return true
     }
 
@@ -163,7 +195,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         }
         let selection = visibleRows[shortcutIndex]
         windowState.selection = selection
-        if let rowIndex = selectableRows().firstIndex(of: selection) {
+        if let rowIndex = renderRows().firstIndex(of: .some(selection)) {
             windowState.paging = pagingState(forRowIndex: rowIndex, pageSize: windowState.paging.pageSize)
         }
         return selection
@@ -194,8 +226,13 @@ public struct CandidatePanelState: Sendable, Equatable {
         rawInput: String,
         prefixCandidates: [CorrectionCandidate],
         continuationCandidates: [ContinuationCandidate],
-        viewModel: CandidatePanelViewModel
+        viewModel: CandidatePanelViewModel,
+        preferredSelection: CandidatePanelSelection?
     ) -> CandidatePanelSelection? {
+        if let preferredSelection,
+           canPreserveSelection(preferredSelection, in: viewModel) {
+            return preferredSelection
+        }
         if windowState.viewModel.rawInput == rawInput,
            let selection = windowState.selection,
            canPreserveSelection(selection, in: viewModel) {
@@ -213,7 +250,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         _ selection: CandidatePanelSelection,
         in viewModel: CandidatePanelViewModel
     ) -> Bool {
-        guard selectableRows(in: viewModel).contains(selection) else {
+        guard renderRows(in: viewModel).contains(.some(selection)) else {
             return false
         }
 
@@ -243,12 +280,25 @@ public struct CandidatePanelState: Sendable, Equatable {
         }
     }
 
-    private func selectableRows() -> [CandidatePanelSelection] {
-        let viewModel = windowState.viewModel
+    private func renderRows() -> [CandidatePanelSelection?] {
+        renderRows(in: windowState.viewModel)
+    }
+
+    private func selectableRows(in renderedRows: [CandidatePanelSelection?]) -> [CandidatePanelSelection] {
+        renderedRows.compactMap { $0 }
+    }
+
+    private func visibleSelectableRows() -> [CandidatePanelSelection] {
+        let rows = renderRows()
+        let range = windowState.paging.visibleRange(totalRows: rows.count)
+        return rows[range].compactMap { $0 }
+    }
+
+    private func renderRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection?] {
         let hasSuggestions = !viewModel.prefixCandidates.isEmpty
             || !viewModel.continuationCandidates.isEmpty
             || viewModel.aiRecommendation.displayText != nil
-        var rows: [CandidatePanelSelection] = []
+        var rows: [CandidatePanelSelection?] = []
 
         if !viewModel.rawInput.isEmpty && !hasSuggestions {
             rows.append(.rawInput)
@@ -257,11 +307,11 @@ public struct CandidatePanelState: Sendable, Equatable {
         if let first = prefixRows.first {
             rows.append(first)
             if viewModel.aiRecommendation.displayText != nil {
-                rows.append(.aiRecommendation)
+                rows.append(viewModel.aiRecommendation.isSelectableRecommendation ? .aiRecommendation : nil)
             }
-            rows.append(contentsOf: prefixRows.dropFirst())
+            rows.append(contentsOf: prefixRows.dropFirst().map { Optional.some($0) })
         } else if viewModel.aiRecommendation.displayText != nil {
-            rows.append(.aiRecommendation)
+            rows.append(viewModel.aiRecommendation.isSelectableRecommendation ? .aiRecommendation : nil)
         }
         rows.append(
             contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
@@ -269,26 +319,66 @@ public struct CandidatePanelState: Sendable, Equatable {
         return rows
     }
 
-    private func visibleSelectableRows() -> [CandidatePanelSelection] {
-        let rows = selectableRows()
-        let range = windowState.paging.visibleRange(totalRows: rows.count)
-        return Array(rows[range])
-    }
-
-    private func clampedIndex(_ index: Int, upperBound: Int) -> Int {
-        min(max(index, 0), upperBound)
-    }
-
-    private func firstIndex(onPage page: Int, currentIndex: Int, totalRows: Int) -> Int {
-        let pageCount = windowState.paging.pageCount(totalRows: totalRows)
+    private func firstSelectableRenderedIndex(
+        onPage page: Int,
+        currentRenderedIndex: Int,
+        renderedRows: [CandidatePanelSelection?]
+    ) -> Int {
+        let pageCount = windowState.paging.pageCount(totalRows: renderedRows.count)
         let targetPage = min(max(page, 0), max(pageCount - 1, 0))
         guard targetPage != windowState.paging.currentPage else {
-            return currentIndex
+            return currentRenderedIndex
         }
         let currentPageStart = windowState.paging.currentPage * windowState.paging.pageSize
-        let currentOffset = max(0, currentIndex - currentPageStart)
+        let currentOffset = max(0, currentRenderedIndex - currentPageStart)
         let targetPageStart = targetPage * windowState.paging.pageSize
-        return min(targetPageStart + currentOffset, max(totalRows - 1, 0))
+        let targetPageEnd = min(targetPageStart + windowState.paging.pageSize, renderedRows.count)
+        let preferredIndex = min(targetPageStart + currentOffset, max(targetPageEnd - 1, targetPageStart))
+        if let forward = firstSelectableIndex(
+            in: renderedRows,
+            range: preferredIndex..<targetPageEnd,
+            direction: 1
+        ) {
+            return forward
+        }
+        if let backward = firstSelectableIndex(
+            in: renderedRows,
+            range: targetPageStart...preferredIndex,
+            direction: -1
+        ) {
+            return backward
+        }
+        return currentRenderedIndex
+    }
+
+    private func adjacentSelectableRenderedIndex(
+        from currentRenderedIndex: Int,
+        step: Int,
+        renderedRows: [CandidatePanelSelection?]
+    ) -> Int {
+        guard step != 0 else {
+            return currentRenderedIndex
+        }
+        var index = currentRenderedIndex + step
+        while renderedRows.indices.contains(index) {
+            if renderedRows[index] != nil {
+                return index
+            }
+            index += step
+        }
+        return currentRenderedIndex
+    }
+
+    private func firstSelectableIndex<R: Sequence>(
+        in renderedRows: [CandidatePanelSelection?],
+        range: R,
+        direction: Int
+    ) -> Int? where R.Element == Int {
+        var indexes = Array(range)
+        if direction < 0 {
+            indexes.reverse()
+        }
+        return indexes.first { renderedRows.indices.contains($0) && renderedRows[$0] != nil }
     }
 
     private func pagingState(
@@ -296,9 +386,9 @@ public struct CandidatePanelState: Sendable, Equatable {
         in viewModel: CandidatePanelViewModel,
         pageSize: Int
     ) -> CandidatePanelPagingState {
-        let rows = selectableRows(in: viewModel)
+        let rows = renderRows(in: viewModel)
         guard let selection,
-              let rowIndex = rows.firstIndex(of: selection) else {
+              let rowIndex = rows.firstIndex(of: .some(selection)) else {
             return CandidatePanelPagingState(pageSize: pageSize)
         }
         return pagingState(forRowIndex: rowIndex, pageSize: pageSize)
@@ -309,31 +399,6 @@ public struct CandidatePanelState: Sendable, Equatable {
             currentPage: rowIndex / max(1, pageSize),
             pageSize: pageSize
         )
-    }
-
-    private func selectableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection] {
-        let hasSuggestions = !viewModel.prefixCandidates.isEmpty
-            || !viewModel.continuationCandidates.isEmpty
-            || viewModel.aiRecommendation.displayText != nil
-        var rows: [CandidatePanelSelection] = []
-
-        if !viewModel.rawInput.isEmpty && !hasSuggestions {
-            rows.append(.rawInput)
-        }
-        let prefixRows = prefixRows(in: viewModel)
-        if let first = prefixRows.first {
-            rows.append(first)
-            if viewModel.aiRecommendation.displayText != nil {
-                rows.append(.aiRecommendation)
-            }
-            rows.append(contentsOf: prefixRows.dropFirst())
-        } else if viewModel.aiRecommendation.displayText != nil {
-            rows.append(.aiRecommendation)
-        }
-        rows.append(
-            contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
-        )
-        return rows
     }
 
     private func prefixRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection] {
@@ -363,7 +428,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         case .prefixCandidate, .fullCandidate, .segmentCandidate:
             return true
         case .aiRecommendation:
-            return viewModel.aiRecommendation.isSelectableRecommendation
+            return false
         case .rawInput, .continuationCandidate:
             return false
         }

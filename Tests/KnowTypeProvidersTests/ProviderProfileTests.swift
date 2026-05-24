@@ -270,7 +270,28 @@ final class ProviderProfileTests: XCTestCase {
             )
             XCTFail("Expected empty diagnostic response to fail")
         } catch {
-            XCTAssertEqual(error as? ProviderError, .invalidResponse("diagnostic returned no usable candidates"))
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("diagnostic returned no usable continuation candidates"))
+        }
+    }
+
+    func testProviderConnectionDiagnosticRejectsCandidatesThatRepeatLockedPrefixOnly() async throws {
+        let diagnostic = ProviderConnectionDiagnostic(providerBuilder: { _ in
+            ResponseProvider(providerName: "diagnostic-stub", response: LLMResponse(candidates: [
+                LLMCandidate(text: "KnowType")
+            ]))
+        })
+
+        do {
+            _ = try await diagnostic.test(
+                configuration: ProviderConfiguration(
+                    kind: .openAIChat,
+                    baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                    model: ""
+                )
+            )
+            XCTFail("Expected unusable continuation to fail")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .invalidResponse("diagnostic returned no usable continuation candidates"))
         }
     }
 

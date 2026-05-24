@@ -82,14 +82,14 @@ public struct InputMethodPipeline: Sendable {
         for locked: LockedPrefix?,
         context: InputContext
     ) async -> [ContinuationCandidate] {
-        guard let locked,
-              !TextProtection.requiresNoCorrection(locked.text, appBundleID: context.appBundleID),
-              !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) else {
+        guard let locked else {
             return []
         }
 
         if hasProvider {
-            guard runtimePreferences.cloudContinuationEnabled else {
+            guard runtimePreferences.cloudContinuationEnabled,
+                  !TextProtection.containsSecretLikeContent(locked.text),
+                  !TextProtection.containsSecretLikeContent(context.rawInput) else {
                 return []
             }
             return await continuationEngine.continuations(
@@ -100,7 +100,9 @@ public struct InputMethodPipeline: Sendable {
             )
         }
 
-        guard runtimePreferences.localContinuationEnabledWhenNoProvider else {
+        guard runtimePreferences.localContinuationEnabledWhenNoProvider,
+              !TextProtection.requiresNoCorrection(locked.text, appBundleID: context.appBundleID),
+              !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) else {
             return []
         }
         return continuationEngine.fallbackContinuations(

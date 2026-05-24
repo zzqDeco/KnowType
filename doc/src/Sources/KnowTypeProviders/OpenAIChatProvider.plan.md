@@ -17,6 +17,12 @@
 - Remote OpenAI-compatible profiles require an explicit model ID.
 - The adapter builds non-streaming requests and normalizes text into
   `LLMResponse`.
+- Requests prefer `response_format.type=json_schema` with `strict=true`.
+  `json_object` is only a compatibility fallback for OpenAI-compatible
+  runtimes that reject the schema field.
+- Fallback capability is cached by provider/base URL/model/auth fingerprint so
+  the input method does not pay repeated failed schema preflights in a session
+  without contaminating another API key or tenant on the same endpoint.
 
 ## Tests
 

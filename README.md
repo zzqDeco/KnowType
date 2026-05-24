@@ -42,22 +42,22 @@ polish.
 
 ## Features
 
-- Chinese input first: pinyin decoding, compact pinyin segmentation, typo
-  normalization, same-pinyin candidates, common initial abbreviations, and
-  partial-syllable input.
+- Chinese input first: the production IMK hot path uses bundled `librime` for
+  synchronous pinyin conversion, Space commit, number selection, and paging.
 - Local candidate learning: recent prefix choices can boost local ranking across
   input-method restarts without being sent to providers.
-- Prefix-locked AI recommendation: the first candidate stays traditional input,
+- Prefix-locked AI recommendation: the first candidate stays Rime conversion,
   the second slot is reserved for AI, and explicit polish is the only rewrite
   path.
 - macOS input method flow: marked text, candidate selection, paging,
-  punctuation handling, and a custom AppKit candidate panel anchored near the
-  caret.
+  punctuation handling, and a compact native-style AppKit candidate panel that
+  stays above Spotlight/search overlays.
 - Provider compatibility: OpenAI-compatible chat, OpenAI Responses, Anthropic
   Messages, Gemini native, Ollama native, and custom HTTP profiles normalize
   into one provider interface.
-- Privacy guardrails: URLs, emails, paths, commands, code-like text, and
-  protected app contexts use the no-provider Level 0 path.
+- Privacy guardrails: correction protects URLs, emails, paths, commands,
+  code-like text, and protected app contexts from rewrite; real-time AI is hard
+  disabled only for suspected secrets and filters secret-like candidate hints.
 - Local lexicons: bundled seed lexicon plus user-owned JSON/TSV resources and a
   managed Rime Pinyin Simplified install path.
 
@@ -103,10 +103,47 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 Build and install the local development bundle:
 
 ```bash
-./scripts/build-inputmethod-bundle.sh
+./scripts/build-inputmethod-bundle.sh --configuration release
 ./scripts/install-inputmethod.sh
 ./scripts/diagnose-inputmethod.sh
 ```
+
+The local installer refreshes the traditional InputMethodKit app registration,
+purges stale `.Mode` development state, restores the System Settings
+third-party parent anchor plus the visible `.Hans` mode, and launches the
+installed app so registration and best-effort selection run from the app
+context macOS uses for input switching. KnowType follows the mature component
+mode shape used by Squirrel, McBopomofo, and macSKK: the parent id is
+`com.knowtype.inputmethod.KnowType`, and the visible input source is
+`com.knowtype.inputmethod.KnowType.Hans`.
+
+`scripts/install-inputmethod.sh` defaults to a release build so local typing
+tests exercise the optimized hot path. Rime runtime files are packaged inside
+`KnowType.app`; if they are missing or fail to load, KnowType keeps raw input
+usable and reports degraded conversion state instead of falling back to the
+retired clean-room converter.
+
+KnowType-specific settings follow the native IMK input-method pattern used by
+McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
+`KnowType Settings...`. It opens a macOS-native sidebar and grouped settings
+window using Simplified Chinese on Chinese macOS locales and English fallback
+strings on non-Chinese locales. The local install does not install a standalone
+settings app. The default install removes any stale local compatibility
+`KnowType.prefPane` so it cannot drift out of sync. A matching compatibility pane
+is only built and installed when `./scripts/install-inputmethod.sh --with-prefpane`
+is used. If System Settings still shows a `KnowType` sidebar entry after a
+default install, it is stale macOS PreferencePane cache state; run the install
+script again or `./scripts/uninstall-inputmethod.sh` to refresh the cache, then
+reopen System Settings.
+
+After the first install or a mode-id migration, macOS may still require the
+System Settings input-source approval path. Open System Settings > Keyboard >
+Input Sources, remove stale KnowType rows, add `知键` / `KnowType` again, and
+click Allow if macOS asks. If the menu still shows stale entries, log out and
+back in to clear the Text Input Source cache. This follows the same boundary
+used by mature IMK input methods: installation uses TIS registration and
+enablement, while System Settings writes the protected third-party input-source
+approval rows.
 
 Select KnowType in the active target app when needed:
 
@@ -127,9 +164,13 @@ and manual acceptance flow.
 
 For a GitHub Release zip, verify the downloaded archive with the published
 `.sha256` file first. Then expand it, copy `KnowType.app` to
-`~/Library/Input Methods/` and `KnowType.prefPane` to
-`~/Library/PreferencePanes/`, and run the same local diagnostics/manual typing
-acceptance from a source checkout when available.
+`~/Library/Input Methods/`, and use the input menu's `KnowType Settings...`
+entry for configuration. `KnowType.prefPane` is a compatibility settings host
+and may be copied to `~/Library/PreferencePanes/` when that fallback is needed.
+Do not use a stale System Settings sidebar entry unless the matching pane is
+installed.
+Run the same local diagnostics/manual typing acceptance from a source checkout
+when available.
 
 ## Configuration
 
@@ -171,38 +212,62 @@ OpenAI-compatible profiles may leave the model blank for `/v1/models`
 discovery.
 
 AI context files live under `~/.knowtype/`. `ENV.md` stores local context
-memory for the AI recommendation slot, and `CORRECTION.md` stores user-editable
-AI correction instructions. Traditional input does not depend on either file.
+memory for the AI recommendation slot, `CORRECTION.md` stores user-editable AI
+correction instructions, and `LEXICAL_PROFILE.md` mirrors the local top-K
+lexical profile built from Rime userdb frequency plus recent KnowType commits
+and selections. The canonical lexical profile JSON lives under
+`~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
+on these files.
+Real-time AI recommendations use a task-specific suffix-generation prompt, have
+a 10-second runtime timeout, prefer provider-level structured JSON schema output
+when available, and emit privacy-preserving substate diagnostics through macOS
+unified logging. While Rime is composing, the current page of Rime candidates is
+sent as contextual hints only; unselected candidates are not treated as the
+locked prefix. If no locked prefix exists yet, the AI response is a full
+commit-ready recommendation rather than a suffix attached to the first Rime
+candidate. The logs distinguish schema fallback, structured decode failures,
+prefix-lock sanitizer rejections, and too-short prefixes without recording raw
+text. To inspect them, run
+`log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`.
 
 ## Input Behavior
 
 | Shortcut | Behavior |
 |---|---|
-| `Space` | Commit the selected visible full prefix candidate, or apply the selected segment inside the active composition. |
+| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, insert a normal space. |
+| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, insert ordinary digits. |
+| Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the current Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. Left/up from the first row lands on the previous page's last row. |
 | `Return` / `Enter` | Commit the original raw composition. |
-| `Tab` / `2` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
-| `0` | Commit the raw composition when correction candidates are visible. |
-| Plain punctuation | Commit composition plus punctuation, or insert punctuation directly with no composition. |
+| `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
+| `0` | Commit the raw composition when correction candidates are visible; with no active composition, insert `0`. |
+| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation or insert punctuation directly when Rime declines. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
-| `Option + number` | Commit the selected prefix plus the mapped continuation. |
+| `Option + 1` | Commit the ready AI recommendation explicitly. |
+| `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
-The candidate panel shows prefix candidates first, continuation candidates after
-them, and raw input only when no suggestion is available. When a provider is
-configured, local prefix candidates appear immediately and provider-backed
-continuations update asynchronously. Provider failures do not show fixed local
-fallback text as if it were AI output.
+The candidate panel shows Rime prefix candidates, a fixed AI recommendation
+state row, and raw input only when no suggestion is available. It is a compact
+AppKit panel using macOS material, system highlight colors, mouse hover/click
+selection, scroll paging, and row accessibility labels. When a provider is
+configured, Rime prefix candidates appear immediately and provider-backed AI
+recommendations update asynchronously. Provider failures do not show fixed
+local fallback text as if it were AI output.
 
-The first candidate slot is reserved for traditional input. The second slot is
+The first candidate slot is reserved for Rime conversion. The second slot is
 reserved for AI recommendation state, so async provider results update that slot
-without reordering the local candidate list.
+without reordering the Rime candidate list. Ready AI uses Tab or explicit
+Option-number rather than ordinary digit shortcuts. Pending, unavailable, or
+ineligible AI states are shown as muted status rows without numeric shortcuts or
+click commit behavior.
 
 ## Privacy
 
-Level 0 input must not call cloud providers. It uses the no-provider path and
-clears continuation candidates.
+Level 0 correction protects text that should usually commit unchanged. It
+prevents correction from rewriting protected content such as URLs, paths,
+commands, code-like text, and protected app contexts.
 
-Protected examples include:
+Correction-protected examples include:
 
 - URLs and `www.` addresses
 - email-like input
@@ -210,6 +275,12 @@ Protected examples include:
 - command-like input such as `swift test` or `git status`
 - code-like snippets containing braces, semicolons, or `=>`
 - Terminal, iTerm, and Xcode sessions by bundle identifier
+
+Real-time AI recommendation uses a narrower cloud privacy gate: `AI 已禁用`
+appears only when raw input or confirmed prefix looks like a credential, such as
+API keys, bearer tokens, JWTs, private keys, or password/token assignments.
+Secret-like Rime candidate hints are filtered without disabling the whole
+request.
 
 Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`,
 `InputMethodKit`, `snake_case`, and `camelCase` are preserved or canonicalized.
@@ -234,8 +305,8 @@ Sources/KnowTypeAI/             AI recommendation, context memory, correction in
 Sources/KnowTypeInputMethod/    IMK controller, session actions, candidate panel
 Sources/KnowTypeInputMethodApp/ Local macOS input-method app entry point
 Sources/KnowTypeSettingsUI/     Shared SwiftUI settings UI
-Sources/KnowTypeSettingsApp/    Standalone settings app host
-Sources/KnowTypePreferencePane/ System Settings PreferencePane host
+Sources/KnowTypeSettingsApp/    Developer preview settings app host
+Sources/KnowTypePreferencePane/ Compatibility PreferencePane host
 Tests/                          Unit tests
 doc/                            Current engineering documentation
 plan/                           Active and recently delivered implementation plans
@@ -250,7 +321,8 @@ Branch workflow:
   `refactor/<desc>`, `test/<desc>`, `release/<version>`
 
 Use Conventional Commits and open topic PRs into `dev` first. For code changes,
-run `swift test`. For documentation-only changes, run at least
+run `swift test`; for input-method hot-path changes also run
+`./scripts/perf-input-hotpath.sh`. For documentation-only changes, run at least
 `git diff --check` and keep indexes in `doc/` and `plan/` synchronized.
 
 ## Roadmap / Non-Goals

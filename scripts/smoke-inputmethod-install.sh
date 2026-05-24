@@ -3,21 +3,28 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLIST_BUDDY="/usr/libexec/PlistBuddy"
+source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
+WITH_PREFPANE=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/smoke-inputmethod-install.sh
+Usage: scripts/smoke-inputmethod-install.sh [--with-prefpane]
 
 Runs deterministic install/profile smoke checks without installing KnowType,
 selecting an input source, or installing a configuration profile.
 
 Options:
+  --with-prefpane  Also build and validate the compatibility KnowType.prefPane.
   -h, --help  Show this help.
 EOF
 }
 
 while (($# > 0)); do
   case "$1" in
+    --with-prefpane)
+      WITH_PREFPANE=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -56,6 +63,18 @@ assert_contains() {
 assert_file() {
   local path="$1"
   [[ -f "$path" ]] || die "missing file: $path"
+}
+
+assert_file_any() {
+  local label="$1"
+  shift
+  local path
+  for path in "$@"; do
+    if [[ -f "$path" ]]; then
+      return 0
+    fi
+  done
+  die "missing file for $label; checked: $*"
 }
 
 assert_dir() {
@@ -122,6 +141,7 @@ help_scripts=(
   "$ROOT_DIR/scripts/install-inputmethod.sh"
   "$ROOT_DIR/scripts/install-lexicon-pack.sh"
   "$ROOT_DIR/scripts/package-release.sh"
+  "$ROOT_DIR/scripts/perf-input-hotpath.sh"
   "$ROOT_DIR/scripts/repair-inputmethod-selection.sh"
   "$ROOT_DIR/scripts/select-inputmethod.sh"
   "$ROOT_DIR/scripts/smoke-inputmethod-install.sh"
@@ -135,6 +155,55 @@ done
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 declare -F knowtype_inputsource_tool >/dev/null ||
   die "scripts/lib/inputsource-tool.sh did not load knowtype_inputsource_tool"
+source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
+declare -F knowtype_find_local_inputmethod_bundle_paths >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load duplicate discovery helpers"
+declare -F knowtype_remove_local_inputmethod_bundle_if_safe >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load safe removal helpers"
+declare -F knowtype_clean_preferencepane_caches >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
+
+cache_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-prefpane-cache-smoke.XXXXXX")"
+cache_stale="$cache_tmp_dir/com.apple.systemsettings.menucache"
+cache_clean="$cache_tmp_dir/com.apple.preferencepanes.usercache"
+cache_unrelated="$cache_tmp_dir/com.apple.preferencepanes.unrelated"
+cache_regex_false_positive="$cache_tmp_dir/com.apple.preferencepanes.regex-like"
+printf 'label=KnowType id=com.knowtype.preferencepane path=KnowType.prefPane\n' >"$cache_stale"
+printf 'label=Keyboard id=com.apple.Keyboard-Settings.extension\n' >"$cache_clean"
+printf 'label=KnowType recent search text without prefpane identity\n' >"$cache_unrelated"
+printf 'id=comXknowtypeXpreferencepane path=KnowTypeXprefPane\n' >"$cache_regex_false_positive"
+previous_cache_paths="${KNOWTYPE_PREFPANE_CACHE_PATHS-}"
+export KNOWTYPE_PREFPANE_CACHE_PATHS="$cache_stale:$cache_clean:$cache_unrelated:$cache_regex_false_positive"
+knowtype_preferencepane_cache_has_identity ||
+  die "PreferencePane cache helper did not detect stale KnowType metadata"
+cache_dry_run_output="$(knowtype_clean_preferencepane_caches 1)"
+assert_contains "$cache_dry_run_output" "$cache_stale" "PreferencePane cache dry run output"
+if grep -Fq "$cache_unrelated" <<<"$cache_dry_run_output"; then
+  die "PreferencePane cache dry run treated unrelated KnowType text as stale prefPane metadata"
+fi
+if grep -Fq "$cache_regex_false_positive" <<<"$cache_dry_run_output"; then
+  die "PreferencePane cache dry run treated regex-like text as stale prefPane metadata"
+fi
+assert_file "$cache_stale"
+assert_file "$cache_clean"
+assert_file "$cache_unrelated"
+assert_file "$cache_regex_false_positive"
+knowtype_clean_preferencepane_caches 0 >/dev/null
+[[ ! -e "$cache_stale" ]] ||
+  die "PreferencePane cache helper did not remove stale KnowType cache"
+assert_file "$cache_clean"
+assert_file "$cache_unrelated"
+assert_file "$cache_regex_false_positive"
+if [[ -n "$previous_cache_paths" ]]; then
+  export KNOWTYPE_PREFPANE_CACHE_PATHS="$previous_cache_paths"
+else
+  unset KNOWTYPE_PREFPANE_CACHE_PATHS
+fi
+rm -rf "$cache_tmp_dir"
+
+if grep -Fq 'bundle.load()' "$ROOT_DIR/scripts/diagnose-inputmethod.sh"; then
+  die "diagnostics must not execute PreferencePane bundle code while inspecting install state"
+fi
 
 bundle_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"
@@ -144,42 +213,72 @@ assert_file "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp"
 [[ -x "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" ]] ||
   die "input-method executable is not executable"
 assert_dir "$bundle_path/Contents/Resources/KnowType_KnowTypeCore.bundle"
+assert_dir "$bundle_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
 assert_file "$bundle_path/Contents/Resources/KnowTypeInputMethodIcon.tiff"
+assert_file "$bundle_path/Contents/Frameworks/librime.1.dylib"
+assert_dir "$bundle_path/Contents/Resources/rime-data"
+assert_file "$bundle_path/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
+assert_file "$bundle_path/Contents/Resources/rime-data/pinyin_simp.dict.yaml"
 assert_equals "com.knowtype.inputmethod.KnowType" \
   "$(plist_read ":CFBundleIdentifier" "$bundle_path/Contents/Info.plist")" \
   "CFBundleIdentifier"
+assert_equals "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+  "$(plist_read ":TISInputSourceID" "$bundle_path/Contents/Info.plist")" \
+  "parent TISInputSourceID"
+assert_equals "com.knowtype.inputmethod.KnowType.Hans" "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" "active input mode id"
+assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
+  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:TISInputSourceID" "$bundle_path/Contents/Info.plist")" \
+  "active component mode TISInputSourceID"
+assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
+  "$(plist_read ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$bundle_path/Contents/Info.plist")" \
+  "visible component mode order"
+assert_equals "K" \
+  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:tsInputModeKeyEquivalentKey" "$bundle_path/Contents/Info.plist")" \
+  "component mode shortcut key"
+assert_equals "4608" \
+  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:tsInputModeKeyEquivalentModifiersKey" "$bundle_path/Contents/Info.plist")" \
+  "component mode shortcut modifiers"
 assert_equals "KnowTypeInputMethodApp" \
   "$(plist_read ":CFBundleExecutable" "$bundle_path/Contents/Info.plist")" \
   "CFBundleExecutable"
+"$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rime-smoke >/dev/null ||
+  die "bundled Rime runtime smoke failed"
 
-prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"
-assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"
-assert_dir "$prefpane_path"
-assert_file "$prefpane_path/Contents/Info.plist"
-assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
-assert_file "$prefpane_path/Contents/Frameworks/libKnowTypePreferencePane.dylib"
-[[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
-  die "PreferencePane executable is not executable"
-if command -v otool >/dev/null 2>&1; then
-  otool -hv "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "BUNDLE" ||
-    die "PreferencePane executable is not an MH_BUNDLE"
-  otool -L "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "@rpath/libKnowTypePreferencePane.dylib" ||
-    die "PreferencePane executable does not load the SwiftPM preference pane library"
+if (( WITH_PREFPANE == 1 )); then
+  prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"
+  assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"
+  assert_dir "$prefpane_path"
+  assert_file "$prefpane_path/Contents/Info.plist"
+  assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
+  assert_file "$prefpane_path/Contents/Frameworks/libKnowTypePreferencePane.dylib"
+  assert_dir "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
+  assert_file "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/en.lproj/Localizable.strings"
+  assert_file_any "zh-Hans settings localization" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/zh-Hans.lproj/Localizable.strings" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/zh-hans.lproj/Localizable.strings"
+  [[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
+    die "PreferencePane executable is not executable"
+  if command -v otool >/dev/null 2>&1; then
+    otool -hv "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "BUNDLE" ||
+      die "PreferencePane executable is not an MH_BUNDLE"
+    otool -L "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" | grep -q "@rpath/libKnowTypePreferencePane.dylib" ||
+      die "PreferencePane executable does not load the SwiftPM preference pane library"
+  fi
+  principal_class="$(
+    PREFPANE_PATH="$prefpane_path" swift -e 'import Foundation; let path = ProcessInfo.processInfo.environment["PREFPANE_PATH"]!; guard let bundle = Bundle(url: URL(fileURLWithPath: path)), bundle.load() else { fatalError("PreferencePane bundle did not load") }; print(String(describing: bundle.principalClass))'
+  )"
+  [[ "$principal_class" == *"KnowTypePreferencePane"* ]] ||
+    die "PreferencePane principal class did not resolve"
+  assert_equals "com.knowtype.preferencepane" \
+    "$(plist_read ":CFBundleIdentifier" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane CFBundleIdentifier"
+  assert_equals "KnowTypePreferencePane" \
+    "$(plist_read ":CFBundleExecutable" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane CFBundleExecutable"
+  assert_equals "KnowTypePreferencePane" \
+    "$(plist_read ":NSPrincipalClass" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane NSPrincipalClass"
 fi
-principal_class="$(
-  PREFPANE_PATH="$prefpane_path" swift -e 'import Foundation; let path = ProcessInfo.processInfo.environment["PREFPANE_PATH"]!; guard let bundle = Bundle(url: URL(fileURLWithPath: path)), bundle.load() else { fatalError("PreferencePane bundle did not load") }; print(String(describing: bundle.principalClass))'
-)"
-[[ "$principal_class" == *"KnowTypePreferencePane"* ]] ||
-  die "PreferencePane principal class did not resolve"
-assert_equals "com.knowtype.preferencepane" \
-  "$(plist_read ":CFBundleIdentifier" "$prefpane_path/Contents/Info.plist")" \
-  "PreferencePane CFBundleIdentifier"
-assert_equals "KnowTypePreferencePane" \
-  "$(plist_read ":CFBundleExecutable" "$prefpane_path/Contents/Info.plist")" \
-  "PreferencePane CFBundleExecutable"
-assert_equals "KnowTypePreferencePane" \
-  "$(plist_read ":NSPrincipalClass" "$prefpane_path/Contents/Info.plist")" \
-  "PreferencePane NSPrincipalClass"
 
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-profile-smoke.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT

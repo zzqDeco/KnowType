@@ -33,10 +33,12 @@ extension InputCandidateSelectionKind {
 public struct InputCandidateSelection: Sendable, Equatable {
     public var text: String
     public var kind: InputCandidateSelectionKind
+    public var nativeCandidateIndex: Int?
 
-    public init(text: String, kind: InputCandidateSelectionKind) {
+    public init(text: String, kind: InputCandidateSelectionKind, nativeCandidateIndex: Int? = nil) {
         self.text = text
         self.kind = kind
+        self.nativeCandidateIndex = nativeCandidateIndex
     }
 }
 
@@ -64,7 +66,8 @@ public struct InputCandidateListBuilder: Sendable {
             candidates.append(
                 InputCandidateSelection(
                     text: prefix.text,
-                    kind: prefixSelectionKind(for: prefix, rawInput: rawInput, index: index)
+                    kind: prefixSelectionKind(for: prefix, rawInput: rawInput, index: index),
+                    nativeCandidateIndex: ConversionCandidateSource.nativeIndex(from: prefix.source)
                 )
             )
             seenTexts.insert(prefix.text)
@@ -79,7 +82,8 @@ public struct InputCandidateListBuilder: Sendable {
             candidates.append(
                 InputCandidateSelection(
                     text: prefix.text,
-                    kind: prefixSelectionKind(for: prefix, rawInput: rawInput, index: index + 1)
+                    kind: prefixSelectionKind(for: prefix, rawInput: rawInput, index: index + 1),
+                    nativeCandidateIndex: ConversionCandidateSource.nativeIndex(from: prefix.source)
                 )
             )
             seenTexts.insert(prefix.text)

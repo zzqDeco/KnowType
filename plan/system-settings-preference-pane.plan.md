@@ -16,7 +16,7 @@ Apple does not provide a public API for embedding third-party input-method contr
 - Added `KnowTypePreferencePane` and `Resources/PreferencePane/Info.plist`.
 - Added `scripts/build-preference-pane.sh` and updated `scripts/install-inputmethod.sh` to install `KnowType.prefPane`.
 - Added `InputMethodServerPreferencesWindowControllerClass` and `KnowTypePreferencesWindowController` for IMK preferences.
-- Added runtime preferences for input scheme, candidate page size, candidate layout mode, AI continuation enablement, continuation length, and continuation count.
+- Added runtime preferences for candidate page size, candidate layout mode, AI continuation enablement, continuation length, and continuation count. The legacy input-scheme value remains persisted for compatibility but is not exposed by the Rime-only settings UI.
 - The input method reads runtime preferences at startup and new composition boundaries, then applies them without changing an active composition.
 
 ## Verification

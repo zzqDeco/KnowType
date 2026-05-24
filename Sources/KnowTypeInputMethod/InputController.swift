@@ -2,16 +2,31 @@ import Foundation
 import KnowTypeAI
 import KnowTypeCore
 import KnowTypeProviders
+import OSLog
 
 #if canImport(InputMethodKit)
 import AppKit
 @preconcurrency import InputMethodKit
 
+private let inputControllerLogger = Logger(
+    subsystem: "com.knowtype.inputmethod.KnowType",
+    category: "input-controller"
+)
+
+enum InputMethodLexicalProfileRuntime {
+    static let store = LexicalProfileStore()
+    static let refreshGate = LexicalProfileRefreshGate()
+    static let rimeMaintenanceService = RimeMaintenanceService(
+        snapshotProvider: RimeUserDBTextSnapshotProvider()
+    )
+}
+
 @objc(KnowTypeInputController)
-public final class KnowTypeInputController: IMKInputController, @unchecked Sendable {
+public final class KnowTypeInputController: IMKInputController, CandidatePanelInteractionHandling, @unchecked Sendable {
     private let coordinator: InputControllerCoordinator
     private let hostAdapter: IMKInputControllerHostAdapter
-    @MainActor private lazy var candidatePanelController = CandidatePanelWindowController()
+    private let runtimePreferenceStore: any InputMethodRuntimePreferenceStore
+    @MainActor private lazy var candidatePanelController = CandidatePanelWindowController(interactionHandler: self)
     @MainActor private var preferencesWindowController: KnowTypePreferencesWindowController?
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
@@ -20,10 +35,8 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         let aiContextEventRecorder: (any AIContextEventRecording)? = provider.map {
             AIContextMemoryRuntime(provider: $0)
         }
-        let lexiconRuntime = InputMethodLexiconRuntime.defaultRuntime()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
-        let initialLexiconState = lexiconRuntime.initialEngineState(scheme: runtimePreferences.inputScheme)
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
         let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
             .map(UserSelectionHistoryPersistence.init(store:))
@@ -31,11 +44,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         let initialClient = Self.inputControllerClient(from: inputClient)
 
         self.hostAdapter = hostAdapter
+        self.runtimePreferenceStore = runtimePreferenceStore
         self.coordinator = InputControllerCoordinator(
             provider: provider,
-            traditionalInputEngine: initialLexiconState.engine,
-            lexiconRuntimeSnapshot: initialLexiconState.snapshot,
-            lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: inputModePreferenceStore,
             runtimePreferenceStore: runtimePreferenceStore,
             initialRuntimePreferences: runtimePreferences,
@@ -43,6 +54,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             userSelectionHistoryPersistence: historyPersistence,
             aiRecommendationProvider: aiRecommendationRuntime,
             aiContextEventRecorder: aiContextEventRecorder,
+            lexicalProfileStore: InputMethodLexicalProfileRuntime.store,
+            lexicalProfileRefreshGate: InputMethodLexicalProfileRuntime.refreshGate,
+            rimeUserDBTextProvider: InputMethodLexicalProfileRuntime.rimeMaintenanceService,
             host: hostAdapter,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: AppKitScreenGeometryProvider(),
@@ -51,6 +65,7 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         )
         super.init(server: server, delegate: delegate, client: inputClient)
         hostAdapter.controller = self
+        inputControllerLogger.notice("KnowTypeInputController initialized client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)")
     }
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
@@ -60,7 +75,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: flags)
         )
 
-        return coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
+        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
+        inputControllerLogger.debug("inputText key=\(keyCode, privacy: .public) handled=\(handled, privacy: .public)")
+        return handled
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
@@ -99,15 +116,10 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func menu() -> NSMenu! {
-        let menu = NSMenu(title: "KnowType")
-        let preferencesItem = NSMenuItem(
-            title: "KnowType Settings...",
-            action: #selector(showPreferences(_:)),
-            keyEquivalent: ","
+        KnowTypeInputMethodMenuBuilder.makeMenu(
+            target: self,
+            runtimePreferences: runtimePreferenceStore.loadPreferences()
         )
-        preferencesItem.target = self
-        menu.addItem(preferencesItem)
-        return menu
     }
 
     public override func showPreferences(_ sender: Any!) {
@@ -116,6 +128,43 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
                 preferencesWindowController = KnowTypePreferencesWindowController()
             }
             preferencesWindowController?.showWindow(nil)
+        }
+    }
+
+    @objc func toggleAIContinuation(_ sender: Any!) {
+        do {
+            let preferences = try KnowTypeInputMethodMenuBuilder.toggleAIContinuation(in: runtimePreferenceStore)
+            coordinator.reloadRuntimePreferencesForExternalChange()
+            inputControllerLogger.notice("AI continuation menu toggle enabled=\(preferences.cloudContinuationEnabled, privacy: .public)")
+        } catch {
+            inputControllerLogger.error("AI continuation menu toggle failed: \(error.localizedDescription, privacy: .public)")
+            NSSound.beep()
+        }
+    }
+
+    @objc func openKnowTypeLogs(_ sender: Any!) {
+        openDirectory(Self.knowTypeLogsURL)
+    }
+
+    @objc func openKnowTypeSupportFolder(_ sender: Any!) {
+        openDirectory(Self.knowTypeSupportURL)
+    }
+
+    @objc func openRimeUserFolder(_ sender: Any!) {
+        openDirectory(NativeRimeConfiguration.defaultConfiguration()?.userDataURL ?? Self.defaultRimeUserURL)
+    }
+
+    @objc func showAbout(_ sender: Any!) {
+        MainActor.assumeIsolated {
+            NSApp.activate(ignoringOtherApps: true)
+            let bundle = Bundle.main
+            let shortVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+            let buildVersion = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "local"
+            NSApp.orderFrontStandardAboutPanel(options: [
+                .applicationName: "KnowType",
+                .applicationVersion: shortVersion,
+                .version: buildVersion
+            ])
         }
     }
 
@@ -133,7 +182,9 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue)),
             eventKind: eventKind
         )
-        return coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
+        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
+        inputControllerLogger.debug("handle event key=\(event.keyCode, privacy: .public) handled=\(handled, privacy: .public)")
+        return handled
     }
 
     public override func commitComposition(_ sender: Any!) {
@@ -146,13 +197,25 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
     }
 
     public override func deactivateServer(_ sender: Any!) {
-        coordinator.deactivateServer()
+        coordinator.deactivateServer(
+            client: Self.inputControllerClient(from: sender) ?? currentInputControllerClient
+        )
         super.deactivateServer(sender)
     }
 
     public override func inputControllerWillClose() {
         coordinator.inputControllerWillClose()
         super.inputControllerWillClose()
+    }
+
+    private func openDirectory(_ url: URL) {
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(url)
+        } catch {
+            inputControllerLogger.error("Could not open directory \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            NSSound.beep()
+        }
     }
 
     fileprivate var currentInputControllerClient: InputControllerClient? {
@@ -173,6 +236,21 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         MainActor.assumeIsolated {
             candidatePanelController.hide()
         }
+    }
+
+    func candidatePanelDidHover(_ selection: CandidatePanelSelection) {
+        coordinator.hoverCandidatePanelSelection(selection)
+    }
+
+    func candidatePanelDidCommit(_ selection: CandidatePanelSelection) {
+        coordinator.commitCandidatePanelSelection(
+            selection,
+            client: Self.inputControllerClient(from: client())
+        )
+    }
+
+    func candidatePanelDidScroll(_ navigation: InputCandidateNavigation) {
+        _ = coordinator.scrollCandidatePanel(navigation)
     }
 
     static func inputControllerClient(from sender: Any!) -> InputControllerClient? {
@@ -208,6 +286,27 @@ public final class KnowTypeInputController: IMKInputController, @unchecked Senda
         default:
             return nil
         }
+    }
+
+    private static var knowTypeSupportURL: URL {
+        libraryURL
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("KnowType", isDirectory: true)
+    }
+
+    private static var knowTypeLogsURL: URL {
+        libraryURL
+            .appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("KnowType", isDirectory: true)
+    }
+
+    private static var defaultRimeUserURL: URL {
+        knowTypeSupportURL.appendingPathComponent("Rime", isDirectory: true)
+    }
+
+    private static var libraryURL: URL {
+        FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library", isDirectory: true)
     }
 }
 
