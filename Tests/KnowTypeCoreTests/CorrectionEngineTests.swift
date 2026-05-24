@@ -459,9 +459,12 @@ final class CorrectionEngineTests: XCTestCase {
             "github_pat_abcdefghijklmnopqrstuvwxyz123456",
             "AKIA1234567890ABCDEF",
             "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+            #"{"Authorization":"Bearer abcdefghijklmnopqrstuvwxyz"}"#,
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.signature12",
             "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
             "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
+            #"{"api_key":"sk-abcdefghijklmnopqrstuvwxyz"}"#,
+            #"{"token":"abcd1234"}"#,
             "password=hunter2",
             "https://example.com/callback?token=abcdef123456"
         ]
