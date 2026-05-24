@@ -64,6 +64,35 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.candidateHints.first?.text }, ["这个方案", "这个方向"])
     }
 
+    func testRecommendationSkipsWhenAnyCandidateHintIsProtected() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "zhege url",
+            lockedPrefix: nil,
+            candidateHints: [
+                AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0),
+                AICandidateHint(text: "https://example.com/token", nativeIndex: 1, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 已禁用"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedProtectedText })
+    }
+
     func testRecommendationDiagnosticsRecordSuccessAndCacheHit() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [

@@ -457,7 +457,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             return true
         }
         return !request.candidateHints.isEmpty
-            && request.candidateHints.allSatisfy {
+            && request.candidateHints.contains {
                 TextProtection.requiresNoCorrection($0.text, appBundleID: appBundleID)
             }
     }

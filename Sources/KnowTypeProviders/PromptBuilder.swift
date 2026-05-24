@@ -24,7 +24,7 @@ enum PromptBuilder {
     - If lockedPrefix is present, text must be only the suffix after lockedPrefix. Do not include, paraphrase, translate, rewrite, or polish lockedPrefix.
     - If lockedPrefix is absent, text must be a complete commit-ready recommendation inferred from rawInput, context, highlighted hint, and candidateHints.
     - candidateHints are hints only. Do not default mechanically to the first hint, and do not need to copy any hint exactly.
-    - Prefer one concise, immediately useful Chinese recommendation in the same intent as rawInput and locale.
+    - Prefer one concise, immediately useful recommendation in the same language and intent implied by lockedPrefix, rawInput, candidateHints, and locale.
     - Empty candidates are allowed only when lockedPrefix/candidateHints are unsafe, impossible, or nonsensical.
     - Preserve English technical tokens exactly, including API, JSON, macOS, InputMethodKit, snake_case, and camelCase.
     Good: lockedPrefix="我觉得这个方案" text="还可以再细化一下。"
