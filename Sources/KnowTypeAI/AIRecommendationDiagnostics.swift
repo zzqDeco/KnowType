@@ -30,6 +30,8 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case staleResultDropped = "stale_result_dropped"
     case stateApplied = "state_applied"
     case lexicalProfileLoad = "lexical_profile_load"
+    case rimeUserDBSnapshotLoadStart = "rime_userdb_snapshot_load_start"
+    case rimeUserDBSnapshotLoadEnd = "rime_userdb_snapshot_load_end"
     case rimeUserDBSyncStart = "rime_userdb_sync_start"
     case rimeUserDBSyncEnd = "rime_userdb_sync_end"
     case rimeUserDBParse = "rime_userdb_parse"

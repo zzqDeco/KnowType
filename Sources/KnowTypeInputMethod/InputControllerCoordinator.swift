@@ -1,5 +1,4 @@
 import CoreGraphics
-import CryptoKit
 import Foundation
 import KnowTypeAI
 import KnowTypeCore
@@ -15,6 +14,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let candidateListBuilder = InputCandidateListBuilder()
     private let anchorResolver: CandidateAnchorResolver
     private weak var host: InputControllerHost?
+    private let candidatePanelPresenter: CandidatePanelPresenter
+    private let inputEventBus = InputEventBus()
     private var rawBuffer = ""
     private var compositionBuffer = CompositionBuffer()
     private var compositionID = 0
@@ -48,11 +49,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var deleteCountBeforeCommit = 0
     private var recentLexicalCommits: [String] = []
     private var recentLexicalSelections: [String] = []
-    private let lexicalContextBuilder = LexicalContextBuilder()
-    private let lexicalProfileStore: LexicalProfileStore
-    private let rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)?
-    private var lexicalProfileRefreshTask: Task<Void, Never>?
-    private let lexicalProfileRefreshGate: LexicalProfileRefreshGate
+    private let lexicalProfileRuntime: LexicalProfileRuntime
     private let taskSupervisor = InputTaskSupervisor()
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
@@ -109,17 +106,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.aiRecommendationProvider = aiRecommendationProvider
         self.aiContextEventRecorder = aiContextEventRecorder
         self.aiDiagnosticSink = aiDiagnosticSink
-        self.lexicalProfileStore = lexicalProfileStore
-        self.lexicalProfileRefreshGate = lexicalProfileRefreshGate
-        self.rimeUserDBTextProvider = rimeUserDBTextProvider
+        self.lexicalProfileRuntime = LexicalProfileRuntime(
+            store: lexicalProfileStore,
+            rimeMaintenanceService: rimeUserDBTextProvider,
+            diagnosticSink: aiDiagnosticSink,
+            refreshGate: lexicalProfileRefreshGate
+        )
         self.host = host
+        self.candidatePanelPresenter = CandidatePanelPresenter(host: host)
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
         self.asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
-        recordAIDiagnostic(
-            .lexicalProfileLoad,
-            reason: lexicalProfileStore.currentSnapshot() == nil ? "empty" : "loaded"
-        )
     }
 
     private static func polishOnlySessionController() -> InputSessionController {
@@ -192,7 +189,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
            highlightNativeSelectionIfNeeded(selectedNativeCandidate, client: host?.currentClient) {
             return
         }
-        host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+        candidatePanelPresenter.apply(currentCandidatePanelFrame(reason: .compositionActive), locale: locale)
     }
 
     func commitCandidatePanelSelection(_ selection: CandidatePanelSelection, client: InputControllerClient?) {
@@ -239,7 +236,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func hidePalettes() {
-        hideCandidatePanel()
+        hideCandidatePanel(reason: .escape)
     }
 
     func deactivateServer(client: InputControllerClient?) {
@@ -257,8 +254,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
-        lexicalProfileRefreshTask?.cancel()
-        lexicalProfileRefreshTask = nil
+        lexicalProfileRuntime.cancelRefresh()
         panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
         _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
@@ -701,16 +697,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func lexicalContextSnapshot(for suggestion: SuggestionResponse) -> LexicalContextSnapshot? {
-        let currentSchemaID = conversionEngine.activeSchemaID
-        let persisted = lexicalProfileStore.currentProfile()
-        let persistedLexicalContext = persisted?.schemaID == currentSchemaID ? persisted?.lexicalContext : nil
-        return lexicalContextBuilder.snapshot(
+        lexicalProfileRuntime.lexicalContextSnapshot(
+            schemaID: conversionEngine.activeSchemaID,
             rimeCandidates: suggestion.prefixCandidates.map(\.text),
             recentCommits: recentLexicalCommits,
-            selectionHistory: recentLexicalSelections,
-            persistentTerms: persistedLexicalContext?.terms ?? [],
-            persistentRecentCommits: persistedLexicalContext?.recentCommits ?? [],
-            persistentSourceSummary: persistedLexicalContext?.sourceSummary ?? []
+            selectionHistory: recentLexicalSelections
         )
     }
 
@@ -815,6 +806,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
         let rawInput = rawBuffer
         let currentCompositionID = compositionID
+        let currentRawRevision = rawRevision
         let request = AIRecommendationRequest(
             rawInput: rawInput,
             traditionalCandidate: firstPrefix,
@@ -839,6 +831,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let diagnosticSink = aiDiagnosticSink
         let task = Task.detached(priority: .utility) { [weak self, aiRecommendationProvider, diagnosticSink] in
             let state = await aiRecommendationProvider.recommendation(for: request)
+            let patch = AIRecommendationPatch(
+                requestID: requestID,
+                generation: generation,
+                compositionID: currentCompositionID,
+                rawRevision: currentRawRevision,
+                rawInput: rawInput,
+                state: state
+            )
             guard !Task.isCancelled else {
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(
@@ -868,10 +868,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     )
                     return
                 }
-                guard self.activeAIRecommendationRequestID == requestID,
-                      self.aiRecommendationGeneration == generation,
-                      self.rawBuffer == rawInput,
-                      self.compositionID == currentCompositionID else {
+                guard patch.matches(
+                    requestID: self.activeAIRecommendationRequestID,
+                    generation: self.aiRecommendationGeneration,
+                    compositionID: self.compositionID,
+                    rawRevision: self.rawRevision,
+                    rawInput: self.rawBuffer
+                ) else {
                     let reason = self.activeAIRecommendationRequestID == requestID
                         ? Self.aiDiagnosticReason(for: state)
                         : "request_inactive"
@@ -891,7 +894,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     )
                     return
                 }
-                self.aiRecommendationState = state
+                self.aiRecommendationState = patch.state
                 if self.activeAIRecommendationRequestID == requestID {
                     self.activeAIRecommendationRequestID = nil
                 }
@@ -903,7 +906,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                         rawLength: rawInput.count,
                         prefixLength: firstPrefix.text.count,
                         appBundleID: currentAppBundleID,
-                        reason: Self.aiDiagnosticReason(for: state)
+                        reason: Self.aiDiagnosticReason(for: patch.state)
                     )
                 )
                 self.updateCandidatePanel(suggestion: self.lastSuggestion, client: self.host?.currentClient)
@@ -948,13 +951,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .unavailable(let reason):
             return "unavailable:\(reason)"
         }
-    }
-
-    private static func pathHash(_ path: String) -> String {
-        SHA256.hash(data: Data(path.utf8))
-            .prefix(6)
-            .map { String(format: "%02x", $0) }
-            .joined()
     }
 
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
@@ -1279,6 +1275,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
               !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
             return
         }
+        publishRuntimeEvent(
+            .candidateSelected(
+                text: trimmed,
+                schemaID: conversionEngine.activeSchemaID,
+                compositionID: compositionID
+            )
+        )
         recordLexicalSelection(trimmed)
         scheduleLexicalProfileRefresh(reason: "selection")
         if let userSelectionHistoryPersistence {
@@ -1300,6 +1303,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         recentLexicalSelections.append(text)
         if recentLexicalSelections.count > Self.maxUserSelectionHistory {
             recentLexicalSelections.removeFirst(recentLexicalSelections.count - Self.maxUserSelectionHistory)
+        }
+    }
+
+    private func publishRuntimeEvent(_ event: InputRuntimeEvent) {
+        Task.detached(priority: .utility) { [inputEventBus] in
+            await inputEventBus.publish(event)
         }
     }
 
@@ -1538,112 +1547,23 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if recentLexicalCommits.count > Self.maxRecentLexicalCommits {
             recentLexicalCommits.removeFirst(recentLexicalCommits.count - Self.maxRecentLexicalCommits)
         }
+        publishRuntimeEvent(
+            .compositionCommitted(
+                text: trimmed,
+                schemaID: conversionEngine.activeSchemaID,
+                compositionID: compositionID
+            )
+        )
         scheduleLexicalProfileRefresh(reason: "commit")
     }
 
     private func scheduleLexicalProfileRefresh(reason: String) {
-        guard let rimeUserDBTextProvider else {
-            return
-        }
-        let generation = lexicalProfileRefreshGate.next()
-        lexicalProfileRefreshTask?.cancel()
-
-        let recentCommits = recentLexicalCommits
-        let selectionHistory = recentLexicalSelections
-        let store = lexicalProfileStore
-        let diagnosticSink = aiDiagnosticSink
-        let builder = lexicalContextBuilder
-        let parser = RimeUserDBTextParser(maxTerms: 64)
-        let schemaID = conversionEngine.activeSchemaID
-        let refreshGate = lexicalProfileRefreshGate
-
-        let task = Task.detached(priority: .utility) { [rimeUserDBTextProvider, diagnosticSink] in
-            do {
-                try await Task.sleep(nanoseconds: 500_000_000)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else {
-                return
-            }
-            diagnosticSink.record(
-                AIRecommendationDiagnosticEvent(
-                    stage: .rimeUserDBSyncStart,
-                    candidateCount: recentCommits.count + selectionHistory.count,
-                    reason: reason
-                )
-            )
-            do {
-                let snapshot = try await rimeUserDBTextProvider.userDBTextSnapshot(schemaID: schemaID)
-                guard !Task.isCancelled else {
-                    return
-                }
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .rimeUserDBSyncEnd,
-                        reason: "path_hash=\(Self.pathHash(snapshot.fileURL.path))"
-                    )
-                )
-                let terms = parser.parse(snapshot)
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .rimeUserDBParse,
-                        candidateCount: terms.count,
-                        reason: "schema=\(snapshot.schemaID)"
-                    )
-                )
-                guard let lexical = builder.snapshot(
-                    recentCommits: recentCommits,
-                    selectionHistory: selectionHistory,
-                    persistentTerms: terms,
-                    persistentSourceSummary: [
-                        "rime-userdb-snapshot: \(Self.pathHash(snapshot.fileURL.path))"
-                    ]
-                ) else {
-                    diagnosticSink.record(
-                        AIRecommendationDiagnosticEvent(
-                            stage: .lexicalProfileFallback,
-                            candidateCount: 0,
-                            reason: "empty_after_parse"
-                        )
-                    )
-                    return
-                }
-                guard !Task.isCancelled else {
-                    return
-                }
-                let transaction = try store.prepareSave(
-                    snapshot: lexical,
-                    schemaID: schemaID,
-                    rimeSnapshotURL: snapshot.fileURL,
-                    rimeSnapshotModifiedAt: snapshot.modifiedAt
-                )
-                guard !Task.isCancelled else {
-                    store.discardPreparedSave(transaction)
-                    return
-                }
-                guard let _ = try store.commitPreparedSaveIfCurrent(transaction, shouldCommit: {
-                    !Task.isCancelled && refreshGate.isCurrent(generation)
-                }) else {
-                    return
-                }
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .lexicalProfileUpdated,
-                        candidateCount: lexical.terms.count,
-                        reason: "generation=\(generation)"
-                    )
-                )
-            } catch {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .lexicalProfileFallback,
-                        reason: String(describing: type(of: error))
-                    )
-                )
-            }
-        }
-        lexicalProfileRefreshTask = task
+        lexicalProfileRuntime.scheduleRefresh(
+            reason: reason,
+            schemaID: conversionEngine.activeSchemaID,
+            recentCommits: recentLexicalCommits,
+            selectionHistory: recentLexicalSelections
+        )
     }
 
     private func recordExternalDelete(client: InputControllerClient?) {
@@ -1709,7 +1629,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         commitPolicy: CompositionLifecycleCommitPolicy
     ) -> Bool {
         traceCompositionLifecycleFinish(reason: reason)
-        hideCandidatePanel()
+        let finishedCompositionID = compositionID
+        hideCandidatePanel(reason: reason.panelVisibilityReason)
 
         let lifecycleClient = client ?? host?.currentClient
         let commitText = lifecycleCommitText(for: commitPolicy)
@@ -1729,6 +1650,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         deleteCountBeforeCommit = 0
         resetAnchorState()
         invalidateSuggestion()
+        publishRuntimeEvent(
+            .compositionEnded(reason: reason.panelVisibilityReason, compositionID: finishedCompositionID)
+        )
         return commitText?.isEmpty == false
     }
 
@@ -1751,6 +1675,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reloadRuntimeLexiconEngineIfNeeded()
             compositionBuffer = CompositionBuffer()
             compositionID += 1
+            publishRuntimeEvent(
+                .compositionStarted(compositionID: compositionID, rawRevision: rawRevision)
+            )
             anchorResolver.reset()
         }
     }
@@ -1838,7 +1765,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         panelUpdateTask = nil
         taskSupervisor.cancel(.panelRender)
         guard canPublishCandidatePanel(suggestion: suggestion) else {
-            hideCandidatePanel()
+            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
             return
         }
         updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: client))
@@ -1846,7 +1773,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, client: InputControllerClient?) {
         guard canPublishCandidatePanel(suggestion: suggestion) else {
-            hideCandidatePanel()
+            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
             return
         }
         guard enablesAsyncSuggestionRefresh else {
@@ -1885,7 +1812,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
         guard canPublishCandidatePanel(suggestion: suggestion) else {
-            hideCandidatePanel()
+            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
             return
         }
         let isDisplayable = anchorResult.source != .none
@@ -1911,7 +1838,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 in: candidatePanelState.windowState.viewModel
             )
             : nil
-        host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+        candidatePanelPresenter.apply(
+            currentCandidatePanelFrame(
+                reason: candidatePanelState.windowState.isVisible ? .compositionActive : .layoutImpossible
+            ),
+            locale: locale
+        )
     }
 
     private func nativeHighlightedSelection(for suggestion: SuggestionResponse?) -> CandidatePanelSelection? {
@@ -1933,7 +1865,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             : .segmentCandidate(highlightedIndex)
     }
 
-    private func hideCandidatePanel() {
+    private func hideCandidatePanel(reason: CandidatePanelVisibilityReason) {
         panelUpdateGeneration += 1
         delayedReanchorGeneration += 1
         panelUpdateTask?.cancel()
@@ -1942,7 +1874,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         candidatePanelState.hide()
         selectedNativeCandidate = nil
         anchorResolver.reset()
-        host?.hideCandidatePanel()
+        candidatePanelPresenter.hide(
+            reason: reason,
+            compositionID: compositionID,
+            rawRevision: rawRevision,
+            rawLength: rawBuffer.count
+        )
     }
 
     private func canPublishCandidatePanel(suggestion: SuggestionResponse?) -> Bool {
@@ -1955,9 +1892,32 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return false
         }
         if conversionEngine.isNativeActive {
-            return nativeSnapshotHasActiveInput(conversionEngine.snapshot)
+            return nativeSnapshotHasActiveInput(conversionEngine.snapshot) || !rawBuffer.isEmpty
         }
         return true
+    }
+
+    private func candidatePanelSuppressionReason(suggestion: SuggestionResponse?) -> CandidatePanelVisibilityReason {
+        guard !rawBuffer.isEmpty else {
+            return .rawEmpty
+        }
+        if suggestion != nil,
+           let lastSuggestionRawInput,
+           lastSuggestionRawInput != rawBuffer {
+            return .staleUpdate
+        }
+        return .layoutImpossible
+    }
+
+    private func currentCandidatePanelFrame(reason: CandidatePanelVisibilityReason) -> CandidatePanelFrame {
+        CandidatePanelFrame(
+            compositionID: compositionID,
+            rawRevision: rawRevision,
+            rawLength: rawBuffer.count,
+            panelModel: candidatePanelState,
+            anchorSource: candidatePanelState.windowState.anchorSource,
+            visibilityReason: reason
+        )
     }
 
     private func traceCompositionLifecycleFinish(reason: CompositionLifecycleFinishReason) {
@@ -2359,6 +2319,21 @@ private enum CompositionLifecycleFinishReason: String {
             return true
         case .deactivate, .close, .reset:
             return false
+        }
+    }
+
+    var panelVisibilityReason: CandidatePanelVisibilityReason {
+        switch self {
+        case .commit:
+            return .compositionEnded
+        case .deactivate:
+            return .deactivate
+        case .close:
+            return .close
+        case .reset:
+            return .reset
+        case .nativeEnded:
+            return .nativeEnded
         }
     }
 }

@@ -34,6 +34,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(coordinator.contains("lexiconRuntime.makeEngine"))
         XCTAssertFalse(coordinator.contains("InputMethodLexiconRuntime.defaultEngine"))
         XCTAssertFalse(coordinator.contains("TraditionalInputEngine()"))
+        XCTAssertFalse(coordinator.contains("syncUserData"))
+        XCTAssertFalse(coordinator.contains("syncedUserDBTextSnapshot"))
         XCTAssertFalse(inputController.contains("InputMethodLexiconRuntime.defaultRuntime"))
         XCTAssertFalse(inputController.contains("initialEngineState"))
         XCTAssertFalse(rimeEngine.contains("InputMethodLexiconRuntime.defaultEngine"))

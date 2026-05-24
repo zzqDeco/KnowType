@@ -93,7 +93,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 - Provider prompts are task-specific: real-time continuation uses a suffix-only prompt, while correction, context digest, and polish keep separate instructions.
 
-The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. Rime userdb sync and lexical-profile persistence run only from background tasks after commits/selections; keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime has a 10-second hard timeout; continuing to type still cancels older requests immediately.
+The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. AI results cross back into the IMK layer as `AIRecommendationPatch` values, which can update only the fixed AI slot after request id, generation, composition id, raw revision, and raw input all still match. They cannot change Rime selection, marked text, base candidates, or panel visibility. Rime userdb sync is a maintenance action and is not part of commit. Commit/selection profile refresh is delegated to `LexicalProfileRuntime` and reads only an already exported userdb snapshot; explicit `sync_user_data` is owned by `RimeMaintenanceService` for manual or idle maintenance paths. Keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime has a 10-second hard timeout; continuing to type still cancels older requests immediately.
 
 ## Settings Layer
 
@@ -148,6 +148,7 @@ real host apps remains the evidence for IMK behavior.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - The input-method menu follows mature IMK inputs such as McBopomofo: common toggles appear first, user data and diagnostic folders are in the middle, and `KnowType Settings...` calls `showPreferences(_:)` to open the in-bundle settings window.
 - `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
+- `CandidatePanelPresenter` is the coordinator-side presentation boundary. It consumes `CandidatePanelFrame` values with composition id, raw revision, anchor source, panel model, and explicit visibility reason before touching the host's AppKit panel adapter.
 - `CandidatePanelWindowController` owns the AppKit panel, mouse interaction, and row accessibility.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
 - `CandidatePanelLayoutEngine` measures rendered rows before AppKit layout, chooses horizontal versus vertical

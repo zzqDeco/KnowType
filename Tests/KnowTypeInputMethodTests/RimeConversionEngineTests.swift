@@ -1,5 +1,6 @@
 import XCTest
 @testable import KnowTypeInputMethod
+import KnowTypeAI
 import KnowTypeCore
 
 final class RimeConversionEngineTests: XCTestCase {
@@ -108,9 +109,9 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(selected?.standardizedFileURL.path, newerSnapshot.standardizedFileURL.path)
     }
 
-    func testUserDBTextSnapshotProviderUsesExistingSnapshotWhenSyncFails() async throws {
+    func testUserDBTextSnapshotProviderReadsExistingSnapshotWithoutSyncing() async throws {
         let fileManager = FileManager.default
-        let root = temporaryDirectory(name: "rime-userdb-sync-fallback")
+        let root = temporaryDirectory(name: "rime-userdb-existing-snapshot")
         defer {
             try? fileManager.removeItem(at: root)
         }
@@ -141,6 +142,80 @@ final class RimeConversionEngineTests: XCTestCase {
 
         XCTAssertEqual(snapshot.fileURL.standardizedFileURL.path, snapshotURL.standardizedFileURL.path)
         XCTAssertTrue(snapshot.content.contains("你"))
+        XCTAssertEqual(session.syncCallCount, 0)
+    }
+
+    func testUserDBTextSnapshotProviderSyncsOnlyOnExplicitSyncedSnapshot() async throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-userdb-explicit-sync")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let sync = userData.appendingPathComponent("sync", isDirectory: true)
+        try fileManager.createDirectory(at: sync, withIntermediateDirectories: true)
+        let snapshotURL = sync.appendingPathComponent("pinyin_simp.userdb.txt")
+        try "wo\t我\tc=21 d=0\n".write(to: snapshotURL, atomically: true, encoding: .utf8)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("share", isDirectory: true),
+            userDataURL: userData,
+            logURL: root.appendingPathComponent("logs", isDirectory: true),
+            schemaID: "pinyin_simp"
+        )
+        let session = FakeRimeUserDBSnapshotSession(
+            syncResult: true,
+            userDataDirectory: userData,
+            userDataSyncDirectory: sync,
+            userDictionaryName: nil
+        )
+        let provider = RimeUserDBTextSnapshotProvider(
+            configuration: configuration,
+            sessionFactory: { _ in session }
+        )
+
+        let snapshot = try await provider.syncedUserDBTextSnapshot(schemaID: "pinyin_simp")
+
+        XCTAssertEqual(snapshot.fileURL.standardizedFileURL.path, snapshotURL.standardizedFileURL.path)
+        XCTAssertTrue(snapshot.content.contains("我"))
+        XCTAssertEqual(session.syncCallCount, 1)
+    }
+
+    func testRimeMaintenanceServiceSyncsOnlyAfterIdlePolicyAllowsIt() async throws {
+        let provider = CountingSyncSnapshotProvider()
+        let service = RimeMaintenanceService(snapshotProvider: provider)
+        let now = Date(timeIntervalSince1970: 1_000)
+        let policy = RimeMaintenancePolicy(idleInterval: 60, minimumSyncInterval: 600)
+
+        _ = try await service.syncUserDataIfIdle(
+            schemaID: "pinyin_simp",
+            lastInputAt: now.addingTimeInterval(-10),
+            now: now,
+            policy: policy
+        )
+        var counts = await provider.counts()
+        XCTAssertEqual(counts.existing, 1)
+        XCTAssertEqual(counts.synced, 0)
+
+        _ = try await service.syncUserDataIfIdle(
+            schemaID: "pinyin_simp",
+            lastInputAt: now.addingTimeInterval(-120),
+            now: now,
+            policy: policy
+        )
+        counts = await provider.counts()
+        XCTAssertEqual(counts.existing, 1)
+        XCTAssertEqual(counts.synced, 1)
+
+        _ = try await service.syncUserDataIfIdle(
+            schemaID: "pinyin_simp",
+            lastInputAt: now.addingTimeInterval(-120),
+            now: now.addingTimeInterval(120),
+            policy: policy
+        )
+        counts = await provider.counts()
+        XCTAssertEqual(counts.existing, 2)
+        XCTAssertEqual(counts.synced, 1)
     }
 
     func testUnavailableSessionPreservesRawBypassForNonASCIIInput() {
@@ -438,11 +513,12 @@ private func temporaryDirectory(name: String) -> URL {
         .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
 }
 
-private final class FakeRimeUserDBSnapshotSession: RimeUserDBSnapshotSession, @unchecked Sendable {
+private final class FakeRimeUserDBSnapshotSession: RimeUserDBMaintenanceSession, @unchecked Sendable {
     private let syncResult: Bool
     private let userDataDirectoryURL: URL?
     private let userDataSyncDirectoryURL: URL?
     private let dictionaryName: String?
+    private(set) var syncCallCount = 0
 
     init(
         syncResult: Bool,
@@ -457,7 +533,8 @@ private final class FakeRimeUserDBSnapshotSession: RimeUserDBSnapshotSession, @u
     }
 
     func syncUserData() -> Bool {
-        syncResult
+        syncCallCount += 1
+        return syncResult
     }
 
     func userDataDirectory() -> URL? {
@@ -470,5 +547,32 @@ private final class FakeRimeUserDBSnapshotSession: RimeUserDBSnapshotSession, @u
 
     func userDictionaryName(schemaID _: String) -> String? {
         dictionaryName
+    }
+}
+
+private actor CountingSyncSnapshotProvider: RimeUserDBTextSnapshotSyncProviding {
+    private(set) var existingCount = 0
+    private(set) var syncCount = 0
+
+    func counts() -> (existing: Int, synced: Int) {
+        (existingCount, syncCount)
+    }
+
+    func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
+        existingCount += 1
+        return snapshot(schemaID: schemaID, content: "existing\t已有\t1\n")
+    }
+
+    func syncedUserDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
+        syncCount += 1
+        return snapshot(schemaID: schemaID, content: "synced\t同步\t2\n")
+    }
+
+    private func snapshot(schemaID: String, content: String) -> RimeUserDBTextSnapshot {
+        RimeUserDBTextSnapshot(
+            schemaID: schemaID,
+            fileURL: URL(fileURLWithPath: "/tmp/\(schemaID).userdb.txt"),
+            content: content
+        )
     }
 }

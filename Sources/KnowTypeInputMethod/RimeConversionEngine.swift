@@ -446,13 +446,16 @@ public struct NativeRimeConfiguration: Sendable, Equatable {
 }
 
 protocol RimeUserDBSnapshotSession: Sendable {
-    func syncUserData() -> Bool
     func userDataDirectory() -> URL?
     func userDataSyncDirectory() -> URL?
     func userDictionaryName(schemaID: String) -> String?
 }
 
-final class NativeRimeSession: RimeUserDBSnapshotSession, @unchecked Sendable {
+protocol RimeUserDBMaintenanceSession: RimeUserDBSnapshotSession {
+    func syncUserData() -> Bool
+}
+
+final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable {
     private let session: OpaquePointer
 
     init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
@@ -635,7 +638,7 @@ public enum RimeUserDBTextSnapshotProviderError: Error, Equatable {
     case snapshotNotFound(schemaID: String)
 }
 
-public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
+public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotSyncProviding {
     private let configuration: NativeRimeConfiguration?
     private let fileManager: FileManager
     private let locator: RimeUserDBSnapshotLocator
@@ -664,11 +667,24 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
     }
 
     public func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
+        try await loadUserDBTextSnapshot(schemaID: schemaID, syncBeforeRead: false)
+    }
+
+    public func syncedUserDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
+        try await loadUserDBTextSnapshot(schemaID: schemaID, syncBeforeRead: true)
+    }
+
+    private func loadUserDBTextSnapshot(
+        schemaID: String,
+        syncBeforeRead: Bool
+    ) async throws -> RimeUserDBTextSnapshot {
         guard let configuration,
               let session = sessionFactory(configuration) else {
             throw RimeUserDBTextSnapshotProviderError.unavailable
         }
-        let syncSucceeded = session.syncUserData()
+        let syncSucceeded = syncBeforeRead
+            ? (session as? any RimeUserDBMaintenanceSession)?.syncUserData() ?? false
+            : true
         let roots = snapshotSearchRoots(
             syncDirectory: session.userDataSyncDirectory(),
             userDataDirectory: session.userDataDirectory() ?? configuration.userDataURL

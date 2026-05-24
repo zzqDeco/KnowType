@@ -16,7 +16,9 @@ private let inputControllerLogger = Logger(
 enum InputMethodLexicalProfileRuntime {
     static let store = LexicalProfileStore()
     static let refreshGate = LexicalProfileRefreshGate()
-    static let rimeUserDBTextProvider = RimeUserDBTextSnapshotProvider()
+    static let rimeMaintenanceService = RimeMaintenanceService(
+        snapshotProvider: RimeUserDBTextSnapshotProvider()
+    )
 }
 
 @objc(KnowTypeInputController)
@@ -54,7 +56,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             aiContextEventRecorder: aiContextEventRecorder,
             lexicalProfileStore: InputMethodLexicalProfileRuntime.store,
             lexicalProfileRefreshGate: InputMethodLexicalProfileRuntime.refreshGate,
-            rimeUserDBTextProvider: InputMethodLexicalProfileRuntime.rimeUserDBTextProvider,
+            rimeUserDBTextProvider: InputMethodLexicalProfileRuntime.rimeMaintenanceService,
             host: hostAdapter,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: AppKitScreenGeometryProvider(),
