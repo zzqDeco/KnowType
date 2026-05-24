@@ -107,10 +107,22 @@ enum InputRuntimeEvent: Sendable, Equatable {
 }
 
 actor InputEventBus {
+    private let maxRecordedEvents: Int
     private var recordedEvents: [InputRuntimeEvent] = []
 
+    init(maxRecordedEvents: Int = 256) {
+        self.maxRecordedEvents = max(0, maxRecordedEvents)
+    }
+
     func publish(_ event: InputRuntimeEvent) {
+        guard maxRecordedEvents > 0 else {
+            return
+        }
         recordedEvents.append(event)
+        let overflowCount = recordedEvents.count - maxRecordedEvents
+        if overflowCount > 0 {
+            recordedEvents.removeFirst(overflowCount)
+        }
     }
 
     func events() -> [InputRuntimeEvent] {

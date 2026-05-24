@@ -17,7 +17,9 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `AIRecommendationPatch` is slot-only. It can be applied only when request id,
   AI generation, composition id, raw revision, and raw input still match.
 - `InputEventBus` records typed lifecycle/commit/selection events for
-  background consumers. Publishing an event must not block key handling.
+  background consumers. Publishing an event must not block key handling, and
+  retained recent-event history is bounded so the long-running input-method
+  process cannot accumulate unbounded memory when no consumer is attached.
 
 ## Behavior Notes
 
@@ -33,4 +35,5 @@ input, candidate-panel presentation, AI slot patches, and background events.
 
 - `InputControllerCoordinatorTests`
 - `InputHotPathPerformanceTests`
+- `InputRuntimeBoundariesTests`
 - `swift test`
