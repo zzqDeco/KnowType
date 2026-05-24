@@ -57,7 +57,7 @@ Provider prompts are task-specific. Continuation requests distinguish confirmed 
 - when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput`, context, and `candidateHints`
 - `candidateHints` are context only; providers do not need to choose a `base` from them and may produce a recommendation that does not copy any hint exactly
 
-When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; hints cannot make a too-short confirmed prefix eligible. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
+When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; hints cannot make a too-short confirmed prefix eligible. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Unselected `candidateHints` containing secret-like text are filtered and logged as `secret_hint_filtered`; they cannot disable the whole request when safe context remains. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
 ## Provider Kinds
 
@@ -341,6 +341,8 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - caches by locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
 - skips cloud requests for too-short prefixes: fewer than two Han characters, or fewer than six visible mixed/Latin characters
+- hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
+- filters secret-like candidate hints before provider request construction, with diagnostic reason `secret_hint_filtered`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
 - reports sanitizer outcomes as normalized reasons such as `same_as_prefix`, `still_repeats_prefix`, `no_usable_suffix`, and `repeated_prefix_repaired`
 - emits privacy-preserving AI diagnostics to macOS unified logging by default under subsystem `com.knowtype.inputmethod.KnowType` and category `ai`
@@ -449,9 +451,13 @@ Script contracts:
 - `scripts/smoke-inputmethod-install.sh` is CI-safe and must not mutate Text
   Input Source state.
 
-## Level 0 Contract
+## Level 0 And Secret Gate Contract
 
-Level 0 input must not call cloud providers. The session controller routes protected input through a no-provider pipeline, clears continuation candidates, and preserves protected text for commit.
+Level 0 remains the correction/local-protection contract. It prevents correction
+from rewriting protected input and preserves protected text for commit in legacy
+session-controller paths. Real-time cloud AI recommendation has a narrower hard
+block: only secret-like raw input or confirmed locked prefixes produce
+`AI 已禁用`.
 
 Level 0 includes:
 
@@ -462,4 +468,9 @@ Level 0 includes:
 - code-like snippets
 - protected Terminal, iTerm, and Xcode contexts
 
-Technical-token preservation is separate from Level 0 routing. A mixed prose input can preserve `API` or `macOS` while still being eligible for provider continuation if it does not match a protected context.
+Technical-token preservation is separate from Level 0 routing. A mixed prose input can preserve `API` or `macOS` while still being eligible for provider continuation.
+
+Normal technical tokens, commands, paths, URLs, and Terminal/iTerm/Xcode app
+context do not directly disable real-time AI recommendation. If a Rime
+candidate hint contains secret-like text, that hint is filtered without blocking
+the rest of the request.

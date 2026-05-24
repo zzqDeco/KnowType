@@ -9,9 +9,13 @@ Current responsibilities:
 - `AIRecommendationDiagnosticSink` records request substates through macOS unified logging by default. Events carry request/composition identifiers, lengths, counts, elapsed milliseconds, and normalized reasons, but never raw input, candidate text, context document bodies, or API keys.
 - `LexicalContextBuilder` produces top-K local lexical and tone summaries from current candidates, recent commits, selection history, and stored Rime userdb terms; full DB files and raw logs are not sent.
 - `LexicalProfileStore` persists canonical lexical profile JSON under Application Support and mirrors readable `~/.knowtype/LEXICAL_PROFILE.md` for diagnostics.
-- Input-method callers must keep Level 0/protected app commits and protected
-  app selection history out of lexical profile inputs before constructing AI
-  recommendation requests.
+- `AIRecommendationRuntime` only hard-blocks cloud AI recommendation when raw
+  input or confirmed `lockedPrefix` contains secret-like credentials. Secret
+  candidate hints are filtered before the provider request and do not disable
+  the whole request while other usable context remains.
+- Input-method callers keep noisy Level 0/protected app commits and protected
+  app selection history out of lexical profile inputs, but those correction
+  protection rules are not the cloud-AI disabled-state gate.
 - `AIContextMemoryRuntime` records committed typing events and periodically asks the provider to summarize them into `ENV.md`.
 - `TypingEventStore` stores event batches as JSONL and archives processed batches after a successful digest.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, replacing only the generated section. Loaded snapshots normalize duplicate generated markers and persist the repair best-effort while still returning the repaired in-memory content if write-back fails.
@@ -25,7 +29,10 @@ Testing concerns:
 - when `lockedPrefix` is present, returned text must stay prefix-locked
 - lexical profile hash changes must invalidate AI recommendation cache entries
 - Rime userdb parser tests must cover malformed rows, protected-token filtering, frequency ranking, and UTF-8 Chinese terms
-- protected Level 0 content must be sanitized before logging or skipped before real-time AI calls
+- `AI 已禁用` must be reserved for secret-like raw input or locked prefixes;
+  normal technical text, commands, paths, URLs, and protected app contexts stay
+  eligible for real-time AI recommendation
+- secret-like candidate hints must be filtered without blocking safe hints
 - diagnostic tests should use an injected sink and assert stage names without relying on OSLog
 - failure cooldown must suppress repeated provider calls
 - context digest must preserve `User Notes` in `ENV.md`

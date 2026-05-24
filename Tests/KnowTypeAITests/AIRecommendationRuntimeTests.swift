@@ -64,7 +64,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.candidateHints.first?.text }, ["这个方案", "这个方向"])
     }
 
-    func testRecommendationSkipsWhenAnyCandidateHintIsProtected() async {
+    func testRecommendationFiltersSecretCandidateHintsWithoutDisablingRequest() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
@@ -79,7 +79,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             lockedPrefix: nil,
             candidateHints: [
                 AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0),
-                AICandidateHint(text: "https://example.com/token", nativeIndex: 1, pageNumber: 0)
+                AICandidateHint(text: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz", nativeIndex: 1, pageNumber: 0)
             ],
             appBundleID: "com.apple.TextEdit",
             compositionID: 1
@@ -88,9 +88,42 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let state = await runtime.recommendation(for: request)
         let requests = await provider.requests
 
-        XCTAssertEqual(state, .ineligible(reason: "AI 已禁用"))
-        XCTAssertTrue(requests.isEmpty)
-        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedProtectedText })
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected ready recommendation")
+        }
+        XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
+        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案"])
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedProtectedText && $0.reason == "secret_hint_filtered"
+        })
+    }
+
+    func testRecommendationDoesNotDisableForTechnicalTokensOrAppContext() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "can be handled naturally", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "ijust",
+            lockedPrefix: nil,
+            candidateHints: [
+                AICandidateHint(text: "InputMethodKit", nativeIndex: 0, pageNumber: 0),
+                AICandidateHint(text: "iOS", nativeIndex: 1, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.dt.Xcode",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected provider-backed recommendation")
+        }
+        XCTAssertEqual(candidate.displayText, "can be handled naturally")
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.rawInput, "ijust")
+        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["InputMethodKit", "iOS"])
     }
 
     func testShortLockedPrefixDoesNotUseCandidateHintsToBypassCloudThreshold() async {
@@ -460,15 +493,20 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertFalse(snapshot.terms.contains { $0.text == "snake_case" })
     }
 
-    func testLevelZeroInputDoesNotCallProvider() async {
+    func testSecretLikeInputDoesNotCallProvider() async {
+        let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: " should not be used")
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
         let request = AIRecommendationRequest(
-            rawInput: "https://example.com/path",
+            rawInput: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
             traditionalCandidate: CorrectionCandidate(
-                text: "https://example.com/path",
+                text: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
                 source: "raw",
                 confidence: 1,
                 correctionLevel: .none
@@ -481,6 +519,9 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         XCTAssertEqual(state, .ineligible(reason: "AI 已禁用"))
         XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedProtectedText && $0.reason == "secret_like_text"
+        })
     }
 
     func testRepeatedProviderFailuresEnterCooldown() async {

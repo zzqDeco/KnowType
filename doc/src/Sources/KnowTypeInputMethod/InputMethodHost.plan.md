@@ -15,6 +15,9 @@ model app context and runtime integration.
 
 - Host app bundle identifiers help apply protected app policy and input-mode
   defaults.
+- Provider-backed continuation uses the secret-only cloud AI gate; host app
+  identity such as Terminal, iTerm, or Xcode is not by itself a real-time AI
+  disabled condition.
 - Host state should be represented in testable value types before it reaches
   core or session logic.
 

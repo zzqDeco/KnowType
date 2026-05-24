@@ -50,8 +50,9 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
 - 多 provider 兼容：OpenAI-compatible chat、OpenAI Responses、
   Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到
   同一套 provider 接口。
-- 隐私保护：URL、邮箱、路径、命令、代码片段和受保护 app 场景走
-  Level 0 no-provider 路径。
+- 隐私保护：纠错会保护 URL、邮箱、路径、命令、代码片段和受保护 app
+  场景不被改写；实时 AI 只在疑似 secret 时硬禁用，并过滤疑似 secret 的
+  候选 hint。
 - 本地词库：内置 seed 词库、用户自有 JSON/TSV 词库，以及托管安装
   Rime 简体拼音词库的路径。
 
@@ -228,9 +229,10 @@ prefix 太短等原因。查看命令：
 
 ## 隐私
 
-Level 0 输入不能调用云端 provider。它会走 no-provider 路径，并清空延续候选。
+Level 0 纠错保护用于避免把本应原样提交的文本改写，例如 URL、路径、命令、
+代码片段和受保护 app 场景。
 
-受保护输入包括：
+纠错保护输入包括：
 
 - URL 和 `www.` 地址
 - 邮箱格式输入
@@ -238,6 +240,10 @@ Level 0 输入不能调用云端 provider。它会走 no-provider 路径，并�
 - `swift test`、`git status` 等命令类输入
 - 包含大括号、分号或 `=>` 的代码片段
 - 通过 bundle identifier 识别的 Terminal、iTerm 和 Xcode 会话
+
+实时 AI 推荐使用更窄的云端隐私门禁：只有 raw input 或已确认前缀疑似包含
+API key、Bearer token、JWT、私钥、password/token 赋值等 credential 时才显示
+`AI 已禁用`。Rime 候选 hint 中的疑似 secret 会被过滤，不会禁用整次请求。
 
 `API`、`JSON`、`FastAPI`、`iOS`、`macOS`、`InputMethodKit`、
 `snake_case`、`camelCase` 等技术 token 会被保留或规范化。

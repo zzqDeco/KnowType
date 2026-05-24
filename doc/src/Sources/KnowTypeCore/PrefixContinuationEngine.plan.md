@@ -23,7 +23,9 @@ locked.
 - When no provider is configured, local fallback continuation may be used.
 - When a provider is configured but fails or returns unusable output,
   continuation rows stay empty instead of showing mock AI text.
-- Level 0 input clears continuation candidates.
+- Provider-backed continuation is hard-blocked only by secret-like locked
+  prefixes or raw input. Level 0 correction-protection input still clears local
+  fallback continuation candidates when no provider is configured.
 
 ## Tests
 

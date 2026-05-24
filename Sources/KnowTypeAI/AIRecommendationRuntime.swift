@@ -85,16 +85,41 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .ineligible(reason: "AI 不适用")
         }
-        if TextProtection.requiresNoCorrection(request.rawInput, appBundleID: request.appBundleID)
-            || Self.containsProtectedRecommendationContext(request, appBundleID: request.appBundleID) {
+        var request = request
+        if Self.containsSecretLikeRecommendationText(request) {
             record(
                 .skippedProtectedText,
                 request: request,
                 providerName: provider.providerName,
                 elapsedSince: startedAt,
-                reason: "protected_text"
+                reason: "secret_like_text"
             )
             return .ineligible(reason: "AI 已禁用")
+        }
+        let unfilteredHintCount = request.candidateHints.count
+        request.candidateHints = Self.secretFilteredCandidateHints(request.candidateHints)
+        if request.candidateHints.count != unfilteredHintCount {
+            record(
+                .skippedProtectedText,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                candidateCount: unfilteredHintCount,
+                acceptedCount: request.candidateHints.count,
+                reason: "secret_hint_filtered"
+            )
+        }
+        guard Self.hasUsableRecommendationContext(in: request) else {
+            record(
+                .skippedIneligible,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                candidateCount: unfilteredHintCount,
+                acceptedCount: 0,
+                reason: "secret_hints_filtered_all"
+            )
+            return .ineligible(reason: "AI 无推荐")
         }
         guard Self.hasLongEnoughRecommendationContextForCloud(request) else {
             record(
@@ -448,18 +473,19 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         return request.candidateHints.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
-    private static func containsProtectedRecommendationContext(
-        _ request: AIRecommendationRequest,
-        appBundleID: String?
-    ) -> Bool {
-        if let lockedPrefix = request.lockedPrefix,
-           TextProtection.requiresNoCorrection(lockedPrefix, appBundleID: appBundleID) {
+    private static func containsSecretLikeRecommendationText(_ request: AIRecommendationRequest) -> Bool {
+        if TextProtection.containsSecretLikeContent(request.rawInput) {
             return true
         }
-        return !request.candidateHints.isEmpty
-            && request.candidateHints.contains {
-                TextProtection.requiresNoCorrection($0.text, appBundleID: appBundleID)
-            }
+        if let lockedPrefix = request.lockedPrefix,
+           TextProtection.containsSecretLikeContent(lockedPrefix) {
+            return true
+        }
+        return false
+    }
+
+    private static func secretFilteredCandidateHints(_ candidateHints: [AICandidateHint]) -> [AICandidateHint] {
+        candidateHints.filter { !TextProtection.containsSecretLikeContent($0.text) }
     }
 
     private static func hasLongEnoughRecommendationContextForCloud(_ request: AIRecommendationRequest) -> Bool {
