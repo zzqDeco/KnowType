@@ -14,10 +14,11 @@ adapters.
 
 ## Behavior Notes
 
-- Continuation prompts use a suffix-generator contract: candidate text must be
-  directly appendable after `lockedPrefix`, must not repeat or paraphrase the
-  locked prefix, and should return an empty array only for unsafe, impossible, or
-  nonsensical prefixes.
+- Continuation prompts distinguish confirmed `lockedPrefix` from current-page
+  Rime `candidateHints`. With a locked prefix, candidate text must be directly
+  appendable after it and must not repeat or paraphrase it. Without a locked
+  prefix, candidate text is a full commit-ready recommendation; hints are
+  context only and do not require the model to choose or copy a base candidate.
 - Correction and polish prompts must keep the distinction between prefix
   refinement and explicit rewrite.
 - Context digest prompts use the separate `{ "markdown": "..." }` shape and

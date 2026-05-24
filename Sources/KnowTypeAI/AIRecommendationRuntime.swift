@@ -8,7 +8,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     }
 
     private struct CacheKey: Hashable {
-        var lockedPrefix: String
+        var lockedPrefix: String?
+        var candidateHints: [AICandidateHint]
         var rawInput: String
         var appBundleID: String
         var localeRawValue: String
@@ -74,18 +75,18 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             return .unavailable(reason: reason)
         }
         guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !request.traditionalCandidate.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+              Self.hasUsableRecommendationContext(in: request) else {
             record(
                 .skippedIneligible,
                 request: request,
                 providerName: provider.providerName,
                 elapsedSince: startedAt,
-                reason: "empty_raw_or_prefix"
+                reason: "empty_raw_or_context"
             )
             return .ineligible(reason: "AI 不适用")
         }
         if TextProtection.requiresNoCorrection(request.rawInput, appBundleID: request.appBundleID)
-            || TextProtection.requiresNoCorrection(request.traditionalCandidate.text, appBundleID: request.appBundleID) {
+            || Self.containsProtectedRecommendationContext(request, appBundleID: request.appBundleID) {
             record(
                 .skippedProtectedText,
                 request: request,
@@ -95,7 +96,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .ineligible(reason: "AI 已禁用")
         }
-        guard Self.isPrefixLongEnoughForCloudRecommendation(request.traditionalCandidate.text) else {
+        guard Self.hasLongEnoughRecommendationContextForCloud(request) else {
             record(
                 .skippedPrefixTooShort,
                 request: request,
@@ -132,7 +133,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 elapsedSince: startedAt
             )
             let key = CacheKey(
-                lockedPrefix: request.traditionalCandidate.text,
+                lockedPrefix: request.lockedPrefix,
+                candidateHints: request.candidateHints,
                 rawInput: request.rawInput,
                 appBundleID: request.appBundleID ?? "",
                 localeRawValue: request.locale.rawValue,
@@ -168,8 +170,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
 
             let llmRequest = LLMRequest(
                 task: .continuation,
-                lockedPrefix: request.traditionalCandidate.text,
+                lockedPrefix: request.lockedPrefix,
                 rawInput: request.rawInput,
+                candidateHints: request.candidateHints.map(\.llmHint),
                 locale: request.locale,
                 appContext: request.appBundleID,
                 maxCandidates: 1,
@@ -214,7 +217,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             }
             let result = Self.makeCandidate(
                 response: response,
-                lockedPrefix: request.traditionalCandidate.text,
+                lockedPrefix: request.lockedPrefix,
                 providerName: provider.providerName,
                 contextVersion: [
                     environment.sha256.prefix(12),
@@ -312,35 +315,53 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
 
     private static func makeCandidate(
         response: LLMResponse,
-        lockedPrefix: String,
+        lockedPrefix: String?,
         providerName: String,
         contextVersion: String
     ) -> CandidateBuildResult {
         var acceptedCount = 0
         var firstCandidate: AIRecommendationCandidate?
-        var rejectionReasons: [ContinuationSanitizationReason] = []
+        var rejectionReasons: [String] = []
         var repairedCount = 0
         for rawCandidate in response.candidates {
-            let sanitized = PrefixContinuationEngine.sanitizeContinuationDetailed(
-                rawCandidate.text,
-                lockedPrefix: lockedPrefix
-            )
-            guard let continuation = sanitized.text else {
-                rejectionReasons.append(sanitized.reason)
-                continue
-            }
-            if sanitized.reason == .repeatedPrefixRepaired {
-                repairedCount += 1
-            }
-            let displayText = join(prefix: lockedPrefix, continuation: continuation)
-            guard displayText.hasPrefix(lockedPrefix) else {
-                rejectionReasons.append(.stillRepeatsPrefix)
-                continue
+            let displayText: String
+            let continuation: String?
+            let prefixText: String
+            if let lockedPrefix = lockedPrefix?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !lockedPrefix.isEmpty {
+                let sanitized = PrefixContinuationEngine.sanitizeContinuationDetailed(
+                    rawCandidate.text,
+                    lockedPrefix: lockedPrefix
+                )
+                guard let sanitizedContinuation = sanitized.text else {
+                    rejectionReasons.append(sanitized.reason.rawValue)
+                    continue
+                }
+                if sanitized.reason == .repeatedPrefixRepaired {
+                    repairedCount += 1
+                }
+                let joined = join(prefix: lockedPrefix, continuation: sanitizedContinuation)
+                guard joined.hasPrefix(lockedPrefix) else {
+                    rejectionReasons.append(ContinuationSanitizationReason.stillRepeatsPrefix.rawValue)
+                    continue
+                }
+                displayText = joined
+                continuation = sanitizedContinuation
+                prefixText = lockedPrefix
+            } else {
+                let trimmed = rawCandidate.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    rejectionReasons.append(ContinuationSanitizationReason.empty.rawValue)
+                    continue
+                }
+                displayText = trimmed
+                continuation = nil
+                prefixText = ""
             }
             acceptedCount += 1
             if firstCandidate == nil {
                 firstCandidate = AIRecommendationCandidate(
-                    prefixText: lockedPrefix,
+                    prefixText: prefixText,
                     continuationText: continuation,
                     displayText: displayText,
                     confidence: rawCandidate.confidence ?? 0.7,
@@ -384,7 +405,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 requestID: request.requestID,
                 compositionID: request.compositionID,
                 rawLength: request.rawInput.count,
-                prefixLength: request.traditionalCandidate.text.count,
+                prefixLength: request.lockedPrefix?.count ?? 0,
                 appBundleID: request.appBundleID,
                 providerName: providerName,
                 elapsedMilliseconds: start.map(Self.elapsedMilliseconds(since:)),
@@ -420,6 +441,35 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         }
     }
 
+    private static func hasUsableRecommendationContext(in request: AIRecommendationRequest) -> Bool {
+        if request.lockedPrefix?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return true
+        }
+        return request.candidateHints.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private static func containsProtectedRecommendationContext(
+        _ request: AIRecommendationRequest,
+        appBundleID: String?
+    ) -> Bool {
+        if let lockedPrefix = request.lockedPrefix,
+           TextProtection.requiresNoCorrection(lockedPrefix, appBundleID: appBundleID) {
+            return true
+        }
+        return !request.candidateHints.isEmpty
+            && request.candidateHints.allSatisfy {
+                TextProtection.requiresNoCorrection($0.text, appBundleID: appBundleID)
+            }
+    }
+
+    private static func hasLongEnoughRecommendationContextForCloud(_ request: AIRecommendationRequest) -> Bool {
+        if let lockedPrefix = request.lockedPrefix,
+           isPrefixLongEnoughForCloudRecommendation(lockedPrefix) {
+            return true
+        }
+        return request.candidateHints.contains { isPrefixLongEnoughForCloudRecommendation($0.text) }
+    }
+
     private static func isPrefixLongEnoughForCloudRecommendation(_ prefix: String) -> Bool {
         let visibleCount = prefix.filter { !$0.isWhitespace && !$0.isNewline }.count
         let hanCount = prefix.filter {
@@ -431,26 +481,26 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         return visibleCount >= 6
     }
 
-    private static func rejectionSummary(_ reasons: [ContinuationSanitizationReason]) -> String {
+    private static func rejectionSummary(_ reasons: [String]) -> String {
         guard !reasons.isEmpty else {
             return "no_usable_continuation"
         }
-        let priority: [ContinuationSanitizationReason] = [
-            .empty,
-            .sameAsPrefix,
-            .stillRepeatsPrefix,
-            .noUsableSuffix,
-            .repeatedPrefixRepaired,
-            .accepted
+        let priority = [
+            ContinuationSanitizationReason.empty.rawValue,
+            ContinuationSanitizationReason.sameAsPrefix.rawValue,
+            ContinuationSanitizationReason.stillRepeatsPrefix.rawValue,
+            ContinuationSanitizationReason.noUsableSuffix.rawValue,
+            ContinuationSanitizationReason.repeatedPrefixRepaired.rawValue,
+            ContinuationSanitizationReason.accepted.rawValue
         ]
-        return priority.first(where: { reasons.contains($0) })?.rawValue ?? reasons[0].rawValue
+        return priority.first(where: { reasons.contains($0) }) ?? reasons[0]
     }
 }
 
 private struct CandidateBuildResult {
     var candidate: AIRecommendationCandidate?
     var acceptedCount: Int
-    var rejectionReasons: [ContinuationSanitizationReason]
+    var rejectionReasons: [String]
     var repairedCount: Int
 }
 

@@ -9,7 +9,9 @@ outputs.
 
 - It defines shape only; semantic prefix-lock validation remains in
   `PrefixContinuationEngine`.
-- Candidate tasks share the `candidates` array contract.
+- Candidate tasks share the `candidates` array contract. Continuation keeps the
+  same `text`, `confidence`, and `reason` fields; it does not add a required
+  base-selection field because Rime hints are contextual, not confirmed input.
 - `contextDigest` uses a dedicated markdown object and is normalized only after
   strict decoding.
 

@@ -32,9 +32,7 @@ enum StructuredResponseNormalizer {
         if allowCandidateArrayRoot,
            task != .contextDigest,
            let rawCandidates = raw as? [Any] {
-            let candidates = try rawCandidates.map { rawCandidate in
-                try candidate(from: rawCandidate)
-            }
+            let candidates = try rawCandidates.map(candidate(from:))
             return LLMResponse(candidates: candidates, diagnostics: diagnostics)
         }
         guard let object = raw as? [String: Any] else {
@@ -60,9 +58,7 @@ enum StructuredResponseNormalizer {
             guard let rawCandidates = object["candidates"] as? [Any] else {
                 throw structuredDecodeError("missing candidates")
             }
-            let candidates = try rawCandidates.map { rawCandidate in
-                try candidate(from: rawCandidate)
-            }
+            let candidates = try rawCandidates.map(candidate(from:))
             return LLMResponse(candidates: candidates, diagnostics: diagnostics)
         }
     }

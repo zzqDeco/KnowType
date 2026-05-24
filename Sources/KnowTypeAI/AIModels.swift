@@ -59,12 +59,37 @@ public enum AIRecommendationState: Sendable, Equatable {
 public struct AIRecommendationRequest: Sendable, Equatable {
     public var requestID: UUID
     public var rawInput: String
-    public var traditionalCandidate: CorrectionCandidate
+    public var lockedPrefix: String?
+    public var candidateHints: [AICandidateHint]
     public var appBundleID: String?
     public var appName: String?
     public var locale: KnowTypeLocale
     public var compositionID: Int
     public var lexicalContext: LexicalContextSnapshot?
+
+    public init(
+        rawInput: String,
+        lockedPrefix: String? = nil,
+        candidateHints: [AICandidateHint] = [],
+        appBundleID: String? = nil,
+        appName: String? = nil,
+        locale: KnowTypeLocale = .mixed,
+        compositionID: Int,
+        requestID: UUID = UUID(),
+        lexicalContext: LexicalContextSnapshot? = nil
+    ) {
+        self.requestID = requestID
+        self.rawInput = rawInput
+        self.lockedPrefix = lockedPrefix?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true
+            ? nil
+            : lockedPrefix
+        self.candidateHints = candidateHints
+        self.appBundleID = appBundleID
+        self.appName = appName
+        self.locale = locale
+        self.compositionID = compositionID
+        self.lexicalContext = lexicalContext
+    }
 
     public init(
         rawInput: String,
@@ -76,14 +101,58 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         requestID: UUID = UUID(),
         lexicalContext: LexicalContextSnapshot? = nil
     ) {
-        self.requestID = requestID
-        self.rawInput = rawInput
-        self.traditionalCandidate = traditionalCandidate
-        self.appBundleID = appBundleID
-        self.appName = appName
-        self.locale = locale
-        self.compositionID = compositionID
-        self.lexicalContext = lexicalContext
+        self.init(
+            rawInput: rawInput,
+            lockedPrefix: traditionalCandidate.text,
+            candidateHints: [],
+            appBundleID: appBundleID,
+            appName: appName,
+            locale: locale,
+            compositionID: compositionID,
+            requestID: requestID,
+            lexicalContext: lexicalContext
+        )
+    }
+
+    public var traditionalCandidate: CorrectionCandidate {
+        CorrectionCandidate(
+            text: lockedPrefix ?? candidateHints.first?.text ?? "",
+            source: lockedPrefix == nil ? "candidate-hint" : "locked-prefix",
+            confidence: 1,
+            correctionLevel: .contextual
+        )
+    }
+}
+
+public struct AICandidateHint: Codable, Sendable, Equatable, Hashable {
+    public var text: String
+    public var nativeIndex: Int?
+    public var pageNumber: Int
+    public var isHighlighted: Bool
+    public var comment: String?
+
+    public init(
+        text: String,
+        nativeIndex: Int? = nil,
+        pageNumber: Int = 0,
+        isHighlighted: Bool = false,
+        comment: String? = nil
+    ) {
+        self.text = text
+        self.nativeIndex = nativeIndex
+        self.pageNumber = pageNumber
+        self.isHighlighted = isHighlighted
+        self.comment = comment
+    }
+
+    public var llmHint: LLMCandidateHint {
+        LLMCandidateHint(
+            text: text,
+            nativeIndex: nativeIndex,
+            pageNumber: pageNumber,
+            isHighlighted: isHighlighted,
+            comment: comment
+        )
     }
 }
 

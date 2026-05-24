@@ -34,6 +34,10 @@ Current behavior:
 - applies AI publications through `AIRecommendationPatch`, which also checks request id and raw revision and is allowed
   to update only the AI slot
 - records AI scheduling diagnostics for scheduled requests, previous-generation cancellation, stale-result drops, and applied AI states through the shared AI diagnostic sink
+- schedules AI recommendation with confirmed locked prefixes only when text has
+  already been resolved by the user; while Rime is merely composing, current-page
+  Rime candidates are sent as contextual `candidateHints` and the first
+  candidate is not treated as locked text
 - merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; current-page Rime candidates and in-memory recent history still participate regardless
 - delegates Rime userdb lexical refreshes to `LexicalProfileRuntime`; commit/selection refresh reads existing snapshots only and does not call `sync_user_data`; profile JSON/Markdown staging, stale-write gates, and userdb parse diagnostics live outside the coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
