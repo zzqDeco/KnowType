@@ -182,7 +182,7 @@ knowtype_bundle_identifier() {
 knowtype_sanitize_backup_component() {
   local value="$1"
   value="${value:-unknown}"
-  printf '%s' "$value" | tr -c 'A-Za-z0-9._-+' '-'
+  printf '%s' "$value" | tr -c 'A-Za-z0-9._+-' '-'
 }
 
 knowtype_path_checksum() {

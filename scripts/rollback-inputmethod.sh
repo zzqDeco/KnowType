@@ -67,6 +67,16 @@ target_path="$(knowtype_inputmethod_target_path)"
 prefpane_path="$(knowtype_preferencepane_target_path)"
 target_dir="$(knowtype_inputmethod_target_dir)"
 prefpane_dir="$(knowtype_preferencepane_target_dir)"
+restore_app_staging_dir=""
+restore_prefpane_staging_dir=""
+
+cleanup_restore_staging() {
+  [[ -n "$restore_app_staging_dir" && -d "$restore_app_staging_dir" ]] && rm -rf "$restore_app_staging_dir"
+  [[ -n "$restore_prefpane_staging_dir" && -d "$restore_prefpane_staging_dir" ]] && rm -rf "$restore_prefpane_staging_dir"
+  return 0
+}
+
+trap cleanup_restore_staging EXIT
 
 list_backups() {
   if [[ ! -d "$backup_root" ]]; then
@@ -90,6 +100,7 @@ list_backups() {
   if (( count == 0 )); then
     echo "No KnowType install backups were found."
   fi
+  return 0
 }
 
 if (( LIST_BACKUPS == 1 )); then
@@ -158,15 +169,27 @@ for _ in {1..30}; do
 done
 
 mkdir -p "$target_dir"
-if [[ -e "$target_path" || -L "$target_path" ]]; then
-  knowtype_remove_local_inputmethod_bundle_if_safe "$target_path" 0
-fi
-cp -R "$backup_dir/KnowType.app" "$target_path"
+restore_app_staging_dir="$(mktemp -d "$target_dir/.KnowType.rollback.app.XXXXXX")"
+cp -R "$backup_dir/KnowType.app" "$restore_app_staging_dir/KnowType.app"
 
 if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
   mkdir -p "$prefpane_dir"
+  restore_prefpane_staging_dir="$(mktemp -d "$prefpane_dir/.KnowType.rollback.prefpane.XXXXXX")"
+  cp -R "$backup_dir/KnowType.prefPane" "$restore_prefpane_staging_dir/KnowType.prefPane"
+fi
+
+if [[ -e "$target_path" || -L "$target_path" ]]; then
+  knowtype_remove_local_inputmethod_bundle_if_safe "$target_path" 0
+fi
+mv "$restore_app_staging_dir/KnowType.app" "$target_path"
+rm -rf "$restore_app_staging_dir"
+restore_app_staging_dir=""
+
+if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
   rm -rf -- "$prefpane_path"
-  cp -R "$backup_dir/KnowType.prefPane" "$prefpane_path"
+  mv "$restore_prefpane_staging_dir/KnowType.prefPane" "$prefpane_path"
+  rm -rf "$restore_prefpane_staging_dir"
+  restore_prefpane_staging_dir=""
 else
   rm -rf -- "$prefpane_path"
 fi

@@ -172,6 +172,8 @@ rollback_failed_install() {
       mkdir -p "$PREFPANE_TARGET_DIR"
       rm -rf -- "$PREFPANE_TARGET_PATH"
       cp -R "$BACKUP_DIR/KnowType.prefPane" "$PREFPANE_TARGET_PATH"
+    else
+      rm -rf -- "$PREFPANE_TARGET_PATH"
     fi
     knowtype_register_launchservices_path "$TARGET_PATH" 0
   fi
