@@ -9,6 +9,143 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds, 10_000)
     }
 
+    func testRecommendationWithoutLockedPrefixUsesCandidateHintsAsContextOnly() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "zhege fangan",
+            lockedPrefix: nil,
+            candidateHints: [
+                AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0, isHighlighted: true),
+                AICandidateHint(text: "这个方向", nativeIndex: 1, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected ready AI recommendation")
+        }
+        XCTAssertEqual(candidate.prefixText, "")
+        XCTAssertNil(candidate.continuationText)
+        XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
+        XCTAssertEqual(requests.first?.lockedPrefix, nil)
+        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案", "这个方向"])
+    }
+
+    func testRecommendationCacheIncludesCandidateHints() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "zhege",
+                candidateHints: [AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0)],
+                compositionID: 1
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "zhege",
+                candidateHints: [AICandidateHint(text: "这个方向", nativeIndex: 0, pageNumber: 1)],
+                compositionID: 1
+            )
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map { $0.candidateHints.first?.text }, ["这个方案", "这个方向"])
+    }
+
+    func testRecommendationSkipsWhenAnyCandidateHintIsProtected() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "zhege url",
+            lockedPrefix: nil,
+            candidateHints: [
+                AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0),
+                AICandidateHint(text: "https://example.com/token", nativeIndex: 1, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 已禁用"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedProtectedText })
+    }
+
+    func testShortLockedPrefixDoesNotUseCandidateHintsToBypassCloudThreshold() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "还可以继续推进。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "wo",
+            lockedPrefix: "我",
+            candidateHints: [
+                AICandidateHint(text: "我觉得这个方案", nativeIndex: 0, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+    }
+
+    func testLockedPrefixWhitespaceIsPreservedInRecommendationDisplayText() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "我觉得这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "wo juede",
+            lockedPrefix: "  我觉得这个方案 ",
+            candidateHints: [
+                AICandidateHint(text: "我觉得这个方案", nativeIndex: 0, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected ready AI recommendation")
+        }
+        XCTAssertEqual(candidate.prefixText, "  我觉得这个方案 ")
+        XCTAssertEqual(candidate.continuationText, "还可以再细化一下")
+        XCTAssertEqual(candidate.displayText, "  我觉得这个方案 还可以再细化一下")
+    }
+
     func testRecommendationDiagnosticsRecordSuccessAndCacheHit() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [

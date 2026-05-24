@@ -21,7 +21,7 @@ enum LLMOutputContract {
         case .contextDigest:
             return "A local KnowType context digest markdown document."
         case .continuation:
-            return "KnowType continuation candidates that contain only text after the locked prefix."
+            return "KnowType continuation candidates. With a locked prefix, text is suffix-only; without one, text is a full commit-ready recommendation informed by candidate hints."
         case .correction:
             return "KnowType correction candidates."
         case .polish:
@@ -43,7 +43,7 @@ enum LLMOutputContract {
                 ],
                 "required": ["markdown"]
             ]
-        case .correction, .continuation, .polish:
+        case .continuation:
             return [
                 "type": "object",
                 "additionalProperties": false,
@@ -56,9 +56,37 @@ enum LLMOutputContract {
                             "properties": [
                                 "text": [
                                     "type": "string",
-                                    "description": task == .continuation
-                                        ? "For continuation, only the suffix after locked_prefix."
-                                        : "Candidate text."
+                                    "description": "If lockedPrefix is present, only the suffix after lockedPrefix. If lockedPrefix is absent, a full commit-ready recommendation informed by rawInput and candidateHints."
+                                ],
+                                "confidence": [
+                                    "type": "number",
+                                    "description": "A confidence score between 0 and 1."
+                                ],
+                                "reason": [
+                                    "type": "string",
+                                    "description": "A short reason for diagnostics."
+                                ]
+                            ],
+                            "required": ["text", "confidence", "reason"]
+                        ]
+                    ]
+                ],
+                "required": ["candidates"]
+            ]
+        case .correction, .polish:
+            return [
+                "type": "object",
+                "additionalProperties": false,
+                "properties": [
+                    "candidates": [
+                        "type": "array",
+                        "items": [
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": [
+                                "text": [
+                                    "type": "string",
+                                    "description": "Candidate text."
                                 ],
                                 "confidence": [
                                     "type": "number",

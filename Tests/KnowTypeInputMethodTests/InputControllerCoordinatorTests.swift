@@ -1491,7 +1491,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         XCTAssertTrue(hasAIRecommendation)
         let requests = await aiProvider.requests
-        XCTAssertTrue(requests.contains { $0.traditionalCandidate.text == "你是谁" })
+        XCTAssertTrue(requests.contains { $0.lockedPrefix == "你是谁" })
 
         XCTAssertTrue(
             coordinator.handle(
@@ -1500,6 +1500,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertEqual(client.insertTextWrites.last?.text, "你是谁继续推进")
+    }
+
+    func testConfirmedLockedPrefixTextPreservesUserWhitespaceForAIRequest() {
+        let suggestion = SuggestionResponse(
+            prefixCandidates: [],
+            lockedPrefix: LockedPrefix(
+                text: "  我觉得这个方案 \n",
+                rawInput: "wojuedezhegefangan",
+                candidateID: "test"
+            ),
+            continuationCandidates: [],
+            latencyMs: 0
+        )
+
+        XCTAssertEqual(
+            InputControllerCoordinator.confirmedLockedPrefixText(for: suggestion),
+            "  我觉得这个方案 \n"
+        )
+    }
+
+    func testConfirmedLockedPrefixTextReturnsNilForWhitespaceOnlyPrefix() {
+        let suggestion = SuggestionResponse(
+            prefixCandidates: [],
+            lockedPrefix: LockedPrefix(
+                text: " \n\t ",
+                rawInput: " ",
+                candidateID: "test"
+            ),
+            continuationCandidates: [],
+            latencyMs: 0
+        )
+
+        XCTAssertNil(InputControllerCoordinator.confirmedLockedPrefixText(for: suggestion))
     }
 
     @MainActor
@@ -1518,12 +1551,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
-            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
         }
         XCTAssertTrue(hasAIRecommendation)
         let requests = await aiProvider.requests
         let request = try XCTUnwrap(requests.last)
 
+        XCTAssertNil(request.lockedPrefix)
+        XCTAssertTrue(request.candidateHints.contains { $0.text == "你" })
+        XCTAssertEqual(request.candidateHints.first?.pageNumber, 0)
         XCTAssertTrue(request.lexicalContext?.markdown.contains("你") == true)
         XCTAssertTrue(request.lexicalContext?.sourceSummary.contains { $0.hasPrefix("rime-candidates: ") } == true)
     }
@@ -1560,7 +1596,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
-            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
         }
         XCTAssertTrue(hasAIRecommendation)
         let requests = await aiProvider.requests
@@ -1603,7 +1639,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
-            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
         }
         XCTAssertTrue(hasAIRecommendation)
         let requests = await aiProvider.requests
@@ -1801,7 +1837,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         let hasReadyAI = await waitUntilOnMainActor {
-            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
         }
         XCTAssertTrue(hasReadyAI)
 
@@ -2674,7 +2710,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         let hasAIRecommendation = await waitUntilOnMainActor {
-            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你AI 续写"
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
         }
         XCTAssertTrue(hasAIRecommendation)
         XCTAssertTrue(
@@ -2684,7 +2720,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你AI 续写")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "AI 续写")
         XCTAssertEqual(persistenceSpy.recordedSelections, [])
     }
 
@@ -2767,7 +2803,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         let hasAIRecommendation = await waitUntilOnMainActor {
-            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你AI 续写"
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
         }
         XCTAssertTrue(hasAIRecommendation)
         coordinator.hoverCandidatePanelSelection(.aiRecommendation)
@@ -2775,7 +2811,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "你AI 续写")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "AI 续写")
         XCTAssertEqual(recorder.spaceProcessCount, 0)
     }
 
@@ -4054,10 +4090,11 @@ private actor RecordingAIRecommendationProvider: AIRecommendationProviding {
 
     func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
         recordedRequests.append(request)
+        let displayText = request.lockedPrefix.map { $0 + continuation } ?? continuation
         let candidate = AIRecommendationCandidate(
-            prefixText: request.traditionalCandidate.text,
-            continuationText: continuation,
-            displayText: request.traditionalCandidate.text + continuation,
+            prefixText: request.lockedPrefix ?? "",
+            continuationText: request.lockedPrefix == nil ? nil : continuation,
+            displayText: displayText,
             confidence: 0.91,
             provider: "ai-test",
             contextVersion: "test"
@@ -4090,10 +4127,11 @@ private actor SignaledAIRecommendationProvider: AIRecommendationProviding {
     }
 
     func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        let displayText = request.lockedPrefix.map { $0 + "继续推进" } ?? "继续推进"
         let candidate = AIRecommendationCandidate(
-            prefixText: request.traditionalCandidate.text,
-            continuationText: "继续推进",
-            displayText: request.traditionalCandidate.text + "继续推进",
+            prefixText: request.lockedPrefix ?? "",
+            continuationText: request.lockedPrefix == nil ? nil : "继续推进",
+            displayText: displayText,
             confidence: 0.91,
             provider: "ai-test",
             contextVersion: "test"

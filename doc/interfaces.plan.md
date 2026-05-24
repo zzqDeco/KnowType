@@ -11,6 +11,9 @@ LLMRequest {
   task: correction | continuation | contextDigest | polish
   lockedPrefix?: string
   rawInput?: string
+  candidateHints: [
+    { text: string, nativeIndex?: number, pageNumber: number, isHighlighted: boolean, comment?: string }
+  ]
   locale: zh-CN | en-US | mixed
   appContext?: string
   maxCandidates: number
@@ -46,12 +49,15 @@ endpoints that reject schema fields fall back once to JSON mode and report `stru
 rejects those fields. Ollama and custom HTTP do not claim provider-enforced schema, but their outputs still pass
 through strict local decoding instead of line-based candidate extraction.
 
-Real-time AI recommendation requests use `task: continuation`, `lockedPrefix`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
+Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, current-page Rime `candidateHints`, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; an unselected Rime first candidate must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
-Provider prompts are task-specific. Continuation requests use a short suffix-generation prompt where candidate `text`
-must be directly appendable after `lockedPrefix`; it must not repeat, paraphrase, translate, rewrite, or polish the locked
-prefix. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into
-those tasks. The local prefix-lock sanitizer remains authoritative even when a provider follows the prompt.
+Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from Rime hints:
+
+- when `lockedPrefix` is present, candidate `text` must be directly appendable after it and must not repeat, paraphrase, translate, rewrite, or polish the locked prefix
+- when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput`, context, and `candidateHints`
+- `candidateHints` are context only; providers do not need to choose a `base` from them and may produce a recommendation that does not copy any hint exactly
+
+When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; hints cannot make a too-short confirmed prefix eligible. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
 ## Provider Kinds
 

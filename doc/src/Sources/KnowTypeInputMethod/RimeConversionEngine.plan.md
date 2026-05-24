@@ -29,6 +29,9 @@ input.
 - Current-page highlight changes call Rime's `highlight_candidate_on_current_page` so arrow movement and hover keep the engine context authoritative.
 - `commitComposition` is exposed for IMK lifecycle commits and uses Rime's native composition commit when available.
 - Native snapshots include Rime raw input and preedit; the coordinator uses preedit as marked text and syncs raw input after partial commits.
+- Native suggestion snapshots expose current-page Rime candidates as prefix
+  candidates only; they do not set `lockedPrefix` from the first unselected
+  candidate.
 - Native snapshots copy only the current Rime menu page on the synchronous key path; full candidate-list iteration is intentionally absent from the bridge.
 - Userdb snapshot reads resolve the live active schema's user dictionary name,
   then scan deterministically for that dictionary's existing `*.userdb.txt`

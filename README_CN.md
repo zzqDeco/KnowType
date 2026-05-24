@@ -192,8 +192,11 @@ Canonical JSON 存在 `~/Library/Application Support/KnowType/AI/`。传统输�
 这些文件。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
-输出不含原文的子状态诊断。日志可以区分 schema 降级、结构化解析失败、
-prefix-lock sanitizer 拒绝、prefix 太短等原因。查看命令：
+输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选只作为
+`candidateHints` 提供给 AI；未选择的候选不会被当成 locked prefix。还没有
+locked prefix 时，AI 返回的是可直接上屏的完整推荐，而不是拼到第一候选后的后缀。
+日志可以区分 schema 降级、结构化解析失败、prefix-lock sanitizer 拒绝、
+prefix 太短等原因。查看命令：
 `log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`。
 
 ## 输入行为

@@ -851,9 +851,7 @@ extension ConversionEngineSnapshot {
         }
         return SuggestionResponse(
             prefixCandidates: prefixCandidates,
-            lockedPrefix: prefixCandidates.first.map {
-                LockedPrefix(text: $0.text, rawInput: originalRawInput, candidateID: $0.source)
-            },
+            lockedPrefix: nil,
             continuationCandidates: [],
             latencyMs: 0
         )

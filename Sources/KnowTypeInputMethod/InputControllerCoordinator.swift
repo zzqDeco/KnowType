@@ -705,6 +705,35 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
+    private func candidateHints(for suggestion: SuggestionResponse) -> [AICandidateHint] {
+        let snapshot = conversionEngine.snapshot
+        if !snapshot.candidates.isEmpty {
+            return snapshot.candidates.map { candidate in
+                AICandidateHint(
+                    text: candidate.text,
+                    nativeIndex: candidate.index,
+                    pageNumber: snapshot.pageNumber,
+                    isHighlighted: candidate.index == snapshot.highlightedIndex,
+                    comment: candidate.comment
+                )
+            }
+        }
+        return suggestion.prefixCandidates.enumerated().map { index, candidate in
+            AICandidateHint(
+                text: candidate.text,
+                nativeIndex: nil,
+                pageNumber: 0,
+                isHighlighted: index == 0,
+                comment: nil
+            )
+        }
+    }
+
+    static func confirmedLockedPrefixText(for suggestion: SuggestionResponse) -> String? {
+        let text = suggestion.lockedPrefix?.text
+        return text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil
+    }
+
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
         let currentAppBundleID = appBundleIdentifier(client: client)
         if let cancelledRequestID = activeAIRecommendationRequestID {
@@ -723,16 +752,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationGeneration += 1
         let generation = aiRecommendationGeneration
         let requestID = UUID()
+        let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
+        let candidateHints = candidateHints(for: suggestion)
 
-        guard let firstPrefix = suggestion.prefixCandidates.first,
-              !isPartialSegmentCandidate(firstPrefix),
+        guard lockedPrefixText != nil || !candidateHints.isEmpty,
               !compositionBuffer.hasResolvedSegments || compositionBuffer.isFullyResolved else {
             recordAIDiagnostic(
                 .skippedIneligible,
                 requestID: requestID,
                 compositionID: compositionID,
                 rawLength: rawBuffer.count,
-                prefixLength: suggestion.prefixCandidates.first?.text.count,
+                prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
                 reason: "no_stable_prefix"
             )
@@ -742,13 +772,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
 
         guard !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: currentAppBundleID),
-              !TextProtection.requiresNoCorrection(firstPrefix.text, appBundleID: currentAppBundleID) else {
+              lockedPrefixText.map({
+                  !TextProtection.requiresNoCorrection($0, appBundleID: currentAppBundleID)
+              }) ?? true else {
             recordAIDiagnostic(
                 .skippedProtectedText,
                 requestID: requestID,
                 compositionID: compositionID,
                 rawLength: rawBuffer.count,
-                prefixLength: firstPrefix.text.count,
+                prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
                 reason: "protected_text"
             )
@@ -763,7 +795,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 requestID: requestID,
                 compositionID: compositionID,
                 rawLength: rawBuffer.count,
-                prefixLength: firstPrefix.text.count,
+                prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
                 reason: "cloud_continuation_disabled"
             )
@@ -778,7 +810,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 requestID: requestID,
                 compositionID: compositionID,
                 rawLength: rawBuffer.count,
-                prefixLength: firstPrefix.text.count,
+                prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
                 reason: "provider_not_configured"
             )
@@ -795,7 +827,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 requestID: requestID,
                 compositionID: compositionID,
                 rawLength: rawBuffer.count,
-                prefixLength: firstPrefix.text.count,
+                prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
                 reason: "recommendation_provider_missing"
             )
@@ -809,7 +841,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let currentRawRevision = rawRevision
         let request = AIRecommendationRequest(
             rawInput: rawInput,
-            traditionalCandidate: firstPrefix,
+            lockedPrefix: lockedPrefixText,
+            candidateHints: candidateHints,
             appBundleID: currentAppBundleID,
             appName: currentAppBundleID,
             locale: locale,
@@ -822,7 +855,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             requestID: requestID,
             compositionID: currentCompositionID,
             rawLength: rawInput.count,
-            prefixLength: firstPrefix.text.count,
+            prefixLength: lockedPrefixText?.count,
             appBundleID: currentAppBundleID
         )
         aiRecommendationState = .pending(requestID: requestID)
@@ -846,7 +879,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                         requestID: requestID,
                         compositionID: currentCompositionID,
                         rawLength: rawInput.count,
-                        prefixLength: firstPrefix.text.count,
+                        prefixLength: lockedPrefixText?.count,
                         appBundleID: currentAppBundleID,
                         reason: "task_cancelled_before_apply"
                     )
@@ -861,7 +894,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                             requestID: requestID,
                             compositionID: currentCompositionID,
                             rawLength: rawInput.count,
-                            prefixLength: firstPrefix.text.count,
+                            prefixLength: lockedPrefixText?.count,
                             appBundleID: currentAppBundleID,
                             reason: "coordinator_released"
                         )
@@ -887,7 +920,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                             requestID: requestID,
                             compositionID: currentCompositionID,
                             rawLength: rawInput.count,
-                            prefixLength: firstPrefix.text.count,
+                            prefixLength: lockedPrefixText?.count,
                             appBundleID: currentAppBundleID,
                             reason: reason
                         )
@@ -904,7 +937,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                         requestID: requestID,
                         compositionID: currentCompositionID,
                         rawLength: rawInput.count,
-                        prefixLength: firstPrefix.text.count,
+                        prefixLength: lockedPrefixText?.count,
                         appBundleID: currentAppBundleID,
                         reason: Self.aiDiagnosticReason(for: patch.state)
                     )
