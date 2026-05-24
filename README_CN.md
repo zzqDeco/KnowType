@@ -186,8 +186,10 @@ OpenAI-compatible profile 必须显式填写 model ID；本地 OpenAI-compatible
 profile 可以留空 model，并通过 `/v1/models` 发现。
 
 AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
-记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明。传统输入引擎不依赖
-这两个文件。
+记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明，`LEXICAL_PROFILE.md`
+是由 Rime userdb 词频、KnowType 近期提交和选择历史合成的本地 top-K 词汇画像镜像。
+Canonical JSON 存在 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
+这些文件。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
 输出不含原文的子状态诊断。日志可以区分 schema 降级、结构化解析失败、

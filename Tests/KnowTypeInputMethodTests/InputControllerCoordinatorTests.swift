@@ -1529,6 +1529,149 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAIRecommendationRequestMergesPersistentLexicalProfile() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let lexicalStore = LexicalProfileStore.inMemory()
+        let persisted = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                persistentTerms: [
+                    LexicalContextTerm(text: "长期高频", score: 1, source: "rime-userdb")
+                ],
+                persistentSourceSummary: ["rime-userdb-snapshot: abc123"]
+            )
+        )
+        try lexicalStore.save(
+            snapshot: persisted,
+            schemaID: "pinyin_simp",
+            rimeSnapshotURL: nil,
+            rimeSnapshotModifiedAt: nil
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            lexicalProfileStore: lexicalStore,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        let requests = await aiProvider.requests
+        let request = try XCTUnwrap(requests.last)
+
+        XCTAssertTrue(request.lexicalContext?.markdown.contains("长期高频") == true)
+        XCTAssertTrue(request.lexicalContext?.sourceSummary.contains("rime-userdb: 1") == true)
+    }
+
+    @MainActor
+    func testAIRecommendationIgnoresPersistentLexicalProfileFromDifferentSchema() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let lexicalStore = LexicalProfileStore.inMemory()
+        let persisted = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                persistentTerms: [
+                    LexicalContextTerm(text: "双拼高频", score: 1, source: "rime-userdb")
+                ],
+                persistentSourceSummary: ["rime-userdb-snapshot: stale"]
+            )
+        )
+        try lexicalStore.save(
+            snapshot: persisted,
+            schemaID: "double_pinyin",
+            rimeSnapshotURL: nil,
+            rimeSnapshotModifiedAt: nil
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            lexicalProfileStore: lexicalStore,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: FixtureNativeConversionEngine(activeSchemaID: "pinyin_simp")
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你继续推进"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        let requests = await aiProvider.requests
+        let request = try XCTUnwrap(requests.last)
+
+        XCTAssertFalse(request.lexicalContext?.markdown.contains("双拼高频") == true)
+        XCTAssertFalse(request.lexicalContext?.sourceSummary.contains("rime-userdb: 1") == true)
+    }
+
+    @MainActor
+    func testRimeUserDBSyncDoesNotRunOnPlainKeydown() async throws {
+        let client = FakeInputControllerClient()
+        let rimeProvider = CountingRimeUserDBTextSnapshotProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            rimeUserDBTextProvider: rimeProvider
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        try await Task.sleep(nanoseconds: 650_000_000)
+
+        let requestCount = await rimeProvider.requestCount
+        XCTAssertEqual(requestCount, 0)
+    }
+
+    @MainActor
+    func testRimeUserDBSyncUsesActiveConversionSchemaID() async throws {
+        let client = FakeInputControllerClient()
+        let rimeProvider = CountingRimeUserDBTextSnapshotProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            rimeUserDBTextProvider: rimeProvider,
+            conversionEngine: FixtureNativeConversionEngine(activeSchemaID: "custom_schema")
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        for _ in 0..<30 {
+            if await rimeProvider.requestCount > 0 {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        let requestedSchemaIDs = await rimeProvider.requestedSchemaIDs
+        XCTAssertEqual(requestedSchemaIDs, ["custom_schema"])
+    }
+
+    func testLexicalProfileRefreshGateRejectsStaleGenerations() {
+        let gate = LexicalProfileRefreshGate()
+        let first = gate.next()
+        XCTAssertTrue(gate.isCurrent(first))
+
+        let second = gate.next()
+
+        XCTAssertFalse(gate.isCurrent(first))
+        XCTAssertTrue(gate.isCurrent(second))
+    }
+
+    func testInputMethodLexicalProfileRuntimeSharesProcessWideState() {
+        XCTAssertTrue(InputMethodLexicalProfileRuntime.store === InputMethodLexicalProfileRuntime.store)
+        XCTAssertTrue(InputMethodLexicalProfileRuntime.refreshGate === InputMethodLexicalProfileRuntime.refreshGate)
+    }
+
+    @MainActor
     func testProtectedAppInputDoesNotReachAIRecommendationOrLaterLexicalProfile() async throws {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
@@ -2784,6 +2927,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        lexicalProfileStore: LexicalProfileStore = .inMemory(),
+        lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
+        rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)? = nil,
         enablesAsyncSuggestionRefresh: Bool = false,
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferences: InputModePreferences = .standard,
@@ -2815,6 +2961,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
             aiDiagnosticSink: aiDiagnosticSink,
+            lexicalProfileStore: lexicalProfileStore,
+            lexicalProfileRefreshGate: lexicalProfileRefreshGate,
+            rimeUserDBTextProvider: rimeUserDBTextProvider,
             conversionEngine: effectiveConversionEngine,
             conversionEngineFactory: conversionEngineFactory,
             host: host,
@@ -2945,8 +3094,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
 private struct FixtureNativeConversionEngine: KnowTypeConversionEngine {
     var isNativeActive = true
+    var activeSchemaID = "pinyin_simp"
     private var rawInput = ""
     private var currentSnapshot = ConversionEngineSnapshot(engineName: "native-test")
+
+    init(activeSchemaID: String = "pinyin_simp") {
+        self.activeSchemaID = activeSchemaID
+    }
 
     var snapshot: ConversionEngineSnapshot {
         currentSnapshot
@@ -4098,6 +4252,29 @@ private final class FakeUserSelectionHistoryPersistence: InputControllerUserSele
 
     func flushHistory(_ currentHistory: [String], maxEntries: Int) {
         flushCalls.append(Array(currentHistory.suffix(maxEntries)))
+    }
+}
+
+private actor CountingRimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {
+    private var count = 0
+    private var schemaIDs: [String] = []
+
+    func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
+        count += 1
+        schemaIDs.append(schemaID)
+        return RimeUserDBTextSnapshot(
+            schemaID: schemaID,
+            fileURL: URL(fileURLWithPath: "/tmp/\(schemaID).userdb.txt"),
+            content: "长期高频\tchang qi gao pin\t5\n"
+        )
+    }
+
+    var requestCount: Int {
+        count
+    }
+
+    var requestedSchemaIDs: [String] {
+        schemaIDs
     }
 }
 

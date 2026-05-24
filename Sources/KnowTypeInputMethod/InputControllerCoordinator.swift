@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 import KnowTypeAI
 import KnowTypeCore
@@ -48,6 +49,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var recentLexicalCommits: [String] = []
     private var recentLexicalSelections: [String] = []
     private let lexicalContextBuilder = LexicalContextBuilder()
+    private let lexicalProfileStore: LexicalProfileStore
+    private let rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)?
+    private var lexicalProfileRefreshTask: Task<Void, Never>?
+    private let lexicalProfileRefreshGate: LexicalProfileRefreshGate
     private let taskSupervisor = InputTaskSupervisor()
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
@@ -69,6 +74,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        lexicalProfileStore: LexicalProfileStore = .inMemory(),
+        lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
+        rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)? = nil,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
         host: InputControllerHost,
@@ -101,10 +109,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.aiRecommendationProvider = aiRecommendationProvider
         self.aiContextEventRecorder = aiContextEventRecorder
         self.aiDiagnosticSink = aiDiagnosticSink
+        self.lexicalProfileStore = lexicalProfileStore
+        self.lexicalProfileRefreshGate = lexicalProfileRefreshGate
+        self.rimeUserDBTextProvider = rimeUserDBTextProvider
         self.host = host
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
         self.asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
+        recordAIDiagnostic(
+            .lexicalProfileLoad,
+            reason: lexicalProfileStore.currentSnapshot() == nil ? "empty" : "loaded"
+        )
     }
 
     private static func polishOnlySessionController() -> InputSessionController {
@@ -242,6 +257,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
+        lexicalProfileRefreshTask?.cancel()
+        lexicalProfileRefreshTask = nil
         panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
         _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
@@ -684,10 +701,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func lexicalContextSnapshot(for suggestion: SuggestionResponse) -> LexicalContextSnapshot? {
-        lexicalContextBuilder.snapshot(
+        let currentSchemaID = conversionEngine.activeSchemaID
+        let persisted = lexicalProfileStore.currentProfile()
+        let persistedLexicalContext = persisted?.schemaID == currentSchemaID ? persisted?.lexicalContext : nil
+        return lexicalContextBuilder.snapshot(
             rimeCandidates: suggestion.prefixCandidates.map(\.text),
             recentCommits: recentLexicalCommits,
-            selectionHistory: recentLexicalSelections
+            selectionHistory: recentLexicalSelections,
+            persistentTerms: persistedLexicalContext?.terms ?? [],
+            persistentRecentCommits: persistedLexicalContext?.recentCommits ?? [],
+            persistentSourceSummary: persistedLexicalContext?.sourceSummary ?? []
         )
     }
 
@@ -892,9 +915,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func recordAIDiagnostic(
         _ stage: AIRecommendationDiagnosticStage,
-        requestID: UUID?,
-        compositionID: Int?,
-        rawLength: Int?,
+        requestID: UUID? = nil,
+        compositionID: Int? = nil,
+        rawLength: Int? = nil,
         prefixLength: Int? = nil,
         appBundleID: String? = nil,
         reason: String? = nil
@@ -925,6 +948,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .unavailable(let reason):
             return "unavailable:\(reason)"
         }
+    }
+
+    private static func pathHash(_ path: String) -> String {
+        SHA256.hash(data: Data(path.utf8))
+            .prefix(6)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
@@ -1250,6 +1280,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
         recordLexicalSelection(trimmed)
+        scheduleLexicalProfileRefresh(reason: "selection")
         if let userSelectionHistoryPersistence {
             userSelectionHistory = userSelectionHistoryPersistence.recordSelection(
                 trimmed,
@@ -1507,6 +1538,112 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if recentLexicalCommits.count > Self.maxRecentLexicalCommits {
             recentLexicalCommits.removeFirst(recentLexicalCommits.count - Self.maxRecentLexicalCommits)
         }
+        scheduleLexicalProfileRefresh(reason: "commit")
+    }
+
+    private func scheduleLexicalProfileRefresh(reason: String) {
+        guard let rimeUserDBTextProvider else {
+            return
+        }
+        let generation = lexicalProfileRefreshGate.next()
+        lexicalProfileRefreshTask?.cancel()
+
+        let recentCommits = recentLexicalCommits
+        let selectionHistory = recentLexicalSelections
+        let store = lexicalProfileStore
+        let diagnosticSink = aiDiagnosticSink
+        let builder = lexicalContextBuilder
+        let parser = RimeUserDBTextParser(maxTerms: 64)
+        let schemaID = conversionEngine.activeSchemaID
+        let refreshGate = lexicalProfileRefreshGate
+
+        let task = Task.detached(priority: .utility) { [rimeUserDBTextProvider, diagnosticSink] in
+            do {
+                try await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else {
+                return
+            }
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .rimeUserDBSyncStart,
+                    candidateCount: recentCommits.count + selectionHistory.count,
+                    reason: reason
+                )
+            )
+            do {
+                let snapshot = try await rimeUserDBTextProvider.userDBTextSnapshot(schemaID: schemaID)
+                guard !Task.isCancelled else {
+                    return
+                }
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .rimeUserDBSyncEnd,
+                        reason: "path_hash=\(Self.pathHash(snapshot.fileURL.path))"
+                    )
+                )
+                let terms = parser.parse(snapshot)
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .rimeUserDBParse,
+                        candidateCount: terms.count,
+                        reason: "schema=\(snapshot.schemaID)"
+                    )
+                )
+                guard let lexical = builder.snapshot(
+                    recentCommits: recentCommits,
+                    selectionHistory: selectionHistory,
+                    persistentTerms: terms,
+                    persistentSourceSummary: [
+                        "rime-userdb-snapshot: \(Self.pathHash(snapshot.fileURL.path))"
+                    ]
+                ) else {
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .lexicalProfileFallback,
+                            candidateCount: 0,
+                            reason: "empty_after_parse"
+                        )
+                    )
+                    return
+                }
+                guard !Task.isCancelled else {
+                    return
+                }
+                let transaction = try store.prepareSave(
+                    snapshot: lexical,
+                    schemaID: schemaID,
+                    rimeSnapshotURL: snapshot.fileURL,
+                    rimeSnapshotModifiedAt: snapshot.modifiedAt
+                )
+                guard !Task.isCancelled else {
+                    store.discardPreparedSave(transaction)
+                    return
+                }
+                guard let _ = try store.commitPreparedSaveIfCurrent(transaction, shouldCommit: {
+                    !Task.isCancelled && refreshGate.isCurrent(generation)
+                }) else {
+                    return
+                }
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .lexicalProfileUpdated,
+                        candidateCount: lexical.terms.count,
+                        reason: "generation=\(generation)"
+                    )
+                )
+            } catch {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .lexicalProfileFallback,
+                        reason: String(describing: type(of: error))
+                    )
+                )
+            }
+        }
+        lexicalProfileRefreshTask = task
     }
 
     private func recordExternalDelete(client: InputControllerClient?) {
@@ -2229,6 +2366,29 @@ private enum CompositionLifecycleFinishReason: String {
 private enum CompositionLifecycleCommitPolicy {
     case none
     case commitRawIfNeeded
+}
+
+final class LexicalProfileRefreshGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+
+    func next() -> Int {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        generation += 1
+        return generation
+    }
+
+    func isCurrent(_ candidate: Int) -> Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return generation == candidate
+    }
+
 }
 
 private extension Collection {

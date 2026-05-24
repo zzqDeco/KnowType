@@ -143,6 +143,8 @@ Core candidate types:
 - `AIRecommendationCandidate`: ready AI slot payload with the locked prefix, optional continuation, display text, provider, confidence, and context version.
 - `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
+- `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
+- `LexicalContextSnapshot`: top-K lexical/tone summary rendered as `LEXICAL_PROFILE.md` and hashed into AI cache keys.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 - `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.
 
@@ -290,10 +292,11 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 `AIRecommendationRuntime`:
 
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
+- includes `LEXICAL_PROFILE.md` when the coordinator provides a lexical snapshot
 - creates default documents when missing
 - debounces before provider calls
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
-- caches by locked prefix, app bundle, locale, ENV hash, and CORRECTION hash
+- caches by locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
 - skips cloud requests for too-short prefixes: fewer than two Han characters, or fewer than six visible mixed/Latin characters
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
@@ -313,8 +316,33 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - archives processed event files under `~/.knowtype/events/processed/`
 - summarizes after a batch threshold or interval
 - updates only the generated section in `ENV.md`
-- normalizes duplicate generated-section markers in loaded snapshots without writing during read, and persists repaired generated sections only during explicit replacement; unmatched markers and literal marker text in user notes are preserved
+- normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically on a best-effort basis; read-only or transient write failures still return the repaired in-memory snapshot
 - sanitizes Level 0 protected content before writing logs
+
+`LexicalProfileStore`:
+
+- writes canonical JSON to `~/Library/Application Support/KnowType/AI/lexical-profile.json`
+- writes a readable markdown mirror to `~/.knowtype/LEXICAL_PROFILE.md`
+- stores only top-K terms, recent commits, source counts, and tone metrics
+- never stores full Rime userdb exports, raw provider responses, or API keys
+
+Rime userdb profile refresh is a background-only input-method task. It calls
+librime sync as a best-effort freshness step, reads the live active schema from
+the Rime session, resolves that schema's `translator/user_dict` or
+`translator/dictionary`, scans for that dictionary's
+`*.userdb.txt`, and parses standard `code<TAB>text<TAB>c=... d=... t=...` rows
+while keeping compatibility with legacy `text<TAB>code<TAB>frequency` fixtures.
+Metadata rows identify the lexical text column by treating Rime code columns as
+ASCII lowercase code strings, so both `code<TAB>text<TAB>c=...` snapshots and
+reversed metadata fixtures avoid persisting code strings as user terms.
+Snapshot selection prefers the local `installation_id` sync folder, then chooses
+deterministically by root, mtime, and path. Refreshes use a process-wide store
+and generation gate shared by IMK sessions. JSON/Markdown bytes are staged
+outside the generation gate, and conditional publish re-checks freshness without
+holding the gate lock across filesystem operations. If a refresh becomes stale
+mid-publish, any promoted profile files are rolled back before the task returns.
+AI requests merge persisted `LEXICAL_PROFILE.md` terms only when the stored
+profile schema matches the active Rime schema.
 
 KnowType-specific settings use the InputMethodKit preferences window opened from
 the input-method menu as the primary user entry point. `KnowType Settings...`

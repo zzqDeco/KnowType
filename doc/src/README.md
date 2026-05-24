@@ -58,6 +58,8 @@ required for every test file.
 ## Sources/KnowTypeAI
 
 - [Overview](Sources/KnowTypeAI/README.plan.md)
+- [AIDocumentStores](Sources/KnowTypeAI/AIDocumentStores.plan.md)
+- [RimeUserDBLexicalProfile](Sources/KnowTypeAI/RimeUserDBLexicalProfile.plan.md)
 
 ## Sources/KnowTypeInputMethod
 

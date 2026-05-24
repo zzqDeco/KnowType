@@ -39,6 +39,110 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.rawInput, "ni")
     }
 
+    func testEngineExposesConfiguredSchemaIDForLexicalProfile() {
+        let configuration = NativeRimeConfiguration(
+            libraryURL: URL(fileURLWithPath: "/tmp/missing-librime.dylib"),
+            sharedDataURL: URL(fileURLWithPath: "/tmp/missing-rime-data", isDirectory: true),
+            userDataURL: URL(fileURLWithPath: "/tmp/missing-rime-user", isDirectory: true),
+            logURL: URL(fileURLWithPath: "/tmp/missing-rime-logs", isDirectory: true),
+            schemaID: "custom_schema"
+        )
+
+        let engine = RimeConversionEngine(configuration: configuration)
+
+        XCTAssertEqual(engine.activeSchemaID, "custom_schema")
+    }
+
+    func testUserDBSnapshotLocatorPrefersLocalInstallationSnapshot() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-userdb-local-snapshot")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let sync = userData.appendingPathComponent("sync", isDirectory: true)
+        let local = sync.appendingPathComponent("local-device", isDirectory: true)
+        let other = sync.appendingPathComponent("other-device", isDirectory: true)
+        try fileManager.createDirectory(at: local, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: other, withIntermediateDirectories: true)
+        try """
+        installation_id: "local-device"
+        """.write(to: userData.appendingPathComponent("installation.yaml"), atomically: true, encoding: .utf8)
+        let localSnapshot = local.appendingPathComponent("custom_dict.userdb.txt")
+        let otherSnapshot = other.appendingPathComponent("custom_dict.userdb.txt")
+        try "local\t本机\tc=1\n".write(to: localSnapshot, atomically: true, encoding: .utf8)
+        try "other\t其他\tc=99\n".write(to: otherSnapshot, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: localSnapshot.path)
+        try fileManager.setAttributes([.modificationDate: Date(timeIntervalSince1970: 2)], ofItemAtPath: otherSnapshot.path)
+        let locator = RimeUserDBSnapshotLocator(fileManager: fileManager)
+
+        let roots = locator.snapshotSearchRoots(syncDirectory: sync, userDataDirectory: userData)
+        let selected = locator.findUserDBTextSnapshot(userDBName: "custom_dict", roots: roots)
+
+        XCTAssertEqual(selected?.standardizedFileURL.path, localSnapshot.standardizedFileURL.path)
+    }
+
+    func testUserDBSnapshotLocatorChoosesLatestSnapshotDeterministicallyWithoutInstallationID() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-userdb-deterministic-snapshot")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let sync = userData.appendingPathComponent("sync", isDirectory: true)
+        let older = sync.appendingPathComponent("a-device", isDirectory: true)
+        let newer = sync.appendingPathComponent("b-device", isDirectory: true)
+        try fileManager.createDirectory(at: older, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: newer, withIntermediateDirectories: true)
+        let olderSnapshot = older.appendingPathComponent("custom_dict.userdb.txt")
+        let newerSnapshot = newer.appendingPathComponent("custom_dict.userdb.txt")
+        try "old\t旧\tc=1\n".write(to: olderSnapshot, atomically: true, encoding: .utf8)
+        try "new\t新\tc=2\n".write(to: newerSnapshot, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: olderSnapshot.path)
+        try fileManager.setAttributes([.modificationDate: Date(timeIntervalSince1970: 2)], ofItemAtPath: newerSnapshot.path)
+        let locator = RimeUserDBSnapshotLocator(fileManager: fileManager)
+
+        let roots = locator.snapshotSearchRoots(syncDirectory: sync, userDataDirectory: userData)
+        let selected = locator.findUserDBTextSnapshot(userDBName: "custom_dict", roots: roots)
+
+        XCTAssertEqual(selected?.standardizedFileURL.path, newerSnapshot.standardizedFileURL.path)
+    }
+
+    func testUserDBTextSnapshotProviderUsesExistingSnapshotWhenSyncFails() async throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-userdb-sync-fallback")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let sync = userData.appendingPathComponent("sync", isDirectory: true)
+        try fileManager.createDirectory(at: sync, withIntermediateDirectories: true)
+        let snapshotURL = sync.appendingPathComponent("pinyin_simp.userdb.txt")
+        try "ni\t你\tc=12 d=0\n".write(to: snapshotURL, atomically: true, encoding: .utf8)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("share", isDirectory: true),
+            userDataURL: userData,
+            logURL: root.appendingPathComponent("logs", isDirectory: true),
+            schemaID: "pinyin_simp"
+        )
+        let session = FakeRimeUserDBSnapshotSession(
+            syncResult: false,
+            userDataDirectory: userData,
+            userDataSyncDirectory: sync,
+            userDictionaryName: nil
+        )
+        let provider = RimeUserDBTextSnapshotProvider(
+            configuration: configuration,
+            sessionFactory: { _ in session }
+        )
+
+        let snapshot = try await provider.userDBTextSnapshot(schemaID: "pinyin_simp")
+
+        XCTAssertEqual(snapshot.fileURL.standardizedFileURL.path, snapshotURL.standardizedFileURL.path)
+        XCTAssertTrue(snapshot.content.contains("你"))
+    }
+
     func testUnavailableSessionPreservesRawBypassForNonASCIIInput() {
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),
@@ -326,5 +430,45 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(engine.snapshot.rawInput, "\(existingComposition)\u{E9}")
         XCTAssertTrue(engine.snapshot.candidates.isEmpty)
         XCTAssertEqual(engine.snapshot.engineName, "rime-raw-bypass")
+    }
+}
+
+private func temporaryDirectory(name: String) -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
+}
+
+private final class FakeRimeUserDBSnapshotSession: RimeUserDBSnapshotSession, @unchecked Sendable {
+    private let syncResult: Bool
+    private let userDataDirectoryURL: URL?
+    private let userDataSyncDirectoryURL: URL?
+    private let dictionaryName: String?
+
+    init(
+        syncResult: Bool,
+        userDataDirectory: URL?,
+        userDataSyncDirectory: URL?,
+        userDictionaryName: String?
+    ) {
+        self.syncResult = syncResult
+        self.userDataDirectoryURL = userDataDirectory
+        self.userDataSyncDirectoryURL = userDataSyncDirectory
+        self.dictionaryName = userDictionaryName
+    }
+
+    func syncUserData() -> Bool {
+        syncResult
+    }
+
+    func userDataDirectory() -> URL? {
+        userDataDirectoryURL
+    }
+
+    func userDataSyncDirectory() -> URL? {
+        userDataSyncDirectoryURL
+    }
+
+    func userDictionaryName(schemaID _: String) -> String? {
+        dictionaryName
     }
 }

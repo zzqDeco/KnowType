@@ -41,6 +41,7 @@ when converting a shipped plan into a short record.
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
 | [inputmethod-async-keypath-supervisor.plan.md](inputmethod-async-keypath-supervisor.plan.md) | Fully asynchronous IMK key path with cancellable candidate, AI, anchor, and panel tasks | Active |
 | [rime-conversion-lexical-ai.plan.md](rime-conversion-lexical-ai.plan.md) | Optional librime bridge, synchronous base candidate hot path, and AI lexical profile context | Active |
+| [rime-userdb-lexical-profile.plan.md](rime-userdb-lexical-profile.plan.md) | Persist AI lexical profile from Rime userdb frequency plus recent KnowType commits/selections | Active |
 | [rime-only-hotpath-performance.plan.md](rime-only-hotpath-performance.plan.md) | Retire production local conversion fallback and enforce Rime-only hot-path performance budgets | Active |
 | [rime-native-interaction-polish.plan.md](rime-native-interaction-polish.plan.md) | Align marked text, arrows, pages, numbers, symbols, and AI shortcuts with Rime-native IME behavior | Active |
 | [direct-space-digit-passthrough.plan.md](direct-space-digit-passthrough.plan.md) | Pass idle Space and digits through while preserving active Rime candidate shortcuts | Active |

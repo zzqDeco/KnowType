@@ -38,6 +38,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, select_candidate_on_current_page)"))
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, select_candidate)"))
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, change_page)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, get_current_schema)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, get_status)"))
     }
 
     func testRimeBridgeUsesCurrentPageCandidatesForNativeSnapshots() throws {
@@ -123,6 +125,30 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(engine.contains("rime-raw-bypass"))
         XCTAssertFalse(engine.contains("fallback.process(.text(existingComposition))"))
         XCTAssertFalse(engine.contains("guard scalar.isASCII else {\n                continue\n            }"))
+    }
+
+    func testRimeConversionReportsLiveSchemaForLexicalProfile() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let engine = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
+            encoding: .utf8
+        )
+        let bridge = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeRimeBridge/KnowTypeRimeBridge.c"),
+            encoding: .utf8
+        )
+        let header = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeRimeBridge/include/KnowTypeRimeBridge.h"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(engine.contains("nativeSession?.currentSchemaID() ?? configuredSchemaID"))
+        XCTAssertTrue(engine.contains("ktb_rime_copy_current_schema(session)"))
+        XCTAssertTrue(bridge.contains("char *ktb_rime_copy_current_schema(KTBRimeSession *session)"))
+        XCTAssertTrue(header.contains("char *ktb_rime_copy_current_schema(KTBRimeSession *session);"))
     }
 
     func testPreferencePaneBuildScriptPackagesSystemSettingsPane() throws {

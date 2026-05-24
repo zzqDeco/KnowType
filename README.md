@@ -211,8 +211,12 @@ OpenAI-compatible profiles may leave the model blank for `/v1/models`
 discovery.
 
 AI context files live under `~/.knowtype/`. `ENV.md` stores local context
-memory for the AI recommendation slot, and `CORRECTION.md` stores user-editable
-AI correction instructions. Traditional input does not depend on either file.
+memory for the AI recommendation slot, `CORRECTION.md` stores user-editable AI
+correction instructions, and `LEXICAL_PROFILE.md` mirrors the local top-K
+lexical profile built from Rime userdb frequency plus recent KnowType commits
+and selections. The canonical lexical profile JSON lives under
+`~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
+on these files.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS

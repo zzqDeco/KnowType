@@ -546,7 +546,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(repaired.contains("- Keep this manual note."))
     }
 
-    func testEnvironmentLoadRepairsDuplicateGeneratedMarkersInMemoryOnly() throws {
+    func testEnvironmentLoadRepairsDuplicateGeneratedMarkersAndPersistsRepair() throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let environmentURL = directory.appendingPathComponent("ENV.md")
@@ -572,8 +572,47 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let snapshot = try store.loadSnapshot()
         let diskContent = try String(contentsOf: environmentURL, encoding: .utf8)
 
+        XCTAssertNotEqual(diskContent, polluted)
+        XCTAssertEqual(snapshot.content, diskContent)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
+        XCTAssertFalse(snapshot.content.contains("Remove duplicate"))
+        XCTAssertTrue(snapshot.content.contains("- Keep user note."))
+    }
+
+    func testEnvironmentLoadReturnsRepairedSnapshotWhenRepairWriteFails() throws {
+        let fileManager = FileManager.default
+        let directory = temporaryDirectory()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? fileManager.removeItem(at: directory)
+        }
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let polluted = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Keep generated.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Remove duplicate.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        - Keep user note.
+        """
+        try Data(polluted.utf8).write(to: environmentURL, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        let store = EnvironmentDocumentStore(fileURL: environmentURL)
+        let snapshot = try store.loadSnapshot()
+        let diskContent = try String(contentsOf: environmentURL, encoding: .utf8)
+
         XCTAssertEqual(diskContent, polluted)
-        XCTAssertNotEqual(snapshot.content, diskContent)
         XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
         XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
         XCTAssertFalse(snapshot.content.contains("Remove duplicate"))

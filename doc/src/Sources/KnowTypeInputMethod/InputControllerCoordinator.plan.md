@@ -32,6 +32,8 @@ Current behavior:
 - uses `InputTaskSupervisor` to replace stale local-candidate cancellation tokens, AI, and panel-render tasks
 - rejects stale AI publications by raw input, composition id, and AI generation
 - records AI scheduling diagnostics for scheduled requests, previous-generation cancellation, stale-result drops, and applied AI states through the shared AI diagnostic sink
+- merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; current-page Rime candidates and in-memory recent history still participate regardless
+- schedules Rime userdb lexical refreshes through an injected refresh gate so production IMK sessions share stale-write protection across controllers; profile JSON/Markdown is staged outside the gate, and publish checks freshness without holding the gate lock across filesystem operations
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`

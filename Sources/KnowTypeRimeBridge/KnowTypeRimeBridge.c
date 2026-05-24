@@ -261,6 +261,11 @@ static void ktb_rime_context_init(RimeContext_stdbool *context) {
     context->data_size = (int)(sizeof(RimeContext_stdbool) - sizeof(context->data_size));
 }
 
+static void ktb_rime_status_init(RimeStatus_stdbool *status) {
+    memset(status, 0, sizeof(RimeStatus_stdbool));
+    status->data_size = (int)(sizeof(RimeStatus_stdbool) - sizeof(status->data_size));
+}
+
 static char *ktb_strdup(const char *value) {
     if (!value) {
         return NULL;
@@ -527,6 +532,124 @@ bool ktb_rime_change_page(KTBRimeSession *session, bool backward) {
         return false;
     }
     return session->api->change_page(session->session_id, backward);
+}
+
+bool ktb_rime_sync_user_data(KTBRimeSession *session) {
+    if (!session || !session->api ||
+        !KTB_RIME_API_HAS(session->api, sync_user_data) ||
+        !session->api->sync_user_data) {
+        return false;
+    }
+    return session->api->sync_user_data();
+}
+
+char *ktb_rime_copy_user_data_dir(KTBRimeSession *session) {
+    if (!session || !session->api) {
+        return NULL;
+    }
+    if (KTB_RIME_API_HAS(session->api, get_user_data_dir_s) && session->api->get_user_data_dir_s) {
+        char buffer[4096];
+        memset(buffer, 0, sizeof(buffer));
+        session->api->get_user_data_dir_s(buffer, sizeof(buffer));
+        if (buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_user_data_dir) && session->api->get_user_data_dir) {
+        return ktb_strdup(session->api->get_user_data_dir());
+    }
+    return NULL;
+}
+
+char *ktb_rime_copy_user_data_sync_dir(KTBRimeSession *session) {
+    if (!session || !session->api) {
+        return NULL;
+    }
+    if (KTB_RIME_API_HAS(session->api, get_user_data_sync_dir) && session->api->get_user_data_sync_dir) {
+        char buffer[4096];
+        memset(buffer, 0, sizeof(buffer));
+        session->api->get_user_data_sync_dir(buffer, sizeof(buffer));
+        if (buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_sync_dir_s) && session->api->get_sync_dir_s) {
+        char buffer[4096];
+        memset(buffer, 0, sizeof(buffer));
+        session->api->get_sync_dir_s(buffer, sizeof(buffer));
+        if (buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_sync_dir) && session->api->get_sync_dir) {
+        return ktb_strdup(session->api->get_sync_dir());
+    }
+    return NULL;
+}
+
+char *ktb_rime_copy_current_schema(KTBRimeSession *session) {
+    if (!session || !session->api || session->session_id == 0) {
+        return NULL;
+    }
+    if (KTB_RIME_API_HAS(session->api, get_current_schema) &&
+        session->api->get_current_schema) {
+        char buffer[1024];
+        memset(buffer, 0, sizeof(buffer));
+        if (session->api->get_current_schema(session->session_id, buffer, sizeof(buffer)) &&
+            buffer[0] != '\0') {
+            return ktb_strdup(buffer);
+        }
+    }
+    if (KTB_RIME_API_HAS(session->api, get_status) &&
+        KTB_RIME_API_HAS(session->api, free_status) &&
+        session->api->get_status &&
+        session->api->free_status) {
+        RimeStatus_stdbool status;
+        ktb_rime_status_init(&status);
+        if (session->api->get_status(session->session_id, &status)) {
+            char *copy = ktb_strdup(status.schema_id);
+            session->api->free_status(&status);
+            return copy;
+        }
+    }
+    return NULL;
+}
+
+char *ktb_rime_copy_schema_user_dict(KTBRimeSession *session, const char *schema_id) {
+    if (!session || !session->api || !schema_id || schema_id[0] == '\0' ||
+        !KTB_RIME_API_HAS(session->api, schema_open) ||
+        !KTB_RIME_API_HAS(session->api, config_close) ||
+        !KTB_RIME_API_HAS(session->api, config_get_string) ||
+        !session->api->schema_open ||
+        !session->api->config_close ||
+        !session->api->config_get_string) {
+        return NULL;
+    }
+
+    RimeConfig config;
+    memset(&config, 0, sizeof(config));
+    if (!session->api->schema_open(schema_id, &config)) {
+        return NULL;
+    }
+
+    char buffer[1024];
+    const char *keys[] = {
+        "translator/user_dict",
+        "translator/dictionary",
+        NULL
+    };
+    char *result = NULL;
+    for (int i = 0; keys[i] != NULL; i++) {
+        memset(buffer, 0, sizeof(buffer));
+        if (session->api->config_get_string(&config, keys[i], buffer, sizeof(buffer)) &&
+            buffer[0] != '\0') {
+            result = ktb_strdup(buffer);
+            break;
+        }
+    }
+
+    session->api->config_close(&config);
+    return result;
 }
 
 void ktb_rime_string_free(char *value) {

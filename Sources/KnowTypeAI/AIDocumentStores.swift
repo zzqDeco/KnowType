@@ -26,6 +26,10 @@ public struct AIUserDirectory: Sendable, Equatable {
     public var eventsDirectoryURL: URL {
         rootURL.appendingPathComponent("events", isDirectory: true)
     }
+
+    public var lexicalProfileURL: URL {
+        rootURL.appendingPathComponent("LEXICAL_PROFILE.md", isDirectory: false)
+    }
 }
 
 public struct AIDocumentSnapshot: Sendable, Equatable {
@@ -79,6 +83,9 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         try ensureExists(defaultContent: Self.defaultContent)
         let content = try String(contentsOf: fileURL, encoding: .utf8)
         let repaired = Self.repairingGeneratedSectionMarkers(in: content)
+        if repaired != content {
+            try? atomicWrite(repaired, to: fileURL)
+        }
         return AIDocumentSnapshot(content: repaired)
     }
 
