@@ -60,6 +60,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local label="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    die "$label unexpectedly contained '$needle'"
+  fi
+}
+
 assert_file() {
   local path="$1"
   [[ -f "$path" ]] || die "missing file: $path"
@@ -163,6 +172,19 @@ declare -F knowtype_remove_local_inputmethod_bundle_if_safe >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load safe removal helpers"
 declare -F knowtype_clean_preferencepane_caches >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
+
+manifest_smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-manifest-smoke.XXXXXX")"
+mkdir -p "$manifest_smoke_root/one" "$manifest_smoke_root/two"
+printf '{}\n' >"$manifest_smoke_root/one/release-manifest.json"
+printf '{}\n' >"$manifest_smoke_root/two/release-manifest.json"
+if manifest_error="$(knowtype_discover_release_manifest "$manifest_smoke_root/release.zip" "$manifest_smoke_root" 2>&1 >/dev/null)"; then
+  die "release manifest discovery accepted multiple manifests"
+fi
+assert_contains "$manifest_error" "exactly one release-manifest.json" "release manifest ambiguity output"
+rm -rf "$manifest_smoke_root/two"
+manifest_path="$(knowtype_discover_release_manifest "$manifest_smoke_root/release.zip" "$manifest_smoke_root")"
+assert_equals "$manifest_smoke_root/one/release-manifest.json" "$manifest_path" "single release manifest discovery"
+rm -rf "$manifest_smoke_root"
 
 cache_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-prefpane-cache-smoke.XXXXXX")"
 cache_stale="$cache_tmp_dir/com.apple.systemsettings.menucache"
@@ -295,6 +317,7 @@ if [[ "$second_backup_id" == "$backup_id" ]]; then
   die "rapid repeated backups reused ID: $backup_id"
 fi
 assert_file "$fake_support_dir/Backups/$second_backup_id/manifest.json"
+mkdir -p "$fake_support_dir/Backups/zzzz-unmanaged"
 latest_backup_dir="$(
   KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
     knowtype_latest_backup_dir
@@ -314,6 +337,7 @@ rollback_list_output="$(
   "$ROOT_DIR/scripts/rollback-inputmethod.sh" --list
 )"
 assert_contains "$rollback_list_output" "$backup_id" "rollback list output"
+assert_not_contains "$rollback_list_output" "zzzz-unmanaged" "rollback list output"
 
 rollback_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
@@ -350,6 +374,7 @@ uninstall_dry_run_output="$(
 assert_contains "$uninstall_dry_run_output" "Would create install backup" "uninstall dry run output"
 assert_contains "$uninstall_dry_run_output" "Would remove KnowType install state" "uninstall dry run output"
 assert_contains "$uninstall_dry_run_output" "Preserved KnowType install backups" "uninstall dry run output"
+assert_not_contains "$uninstall_dry_run_output" "Would prune old install backup" "uninstall dry run output"
 
 diagnose_json_output="$(
   KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \

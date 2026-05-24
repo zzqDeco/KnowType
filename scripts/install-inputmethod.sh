@@ -267,14 +267,7 @@ repair_preferences_best_effort() {
 discover_release_manifest() {
   local zip_path="$1"
   local extracted_root="$2"
-  local candidate
-  candidate="$(find "$extracted_root" -maxdepth 4 -type f -name 'release-manifest.json' -print 2>/dev/null | head -n 1)"
-  if [[ -z "$candidate" ]]; then
-    local sibling
-    sibling="$(dirname "$zip_path")/release-manifest.json"
-    [[ -f "$sibling" ]] && candidate="$sibling"
-  fi
-  printf '%s' "$candidate"
+  knowtype_discover_release_manifest "$zip_path" "$extracted_root"
 }
 
 release_manifest_field() {

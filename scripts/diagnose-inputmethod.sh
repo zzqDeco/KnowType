@@ -118,6 +118,7 @@ print_json_snapshot() {
 import json
 import os
 import plistlib
+import re
 from pathlib import Path
 
 def file_mtime(path):
@@ -175,9 +176,16 @@ def default_provider(app_support):
 def backup_summary(root):
     root_path = Path(root)
     backups = []
+    managed_id_pattern = re.compile(r"^\d{8}T\d{6}Z-\d{4}-")
     if root_path.is_dir():
         for directory in sorted([p for p in root_path.iterdir() if p.is_dir()], reverse=True):
             manifest = load_json(directory / "manifest.json") or {}
+            if not managed_id_pattern.match(directory.name):
+                continue
+            if manifest.get("backupID") != directory.name:
+                continue
+            if not (directory / "KnowType.app").is_dir():
+                continue
             backups.append({
                 "backupID": directory.name,
                 "createdAt": manifest.get("createdAt"),
@@ -517,9 +525,9 @@ else
 fi
 
 if [[ -d "$BACKUP_ROOT" ]]; then
-  backup_count="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | wc -l | tr -d ' ')"
+  backup_count="$(knowtype_list_managed_backup_dirs | wc -l | tr -d ' ')"
   latest_backup="$(knowtype_latest_backup_dir)"
-  ok "install backup root exists with $backup_count backup(s): $BACKUP_ROOT"
+  ok "install backup root exists with $backup_count managed backup(s): $BACKUP_ROOT"
   if [[ -n "$latest_backup" ]]; then
     latest_manifest="$latest_backup/manifest.json"
     latest_version="$(knowtype_backup_manifest_field "$latest_manifest" "sourceVersion")"

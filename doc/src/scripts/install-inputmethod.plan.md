@@ -18,6 +18,9 @@ Installs the locally built KnowType input method bundle into
 - The script can install from three sources: a release-config local build, an
   existing `KnowType.app` via `--from-bundle`, or a release archive via
   `--from-release-zip`.
+- Release archive provenance is accepted only when the extracted archive has a
+  single unambiguous `release-manifest.json`; older archives may still use one
+  sibling manifest beside the zip.
 - Before replacing an existing app, it creates an install-artifact backup under
   `~/Library/Application Support/KnowType/Backups/` unless `--no-backup` is
   passed. Backups contain `KnowType.app`, optional `KnowType.prefPane`, and a

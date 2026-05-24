@@ -155,7 +155,9 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
         ) else {
             return BackupSummary(count: 0, latestID: nil, latestVersionBuild: nil)
         }
-        let backupDirectories = contents.filter(\.hasDirectoryPath).sorted {
+        let backupDirectories = contents.filter {
+            Self.isManagedBackupDirectory($0, fileManager: fileManager)
+        }.sorted {
             $0.lastPathComponent > $1.lastPathComponent
         }
         guard let latest = backupDirectories.first else {
@@ -170,6 +172,30 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
             latestID: latest.lastPathComponent,
             latestVersionBuild: versionBuild
         )
+    }
+
+    private static func isManagedBackupDirectory(_ url: URL, fileManager: FileManager) -> Bool {
+        guard url.lastPathComponent.range(
+            of: #"^\d{8}T\d{6}Z-\d{4}-"#,
+            options: .regularExpression
+        ) != nil else {
+            return false
+        }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(
+            atPath: url.appendingPathComponent("KnowType.app", isDirectory: true).path,
+            isDirectory: &isDirectory
+        ), isDirectory.boolValue else {
+            return false
+        }
+
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(BackupManifest.self, from: data) else {
+            return false
+        }
+        return manifest.backupID == url.lastPathComponent
     }
 }
 

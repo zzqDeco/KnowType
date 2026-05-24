@@ -193,6 +193,37 @@ knowtype_is_valid_backup_id() {
   [[ "$backup_id" == "$(knowtype_sanitize_backup_component "$backup_id")" ]]
 }
 
+knowtype_discover_release_manifest() {
+  local zip_path="$1"
+  local extracted_root="$2"
+  local candidate=""
+  local count=0
+  local manifest_path
+  while IFS= read -r manifest_path; do
+    [[ -n "$manifest_path" ]] || continue
+    count=$((count + 1))
+    if [[ -z "$candidate" ]]; then
+      candidate="$manifest_path"
+    fi
+  done < <(find "$extracted_root" -maxdepth 4 -type f -name 'release-manifest.json' -print 2>/dev/null)
+
+  if (( count > 1 )); then
+    echo "error: release zip must contain exactly one release-manifest.json; found $count" >&2
+    return 1
+  fi
+  if (( count == 1 )); then
+    printf '%s' "$candidate"
+    return 0
+  fi
+
+  local sibling
+  sibling="$(dirname "$zip_path")/release-manifest.json"
+  if [[ -f "$sibling" ]]; then
+    printf '%s' "$sibling"
+  fi
+  return 0
+}
+
 knowtype_path_checksum() {
   local path="$1"
   if [[ ! -e "$path" ]]; then
@@ -438,50 +469,6 @@ PY
   echo "Created install backup: $backup_dir"
 }
 
-knowtype_prune_install_backups() {
-  local keep_backups="${1:-$KNOWTYPE_DEFAULT_BACKUP_RETENTION}"
-  local dry_run="${2:-0}"
-  local backup_root
-  backup_root="$(knowtype_backup_root_dir)"
-  [[ -d "$backup_root" ]] || return 0
-  [[ "$keep_backups" =~ ^[0-9]+$ ]] || keep_backups="$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
-
-  local index=0
-  while IFS= read -r backup_dir; do
-    [[ -n "$backup_dir" ]] || continue
-    index=$((index + 1))
-    if (( index <= keep_backups )); then
-      continue
-    fi
-    if [[ "$dry_run" == "1" ]]; then
-      echo "[dry-run] Would prune old install backup: $backup_dir"
-    else
-      rm -rf -- "$backup_dir"
-      echo "Pruned old install backup: $backup_dir"
-    fi
-    # Backup IDs start with UTC timestamp plus a monotonic per-second counter,
-    # so reverse lexical order is newest-first for managed backups.
-  done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r)
-}
-
-knowtype_latest_backup_dir() {
-  local backup_root
-  backup_root="$(knowtype_backup_root_dir)"
-  [[ -d "$backup_root" ]] || return 0
-  # See knowtype_prune_install_backups: IDs are sortable by creation order.
-  find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r | head -n 1
-}
-
-knowtype_backup_dir_for_id() {
-  local backup_id="$1"
-  if ! knowtype_is_valid_backup_id "$backup_id"; then
-    return 1
-  fi
-  local backup_dir
-  backup_dir="$(knowtype_backup_root_dir)/$backup_id"
-  [[ -d "$backup_dir" ]] && printf '%s\n' "$backup_dir"
-}
-
 knowtype_backup_manifest_field() {
   local manifest_path="$1"
   local field="$2"
@@ -497,6 +484,73 @@ except Exception:
 if value is not None:
     print(value)
 PY
+}
+
+knowtype_is_managed_backup_dir() {
+  local backup_dir="$1"
+  local backup_id
+  backup_id="$(basename "$backup_dir")"
+  knowtype_is_valid_backup_id "$backup_id" || return 1
+  [[ "$backup_id" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]{4}- ]] || return 1
+  [[ -d "$backup_dir/KnowType.app" ]] || return 1
+  [[ -f "$backup_dir/manifest.json" ]] || return 1
+  local manifest_id
+  manifest_id="$(knowtype_backup_manifest_field "$backup_dir/manifest.json" "backupID")"
+  [[ "$manifest_id" == "$backup_id" ]]
+}
+
+knowtype_list_managed_backup_dirs() {
+  local backup_root
+  backup_root="$(knowtype_backup_root_dir)"
+  [[ -d "$backup_root" ]] || return 0
+  local backup_dir
+  while IFS= read -r backup_dir; do
+    [[ -n "$backup_dir" ]] || continue
+    if knowtype_is_managed_backup_dir "$backup_dir"; then
+      printf '%s\n' "$backup_dir"
+    fi
+  done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null) | LC_ALL=C sort -r
+}
+
+knowtype_prune_install_backups() {
+  local keep_backups="${1:-$KNOWTYPE_DEFAULT_BACKUP_RETENTION}"
+  local dry_run="${2:-0}"
+  [[ "$keep_backups" =~ ^[0-9]+$ ]] || keep_backups="$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
+
+  local index=0
+  while IFS= read -r backup_dir; do
+    [[ -n "$backup_dir" ]] || continue
+    index=$((index + 1))
+    if (( index <= keep_backups )); then
+      continue
+    fi
+    if [[ "$dry_run" == "1" ]]; then
+      echo "[dry-run] Would prune old install backup: $backup_dir"
+    else
+      rm -rf -- "$backup_dir"
+      echo "Pruned old install backup: $backup_dir"
+    fi
+  done < <(knowtype_list_managed_backup_dirs)
+}
+
+knowtype_latest_backup_dir() {
+  # Backup IDs start with UTC timestamp plus a monotonic per-second counter, so
+  # reverse lexical order is newest-first for managed restorable backups.
+  knowtype_list_managed_backup_dirs | head -n 1
+}
+
+knowtype_backup_dir_for_id() {
+  local backup_id="$1"
+  if ! knowtype_is_valid_backup_id "$backup_id"; then
+    return 1
+  fi
+  local backup_dir
+  backup_dir="$(knowtype_backup_root_dir)/$backup_id"
+  if [[ -d "$backup_dir" ]] && knowtype_is_managed_backup_dir "$backup_dir"; then
+    printf '%s\n' "$backup_dir"
+    return 0
+  fi
+  return 1
 }
 
 knowtype_validate_inputmethod_bundle_for_install() {

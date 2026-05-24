@@ -43,7 +43,7 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
                 "gitTag": "v0.2.0",
                 "bundlePath": bundle.path,
                 "prefPanePath": prefPane.path,
-                "previousBackupID": "20260524T000000Z-0.1.0-1"
+                "previousBackupID": "20260524T000000Z-0000-0.1.0-1"
             ],
             to: support.appendingPathComponent("install-state.json")
         )
@@ -60,8 +60,12 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
 
         let backup = support
             .appendingPathComponent("Backups", isDirectory: true)
-            .appendingPathComponent("20260524T000000Z-0.1.0-1", isDirectory: true)
+            .appendingPathComponent("20260524T000000Z-0000-0.1.0-1", isDirectory: true)
         try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: backup.appendingPathComponent("KnowType.app", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         try writeJSON(
             [
                 "schemaVersion": 1,
@@ -75,6 +79,12 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
                 "restoreCommand": "./scripts/rollback-inputmethod.sh --to \(backup.lastPathComponent)"
             ],
             to: backup.appendingPathComponent("manifest.json")
+        )
+        try FileManager.default.createDirectory(
+            at: support
+                .appendingPathComponent("Backups", isDirectory: true)
+                .appendingPathComponent("zzzz-unmanaged", isDirectory: true),
+            withIntermediateDirectories: true
         )
 
         let status = InstallationDiagnosticsStatus(
@@ -98,7 +108,7 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         XCTAssertTrue(value("默认 provider", in: status.aiRows).contains("gpt-5.3-codex-spark"))
         XCTAssertNotEqual(value("ENV.md", in: status.userDataRows), "缺失")
         XCTAssertEqual(value("备份数量", in: status.backupRows), "1")
-        XCTAssertEqual(status.rollbackCommand, "./scripts/rollback-inputmethod.sh --to 20260524T000000Z-0.1.0-1")
+        XCTAssertEqual(status.rollbackCommand, "./scripts/rollback-inputmethod.sh --to 20260524T000000Z-0000-0.1.0-1")
     }
 
     private func makeBundle(at url: URL, version: String, build: String) throws {

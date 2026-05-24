@@ -12,7 +12,8 @@ It intentionally sits after `scripts/install-inputmethod.sh` in the developer lo
 The script does not mutate macOS input-source state. It reports:
 
 - install-state metadata, bundle version/build, source commit/tag when known,
-  backup count, latest backup id, and the rollback command for that backup;
+  managed backup count, latest backup id, and the rollback command for that
+  backup;
 - bundle existence, executable permission, and `Info.plist` identifiers;
 - the active visible component input mode `com.knowtype.inputmethod.KnowType.Hans`;
 - packaged SwiftPM resource bundle for the seed lexicon;

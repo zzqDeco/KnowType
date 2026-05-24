@@ -25,6 +25,11 @@ Install backups are artifact backups only. They may contain `KnowType.app` and
 secrets, Rime userdb, ENV.md, CORRECTION.md, LEXICAL_PROFILE.md, or local
 lexicon data.
 
+Backup discovery only treats directories with managed backup IDs, matching
+manifests, and a restorable `KnowType.app` as rollback candidates. Unrelated
+folders under the backup root are ignored by `--latest`, retention pruning, and
+diagnostic backup summaries.
+
 Related scripts:
 
 - `scripts/install-inputmethod.sh`

@@ -95,7 +95,7 @@ list_backups() {
     build="$(knowtype_backup_manifest_field "$manifest" "sourceBuild")"
     created="$(knowtype_backup_manifest_field "$manifest" "createdAt")"
     printf '%s\tversion=%s\tbuild=%s\tcreated=%s\n' "$backup_id" "${version:-<unknown>}" "${build:-<unknown>}" "${created:-<unknown>}"
-  done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r)
+  done < <(knowtype_list_managed_backup_dirs)
 
   if (( count == 0 )); then
     echo "No KnowType install backups were found."

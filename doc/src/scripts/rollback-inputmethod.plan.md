@@ -15,9 +15,9 @@ uninstall scripts.
 
 ## Behavior Notes
 
-- `--list` prints available backup ids with version/build metadata.
-- `--latest` restores the newest backup; `--to <backup-id>` restores a specific
-  backup.
+- `--list` prints managed, restorable backup ids with version/build metadata.
+- `--latest` restores the newest managed backup; `--to <backup-id>` restores a
+  specific backup.
 - `--dry-run` shows target app/prefPane paths and refresh steps without changing
   files or input-source state.
 - A real rollback switches away from KnowType, stops `KnowTypeInputMethodApp`,
