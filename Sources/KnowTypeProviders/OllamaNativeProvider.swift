@@ -19,7 +19,7 @@ public struct OllamaNativeProvider: LLMProvider {
             "model": configuration.model,
             "stream": false,
             "messages": [
-                ["role": "system", "content": PromptBuilder.systemPrompt],
+                ["role": "system", "content": PromptBuilder.systemPrompt(for: request.task)],
                 ["role": "user", "content": PromptBuilder.userPayload(for: request)]
             ],
             "options": [
@@ -34,6 +34,6 @@ public struct OllamaNativeProvider: LLMProvider {
         guard let content = ResponseNormalizer.string(at: ["message", "content"], in: raw) else {
             throw ProviderError.invalidResponse("missing message.content")
         }
-        return try ResponseNormalizer.normalizeText(content, preservePlainText: request.task == .contextDigest)
+        return try StructuredResponseNormalizer.normalizeText(content, task: request.task)
     }
 }

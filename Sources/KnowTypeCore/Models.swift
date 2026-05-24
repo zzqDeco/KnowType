@@ -222,10 +222,33 @@ public struct LLMCandidate: Codable, Sendable, Equatable {
     }
 }
 
+public struct LLMCandidateHint: Codable, Sendable, Equatable, Hashable {
+    public var text: String
+    public var nativeIndex: Int?
+    public var pageNumber: Int
+    public var isHighlighted: Bool
+    public var comment: String?
+
+    public init(
+        text: String,
+        nativeIndex: Int? = nil,
+        pageNumber: Int = 0,
+        isHighlighted: Bool = false,
+        comment: String? = nil
+    ) {
+        self.text = text
+        self.nativeIndex = nativeIndex
+        self.pageNumber = pageNumber
+        self.isHighlighted = isHighlighted
+        self.comment = comment
+    }
+}
+
 public struct LLMRequest: Codable, Sendable, Equatable {
     public var task: LLMTask
     public var lockedPrefix: String?
     public var rawInput: String?
+    public var candidateHints: [LLMCandidateHint]
     public var locale: KnowTypeLocale
     public var appContext: String?
     public var maxCandidates: Int
@@ -237,6 +260,7 @@ public struct LLMRequest: Codable, Sendable, Equatable {
         task: LLMTask,
         lockedPrefix: String? = nil,
         rawInput: String? = nil,
+        candidateHints: [LLMCandidateHint] = [],
         locale: KnowTypeLocale = .mixed,
         appContext: String? = nil,
         maxCandidates: Int = 3,
@@ -247,6 +271,7 @@ public struct LLMRequest: Codable, Sendable, Equatable {
         self.task = task
         self.lockedPrefix = lockedPrefix
         self.rawInput = rawInput
+        self.candidateHints = candidateHints
         self.locale = locale
         self.appContext = appContext
         self.maxCandidates = max(1, maxCandidates)
@@ -258,9 +283,30 @@ public struct LLMRequest: Codable, Sendable, Equatable {
 
 public struct LLMResponse: Codable, Sendable, Equatable {
     public var candidates: [LLMCandidate]
+    public var diagnostics: [String]
 
-    public init(candidates: [LLMCandidate]) {
+    public init(candidates: [LLMCandidate], diagnostics: [String] = []) {
         self.candidates = candidates
+        self.diagnostics = diagnostics
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case candidates
+        case diagnostics
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.candidates = try container.decode([LLMCandidate].self, forKey: .candidates)
+        self.diagnostics = try container.decodeIfPresent([String].self, forKey: .diagnostics) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(candidates, forKey: .candidates)
+        if !diagnostics.isEmpty {
+            try container.encode(diagnostics, forKey: .diagnostics)
+        }
     }
 }
 

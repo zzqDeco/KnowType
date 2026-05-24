@@ -5,6 +5,340 @@ import KnowTypeCore
 import KnowTypeProviders
 
 final class AIRecommendationRuntimeTests: XCTestCase {
+    func testDefaultHardTimeoutIsTenSeconds() {
+        XCTAssertEqual(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds, 10_000)
+    }
+
+    func testRecommendationWithoutLockedPrefixUsesCandidateHintsAsContextOnly() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "zhege fangan",
+            lockedPrefix: nil,
+            candidateHints: [
+                AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0, isHighlighted: true),
+                AICandidateHint(text: "这个方向", nativeIndex: 1, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected ready AI recommendation")
+        }
+        XCTAssertEqual(candidate.prefixText, "")
+        XCTAssertNil(candidate.continuationText)
+        XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
+        XCTAssertEqual(requests.first?.lockedPrefix, nil)
+        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案", "这个方向"])
+    }
+
+    func testRecommendationCacheIncludesCandidateHints() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "zhege",
+                candidateHints: [AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0)],
+                compositionID: 1
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "zhege",
+                candidateHints: [AICandidateHint(text: "这个方向", nativeIndex: 0, pageNumber: 1)],
+                compositionID: 1
+            )
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests.map { $0.candidateHints.first?.text }, ["这个方案", "这个方向"])
+    }
+
+    func testRecommendationFiltersSecretCandidateHintsWithoutDisablingRequest() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "zhege url",
+            lockedPrefix: nil,
+            candidateHints: [
+                AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0),
+                AICandidateHint(text: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz", nativeIndex: 1, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected ready recommendation")
+        }
+        XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
+        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案"])
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedProtectedText && $0.reason == "secret_hint_filtered"
+        })
+    }
+
+    func testRecommendationDoesNotDisableForTechnicalTokensOrAppContext() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "can be handled naturally", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "ijust",
+            lockedPrefix: nil,
+            candidateHints: [
+                AICandidateHint(text: "InputMethodKit", nativeIndex: 0, pageNumber: 0),
+                AICandidateHint(text: "iOS", nativeIndex: 1, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.dt.Xcode",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected provider-backed recommendation")
+        }
+        XCTAssertEqual(candidate.displayText, "can be handled naturally")
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.rawInput, "ijust")
+        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["InputMethodKit", "iOS"])
+    }
+
+    func testShortLockedPrefixDoesNotUseCandidateHintsToBypassCloudThreshold() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "还可以继续推进。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "wo",
+            lockedPrefix: "我",
+            candidateHints: [
+                AICandidateHint(text: "我觉得这个方案", nativeIndex: 0, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+    }
+
+    func testLockedPrefixWhitespaceIsPreservedInRecommendationDisplayText() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "我觉得这个方案还可以再细化一下。", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "wo juede",
+            lockedPrefix: "  我觉得这个方案 ",
+            candidateHints: [
+                AICandidateHint(text: "我觉得这个方案", nativeIndex: 0, pageNumber: 0)
+            ],
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected ready AI recommendation")
+        }
+        XCTAssertEqual(candidate.prefixText, "  我觉得这个方案 ")
+        XCTAssertEqual(candidate.continuationText, "还可以再细化一下")
+        XCTAssertEqual(candidate.displayText, "  我觉得这个方案 还可以再细化一下")
+    }
+
+    func testRecommendationDiagnosticsRecordSuccessAndCacheHit() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        _ = await runtime.recommendation(for: request)
+        _ = await runtime.recommendation(for: request)
+
+        let stages = diagnosticSink.events.map(\.stage)
+        XCTAssertTrue(stages.contains(.contextLoaded))
+        XCTAssertTrue(stages.contains(.cacheMiss))
+        XCTAssertTrue(stages.contains(.providerRequestStart))
+        XCTAssertTrue(stages.contains(.providerResponse))
+        XCTAssertTrue(stages.contains(.ready))
+        XCTAssertTrue(stages.contains(.cacheHit))
+        XCTAssertTrue(diagnosticSink.events.allSatisfy { $0.requestID == request.requestID })
+        XCTAssertTrue(diagnosticSink.events.allSatisfy { $0.rawLength == "nihao".count })
+        XCTAssertTrue(diagnosticSink.events.allSatisfy { $0.prefixLength == "你好".count })
+    }
+
+    func testRecommendationSkipsSingleHanPrefixBeforeProviderRequest() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "wo",
+            traditionalCandidate: CorrectionCandidate(
+                text: "我",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+    }
+
+    func testRecommendationDiagnosticsRecordStructuredSchemaFallback() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(
+            candidates: [LLMCandidate(text: "继续推进", confidence: 0.88)],
+            diagnostics: ["structured_schema_unsupported"]
+        ))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        _ = await runtime.recommendation(for: request)
+
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .structuredSchemaRequest })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .structuredSchemaUnsupported && $0.reason == "structured_schema_unsupported"
+        })
+    }
+
+    func testRecommendationDiagnosticsRecordStructuredDecodeErrors() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = FailingLLMProvider(error: ProviderError.invalidResponse("structured_decode_error: missing candidates"))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        XCTAssertEqual(state, .unavailable(reason: "AI 暂不可用"))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .structuredDecodeError
+                && $0.reason == "structured_decode_error: missing candidates"
+        })
+    }
+
+    func testRecommendationDiagnosticsRecordSanitizerRejectReason() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "你好", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .sanitizeReject && $0.reason == "sanitize_reject_same_as_prefix"
+        })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .sanitizeEmpty && $0.reason == "same_as_prefix"
+        })
+    }
+
     func testRecommendationReadsContextDocumentsAndCachesResult() async throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -97,15 +431,82 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requests.map(\.rawInput), ["nihao", "ni hao"])
     }
 
-    func testLevelZeroInputDoesNotCallProvider() async {
+    func testRecommendationIncludesLexicalProfileAndCacheKey() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let candidate = CorrectionCandidate(
+            text: "你好",
+            source: "traditional",
+            confidence: 1,
+            correctionLevel: .contextual
+        )
+        let builder = LexicalContextBuilder()
+        let firstLexical = try! XCTUnwrap(builder.snapshot(rimeCandidates: ["你好"], recentCommits: ["请同步这个方案"]))
+        let secondLexical = try! XCTUnwrap(builder.snapshot(rimeCandidates: ["你好"], recentCommits: ["这个方向可以继续"]))
+
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                lexicalContext: firstLexical
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                lexicalContext: firstLexical
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                lexicalContext: secondLexical
+            )
+        )
+        let requests = await provider.requests
+
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests[0].contextDocuments["LEXICAL_PROFILE.md"]?.contains("请同步这个方案") == true)
+        XCTAssertTrue(requests[1].contextDocuments["LEXICAL_PROFILE.md"]?.contains("这个方向可以继续") == true)
+        XCTAssertNotEqual(firstLexical.sha256, secondLexical.sha256)
+    }
+
+    func testLexicalProfileFiltersStandaloneProtectedTechnicalTokens() throws {
+        let snapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                rimeCandidates: ["API", "JSON", "方案"],
+                recentCommits: ["请同步这个方案"],
+                selectionHistory: ["snake_case"]
+            )
+        )
+
+        XCTAssertTrue(snapshot.markdown.contains("方案"))
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "API" })
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "JSON" })
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "snake_case" })
+    }
+
+    func testSecretLikeInputDoesNotCallProvider() async {
+        let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: " should not be used")
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
         let request = AIRecommendationRequest(
-            rawInput: "https://example.com/path",
+            rawInput: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
             traditionalCandidate: CorrectionCandidate(
-                text: "https://example.com/path",
+                text: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
                 source: "raw",
                 confidence: 1,
                 correctionLevel: .none
@@ -118,6 +519,9 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         XCTAssertEqual(state, .ineligible(reason: "AI 已禁用"))
         XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedProtectedText && $0.reason == "secret_like_text"
+        })
     }
 
     func testRepeatedProviderFailuresEnterCooldown() async {
@@ -148,6 +552,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     }
 
     func testEmptyRecommendationDoesNotEnterCooldown() async {
+        let diagnosticSink = RecordingDiagnosticSink()
         let provider = QueuedLLMProvider(responses: [
             LLMResponse(candidates: []),
             LLMResponse(candidates: [
@@ -157,7 +562,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
-            debounceMilliseconds: 0
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -180,14 +586,20 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(candidate.displayText, "你好继续推进")
         XCTAssertEqual(requestCount, 2)
+        let sanitizeEmptyEvents = diagnosticSink.events.filter { $0.stage == .sanitizeEmpty }
+        XCTAssertEqual(sanitizeEmptyEvents.count, 1)
+        XCTAssertEqual(sanitizeEmptyEvents.first?.candidateCount, 0)
+        XCTAssertEqual(sanitizeEmptyEvents.first?.acceptedCount, 0)
     }
 
     func testHardTimeoutReturnsWithoutWaitingForCancellationResistantProvider() async {
+        let diagnosticSink = RecordingDiagnosticSink()
         let provider = SlowCancellationResistantLLMProvider()
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            hardTimeoutMilliseconds: 20
+            hardTimeoutMilliseconds: 20,
+            diagnosticSink: diagnosticSink
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -207,6 +619,9 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(state, .unavailable(reason: "AI 请求超时"))
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.5)
         XCTAssertEqual(requestCount, 1)
+        let timeoutEvent = diagnosticSink.events.first { $0.stage == .timeout }
+        XCTAssertEqual(timeoutEvent?.reason, "hard_timeout")
+        XCTAssertNotNil(timeoutEvent?.elapsedMilliseconds)
     }
 
     func testDocumentStoresCreateDefaultsAndPreserveUserNotes() throws {
@@ -245,6 +660,141 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(updated.contains("## Global Style\n- Learned style."))
         XCTAssertTrue(updated.contains("## User Notes"))
         XCTAssertTrue(updated.contains("- Keep this manual note."))
+    }
+
+    func testEnvironmentReplacementRepairsDuplicateGeneratedMarkers() {
+        let current = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Old generated section.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Duplicate generated section.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        - Keep this manual note.
+        """
+
+        let updated = EnvironmentDocumentStore.replacingGeneratedSection(
+            in: current,
+            with: "## Global Style\n- Learned style."
+        )
+
+        XCTAssertEqual(updated.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
+        XCTAssertEqual(updated.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
+        XCTAssertTrue(updated.contains("## Global Style\n- Learned style."))
+        XCTAssertFalse(updated.contains("Duplicate generated section"))
+        XCTAssertTrue(updated.contains("## User Notes"))
+        XCTAssertTrue(updated.contains("- Keep this manual note."))
+    }
+
+    func testEnvironmentRepairPreservesUnmatchedDuplicateBeginAndStandaloneEnd() {
+        let current = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Old generated section.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        - The next line is literal documentation.
+        <!-- KNOWTYPE:END GENERATED -->
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        - A literal paired marker block in notes must be preserved.
+        <!-- KNOWTYPE:END GENERATED -->
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        - Keep this unmatched marker and everything after it.
+        - Keep this manual note.
+        """
+
+        let repaired = EnvironmentDocumentStore.repairingGeneratedSectionMarkers(in: current)
+
+        XCTAssertTrue(repaired.contains("- The next line is literal documentation."))
+        XCTAssertTrue(repaired.contains("<!-- KNOWTYPE:END GENERATED -->"))
+        XCTAssertTrue(repaired.contains("- A literal paired marker block in notes must be preserved."))
+        XCTAssertTrue(repaired.contains("- Keep this unmatched marker and everything after it."))
+        XCTAssertTrue(repaired.contains("- Keep this manual note."))
+    }
+
+    func testEnvironmentLoadRepairsDuplicateGeneratedMarkersAndPersistsRepair() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let polluted = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Keep generated.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Remove duplicate.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        - Keep user note.
+        """
+        try Data(polluted.utf8).write(to: environmentURL, options: .atomic)
+
+        let store = EnvironmentDocumentStore(fileURL: environmentURL)
+        let snapshot = try store.loadSnapshot()
+        let diskContent = try String(contentsOf: environmentURL, encoding: .utf8)
+
+        XCTAssertNotEqual(diskContent, polluted)
+        XCTAssertEqual(snapshot.content, diskContent)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
+        XCTAssertFalse(snapshot.content.contains("Remove duplicate"))
+        XCTAssertTrue(snapshot.content.contains("- Keep user note."))
+    }
+
+    func testEnvironmentLoadReturnsRepairedSnapshotWhenRepairWriteFails() throws {
+        let fileManager = FileManager.default
+        let directory = temporaryDirectory()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? fileManager.removeItem(at: directory)
+        }
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let polluted = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Keep generated.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - Remove duplicate.
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        - Keep user note.
+        """
+        try Data(polluted.utf8).write(to: environmentURL, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        let store = EnvironmentDocumentStore(fileURL: environmentURL)
+        let snapshot = try store.loadSnapshot()
+        let diskContent = try String(contentsOf: environmentURL, encoding: .utf8)
+
+        XCTAssertEqual(diskContent, polluted)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
+        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
+        XCTAssertFalse(snapshot.content.contains("Remove duplicate"))
+        XCTAssertTrue(snapshot.content.contains("- Keep user note."))
     }
 }
 
@@ -329,6 +879,24 @@ private actor SlowCancellationResistantLLMProvider: LLMProvider {
 
     var requestCount: Int {
         count
+    }
+}
+
+private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [AIRecommendationDiagnosticEvent] = []
+
+    func record(_ event: AIRecommendationDiagnosticEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+
+    var events: [AIRecommendationDiagnosticEvent] {
+        lock.lock()
+        let events = recordedEvents
+        lock.unlock()
+        return events
     }
 }
 

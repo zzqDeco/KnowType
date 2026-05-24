@@ -3,13 +3,15 @@
 ## Responsibility
 
 Builds the local MVP GitHub Release artifact set: a zip containing
-`KnowType.app` and `KnowType.prefPane`, a SHA256 file, and
+`KnowType.app` and the compatibility `KnowType.prefPane`, a SHA256 file, and
 `release-manifest.json`.
 
 ## Boundaries
 
 - It creates local MVP archives only; it must not claim notarization, installer,
   updater, or App Store distribution behavior.
+- It does not package a standalone `KnowType Settings.app`; user settings are
+  opened from the input-method menu.
 - Installation and target-app typing acceptance remain owned by the local install
   and acceptance scripts.
 

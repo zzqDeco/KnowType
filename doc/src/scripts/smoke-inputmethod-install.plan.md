@@ -13,6 +13,11 @@ Runs CI-safe smoke checks for local input-method scripts and bundle packaging.
 
 - It checks shell syntax, help paths, bundle packaging resources, ad-hoc signing
   smoke, and local SystemPolicyRule profile payload shape.
+- The default run validates the primary `KnowType.app` install path. Passing
+  `--with-prefpane` additionally builds and load-checks the compatibility
+  `KnowType.prefPane`; CI and release workflows run that explicit compatibility
+  smoke so release fallback assets stay covered without making prefPane part of
+  the default local install path.
 - Passing CI smoke supports packaging confidence but not host-app behavior
   claims.
 

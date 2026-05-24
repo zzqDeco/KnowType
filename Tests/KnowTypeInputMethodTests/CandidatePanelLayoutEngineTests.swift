@@ -15,8 +15,8 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
 
         XCTAssertEqual(plan?.orientation, .horizontal)
         XCTAssertEqual(plan?.items.count, 6)
-        XCTAssertEqual(plan?.panelSize.width, 428)
-        XCTAssertEqual(plan?.panelSize.height, 38)
+        XCTAssertEqual(plan?.panelSize.width, 362)
+        XCTAssertEqual(plan?.panelSize.height, 34)
         XCTAssertEqual(plan?.items.map(\.rowIndex), [0, 1, 2, 3, 4, 5])
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: false, count: 6))
     }
@@ -32,7 +32,7 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
 
         XCTAssertEqual(plan?.orientation, .horizontal)
         XCTAssertEqual(plan?.items.count, 4)
-        XCTAssertEqual(plan?.panelSize.width, 640)
+        XCTAssertEqual(plan?.panelSize.width, 596)
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: false, count: 4))
     }
 
@@ -46,8 +46,8 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(plan?.orientation, .vertical)
-        XCTAssertEqual(plan?.panelSize.width, 296)
-        XCTAssertEqual(plan?.panelSize.height, 186)
+        XCTAssertEqual(plan?.panelSize.width, 285)
+        XCTAssertEqual(plan?.panelSize.height, 174)
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: false, count: 6))
     }
 
@@ -71,15 +71,15 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         let plan = engine.layout(
             model: renderModel(rowCount: 9),
             anchorRect: CGRect(x: 100, y: 120, width: 0, height: 18),
-            screenProvider: screenProvider(width: 800, height: 200)
+            screenProvider: screenProvider(width: 800, height: 210)
         )
 
         XCTAssertEqual(plan?.orientation, .vertical)
         XCTAssertEqual(plan?.items.count, 9)
         XCTAssertEqual(plan?.items.map(\.rowIndex), Array(0..<9))
-        XCTAssertEqual(plan?.items.first?.frame.height, 18)
-        XCTAssertEqual(plan?.itemSpacing, 1.75)
-        XCTAssertLessThanOrEqual(plan?.panelSize.height ?? .infinity, 184)
+        XCTAssertEqual(plan?.items.first?.frame.height, 20)
+        XCTAssertEqual(plan?.itemSpacing, 0.75)
+        XCTAssertLessThanOrEqual(plan?.panelSize.height ?? .infinity, 194)
     }
 
     func testLayoutReturnsNilWhenVisibleFrameCannotFitOneRow() {
@@ -106,7 +106,7 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         XCTAssertEqual(plan?.orientation, .vertical)
         XCTAssertEqual(plan?.panelSize.width, 560)
         XCTAssertEqual(plan?.items.map(\.isTruncated), Array(repeating: true, count: 6))
-        XCTAssertEqual(plan?.items.first?.textWidthLimit, 514)
+        XCTAssertEqual(plan?.items.first?.textWidthLimit, 525)
     }
 
     func testLayoutAvoidsVisibleFrameEdges() {
@@ -133,7 +133,62 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(bottomLeft?.panelOrigin, CGPoint(x: 58, y: 84))
-        XCTAssertEqual(topRight?.panelOrigin, CGPoint(x: 154, y: 294))
+        XCTAssertEqual(topRight?.panelOrigin, CGPoint(x: 198, y: 298))
+    }
+
+    func testHorizontalLayoutUsesMeasuredShortcutWidthWithoutReservedSlot() {
+        let engine = engine(defaultTextWidth: 32, defaultShortcutWidth: 8)
+
+        let plan = engine.layout(
+            model: renderModel(rowCount: 4),
+            anchorRect: CGRect(x: 100, y: 400, width: 0, height: 18),
+            screenProvider: screenProvider()
+        )
+
+        XCTAssertEqual(plan?.orientation, .horizontal)
+        XCTAssertEqual(plan?.items.first?.frame.width, 55)
+        XCTAssertEqual(plan?.items.first?.shortcutLabelWidth, 8)
+        XCTAssertEqual(plan?.items.first?.textWidthLimit, 32)
+    }
+
+    func testRowsWithoutShortcutDoNotReserveShortcutSlot() {
+        let engine = engine(defaultTextWidth: 32, defaultShortcutWidth: 8)
+        let shortcutLabels: [String?] = [nil, nil, nil, nil]
+
+        let plan = engine.layout(
+            model: renderModel(shortcutLabels: shortcutLabels),
+            anchorRect: CGRect(x: 100, y: 400, width: 0, height: 18),
+            screenProvider: screenProvider()
+        )
+
+        XCTAssertEqual(plan?.orientation, .horizontal)
+        XCTAssertEqual(plan?.items.first?.frame.width, 44)
+        XCTAssertEqual(plan?.items.first?.shortcutLabelWidth, 0)
+        XCTAssertEqual(plan?.items.first?.textWidthLimit, 32)
+    }
+
+    func testVerticalLayoutAlignsOnlyRowsWithShortcutToPageMaxShortcutWidth() {
+        let engine = CandidatePanelLayoutEngine(
+            configuration: CandidatePanelLayoutConfiguration(layoutMode: .verticalPreferred),
+            textMeasurer: FixedCandidatePanelTextMeasurer(
+                defaultTextWidth: 40,
+                defaultShortcutWidth: 8,
+                shortcutWidths: [
+                    "1": 8,
+                    "10": 16
+                ]
+            )
+        )
+
+        let plan = engine.layout(
+            model: renderModel(shortcutLabels: ["1", nil, "10"]),
+            anchorRect: CGRect(x: 100, y: 400, width: 0, height: 18),
+            screenProvider: screenProvider()
+        )
+
+        XCTAssertEqual(plan?.orientation, .vertical)
+        XCTAssertEqual(plan?.items.map(\.shortcutLabelWidth), [16, 0, 16])
+        XCTAssertEqual(plan?.items.map(\.textWidthLimit), [179, 198, 179])
     }
 
     func testLayoutReturnsNilForInvalidAnchor() {
@@ -148,22 +203,29 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         XCTAssertNil(plan)
     }
 
-    private func engine(defaultTextWidth: CGFloat) -> CandidatePanelLayoutEngine {
+    private func engine(defaultTextWidth: CGFloat, defaultShortcutWidth: CGFloat = 10) -> CandidatePanelLayoutEngine {
         CandidatePanelLayoutEngine(
-            textMeasurer: FixedCandidatePanelTextMeasurer(defaultTextWidth: defaultTextWidth)
+            textMeasurer: FixedCandidatePanelTextMeasurer(
+                defaultTextWidth: defaultTextWidth,
+                defaultShortcutWidth: defaultShortcutWidth
+            )
         )
     }
 
     private func renderModel(rowCount: Int) -> CandidatePanelRenderModel {
+        renderModel(shortcutLabels: (1...rowCount).map { "\($0)" })
+    }
+
+    private func renderModel(shortcutLabels: [String?]) -> CandidatePanelRenderModel {
         CandidatePanelRenderModel(
             title: "KnowType",
             previewText: nil,
-            rows: (1...rowCount).map { index in
+            rows: shortcutLabels.enumerated().map { index, shortcutLabel in
                 CandidatePanelRenderRow(
                     kind: .prefixCandidate,
-                    shortcutLabel: "\(index)",
-                    text: "candidate-\(index)",
-                    isSelected: index == 1,
+                    shortcutLabel: shortcutLabel,
+                    text: "candidate-\(index + 1)",
+                    isSelected: index == 0,
                     visualRole: .lockedPrefix
                 )
             }
@@ -186,13 +248,14 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
 private struct FixedCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
     var defaultTextWidth: CGFloat
     var defaultShortcutWidth: CGFloat = 10
+    var shortcutWidths: [String: CGFloat] = [:]
 
     func textWidth(for row: CandidatePanelRenderRow) -> CGFloat {
         defaultTextWidth
     }
 
     func shortcutWidth(for label: String) -> CGFloat {
-        defaultShortcutWidth
+        shortcutWidths[label] ?? defaultShortcutWidth
     }
 }
 

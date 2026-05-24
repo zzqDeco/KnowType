@@ -107,6 +107,33 @@ public enum TextProtection {
         }.sorted { $0.start < $1.start }
     }
 
+    public static func containsSecretLikeContent(_ text: String) -> Bool {
+        !detectSecretLikeRanges(in: text).isEmpty
+    }
+
+    public static func detectSecretLikeRanges(in text: String) -> [ProtectedRange] {
+        let patterns: [(String, String)] = [
+            (#"-----BEGIN [A-Z ]*PRIVATE KEY-----"#, "secret_private_key"),
+            (#"(?i)(?:^|[^A-Za-z0-9_])['"]?Authorization['"]?\s*:\s*['"]?\s*(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}"#, "secret_authorization_header"),
+            (#"\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{16,}\b"#, "secret_openai_key"),
+            (#"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b"#, "secret_github_token"),
+            (#"\bgithub_pat_[A-Za-z0-9_]{20,}\b"#, "secret_github_token"),
+            (#"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#, "secret_aws_key"),
+            (#"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"#, "secret_jwt"),
+            (#"(?i)(?:^|[^A-Za-z0-9_])['"]?(?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|auth[_-]?token|password|passwd|secret|client[_-]?secret|private[_-]?key)['"]?\s*[:=]\s*['"]?[^'"\s]{4,}"#, "secret_assignment"),
+            (#"(?i)[?&](?:api[_-]?key|key|token|access[_-]?token|password|secret|client[_-]?secret)=[^&#\s]{4,}"#, "secret_url_query")
+        ]
+
+        return patterns.flatMap { pattern, reason in
+            ranges(matching: pattern, in: text, reason: reason)
+        }.sorted { lhs, rhs in
+            if lhs.start == rhs.start {
+                return lhs.length > rhs.length
+            }
+            return lhs.start < rhs.start
+        }
+    }
+
     private static func isProtectedAppBundleID(_ appBundleID: String?) -> Bool {
         guard let appBundleID else {
             return false

@@ -70,12 +70,16 @@ jobs:
           fetch-depth: 0
       - name: Show Swift version
         run: swift --version
+      - name: Prepare Rime artifacts
+        run: ./scripts/prepare-rime-artifacts.sh
       - name: Release build
         run: swift build --configuration release
       - name: Test
         run: swift test
       - name: Input method install/profile script smoke
         run: ./scripts/smoke-inputmethod-install.sh
+      - name: Compatibility PreferencePane script smoke
+        run: ./scripts/smoke-inputmethod-install.sh --with-prefpane
       - name: Package release assets
         run: |
           CODESIGN_IDENTITY=- ./scripts/package-release.sh \

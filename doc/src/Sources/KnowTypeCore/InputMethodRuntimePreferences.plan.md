@@ -2,7 +2,7 @@
 
 `InputMethodRuntimePreferences` is the shared preference model for runtime behavior that must be visible in settings and consumed by the input method.
 
-It persists through the same `com.knowtype.preferences` defaults domain as punctuation preferences. The stored values cover input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation enablement, continuation length, and maximum continuation candidates.
+It persists through the same `com.knowtype.preferences` defaults domain as punctuation preferences. The stored values cover a legacy input-scheme value, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation enablement, continuation length, and maximum continuation candidates. The production Rime-only settings UI no longer exposes the legacy input-scheme picker.
 
 Adaptive candidate layout defaults to six visible rows and caps the effective page size at six even if an older stored preference says nine. Vertical-list mode uses the stored page size, up to the global maximum of nine.
 

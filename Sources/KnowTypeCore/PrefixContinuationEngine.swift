@@ -13,16 +13,14 @@ public final class PrefixContinuationEngine: Sendable {
         lengthLevel: ContinuationLengthLevel = .medium,
         maxCandidates: Int = 3
     ) async -> [ContinuationCandidate] {
-        if TextProtection.requiresNoCorrection(lockedPrefix.text, appBundleID: context?.appBundleID) {
-            return []
-        }
-
-        if let context,
-           TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
-            return []
-        }
-
         if let provider {
+            if TextProtection.containsSecretLikeContent(lockedPrefix.text) {
+                return []
+            }
+            if let context,
+               TextProtection.containsSecretLikeContent(context.rawInput) {
+                return []
+            }
             let request = LLMRequest(
                 task: .continuation,
                 lockedPrefix: lockedPrefix.text,
@@ -54,20 +52,51 @@ public final class PrefixContinuationEngine: Sendable {
             }
         }
 
+        if TextProtection.requiresNoCorrection(lockedPrefix.text, appBundleID: context?.appBundleID) {
+            return []
+        }
+
+        if let context,
+           TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) {
+            return []
+        }
+
         return fallbackContinuations(for: lockedPrefix.text, lengthLevel: lengthLevel, maxCandidates: maxCandidates)
     }
 
     public static func sanitizeContinuation(_ text: String, lockedPrefix: String) -> String? {
+        sanitizeContinuationDetailed(text, lockedPrefix: lockedPrefix).text
+    }
+
+    public static func sanitizeContinuationDetailed(
+        _ text: String,
+        lockedPrefix: String
+    ) -> ContinuationSanitizationResult {
         var candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let prefix = lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        guard !candidate.isEmpty else {
+            return ContinuationSanitizationResult(text: nil, reason: .empty)
+        }
+        guard !prefix.isEmpty else {
+            return ContinuationSanitizationResult(text: candidate, reason: .accepted)
+        }
+        if candidate == prefix {
+            return ContinuationSanitizationResult(text: nil, reason: .sameAsPrefix)
+        }
+
+        var repaired = false
         if candidate.hasPrefix(prefix) {
             candidate.removeFirst(prefix.count)
             candidate = trimJoiner(candidate)
+            repaired = true
         }
 
-        if candidate == prefix || candidate.isEmpty {
-            return nil
+        if candidate.isEmpty {
+            return ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
+        }
+        if candidate == prefix {
+            return ContinuationSanitizationResult(text: nil, reason: .sameAsPrefix)
         }
 
         if candidate.hasPrefix("|") || candidate.hasPrefix("｜") {
@@ -75,11 +104,17 @@ public final class PrefixContinuationEngine: Sendable {
             candidate = trimJoiner(candidate)
         }
 
-        if candidate.hasPrefix(prefix) || candidate.isEmpty {
-            return nil
+        guard !candidate.isEmpty else {
+            return ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
+        }
+        if candidate.hasPrefix(prefix) {
+            return ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix)
         }
 
-        return candidate
+        return ContinuationSanitizationResult(
+            text: candidate,
+            reason: repaired ? .repeatedPrefixRepaired : .accepted
+        )
     }
 
     public static func hasTechnicalLatencySignal(_ text: String) -> Bool {
@@ -195,6 +230,25 @@ public final class PrefixContinuationEngine: Sendable {
             seen.insert($0.text)
             return true
         }
+    }
+}
+
+public enum ContinuationSanitizationReason: String, Codable, Sendable, Equatable {
+    case accepted
+    case empty
+    case sameAsPrefix = "same_as_prefix"
+    case repeatedPrefixRepaired = "repeated_prefix_repaired"
+    case stillRepeatsPrefix = "still_repeats_prefix"
+    case noUsableSuffix = "no_usable_suffix"
+}
+
+public struct ContinuationSanitizationResult: Codable, Sendable, Equatable {
+    public var text: String?
+    public var reason: ContinuationSanitizationReason
+
+    public init(text: String?, reason: ContinuationSanitizationReason) {
+        self.text = text
+        self.reason = reason
     }
 }
 

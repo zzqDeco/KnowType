@@ -27,23 +27,59 @@ public enum CandidatePanelSelection: Sendable, Equatable {
 
 public struct CandidatePanelRenderRow: Sendable, Equatable {
     public var kind: CandidatePanelRowKind
+    public var selection: CandidatePanelSelection?
     public var shortcutLabel: String?
     public var text: String
     public var isSelected: Bool
+    public var isEnabled: Bool
     public var visualRole: CandidatePanelVisualRole
+    public var accessibilityLabel: String
 
     public init(
         kind: CandidatePanelRowKind,
+        selection: CandidatePanelSelection? = nil,
         shortcutLabel: String?,
         text: String,
         isSelected: Bool,
-        visualRole: CandidatePanelVisualRole
+        isEnabled: Bool = true,
+        visualRole: CandidatePanelVisualRole,
+        accessibilityLabel: String? = nil
     ) {
         self.kind = kind
+        self.selection = selection
         self.shortcutLabel = shortcutLabel
         self.text = text
         self.isSelected = isSelected
+        self.isEnabled = isEnabled
         self.visualRole = visualRole
+        self.accessibilityLabel = accessibilityLabel ?? Self.defaultAccessibilityLabel(
+            shortcutLabel: shortcutLabel,
+            text: text,
+            visualRole: visualRole,
+            isEnabled: isEnabled
+        )
+    }
+
+    private static func defaultAccessibilityLabel(
+        shortcutLabel: String?,
+        text: String,
+        visualRole: CandidatePanelVisualRole,
+        isEnabled: Bool
+    ) -> String {
+        let rolePrefix: String?
+        switch visualRole {
+        case .aiRecommendation:
+            rolePrefix = isEnabled ? "AI 推荐" : "AI 状态"
+        case .continuation:
+            rolePrefix = "续写"
+        case .rawInput:
+            rolePrefix = "原文"
+        case .lockedPrefix:
+            rolePrefix = nil
+        }
+        return [rolePrefix, shortcutLabel, text]
+            .compactMap { $0 }
+            .joined(separator: "，")
     }
 }
 
@@ -78,26 +114,29 @@ public struct CandidatePanelRenderer: Sendable {
         let rows = allRows[visibleRange].map { item in
             let shortcutLabel: String?
             switch item.selection {
-            case .rawInput:
+            case nil:
                 shortcutLabel = nil
-            case .prefixCandidate, .fullCandidate, .segmentCandidate:
+            case .some(.rawInput):
+                shortcutLabel = nil
+            case .some(.prefixCandidate), .some(.fullCandidate), .some(.segmentCandidate):
                 shortcutLabel = "\(nextNumberShortcut)"
                 nextNumberShortcut += 1
-            case .aiRecommendation:
+            case .some(.aiRecommendation):
                 if viewModel.aiRecommendation.isSelectableRecommendation {
-                    shortcutLabel = "\(nextNumberShortcut)"
-                    nextNumberShortcut += 1
+                    shortcutLabel = "⇥"
                 } else {
                     shortcutLabel = nil
                 }
-            case .continuationCandidate(let index):
+            case .some(.continuationCandidate(let index)):
                 shortcutLabel = continuationShortcutLabel(atGlobalIndex: index)
             }
             return CandidatePanelRenderRow(
                 kind: item.kind,
+                selection: item.selection,
                 shortcutLabel: shortcutLabel,
                 text: item.text,
-                isSelected: selection == item.selection,
+                isSelected: item.isEnabled && selection == item.selection,
+                isEnabled: item.isEnabled,
                 visualRole: item.visualRole
             )
         }
@@ -164,10 +203,11 @@ public struct CandidatePanelRenderer: Sendable {
             return nil
         }
         return CandidatePanelRenderableRow(
-            selection: .aiRecommendation,
+            selection: state.isSelectableRecommendation ? .aiRecommendation : nil,
             kind: .aiRecommendation,
             text: text,
-            visualRole: .aiRecommendation
+            visualRole: .aiRecommendation,
+            isEnabled: state.isSelectableRecommendation
         )
     }
 
@@ -209,8 +249,9 @@ public struct CandidatePanelRenderer: Sendable {
 }
 
 private struct CandidatePanelRenderableRow: Sendable, Equatable {
-    var selection: CandidatePanelSelection
+    var selection: CandidatePanelSelection?
     var kind: CandidatePanelRowKind
     var text: String
     var visualRole: CandidatePanelVisualRole
+    var isEnabled: Bool = true
 }

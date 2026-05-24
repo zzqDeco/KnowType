@@ -1,6 +1,90 @@
 import Foundation
 import KnowTypeProviders
 
+enum SettingsSection: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case input
+    case candidates
+    case lexicons
+    case aiProvider
+    case privacy
+    case diagnostics
+
+    var id: String { rawValue }
+
+    var title: String {
+        title(preferredLanguages: Locale.preferredLanguages)
+    }
+
+    func title(preferredLanguages: [String]) -> String {
+        switch self {
+        case .input:
+            SettingsLocalization.string("settings.section.input", preferredLanguages: preferredLanguages)
+        case .candidates:
+            SettingsLocalization.string("settings.section.candidates", preferredLanguages: preferredLanguages)
+        case .lexicons:
+            SettingsLocalization.string("settings.section.lexicons", preferredLanguages: preferredLanguages)
+        case .aiProvider:
+            SettingsLocalization.string("settings.section.ai", preferredLanguages: preferredLanguages)
+        case .privacy:
+            SettingsLocalization.string("settings.section.privacy", preferredLanguages: preferredLanguages)
+        case .diagnostics:
+            SettingsLocalization.string("settings.section.diagnostics", preferredLanguages: preferredLanguages)
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .input:
+            "keyboard"
+        case .candidates:
+            "list.bullet.rectangle"
+        case .lexicons:
+            "folder"
+        case .aiProvider:
+            "sparkles"
+        case .privacy:
+            "lock.shield"
+        case .diagnostics:
+            "stethoscope"
+        }
+    }
+
+    var keywords: [String] {
+        switch self {
+        case .input:
+            ["输入", "组合", "标点", "符号", "前缀", "Input", "punctuation"]
+        case .candidates:
+            ["候选", "候选窗", "翻页", "快捷键", "Candidates", "panel"]
+        case .lexicons:
+            ["Rime", "用户数据", "词库", "目录", "lexicon", "data"]
+        case .aiProvider:
+            ["AI", "续写", "Provider", "API Key", "模型", "连接"]
+        case .privacy:
+            ["隐私", "云端", "本地", "保护", "Privacy"]
+        case .diagnostics:
+            ["诊断", "安装", "日志", "命令", "Diagnostics", "logs"]
+        }
+    }
+}
+
+struct SettingsSidebarPresentation: Equatable, Sendable {
+    var sections: [SettingsSection]
+
+    init(searchText: String, preferredLanguages: [String] = Locale.preferredLanguages) {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            self.sections = SettingsSection.allCases
+            return
+        }
+
+        self.sections = SettingsSection.allCases.filter { section in
+            ([section.title(preferredLanguages: preferredLanguages)] + section.keywords).contains { candidate in
+                candidate.localizedCaseInsensitiveContains(query)
+            }
+        }
+    }
+}
+
 struct SettingsKeyValuePresentation: Equatable, Sendable {
     var label: String
     var value: String
@@ -30,17 +114,32 @@ struct ProviderProfileDraftPresentation: Equatable, Sendable {
     var customResponsePathLabel: String
     var secret: ProviderSecretPresentation
 
-    init(draft: ProviderProfileDraft) {
-        self.displayNameFieldLabel = "Display Name"
-        self.kindPickerLabel = "Kind"
+    init(draft: ProviderProfileDraft, preferredLanguages: [String] = Locale.preferredLanguages) {
+        self.displayNameFieldLabel = SettingsLocalization.string(
+            "settings.provider.displayName",
+            preferredLanguages: preferredLanguages
+        )
+        self.kindPickerLabel = SettingsLocalization.string(
+            "settings.provider.kind",
+            preferredLanguages: preferredLanguages
+        )
         self.baseURLFieldLabel = "Base URL"
-        self.modelFieldLabel = "Model"
-        self.timeoutLabel = "Timeout: \(Int(draft.timeoutSeconds)) seconds"
-        self.defaultProviderLabel = "Default provider"
+        self.modelFieldLabel = SettingsLocalization.string(
+            "settings.provider.model",
+            preferredLanguages: preferredLanguages
+        )
+        self.timeoutLabel = String(
+            format: SettingsLocalization.string("settings.provider.timeout", preferredLanguages: preferredLanguages),
+            Int(draft.timeoutSeconds)
+        )
+        self.defaultProviderLabel = SettingsLocalization.string(
+            "settings.provider.default",
+            preferredLanguages: preferredLanguages
+        )
         self.showsCustomHTTPFields = draft.kind == .customHTTP
         self.customBodyTemplateLabel = "Custom HTTP"
         self.customResponsePathLabel = "Response Path"
-        self.secret = ProviderSecretPresentation(secretName: draft.secretName)
+        self.secret = ProviderSecretPresentation(secretName: draft.secretName, preferredLanguages: preferredLanguages)
     }
 }
 
@@ -50,13 +149,25 @@ struct ProviderSecretPresentation: Equatable, Sendable {
     var reference: SettingsKeyValuePresentation?
     var helpText: String
 
-    init(secretName: String?) {
+    init(secretName: String?, preferredLanguages: [String] = Locale.preferredLanguages) {
         self.sectionTitle = "API Key"
-        self.apiKeyFieldPrompt = "Leave blank to keep existing key"
+        self.apiKeyFieldPrompt = SettingsLocalization.string(
+            "settings.provider.secretPrompt",
+            preferredLanguages: preferredLanguages
+        )
         self.reference = secretName.map {
-            SettingsKeyValuePresentation(label: "Secret reference", value: $0)
+            SettingsKeyValuePresentation(
+                label: SettingsLocalization.string(
+                    "settings.provider.secretReference",
+                    preferredLanguages: preferredLanguages
+                ),
+                value: $0
+            )
         }
-        self.helpText = "API keys are written through the secret store. On macOS this uses Keychain; provider JSON stores secret references only."
+        self.helpText = SettingsLocalization.string(
+            "settings.provider.secretHelp",
+            preferredLanguages: preferredLanguages
+        )
     }
 }
 
@@ -70,9 +181,15 @@ struct ProviderConnectionStatusPresentation: Equatable, Sendable {
         showsProgress
     }
 
-    init(status: ProviderConnectionStatus) {
-        self.sectionTitle = "Connection"
-        self.testButtonLabel = "Test Connection"
+    init(status: ProviderConnectionStatus, preferredLanguages: [String] = Locale.preferredLanguages) {
+        self.sectionTitle = SettingsLocalization.string(
+            "settings.provider.connection",
+            preferredLanguages: preferredLanguages
+        )
+        self.testButtonLabel = SettingsLocalization.string(
+            "settings.action.testConnection",
+            preferredLanguages: preferredLanguages
+        )
         switch status {
         case .idle:
             self.showsProgress = false
@@ -108,8 +225,11 @@ struct ProviderValidationPresentation: Equatable, Sendable {
         !messages.isEmpty
     }
 
-    init(errors: [String]) {
-        self.title = "Validation"
+    init(errors: [String], preferredLanguages: [String] = Locale.preferredLanguages) {
+        self.title = SettingsLocalization.string(
+            "settings.provider.validation",
+            preferredLanguages: preferredLanguages
+        )
         self.messages = errors
     }
 }
@@ -122,8 +242,11 @@ struct ProviderLastErrorPresentation: Equatable, Sendable {
         message != nil
     }
 
-    init(message: String?) {
-        self.title = "Last Error"
+    init(message: String?, preferredLanguages: [String] = Locale.preferredLanguages) {
+        self.title = SettingsLocalization.string(
+            "settings.provider.lastError",
+            preferredLanguages: preferredLanguages
+        )
         self.message = message
     }
 }

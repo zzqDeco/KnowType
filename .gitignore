@@ -2,6 +2,7 @@
 .swiftpm/
 DerivedData/
 dist/
+Vendor/Rime/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcworkspace/xcuserdata/
 xcuserdata/

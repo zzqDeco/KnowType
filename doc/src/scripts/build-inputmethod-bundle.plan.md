@@ -19,6 +19,12 @@ products and repository resources.
 - `--version` and `--build` override the copied `Info.plist` before signing so
   release artifacts can carry tag and CI build metadata without mutating source
   plists.
+- If `Vendor/Rime` exists, the script copies `librime.1.dylib`, Rime plugins,
+  and shared data into the app bundle before signing. `KnowTypeInputMethodApp`
+  is linked with `@loader_path/../Frameworks` in SwiftPM so packaging does not
+  depend on mutating the Mach-O executable with `install_name_tool`.
+- The required Rime rpath is verified before signing. A missing rpath aborts
+  packaging instead of producing a bundle that cannot load native Rime.
 - CI smoke checks this script without installing the bundle.
 
 ## Tests
