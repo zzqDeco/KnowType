@@ -15,9 +15,12 @@ Installs the locally built KnowType input method bundle into
 
 ## Behavior Notes
 
-- The script can install from three sources: a release-config local build, an
-  existing `KnowType.app` via `--from-bundle`, or a release archive via
-  `--from-release-zip`.
+- The script can install from four sources: a release-config local build, an
+  existing `KnowType.app` via `--from-bundle`, a release archive via
+  `--from-release-zip`, or a mounted Developer Preview DMG root via
+  `--from-dmg-payload`.
+- Developer Preview DMG installs record `source=dmg-dev-preview`, release
+  commit/tag, and manifest digest in install state.
 - Release archive provenance is accepted only when the extracted archive has a
   single unambiguous `release-manifest.json`; older archives may still use one
   sibling manifest beside the zip.

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
-source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR"
+source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
+source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
 DRY_RUN=0
 BACKUP_ENABLED=1
 PURGE_BACKUPS=0

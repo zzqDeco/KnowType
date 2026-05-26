@@ -60,7 +60,7 @@ jobs:
           } >>"$GITHUB_OUTPUT"
 
   build-package:
-    name: Build local MVP package
+    name: Build release artifacts
     needs: validate
     runs-on: macos-latest
     steps:
@@ -86,12 +86,18 @@ jobs:
             --version "${{ needs.validate.outputs.version }}" \
             --build "$GITHUB_RUN_NUMBER" \
             --configuration release
+          CODESIGN_IDENTITY=- ./scripts/package-dmg.sh \
+            --version "${{ needs.validate.outputs.version }}" \
+            --build "$GITHUB_RUN_NUMBER" \
+            --configuration release
       - name: Upload release assets
         uses: actions/upload-artifact@v7
         with:
           name: release-assets
           if-no-files-found: error
           path: |
+            dist/release/KnowType-v${{ needs.validate.outputs.version }}-macos-dev-preview.dmg
+            dist/release/KnowType-v${{ needs.validate.outputs.version }}-macos-dev-preview.dmg.sha256
             dist/release/KnowType-v${{ needs.validate.outputs.version }}-macos-local-mvp.zip
             dist/release/KnowType-v${{ needs.validate.outputs.version }}-macos-local-mvp.zip.sha256
             dist/release/release-manifest.json
@@ -128,10 +134,24 @@ jobs:
           RELEASE_COMMIT: ${{ needs.validate.outputs.release_commit }}
         run: |
           set -euo pipefail
+          cat >release-notes.md <<EOF
+          Developer Preview release.
+
+          Default download:
+          - KnowType-v${VERSION}-macos-dev-preview.dmg
+
+          This build is not Developer ID signed or notarized and may require macOS Privacy & Security > Open Anyway or Control-click > Open before installation. A notarized pkg installer is planned for a future release after Developer ID signing is available.
+
+          Developer/debug assets:
+          - KnowType-v${VERSION}-macos-local-mvp.zip
+          - SHA256 checksum files and release-manifest.json
+          EOF
           gh release create "$TAG" \
+            "release-assets/KnowType-v${VERSION}-macos-dev-preview.dmg" \
+            "release-assets/KnowType-v${VERSION}-macos-dev-preview.dmg.sha256" \
             "release-assets/KnowType-v${VERSION}-macos-local-mvp.zip" \
             "release-assets/KnowType-v${VERSION}-macos-local-mvp.zip.sha256" \
             "release-assets/release-manifest.json" \
             --title "KnowType $TAG" \
             --target "$RELEASE_COMMIT" \
-            --notes "Local MVP release package. This zip is ad-hoc signed and not notarized."
+            --notes-file release-notes.md

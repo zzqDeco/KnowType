@@ -117,7 +117,6 @@ staging_dir="$RELEASE_DIR/$artifact_stem"
 archive_path="$RELEASE_DIR/${artifact_stem}.zip"
 checksum_path="$RELEASE_DIR/${artifact_stem}.zip.sha256"
 manifest_path="$RELEASE_DIR/release-manifest.json"
-archive_relative="dist/release/${artifact_stem}.zip"
 
 mkdir -p "$staging_dir"
 cp -R "$bundle_path" "$staging_dir/"
@@ -165,7 +164,7 @@ EOF
 cp "$manifest_path" "$staging_dir/release-manifest.json"
 
 ditto -c -k --sequesterRsrc --keepParent "$staging_dir" "$archive_path"
-(cd "$ROOT_DIR" && shasum -a 256 "$archive_relative" >"$checksum_path")
+(cd "$RELEASE_DIR" && shasum -a 256 "$(basename "$archive_path")" >"$checksum_path")
 
 echo "$archive_path"
 echo "$checksum_path"

@@ -127,8 +127,13 @@
 "settings.diagnostics.install.source" = "来源";
 "settings.diagnostics.install.commit" = "Commit";
 "settings.diagnostics.install.tag" = "Tag";
+"settings.diagnostics.install.manifest" = "Manifest";
 "settings.diagnostics.install.installedAt" = "安装时间";
 "settings.diagnostics.install.path" = "安装路径";
+"settings.diagnostics.install.source.bundle" = "现有 Bundle";
+"settings.diagnostics.install.source.dmgDevPreview" = "开发者预览 DMG";
+"settings.diagnostics.install.source.localBuild" = "本地构建";
+"settings.diagnostics.install.source.releaseZip" = "Release Zip";
 "settings.diagnostics.runtime.bundle" = "KnowType.app";
 "settings.diagnostics.runtime.prefpane" = "Compatibility prefPane";
 "settings.diagnostics.runtime.rimeDylib" = "Rime dylib";

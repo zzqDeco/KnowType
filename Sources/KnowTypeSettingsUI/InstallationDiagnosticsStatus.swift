@@ -36,9 +36,10 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
 
         installRows = [
             Self.row("settings.diagnostics.install.version", bundleInfo.versionBuild ?? Self.missing(preferredLanguages), preferredLanguages),
-            Self.row("settings.diagnostics.install.source", installState?.source ?? Self.missing(preferredLanguages), preferredLanguages),
+            Self.row("settings.diagnostics.install.source", Self.installSourceDisplay(installState?.source, preferredLanguages), preferredLanguages),
             Self.row("settings.diagnostics.install.commit", installState?.gitCommit ?? Self.missing(preferredLanguages), preferredLanguages),
             Self.row("settings.diagnostics.install.tag", installState?.gitTag ?? Self.missing(preferredLanguages), preferredLanguages),
+            Self.row("settings.diagnostics.install.manifest", installState?.releaseManifestDigest ?? Self.missing(preferredLanguages), preferredLanguages),
             Self.row("settings.diagnostics.install.installedAt", installState?.installedAt ?? Self.missing(preferredLanguages), preferredLanguages),
             Self.row("settings.diagnostics.install.path", bundleURL.path, preferredLanguages)
         ]
@@ -112,6 +113,26 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
 
     private static func missing(_ preferredLanguages: [String]) -> String {
         SettingsLocalization.string("settings.diagnostics.status.missing", preferredLanguages: preferredLanguages)
+    }
+
+    private static func installSourceDisplay(_ source: String?, _ preferredLanguages: [String]) -> String {
+        guard let source, !source.isEmpty else {
+            return Self.missing(preferredLanguages)
+        }
+        let key: String
+        switch source {
+        case "dmg-dev-preview":
+            key = "settings.diagnostics.install.source.dmgDevPreview"
+        case "release-zip":
+            key = "settings.diagnostics.install.source.releaseZip"
+        case "local-build":
+            key = "settings.diagnostics.install.source.localBuild"
+        case "bundle":
+            key = "settings.diagnostics.install.source.bundle"
+        default:
+            return source
+        }
+        return SettingsLocalization.string(key, preferredLanguages: preferredLanguages)
     }
 
     private static func dateString(_ date: Date) -> String {
@@ -210,6 +231,7 @@ private struct InstallState: Decodable, Equatable, Sendable {
     var bundlePath: String
     var prefPanePath: String?
     var previousBackupID: String?
+    var releaseManifestDigest: String?
 }
 
 private struct BackupManifest: Decodable, Equatable, Sendable {

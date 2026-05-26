@@ -135,7 +135,8 @@ development, diagnostics, and lexicon management:
   `scripts/rollback-inputmethod.sh`, `scripts/select-inputmethod.sh`,
   `scripts/repair-inputmethod-selection.sh`, and
   `scripts/uninstall-inputmethod.sh` form the local install, rollback, and
-  acceptance workflow.
+  acceptance workflow. `scripts/package-dmg.sh` builds the unsigned/not
+  notarized Developer Preview DMG used as the default GitHub Release download.
 - `scripts/smoke-inputmethod-install.sh` is the CI-safe script smoke path; it
   does not mutate Text Input Source state or prove target-app typing behavior.
 

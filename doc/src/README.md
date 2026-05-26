@@ -127,6 +127,7 @@ required for every test file.
 - [Input Method Diagnostic Scripts](scripts/inputmethod-diagnostics.plan.md)
 - [Input Method Installer](scripts/install-inputmethod.plan.md)
 - [Managed Lexicon Pack Installer](scripts/install-lexicon-pack.plan.md)
+- [Developer Preview DMG Packager](scripts/package-dmg.plan.md)
 - [Release Packager](scripts/package-release.plan.md)
 - [Rime Artifact Preparer](scripts/prepare-rime-artifacts.plan.md)
 - [Input Method Installation Helpers](scripts/lib/inputmethod-installation.plan.md)

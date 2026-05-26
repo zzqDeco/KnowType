@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
-source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
-source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR"
+source "$SCRIPTS_DIR/lib/inputsource-ids.sh"
+source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
+source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
 
 DRY_RUN=0
 CONFIGURATION="${CONFIGURATION:-release}"
@@ -12,6 +14,7 @@ WITH_PREFPANE="${KNOWTYPE_INSTALL_PREFPANE:-0}"
 SOURCE_MODE="build"
 FROM_BUNDLE=""
 FROM_RELEASE_ZIP=""
+FROM_DMG_PAYLOAD=""
 BACKUP_ENABLED=1
 VERIFY_ENABLED=1
 KEEP_BACKUPS="$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
@@ -29,6 +32,7 @@ Options:
   --with-prefpane                Also build/install the compatibility KnowType.prefPane.
   --from-bundle PATH             Install an existing KnowType.app instead of building from source.
   --from-release-zip PATH        Install KnowType.app from a release zip and validate release metadata when present.
+  --from-dmg-payload PATH        Install from a mounted Developer Preview DMG payload root.
   --no-backup                    Replace without creating an app/prefPane backup.
   --keep-backups N               Keep the newest N app backups. Defaults to 3.
   --no-verify                    Skip codesign verification during preflight.
@@ -71,6 +75,15 @@ while (($# > 0)); do
       fi
       SOURCE_MODE="release-zip"
       FROM_RELEASE_ZIP="$2"
+      shift 2
+      ;;
+    --from-dmg-payload)
+      if (($# < 2)); then
+        echo "error: --from-dmg-payload requires a path" >&2
+        exit 2
+      fi
+      SOURCE_MODE="dmg-dev-preview"
+      FROM_DMG_PAYLOAD="$2"
       shift 2
       ;;
     --no-backup)
@@ -118,8 +131,12 @@ case "$WITH_PREFPANE" in
     ;;
 esac
 
-if [[ "$SOURCE_MODE" != "build" && -n "$FROM_BUNDLE" && -n "$FROM_RELEASE_ZIP" ]]; then
-  echo "error: --from-bundle and --from-release-zip are mutually exclusive" >&2
+source_path_count=0
+[[ -n "$FROM_BUNDLE" ]] && source_path_count=$((source_path_count + 1))
+[[ -n "$FROM_RELEASE_ZIP" ]] && source_path_count=$((source_path_count + 1))
+[[ -n "$FROM_DMG_PAYLOAD" ]] && source_path_count=$((source_path_count + 1))
+if (( source_path_count > 1 )); then
+  echo "error: --from-bundle, --from-release-zip, and --from-dmg-payload are mutually exclusive" >&2
   exit 2
 fi
 if [[ ! "$KEEP_BACKUPS" =~ ^[0-9]+$ ]]; then
@@ -381,9 +398,9 @@ prepare_source_artifacts() {
     build)
       SOURCE_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
       SOURCE_GIT_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
-      SOURCE_BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$ROOT_DIR/scripts/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+      SOURCE_BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$SCRIPTS_DIR/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" | tail -n 1)"
       if (( WITH_PREFPANE == 1 )); then
-        SOURCE_PREFPANE_PATH="$("$ROOT_DIR/scripts/build-preference-pane.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+        SOURCE_PREFPANE_PATH="$("$SCRIPTS_DIR/build-preference-pane.sh" --configuration "$CONFIGURATION" | tail -n 1)"
       fi
       ;;
     bundle)
@@ -431,6 +448,23 @@ prepare_source_artifacts() {
         echo "warning: release-manifest.json was not found in or beside the release zip; install-state will record release-zip without commit metadata" >&2
       fi
       ;;
+    dmg-dev-preview)
+      local payload_root
+      payload_root="$(knowtype_canonical_bundle_path "$FROM_DMG_PAYLOAD")"
+      SOURCE_BUNDLE_PATH="$payload_root/Payload/KnowType.app"
+      if [[ -d "$payload_root/Payload/KnowType.prefPane" ]]; then
+        SOURCE_PREFPANE_PATH="$payload_root/Payload/KnowType.prefPane"
+      fi
+      SOURCE_RELEASE_MANIFEST="$payload_root/Resources/release-manifest.json"
+      if [[ ! -f "$SOURCE_RELEASE_MANIFEST" ]]; then
+        echo "error: Developer Preview DMG payload is missing Resources/release-manifest.json: $payload_root" >&2
+        exit 1
+      fi
+      SOURCE_RELEASE_MANIFEST_DIGEST="$(shasum -a 256 "$SOURCE_RELEASE_MANIFEST" | awk '{print $1}')"
+      validate_release_manifest_metadata "$SOURCE_RELEASE_MANIFEST" "$SOURCE_BUNDLE_PATH" "$SOURCE_PREFPANE_PATH"
+      SOURCE_GIT_COMMIT="$(release_manifest_field "$SOURCE_RELEASE_MANIFEST" "releaseCommit")"
+      SOURCE_GIT_TAG="$(release_manifest_field "$SOURCE_RELEASE_MANIFEST" "tag")"
+      ;;
   esac
 
   [[ -n "$SOURCE_BUNDLE_PATH" ]] || {
@@ -446,10 +480,17 @@ prepare_source_artifacts() {
 }
 
 if (( DRY_RUN == 1 )); then
+  if [[ "$SOURCE_MODE" != "build" ]]; then
+    prepare_source_artifacts
+  fi
   echo "KnowType input-method install dry run"
   echo "Source mode: $(install_state_source)"
   [[ -n "$FROM_BUNDLE" ]] && echo "Source bundle: $FROM_BUNDLE"
   [[ -n "$FROM_RELEASE_ZIP" ]] && echo "Source release zip: $FROM_RELEASE_ZIP"
+  [[ -n "$FROM_DMG_PAYLOAD" ]] && echo "Source DMG payload: $FROM_DMG_PAYLOAD"
+  [[ -n "$SOURCE_BUNDLE_PATH" ]] && echo "Resolved source app: $SOURCE_BUNDLE_PATH"
+  [[ -n "$SOURCE_GIT_TAG" ]] && echo "Release tag: $SOURCE_GIT_TAG"
+  [[ -n "$SOURCE_GIT_COMMIT" ]] && echo "Release commit: $SOURCE_GIT_COMMIT"
   echo "Target bundle: $TARGET_PATH"
   echo "Install state: $(knowtype_install_state_path)"
   echo "Backup root: $(knowtype_backup_root_dir)"
@@ -605,7 +646,7 @@ fi
 installed_version="$(knowtype_bundle_short_version "$TARGET_PATH")"
 installed_build="$(knowtype_bundle_build_version "$TARGET_PATH")"
 postflight_result="ok"
-if ! "$ROOT_DIR/scripts/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH" >/dev/null 2>&1; then
+if ! "$SCRIPTS_DIR/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH" >/dev/null 2>&1; then
   postflight_result="warning"
 fi
 
