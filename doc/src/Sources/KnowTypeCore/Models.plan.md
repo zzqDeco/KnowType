@@ -13,8 +13,9 @@ providers, settings, and the input-method package.
 ## Behavior Notes
 
 - `LLMRequest` and `LLMResponse` are the normalized provider boundary.
-- `LLMRequest.candidateHints` carries current-page Rime candidates as provider
-  context; hints are not confirmed text and do not imply a locked prefix.
+- `LLMRequest.candidateHints` is a legacy-compatible field; realtime
+  continuation requests currently send it empty so unconfirmed Rime candidates
+  do not bias AI output or imply a locked prefix.
 - Correction, locked-prefix, continuation, protection, and suggestion models
   encode the product rule that continuation appends after a locked prefix.
 - Local-only ranking hints such as user selection history are input context, not

@@ -51,8 +51,7 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
   Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到
   同一套 provider 接口。
 - 隐私保护：纠错会保护 URL、邮箱、路径、命令、代码片段和受保护 app
-  场景不被改写；实时 AI 只在疑似 secret 时硬禁用，并过滤疑似 secret 的
-  候选 hint。
+  场景不被改写；实时 AI 只在 raw input 或已确认前缀疑似 secret 时硬禁用。
 - 本地词库：内置 seed 词库、用户自有 JSON/TSV 词库，以及托管安装
   Rime 简体拼音词库的路径。
 
@@ -210,9 +209,10 @@ Canonical JSON 存在 `~/Library/Application Support/KnowType/AI/`。传统输�
 这些文件。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
-输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选只作为
-`candidateHints` 提供给 AI；未选择的候选不会被当成 locked prefix。还没有
-locked prefix 时，AI 返回的是可直接上屏的完整推荐，而不是拼到第一候选后的后缀。
+输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给
+实时 AI 请求；未选择的候选不会被当成 locked prefix。还没有 locked prefix 时，
+AI 会基于 raw input、上下文文档和持久 `LEXICAL_PROFILE.md` 返回可直接上屏的
+完整推荐，而不是拼到第一候选后的后缀。
 日志可以区分 schema 降级、结构化解析失败、prefix-lock sanitizer 拒绝、
 prefix 太短等原因。查看命令：
 `log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`。
@@ -260,7 +260,7 @@ Level 0 纠错保护用于避免把本应原样提交的文本改写，例如 UR
 
 实时 AI 推荐使用更窄的云端隐私门禁：只有 raw input 或已确认前缀疑似包含
 API key、Bearer token、JWT、私钥、password/token 赋值等 credential 时才显示
-`AI 已禁用`。Rime 候选 hint 中的疑似 secret 会被过滤，不会禁用整次请求。
+`AI 已禁用`。
 
 `API`、`JSON`、`FastAPI`、`iOS`、`macOS`、`InputMethodKit`、
 `snake_case`、`camelCase` 等技术 token 会被保留或规范化。

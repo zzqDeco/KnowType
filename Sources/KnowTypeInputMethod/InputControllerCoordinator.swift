@@ -696,42 +696,36 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return conversionEngine.snapshot.suggestionResponse(originalRawInput: rawBuffer)
     }
 
-    private func lexicalContextSnapshot(for suggestion: SuggestionResponse) -> LexicalContextSnapshot? {
+    private func lexicalContextSnapshot(for _: SuggestionResponse) -> LexicalContextSnapshot? {
         lexicalProfileRuntime.lexicalContextSnapshot(
             schemaID: conversionEngine.activeSchemaID,
-            rimeCandidates: suggestion.prefixCandidates.map(\.text),
             recentCommits: recentLexicalCommits,
             selectionHistory: recentLexicalSelections
         )
     }
 
-    private func candidateHints(for suggestion: SuggestionResponse) -> [AICandidateHint] {
-        let snapshot = conversionEngine.snapshot
-        if !snapshot.candidates.isEmpty {
-            return snapshot.candidates.map { candidate in
-                AICandidateHint(
-                    text: candidate.text,
-                    nativeIndex: candidate.index,
-                    pageNumber: snapshot.pageNumber,
-                    isHighlighted: candidate.index == snapshot.highlightedIndex,
-                    comment: candidate.comment
-                )
-            }
-        }
-        return suggestion.prefixCandidates.enumerated().map { index, candidate in
-            AICandidateHint(
-                text: candidate.text,
-                nativeIndex: nil,
-                pageNumber: 0,
-                isHighlighted: index == 0,
-                comment: nil
-            )
-        }
-    }
-
     static func confirmedLockedPrefixText(for suggestion: SuggestionResponse) -> String? {
         let text = suggestion.lockedPrefix?.text
         return text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil
+    }
+
+    private static func hasLongEnoughAIRecommendationContext(rawInput: String, lockedPrefix: String?) -> Bool {
+        if let lockedPrefix,
+           !lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return isLongEnoughForCloudRecommendation(lockedPrefix)
+        }
+        return isLongEnoughForCloudRecommendation(rawInput)
+    }
+
+    private static func isLongEnoughForCloudRecommendation(_ text: String) -> Bool {
+        let visibleCount = text.filter { !$0.isWhitespace && !$0.isNewline }.count
+        let hanCount = text.filter {
+            String($0).range(of: #"\p{Han}"#, options: .regularExpression) != nil
+        }.count
+        if hanCount > 0 {
+            return hanCount >= 2 || visibleCount >= 6
+        }
+        return visibleCount >= 6
     }
 
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
@@ -753,9 +747,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let generation = aiRecommendationGeneration
         let requestID = UUID()
         let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
-        let candidateHints = candidateHints(for: suggestion)
 
-        guard lockedPrefixText != nil || !candidateHints.isEmpty,
+        guard !rawBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !compositionBuffer.hasResolvedSegments || compositionBuffer.isFullyResolved else {
             recordAIDiagnostic(
                 .skippedIneligible,
@@ -765,6 +758,24 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
                 reason: "no_stable_prefix"
+            )
+            aiRecommendationState = .idle
+            updateCandidatePanel(suggestion: suggestion, client: client)
+            return
+        }
+
+        guard Self.hasLongEnoughAIRecommendationContext(
+            rawInput: rawBuffer,
+            lockedPrefix: lockedPrefixText
+        ) else {
+            recordAIDiagnostic(
+                .skippedPrefixTooShort,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawBuffer.count,
+                prefixLength: lockedPrefixText?.count,
+                appBundleID: currentAppBundleID,
+                reason: "prefix_too_short"
             )
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)
@@ -842,7 +853,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let request = AIRecommendationRequest(
             rawInput: rawInput,
             lockedPrefix: lockedPrefixText,
-            candidateHints: candidateHints,
+            candidateHints: [],
             appBundleID: currentAppBundleID,
             appName: currentAppBundleID,
             locale: locale,

@@ -11,7 +11,7 @@ LLMRequest {
   task: correction | continuation | contextDigest | polish
   lockedPrefix?: string
   rawInput?: string
-  candidateHints: [
+  candidateHints: [              // legacy-compatible; realtime continuation sends []
     { text: string, nativeIndex?: number, pageNumber: number, isHighlighted: boolean, comment?: string }
   ]
   locale: zh-CN | en-US | mixed
@@ -49,15 +49,14 @@ endpoints that reject schema fields fall back once to JSON mode and report `stru
 rejects those fields. Ollama and custom HTTP do not claim provider-enforced schema, but their outputs still pass
 through strict local decoding instead of line-based candidate extraction.
 
-Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, current-page Rime `candidateHints`, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; an unselected Rime first candidate must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
+Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; unselected Rime candidates are not sent to the provider and must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
-Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from Rime hints:
+Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from unconfirmed raw input:
 
 - when `lockedPrefix` is present, candidate `text` must be directly appendable after it and must not repeat, paraphrase, translate, rewrite, or polish the locked prefix
-- when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput`, context, and `candidateHints`
-- `candidateHints` are context only; providers do not need to choose a `base` from them and may produce a recommendation that does not copy any hint exactly
+- when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput` and context documents
 
-When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; hints cannot make a too-short confirmed prefix eligible. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Unselected `candidateHints` containing secret-like text are filtered and logged as `secret_hint_filtered`; they cannot disable the whole request when safe context remains. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
+When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
 ## Provider Kinds
 
@@ -172,7 +171,7 @@ Core candidate types:
 - `AITypingEvent`: committed typing event used by the background memory runtime.
 - `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
 - `RimeMaintenanceService`: background owner of explicit `sync_user_data`, userdb snapshot discovery, and idle/manual maintenance policy.
-- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with current Rime candidates and schedules background profile refresh from existing userdb snapshots.
+- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, and schedules background profile refresh from existing userdb snapshots.
 - `LexicalContextSnapshot`: top-K lexical/tone summary rendered as `LEXICAL_PROFILE.md` and hashed into AI cache keys.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 - `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.
@@ -359,11 +358,10 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - creates default documents when missing
 - debounces before provider calls
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
-- caches by locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
+- caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
 - skips cloud requests for too-short prefixes: fewer than two Han characters, or fewer than six visible mixed/Latin characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
-- filters secret-like candidate hints before provider request construction, with diagnostic reason `secret_hint_filtered`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
 - reports sanitizer outcomes as normalized reasons such as `same_as_prefix`, `still_repeats_prefix`, `no_usable_suffix`, and `repeated_prefix_repaired`
 - emits privacy-preserving AI diagnostics to macOS unified logging by default under subsystem `com.knowtype.inputmethod.KnowType` and category `ai`
@@ -407,7 +405,8 @@ outside the generation gate, and conditional publish re-checks freshness without
 holding the gate lock across filesystem operations. If a refresh becomes stale
 mid-publish, any promoted profile files are rolled back before the task returns.
 AI requests merge persisted `LEXICAL_PROFILE.md` terms only when the stored
-profile schema matches the active Rime schema.
+profile schema matches the active Rime schema. They do not add the current
+composition's Rime candidate page to the lexical profile.
 
 KnowType-specific settings use the InputMethodKit preferences window opened from
 the input-method menu as the primary user entry point. `KnowType Settings...`

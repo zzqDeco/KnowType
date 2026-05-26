@@ -35,14 +35,12 @@ final class LexicalProfileRuntime: @unchecked Sendable {
 
     func lexicalContextSnapshot(
         schemaID: String,
-        rimeCandidates: [String],
         recentCommits: [String],
         selectionHistory: [String]
     ) -> LexicalContextSnapshot? {
         let persisted = store.currentProfile()
         let persistedLexicalContext = persisted?.schemaID == schemaID ? persisted?.lexicalContext : nil
         return builder.snapshot(
-            rimeCandidates: rimeCandidates,
             recentCommits: recentCommits,
             selectionHistory: selectionHistory,
             persistentTerms: persistedLexicalContext?.terms ?? [],

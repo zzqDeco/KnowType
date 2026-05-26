@@ -9,7 +9,20 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds, 10_000)
     }
 
-    func testRecommendationWithoutLockedPrefixUsesCandidateHintsAsContextOnly() async {
+    func testLegacyTraditionalCandidateDoesNotUseFirstCandidateHint() {
+        let request = AIRecommendationRequest(
+            rawInput: "zhegefangan",
+            candidateHints: [
+                AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0)
+            ],
+            compositionID: 1
+        )
+
+        XCTAssertEqual(request.traditionalCandidate.text, "")
+        XCTAssertEqual(request.traditionalCandidate.source, "raw-input")
+    }
+
+    func testRecommendationWithoutLockedPrefixIgnoresCandidateHints() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
         ]))
@@ -35,10 +48,10 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertNil(candidate.continuationText)
         XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
         XCTAssertEqual(requests.first?.lockedPrefix, nil)
-        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案", "这个方向"])
+        XCTAssertEqual(requests.first?.candidateHints, [])
     }
 
-    func testRecommendationCacheIncludesCandidateHints() async {
+    func testRecommendationCacheIgnoresCandidateHints() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
         ]))
@@ -46,25 +59,25 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         _ = await runtime.recommendation(
             for: AIRecommendationRequest(
-                rawInput: "zhege",
+                rawInput: "zhegefangan",
                 candidateHints: [AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0)],
                 compositionID: 1
             )
         )
         _ = await runtime.recommendation(
             for: AIRecommendationRequest(
-                rawInput: "zhege",
+                rawInput: "zhegefangan",
                 candidateHints: [AICandidateHint(text: "这个方向", nativeIndex: 0, pageNumber: 1)],
                 compositionID: 1
             )
         )
 
         let requests = await provider.requests
-        XCTAssertEqual(requests.count, 2)
-        XCTAssertEqual(requests.map { $0.candidateHints.first?.text }, ["这个方案", "这个方向"])
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.candidateHints, [])
     }
 
-    func testRecommendationFiltersSecretCandidateHintsWithoutDisablingRequest() async {
+    func testRecommendationDropsCandidateHintsBeforeProviderRequest() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
@@ -92,8 +105,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             return XCTFail("expected ready recommendation")
         }
         XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
-        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案"])
-        XCTAssertTrue(diagnosticSink.events.contains {
+        XCTAssertEqual(requests.first?.candidateHints, [])
+        XCTAssertFalse(diagnosticSink.events.contains {
             $0.stage == .skippedProtectedText && $0.reason == "secret_hint_filtered"
         })
     }
@@ -104,7 +117,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         ]))
         let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
         let request = AIRecommendationRequest(
-            rawInput: "ijust",
+            rawInput: "ijustworks",
             lockedPrefix: nil,
             candidateHints: [
                 AICandidateHint(text: "InputMethodKit", nativeIndex: 0, pageNumber: 0),
@@ -122,8 +135,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(candidate.displayText, "can be handled naturally")
         XCTAssertEqual(requests.count, 1)
-        XCTAssertEqual(requests.first?.rawInput, "ijust")
-        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["InputMethodKit", "iOS"])
+        XCTAssertEqual(requests.first?.rawInput, "ijustworks")
+        XCTAssertEqual(requests.first?.candidateHints, [])
     }
 
     func testShortLockedPrefixDoesNotUseCandidateHintsToBypassCloudThreshold() async {
@@ -481,13 +494,14 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     func testLexicalProfileFiltersStandaloneProtectedTechnicalTokens() throws {
         let snapshot = try XCTUnwrap(
             LexicalContextBuilder().snapshot(
-                rimeCandidates: ["API", "JSON", "方案"],
+                rimeCandidates: ["当前候选", "API", "JSON"],
                 recentCommits: ["请同步这个方案"],
                 selectionHistory: ["snake_case"]
             )
         )
 
-        XCTAssertTrue(snapshot.markdown.contains("方案"))
+        XCTAssertTrue(snapshot.markdown.contains("请同步这个方案"))
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "当前候选" })
         XCTAssertFalse(snapshot.terms.contains { $0.text == "API" })
         XCTAssertFalse(snapshot.terms.contains { $0.text == "JSON" })
         XCTAssertFalse(snapshot.terms.contains { $0.text == "snake_case" })
