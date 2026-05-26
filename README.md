@@ -238,9 +238,10 @@ Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS
 unified logging. While Rime is composing, the current page of Rime candidates is
-sent as contextual hints only; unselected candidates are not treated as the
-locked prefix. If no locked prefix exists yet, the AI response is a full
-commit-ready recommendation rather than a suffix attached to the first Rime
+not sent to the realtime AI request and unselected candidates are not treated as
+the locked prefix. If no locked prefix exists yet, the AI response is a full
+commit-ready recommendation based on raw input, context documents, and the
+persistent lexical profile rather than a suffix attached to the first Rime
 candidate. The logs distinguish schema fallback, structured decode failures,
 prefix-lock sanitizer rejections, and too-short prefixes without recording raw
 text. To inspect them, run

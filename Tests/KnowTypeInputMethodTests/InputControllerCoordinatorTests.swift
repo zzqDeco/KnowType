@@ -414,7 +414,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
@@ -433,7 +433,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
@@ -963,7 +963,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasPendingAI = await waitUntilOnMainActor {
@@ -982,7 +982,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertEqual(client.insertTextWrites.count, 0)
-        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+        XCTAssertEqual(coordinator.composedString() as? String, "zhegeapi")
     }
 
     @MainActor
@@ -999,7 +999,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1008,7 +1008,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(hasScheduled)
         let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
 
-        XCTAssertTrue(coordinator.handleText("h", client: client))
+        XCTAssertTrue(coordinator.handleText("x", client: client))
         let hasCancellation = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
                 $0.stage == .cancelPrevious && $0.requestID == cancelledRequestID
@@ -1034,7 +1034,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         ).0
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator?.handleText(String(character), client: client) == true)
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1066,7 +1066,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasApplied = await waitUntilOnMainActor {
@@ -1077,7 +1077,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             $0.stage == .cancelPrevious
         }.count
 
-        XCTAssertTrue(coordinator.handleText("h", client: client))
+        XCTAssertTrue(coordinator.handleText("x", client: client))
         let hasLaterSchedule = await waitUntilOnMainActor {
             diagnosticSink.events.filter { $0.stage == .scheduled }.count >= 2
         }
@@ -1103,7 +1103,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1143,7 +1143,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1186,7 +1186,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1584,7 +1584,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAIRecommendationRequestCarriesLexicalProfile() async throws {
+    func testAIRecommendationRequestDropsRealtimeCandidateHints() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let aiProvider = RecordingAIRecommendationProvider()
@@ -1595,7 +1595,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
@@ -1606,10 +1606,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let request = try XCTUnwrap(requests.last)
 
         XCTAssertNil(request.lockedPrefix)
-        XCTAssertTrue(request.candidateHints.contains { $0.text == "你" })
-        XCTAssertEqual(request.candidateHints.first?.pageNumber, 0)
-        XCTAssertTrue(request.lexicalContext?.markdown.contains("你") == true)
-        XCTAssertTrue(request.lexicalContext?.sourceSummary.contains { $0.hasPrefix("rime-candidates: ") } == true)
+        XCTAssertEqual(request.rawInput, "zhegeapi")
+        XCTAssertEqual(request.candidateHints, [])
+        XCTAssertFalse(request.lexicalContext?.markdown.contains("这个 API") == true)
+        XCTAssertFalse(request.lexicalContext?.sourceSummary.contains { $0.hasPrefix("rime-candidates: ") } == true)
     }
 
     @MainActor
@@ -1640,7 +1640,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
@@ -1650,6 +1650,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let requests = await aiProvider.requests
         let request = try XCTUnwrap(requests.last)
 
+        XCTAssertEqual(request.candidateHints, [])
         XCTAssertTrue(request.lexicalContext?.markdown.contains("长期高频") == true)
         XCTAssertTrue(request.lexicalContext?.sourceSummary.contains("rime-userdb: 1") == true)
     }
@@ -1683,7 +1684,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             conversionEngine: FixtureNativeConversionEngine(activeSchemaID: "pinyin_simp")
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
@@ -1790,14 +1791,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(requestsAfterProtectedSelection.isEmpty)
 
         client.bundleIdentifier = "com.example.host"
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
 
         var unprotectedRequest: AIRecommendationRequest?
         for _ in 0..<60 {
             let requests = await aiProvider.requests
-            unprotectedRequest = requests.last { $0.rawInput == "ni" }
+            unprotectedRequest = requests.last { $0.rawInput == "zhegeapi" }
             if unprotectedRequest != nil {
                 break
             }
@@ -1883,7 +1884,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             runtimePreferenceStore: runtimeStore
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         let hasReadyAI = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
         }
@@ -1892,7 +1895,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         runtimeStore.preferences = InputMethodRuntimePreferences(cloudContinuationEnabled: false)
         coordinator.reloadRuntimePreferencesForExternalChange()
 
-        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text, "你")
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty == true)
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText, "AI 已关闭")
         XCTAssertTrue(host.panelStates.last?.windowState.viewModel.continuationCandidates.isEmpty == true)
     }
@@ -2681,7 +2684,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         try? await Task.sleep(nanoseconds: 100_000_000)
         let requests = await aiProvider.requests
         XCTAssertFalse(requests.isEmpty)
@@ -2759,7 +2764,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         let hasAIRecommendation = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
         }
@@ -2796,7 +2803,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        for character in "hou" {
+        for character in "houhou" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRequest = await waitForAIRecommendationRequest(aiProvider)
@@ -2857,7 +2864,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         let hasAIRecommendation = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
         }

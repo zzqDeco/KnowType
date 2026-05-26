@@ -9,7 +9,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
 
     private struct CacheKey: Hashable {
         var lockedPrefix: String?
-        var candidateHints: [AICandidateHint]
         var rawInput: String
         var appBundleID: String
         var localeRawValue: String
@@ -74,6 +73,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: reason)
         }
+        var request = request
+        request.candidateHints = []
         guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               Self.hasUsableRecommendationContext(in: request) else {
             record(
@@ -85,7 +86,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .ineligible(reason: "AI 不适用")
         }
-        var request = request
         if Self.containsSecretLikeRecommendationText(request) {
             record(
                 .skippedProtectedText,
@@ -95,31 +95,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 reason: "secret_like_text"
             )
             return .ineligible(reason: "AI 已禁用")
-        }
-        let unfilteredHintCount = request.candidateHints.count
-        request.candidateHints = Self.secretFilteredCandidateHints(request.candidateHints)
-        if request.candidateHints.count != unfilteredHintCount {
-            record(
-                .skippedProtectedText,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt,
-                candidateCount: unfilteredHintCount,
-                acceptedCount: request.candidateHints.count,
-                reason: "secret_hint_filtered"
-            )
-        }
-        guard Self.hasUsableRecommendationContext(in: request) else {
-            record(
-                .skippedIneligible,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt,
-                candidateCount: unfilteredHintCount,
-                acceptedCount: 0,
-                reason: "secret_hints_filtered_all"
-            )
-            return .ineligible(reason: "AI 无推荐")
         }
         guard Self.hasLongEnoughRecommendationContextForCloud(request) else {
             record(
@@ -159,7 +134,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             let key = CacheKey(
                 lockedPrefix: request.lockedPrefix,
-                candidateHints: request.candidateHints,
                 rawInput: request.rawInput,
                 appBundleID: request.appBundleID ?? "",
                 localeRawValue: request.locale.rawValue,
@@ -197,7 +171,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 task: .continuation,
                 lockedPrefix: request.lockedPrefix,
                 rawInput: request.rawInput,
-                candidateHints: request.candidateHints.map(\.llmHint),
+                candidateHints: [],
                 locale: request.locale,
                 appContext: request.appBundleID,
                 maxCandidates: 1,
@@ -470,7 +444,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         if request.lockedPrefix?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             return true
         }
-        return request.candidateHints.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private static func containsSecretLikeRecommendationText(_ request: AIRecommendationRequest) -> Bool {
@@ -484,16 +458,12 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         return false
     }
 
-    private static func secretFilteredCandidateHints(_ candidateHints: [AICandidateHint]) -> [AICandidateHint] {
-        candidateHints.filter { !TextProtection.containsSecretLikeContent($0.text) }
-    }
-
     private static func hasLongEnoughRecommendationContextForCloud(_ request: AIRecommendationRequest) -> Bool {
         if let lockedPrefix = request.lockedPrefix,
            !lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return isPrefixLongEnoughForCloudRecommendation(lockedPrefix)
         }
-        return request.candidateHints.contains { isPrefixLongEnoughForCloudRecommendation($0.text) }
+        return isPrefixLongEnoughForCloudRecommendation(request.rawInput)
     }
 
     private static func isPrefixLongEnoughForCloudRecommendation(_ prefix: String) -> Bool {

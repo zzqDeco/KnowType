@@ -185,7 +185,7 @@ final class LexicalProfileStoreTests: XCTestCase {
         XCTAssertFalse(try String(contentsOf: markdownURL, encoding: .utf8).contains("发布中断"))
     }
 
-    func testLexicalMergeKeepsCurrentRimeCandidatesAheadOfUserDBTerms() throws {
+    func testLexicalMergeIgnoresRealtimeRimeCandidates() throws {
         let snapshot = try XCTUnwrap(
             LexicalContextBuilder().snapshot(
                 rimeCandidates: ["当前候选"],
@@ -197,9 +197,10 @@ final class LexicalProfileStoreTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(snapshot.terms.first?.text, "当前候选")
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "当前候选" })
         XCTAssertTrue(snapshot.terms.contains { $0.text == "长期高频" })
         XCTAssertTrue(snapshot.sourceSummary.contains("rime-userdb: 1"))
+        XCTAssertFalse(snapshot.sourceSummary.contains { $0.hasPrefix("rime-candidates:") })
     }
 }
 

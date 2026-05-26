@@ -151,7 +151,6 @@ public struct LexicalContextBuilder: Sendable {
     ) -> LexicalContextSnapshot? {
         var scores: [String: (score: Double, source: String)] = [:]
         addTerms(persistentTerms, to: &scores)
-        addTerms(rimeCandidates, source: "rime-candidates", baseScore: 1.0, to: &scores)
         addTerms(selectionHistory.reversed(), source: "selection-history", baseScore: 0.86, to: &scores)
         addTerms(recentCommits.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
 
@@ -176,7 +175,6 @@ public struct LexicalContextBuilder: Sendable {
             recentCommits: Array(commits),
             toneProfile: toneProfile(from: Array(commits)),
             sourceSummary: sourceSummary(
-                rimeCandidates: rimeCandidates,
                 recentCommits: recentCommits,
                 selectionHistory: selectionHistory,
                 persistentTerms: persistentTerms,
@@ -268,14 +266,12 @@ public struct LexicalContextBuilder: Sendable {
     }
 
     private func sourceSummary(
-        rimeCandidates: [String],
         recentCommits: [String],
         selectionHistory: [String],
         persistentTerms: [LexicalContextTerm],
         persistentSourceSummary: [String]
     ) -> [String] {
         var summary = [
-            "rime-candidates: \(rimeCandidates.count)",
             "recent-commits: \(recentCommits.count)",
             "selection-history: \(selectionHistory.count)",
             "rime-userdb: \(persistentTerms.count)"

@@ -116,8 +116,8 @@ public struct AIRecommendationRequest: Sendable, Equatable {
 
     public var traditionalCandidate: CorrectionCandidate {
         CorrectionCandidate(
-            text: lockedPrefix ?? candidateHints.first?.text ?? "",
-            source: lockedPrefix == nil ? "candidate-hint" : "locked-prefix",
+            text: lockedPrefix ?? "",
+            source: lockedPrefix == nil ? "raw-input" : "locked-prefix",
             confidence: 1,
             correctionLevel: .contextual
         )

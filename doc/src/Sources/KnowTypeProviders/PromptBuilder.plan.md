@@ -14,11 +14,10 @@ adapters.
 
 ## Behavior Notes
 
-- Continuation prompts distinguish confirmed `lockedPrefix` from current-page
-  Rime `candidateHints`. With a locked prefix, candidate text must be directly
-  appendable after it and must not repeat or paraphrase it. Without a locked
-  prefix, candidate text is a full commit-ready recommendation; hints are
-  context only and do not require the model to choose or copy a base candidate.
+- Continuation prompts distinguish confirmed `lockedPrefix` from unconfirmed raw
+  input. With a locked prefix, candidate text must be directly appendable after
+  it and must not repeat or paraphrase it. Without a locked prefix, candidate
+  text is a full commit-ready recommendation from raw input and context.
   The prompt asks for language and intent aligned with the request context; it
   must not force Chinese output for English or mixed-locale input.
 - Correction and polish prompts must keep the distinction between prefix
