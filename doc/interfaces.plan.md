@@ -128,10 +128,11 @@ Settings connection tests:
 
 Local install scripts record recoverable install metadata under the user's
 Application Support directory. `install-state.json` is schema version `1` and
-contains the install time, source (`local-build`, `release-zip`, or `bundle`),
-bundle version/build, optional git commit/tag, installed app and prefPane paths,
-and the previous backup id. It describes install artifacts only; it does not
-snapshot Rime userdb, provider profiles, Keychain secrets, or AI context files.
+contains the install time, source (`local-build`, `dmg-dev-preview`,
+`release-zip`, or `bundle`), bundle version/build, optional git commit/tag,
+installed app and prefPane paths, release manifest digest, and the previous
+backup id. It describes install artifacts only; it does not snapshot Rime
+userdb, provider profiles, Keychain secrets, or AI context files.
 
 Install backups live under `Backups/<backup-id>/`. Each backup manifest records
 schema version, backup id, creation time, app version/build, bundle identifier,

@@ -323,6 +323,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("scripts/package-release.sh"),
             encoding: .utf8
         )
+        let dmgScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/package-dmg.sh"),
+            encoding: .utf8
+        )
         let releaseWorkflow = try String(
             contentsOf: rootURL.appendingPathComponent(".github/workflows/release.yml"),
             encoding: .utf8
@@ -330,6 +334,13 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         XCTAssertFalse(packageScript.contains("KnowType Settings.app"))
         XCTAssertTrue(packageScript.contains("compatibility KnowType.prefPane"))
+        XCTAssertTrue(packageScript.contains(#"shasum -a 256 "$(basename "$archive_path")""#))
+        XCTAssertTrue(dmgScript.contains("Developer Preview DMG"))
+        XCTAssertTrue(dmgScript.contains("Install KnowType.command"))
+        XCTAssertTrue(dmgScript.contains("--from-dmg-payload"))
+        XCTAssertTrue(dmgScript.contains(#"shasum -a 256 "$(basename "$dmg_path")""#))
+        XCTAssertTrue(releaseWorkflow.contains("./scripts/package-dmg.sh"))
+        XCTAssertTrue(releaseWorkflow.contains("macos-dev-preview.dmg"))
         XCTAssertTrue(releaseWorkflow.contains("./scripts/smoke-inputmethod-install.sh --with-prefpane"))
     }
 
@@ -416,7 +427,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("repair_preferences_best_effort"))
         XCTAssertTrue(installScript.contains("falling back to helper"))
         XCTAssertTrue(installScript.contains("continuing so installed app activation and diagnostics can run"))
-        XCTAssertTrue(installScript.contains("scripts/lib/inputmethod-installation.sh"))
+        XCTAssertTrue(installScript.contains("SCRIPT_DIR="))
+        XCTAssertTrue(installScript.contains("SCRIPTS_DIR=\"$SCRIPT_DIR\""))
+        XCTAssertTrue(installScript.contains(#"source "$SCRIPTS_DIR/lib/inputmethod-installation.sh""#))
         XCTAssertTrue(installScript.contains("knowtype_remove_local_inputmethod_bundle_if_safe"))
         XCTAssertTrue(installScript.contains("knowtype_cleanup_local_duplicate_bundles_except"))
         XCTAssertTrue(installScript.contains("knowtype_unregister_launchservices_records_except"))

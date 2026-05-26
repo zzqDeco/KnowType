@@ -149,6 +149,7 @@ help_scripts=(
   "$ROOT_DIR/scripts/diagnose-inputmethod.sh"
   "$ROOT_DIR/scripts/install-inputmethod.sh"
   "$ROOT_DIR/scripts/install-lexicon-pack.sh"
+  "$ROOT_DIR/scripts/package-dmg.sh"
   "$ROOT_DIR/scripts/package-release.sh"
   "$ROOT_DIR/scripts/perf-input-hotpath.sh"
   "$ROOT_DIR/scripts/repair-inputmethod-selection.sh"
@@ -286,6 +287,31 @@ assert_contains "$install_dry_run_output" "Backup root: $fake_support_dir/Backup
 assert_contains "$install_dry_run_output" "Would create install backup" "install dry run output"
 
 release_zip_path="$install_state_tmp/KnowType-test-release.zip"
+release_zip_checksum_path="$install_state_tmp/KnowType-test-release.zip.sha256"
+release_stage_root="$install_state_tmp/release-stage"
+release_stage="$release_stage_root/KnowType-test-release"
+mkdir -p "$release_stage"
+cp -R "$bundle_path" "$release_stage/KnowType.app"
+cat >"$release_stage/release-manifest.json" <<EOF
+{
+  "tag": "v0.2.0",
+  "releaseCommit": "fixture-commit",
+  "artifacts": {
+    "archive": "$(basename "$release_zip_path")",
+    "checksum": "$(basename "$release_zip_checksum_path")"
+  },
+  "bundles": [
+    {
+      "path": "KnowType.app",
+      "bundleIdentifier": "$(plist_read ":CFBundleIdentifier" "$bundle_path/Contents/Info.plist")",
+      "shortVersion": "$(plist_read ":CFBundleShortVersionString" "$bundle_path/Contents/Info.plist")",
+      "buildVersion": "$(plist_read ":CFBundleVersion" "$bundle_path/Contents/Info.plist")"
+    }
+  ]
+}
+EOF
+ditto -c -k --keepParent "$release_stage" "$release_zip_path"
+(cd "$install_state_tmp" && shasum -a 256 "$(basename "$release_zip_path")" >"$(basename "$release_zip_checksum_path")")
 release_zip_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
@@ -294,6 +320,21 @@ release_zip_dry_run_output="$(
 )"
 assert_contains "$release_zip_dry_run_output" "Source mode: release-zip" "release zip install dry run output"
 assert_contains "$release_zip_dry_run_output" "Source release zip: $release_zip_path" "release zip install dry run output"
+assert_contains "$release_zip_dry_run_output" "Release commit: fixture-commit" "release zip install dry run output"
+
+dmg_payload_root="$install_state_tmp/dmg-payload"
+mkdir -p "$dmg_payload_root/Payload" "$dmg_payload_root/Resources"
+cp -R "$bundle_path" "$dmg_payload_root/Payload/KnowType.app"
+cp "$release_stage/release-manifest.json" "$dmg_payload_root/Resources/release-manifest.json"
+dmg_payload_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-dmg-payload "$dmg_payload_root" --no-backup
+)"
+assert_contains "$dmg_payload_dry_run_output" "Source mode: dmg-dev-preview" "DMG payload install dry run output"
+assert_contains "$dmg_payload_dry_run_output" "Source DMG payload: $dmg_payload_root" "DMG payload install dry run output"
+assert_contains "$dmg_payload_dry_run_output" "Release commit: fixture-commit" "DMG payload install dry run output"
 
 assert_equals "0.2.0+build-bad-value" \
   "$(knowtype_sanitize_backup_component "0.2.0+build bad/value")" \

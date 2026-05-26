@@ -83,6 +83,7 @@ when converting a shipped plan into a short record.
 | [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual gates | Active |
 | [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active |
 | [main-tag-release-ci.plan.md](main-tag-release-ci.plan.md) | Main branch bootstrap and tag-triggered local MVP release packages | Active |
+| [developer-preview-dmg-release.plan.md](developer-preview-dmg-release.plan.md) | Developer Preview DMG as the default GitHub Release download while notarized pkg is unavailable | Active |
 
 ## Local IME And Tooling References
 

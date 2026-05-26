@@ -61,12 +61,12 @@ KnowType 目前是用于本地开发和手动验收的 MVP。它包含 Swift pac
 本地 InputMethodKit app bundle、SwiftUI 设置宿主、provider profile 存储、
 Keychain-backed API key 和本地词库工具。
 
-它还不是签名安装器、公证发行包、自动更新程序或 App Store 应用。
+它还不是公证安装器、自动更新程序或 App Store 应用。
 
-GitHub Releases 可以提供名为 `KnowType-vX.Y.Z-macos-local-mvp.zip` 的本地
-MVP zip。这个压缩包包含 ad-hoc 签名的 `KnowType.app` 输入法 bundle 和
-`KnowType.prefPane`，并附带 SHA256 文件和 release manifest。它仍然只是本地
-MVP 打包，不是公证安装器。
+GitHub Releases 默认提供名为 `KnowType-vX.Y.Z-macos-dev-preview.dmg` 的
+Developer Preview DMG。它包含 `KnowType.app`、命令文件安装入口、release manifest
+和 SHA256 文件。该 DMG 没有 Developer ID 签名，也未公证；macOS 可能要求右键打开，
+或在“隐私与安全性”里点击“仍要打开”。旧的本地 MVP zip 仍保留为开发者调试资产。
 
 ## 快速开始
 
@@ -155,15 +155,24 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 手动验收流程见 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md)
 和 [MVP Acceptance](doc/mvp-acceptance.plan.md)。
 
-使用 GitHub Release zip 时，先用发布页提供的 `.sha256` 文件校验下载的 zip。
-然后通过本地脚本安装，这样 release metadata、备份和诊断状态会被记录：
+使用 GitHub Release DMG 时，先用发布页提供的 `.sha256` 文件校验下载的 DMG：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.0-macos-local-mvp.zip
+cd ~/Downloads
+shasum -a 256 -c KnowType-v0.2.1-macos-dev-preview.dmg.sha256
 ```
 
-只有需要兼容 System Settings pane 时才额外传 `--with-prefpane`。除非已安装匹配版本的 pane，
+打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
+或到“系统设置 > 隐私与安全性”点击“仍要打开”。安装命令会在诊断中记录
+`source=dmg-dev-preview`、release commit/tag 和 manifest digest。只有需要兼容
+System Settings pane 时才额外传 `--with-prefpane`。除非已安装匹配版本的 pane，
 否则不要使用系统设置侧边栏里残留的 KnowType 入口。
+
+旧的本地 MVP zip 仍可用于开发者调试：
+
+```bash
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.1-macos-local-mvp.zip
+```
 
 ## 配置
 

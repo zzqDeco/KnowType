@@ -36,11 +36,12 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
             [
                 "schemaVersion": 1,
                 "installedAt": "2026-05-24T00:00:00Z",
-                "source": "release-zip",
+                "source": "dmg-dev-preview",
                 "version": "0.2.0",
                 "build": "2026052401",
                 "gitCommit": "abc123",
                 "gitTag": "v0.2.0",
+                "releaseManifestDigest": "digest123",
                 "bundlePath": bundle.path,
                 "prefPanePath": prefPane.path,
                 "previousBackupID": "20260524T000000Z-0000-0.1.0-1"
@@ -100,8 +101,9 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         )
 
         XCTAssertEqual(value("版本", in: status.installRows), "0.2.0 (2026052401)")
-        XCTAssertEqual(value("来源", in: status.installRows), "release-zip")
+        XCTAssertEqual(value("来源", in: status.installRows), "开发者预览 DMG")
         XCTAssertEqual(value("Commit", in: status.installRows), "abc123")
+        XCTAssertEqual(value("Manifest", in: status.installRows), "digest123")
         XCTAssertEqual(value("Rime dylib", in: status.runtimeRows), "存在")
         XCTAssertEqual(value("云端续写", in: status.aiRows), "已启用")
         XCTAssertEqual(value("本地 fallback", in: status.aiRows), "已关闭")

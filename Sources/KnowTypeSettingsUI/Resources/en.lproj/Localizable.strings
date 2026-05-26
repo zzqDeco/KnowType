@@ -127,8 +127,13 @@
 "settings.diagnostics.install.source" = "Source";
 "settings.diagnostics.install.commit" = "Commit";
 "settings.diagnostics.install.tag" = "Tag";
+"settings.diagnostics.install.manifest" = "Manifest";
 "settings.diagnostics.install.installedAt" = "Installed";
 "settings.diagnostics.install.path" = "Install Path";
+"settings.diagnostics.install.source.bundle" = "Existing Bundle";
+"settings.diagnostics.install.source.dmgDevPreview" = "Developer Preview DMG";
+"settings.diagnostics.install.source.localBuild" = "Local Build";
+"settings.diagnostics.install.source.releaseZip" = "Release Zip";
 "settings.diagnostics.runtime.bundle" = "KnowType.app";
 "settings.diagnostics.runtime.prefpane" = "Compatibility prefPane";
 "settings.diagnostics.runtime.rimeDylib" = "Rime dylib";

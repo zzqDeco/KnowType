@@ -68,13 +68,14 @@ includes a Swift package, unit tests, a local InputMethodKit app bundle,
 SwiftUI settings hosts, provider profile storage, Keychain-backed API keys, and
 local dictionary tooling.
 
-It is not yet a signed installer, notarized release, auto-updater, or App Store
-package.
+It is not yet a notarized installer, auto-updater, or App Store package.
 
-GitHub Releases may provide a local MVP zip named
-`KnowType-vX.Y.Z-macos-local-mvp.zip`. That archive contains the ad-hoc signed
-`KnowType.app` input method bundle and `KnowType.prefPane`, plus a SHA256 file
-and release manifest. It is still local MVP packaging, not a notarized installer.
+GitHub Releases provide a Developer Preview DMG named
+`KnowType-vX.Y.Z-macos-dev-preview.dmg`. It contains `KnowType.app`, a
+command-file installer, a release manifest, and a SHA256 file. The DMG is not
+Developer ID signed or notarized; macOS may require Control-click > Open or
+Privacy & Security > Open Anyway before installation. The local MVP zip remains
+available as a developer/debug asset.
 
 ## Quick Start
 
@@ -176,17 +177,26 @@ Local IME behavior must still be verified by typing in real host apps. See
 [MVP Acceptance](doc/mvp-acceptance.plan.md) for the macOS policy, selection,
 and manual acceptance flow.
 
-For a GitHub Release zip, verify the downloaded archive with the published
-`.sha256` file first. Then install through the local script so release
-metadata, backups, and diagnostics are recorded:
+For a GitHub Release DMG, verify the downloaded image with the published
+`.sha256` file first:
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.0-macos-local-mvp.zip
+cd ~/Downloads
+shasum -a 256 -c KnowType-v0.2.1-macos-dev-preview.dmg.sha256
 ```
 
-Pass `--with-prefpane` only when the optional compatibility System Settings
-pane is needed. Do not use a stale System Settings sidebar entry unless the
-matching pane is installed.
+Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
+Control-click > Open, or open System Settings > Privacy & Security and choose
+Open Anyway. The command records `source=dmg-dev-preview`, release commit/tag,
+and manifest digest in diagnostics. Pass `--with-prefpane` only when the
+optional compatibility System Settings pane is needed. Do not use a stale
+System Settings sidebar entry unless the matching pane is installed.
+
+The older local MVP zip can still be installed for developer debugging:
+
+```bash
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.1-macos-local-mvp.zip
+```
 
 ## Configuration
 
