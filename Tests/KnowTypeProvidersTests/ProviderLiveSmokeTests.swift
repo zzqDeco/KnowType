@@ -7,6 +7,8 @@ private let liveSmokeEnabledVariable = "KNOWTYPE_PROVIDER_LIVE_SMOKE"
 private let liveSmokeAPIKeyVariable = "KNOWTYPE_PROVIDER_LIVE_API_KEY"
 private let defaultLiveSmokeAPIKey = "local-544c98478806455ae2c63d54830cc3d3"
 private let liveSmokeBaseURL = URL(string: "http://127.0.0.1:8317/v1")!
+private let liveSmokeProviderTimeoutSeconds: TimeInterval = 12
+private let expectedRuntimeBudgetSeconds: TimeInterval = 10
 
 private actor LiveRecordingHTTPClient: HTTPClient {
     private var requestedPaths: [String] = []
@@ -63,16 +65,40 @@ final class ProviderLiveSmokeTests: XCTestCase {
             httpClient: client
         )
 
-        let response = try await provider.complete(request)
+        let startedAt = Date()
+        let response: LLMResponse
+        do {
+            response = try await provider.complete(request)
+        } catch let error as URLError where error.code == .timedOut {
+            XCTFail("transport timeout: local provider did not respond within \(liveSmokeProviderTimeoutSeconds)s: \(error)")
+            return
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut {
+                XCTFail("transport timeout: local provider did not respond within \(liveSmokeProviderTimeoutSeconds)s: \(error)")
+            } else {
+                XCTFail("local provider failure before live smoke could validate runtime budget: \(error)")
+            }
+            return
+        }
+        let elapsedSeconds = Date().timeIntervalSince(startedAt)
         let paths = await client.paths()
         let sanitized = response.candidates.compactMap { candidate in
             PrefixContinuationEngine.sanitizeContinuation(candidate.text, lockedPrefix: lockedPrefix)
         }
 
         XCTAssertEqual(paths, ["/v1/models", "/v1/chat/completions"])
-        XCTAssertFalse(response.candidates.isEmpty)
-        XCTAssertFalse(sanitized.isEmpty)
-        XCTAssertTrue(sanitized.allSatisfy { !$0.hasPrefix(lockedPrefix) })
+        XCTAssertLessThanOrEqual(
+            elapsedSeconds,
+            expectedRuntimeBudgetSeconds,
+            "runtime budget exceeded: provider returned in \(elapsedSeconds)s, slower than KnowType's \(expectedRuntimeBudgetSeconds)s AI runtime hard timeout"
+        )
+        XCTAssertFalse(response.candidates.isEmpty, "invalid continuation: provider returned no candidates")
+        XCTAssertFalse(sanitized.isEmpty, "invalid continuation: provider candidates did not pass the locked-prefix sanitizer")
+        XCTAssertTrue(
+            sanitized.allSatisfy { !$0.hasPrefix(lockedPrefix) },
+            "invalid continuation: sanitized suffix must not repeat lockedPrefix"
+        )
     }
 
     func testProviderFailureDoesNotReturnLocalFallbackContinuation() async {
@@ -119,7 +145,7 @@ final class ProviderLiveSmokeTests: XCTestCase {
             baseURL: liveSmokeBaseURL,
             apiKey: apiKey,
             model: "",
-            timeoutSeconds: 5
+            timeoutSeconds: liveSmokeProviderTimeoutSeconds
         )
     }
 }
