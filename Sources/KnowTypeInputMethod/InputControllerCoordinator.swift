@@ -709,25 +709,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil
     }
 
-    private static func hasLongEnoughAIRecommendationContext(rawInput: String, lockedPrefix: String?) -> Bool {
-        if let lockedPrefix,
-           !lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return isLongEnoughForCloudRecommendation(lockedPrefix)
-        }
-        return isLongEnoughForCloudRecommendation(rawInput)
-    }
-
-    private static func isLongEnoughForCloudRecommendation(_ text: String) -> Bool {
-        let visibleCount = text.filter { !$0.isWhitespace && !$0.isNewline }.count
-        let hanCount = text.filter {
-            String($0).range(of: #"\p{Han}"#, options: .regularExpression) != nil
-        }.count
-        if hanCount > 0 {
-            return hanCount >= 2 || visibleCount >= 6
-        }
-        return visibleCount >= 6
-    }
-
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
         let currentAppBundleID = appBundleIdentifier(client: client)
         if let cancelledRequestID = activeAIRecommendationRequestID {
@@ -764,10 +745,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        guard Self.hasLongEnoughAIRecommendationContext(
+        let triggerDecision = AIRecommendationTriggerPolicy.default.decision(
             rawInput: rawBuffer,
             lockedPrefix: lockedPrefixText
-        ) else {
+        )
+        guard triggerDecision.isEligible else {
             recordAIDiagnostic(
                 .skippedPrefixTooShort,
                 requestID: requestID,
@@ -775,7 +757,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 rawLength: rawBuffer.count,
                 prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
-                reason: "prefix_too_short"
+                reason: triggerDecision.rejectionReason?.rawValue ?? "prefix_too_short"
             )
             aiRecommendationState = .idle
             updateCandidatePanel(suggestion: suggestion, client: client)

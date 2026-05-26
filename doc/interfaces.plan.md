@@ -356,11 +356,11 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
 - includes `LEXICAL_PROFILE.md` when the coordinator provides a lexical snapshot
 - creates default documents when missing
-- debounces before provider calls
+- debounces for 350 ms by default before provider calls
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
 - caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
-- skips cloud requests for too-short prefixes: fewer than two Han characters, or fewer than six visible mixed/Latin characters
+- skips cloud requests for too-short context: with a confirmed locked prefix, fewer than two Han characters or fewer than six visible mixed/Latin characters; without a locked prefix, fewer than three visible raw-input characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
 - reports sanitizer outcomes as normalized reasons such as `same_as_prefix`, `still_repeats_prefix`, `no_usable_suffix`, and `repeated_prefix_repaired`

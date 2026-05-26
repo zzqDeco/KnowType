@@ -4,6 +4,7 @@ import KnowTypeProviders
 
 public actor AIRecommendationRuntime: AIRecommendationProviding {
     public enum Defaults {
+        public static let debounceMilliseconds = 350
         public static let hardTimeoutMilliseconds = 10_000
     }
 
@@ -37,7 +38,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         environmentStore: EnvironmentDocumentStore = EnvironmentDocumentStore(),
         correctionStore: CorrectionInstructionStore = CorrectionInstructionStore(),
         healthMonitor: AIHealthMonitor = AIHealthMonitor(),
-        debounceMilliseconds: Int = 120,
+        debounceMilliseconds: Int = Defaults.debounceMilliseconds,
         hardTimeoutMilliseconds: Int = Defaults.hardTimeoutMilliseconds,
         diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         cacheTTL: TimeInterval = 300
@@ -96,26 +97,34 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .ineligible(reason: "AI 已禁用")
         }
-        guard Self.hasLongEnoughRecommendationContextForCloud(request) else {
+        let triggerDecision = AIRecommendationTriggerPolicy.default.decision(
+            rawInput: request.rawInput,
+            lockedPrefix: request.lockedPrefix
+        )
+        guard triggerDecision.isEligible else {
             record(
                 .skippedPrefixTooShort,
                 request: request,
                 providerName: provider.providerName,
                 elapsedSince: startedAt,
-                reason: "prefix_too_short"
+                reason: triggerDecision.rejectionReason?.rawValue ?? "prefix_too_short"
             )
             return .ineligible(reason: "AI 无推荐")
         }
 
+        var waitingForIdle = false
         do {
             if debounceNanoseconds > 0 {
+                waitingForIdle = true
                 record(
                     .debounceStart,
                     request: request,
                     providerName: provider.providerName,
-                    elapsedSince: startedAt
+                    elapsedSince: startedAt,
+                    reason: "waiting_for_idle"
                 )
                 try await Task.sleep(nanoseconds: debounceNanoseconds)
+                waitingForIdle = false
                 record(
                     .debounceEnd,
                     request: request,
@@ -277,7 +286,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 request: request,
                 providerName: provider.providerName,
                 elapsedSince: startedAt,
-                reason: "task_cancelled"
+                reason: waitingForIdle ? "debounce_cancelled_by_new_input" : "task_cancelled"
             )
             return .idle
         } catch {
@@ -456,25 +465,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             return true
         }
         return false
-    }
-
-    private static func hasLongEnoughRecommendationContextForCloud(_ request: AIRecommendationRequest) -> Bool {
-        if let lockedPrefix = request.lockedPrefix,
-           !lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return isPrefixLongEnoughForCloudRecommendation(lockedPrefix)
-        }
-        return isPrefixLongEnoughForCloudRecommendation(request.rawInput)
-    }
-
-    private static func isPrefixLongEnoughForCloudRecommendation(_ prefix: String) -> Bool {
-        let visibleCount = prefix.filter { !$0.isWhitespace && !$0.isNewline }.count
-        let hanCount = prefix.filter {
-            String($0).range(of: #"\p{Han}"#, options: .regularExpression) != nil
-        }.count
-        if hanCount > 0 {
-            return hanCount >= 2 || visibleCount >= 6
-        }
-        return visibleCount >= 6
     }
 
     private static func rejectionSummary(_ reasons: [String]) -> String {
