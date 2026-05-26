@@ -74,6 +74,7 @@ when converting a shipped plan into a short record.
 | [ai-remove-candidate-hints-bias.plan.md](ai-remove-candidate-hints-bias.plan.md) | Remove current-page Rime candidate hints from real-time AI continuation context | Active |
 | [ai-trigger-stability-no-hints.plan.md](ai-trigger-stability-no-hints.plan.md) | Stabilize three-character raw-input AI triggers without reintroducing candidate hints | Active |
 | [provider-live-smoke-timeout-alignment.plan.md](provider-live-smoke-timeout-alignment.plan.md) | Align env-gated provider live smoke timeout with the AI runtime budget | Active |
+| [provider-live-smoke-model-alignment.plan.md](provider-live-smoke-model-alignment.plan.md) | Align env-gated continuation live smoke with the explicit product model under test | Active |
 | [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |
 | [imk-owned-marked-range-commit.plan.md](imk-owned-marked-range-commit.plan.md) | Prevent cursor misplacement by ignoring stale host marked ranges on ordinary IMK writes | Active |
 | [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
