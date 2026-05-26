@@ -9,6 +9,47 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds, 10_000)
     }
 
+    func testDefaultDebounceIsThreeHundredFiftyMilliseconds() {
+        XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 350)
+    }
+
+    func testTriggerPolicyAllowsThreeCharacterRawInputWithoutLockedPrefix() {
+        let policy = AIRecommendationTriggerPolicy.default
+
+        XCTAssertTrue(policy.decision(rawInput: "api", lockedPrefix: nil).isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "json", lockedPrefix: nil).isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "zhege", lockedPrefix: nil).isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "nihao", lockedPrefix: nil).isEligible)
+    }
+
+    func testTriggerPolicyRejectsOneOrTwoCharacterRawInputWithoutLockedPrefix() {
+        let policy = AIRecommendationTriggerPolicy.default
+
+        XCTAssertEqual(
+            policy.decision(rawInput: "n", lockedPrefix: nil),
+            .rejected(.rawTooShort)
+        )
+        XCTAssertEqual(
+            policy.decision(rawInput: "ni", lockedPrefix: nil),
+            .rejected(.rawTooShort)
+        )
+        XCTAssertEqual(
+            policy.decision(rawInput: " \n", lockedPrefix: nil),
+            .rejected(.rawTooShort)
+        )
+    }
+
+    func testTriggerPolicyKeepsLockedPrefixThresholdStrict() {
+        let policy = AIRecommendationTriggerPolicy.default
+
+        XCTAssertEqual(
+            policy.decision(rawInput: "wo", lockedPrefix: "我"),
+            .rejected(.prefixTooShort)
+        )
+        XCTAssertTrue(policy.decision(rawInput: "nihao", lockedPrefix: "你好").isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "approach", lockedPrefix: "prefix").isEligible)
+    }
+
     func testLegacyTraditionalCandidateDoesNotUseFirstCandidateHint() {
         let request = AIRecommendationRequest(
             rawInput: "zhegefangan",
@@ -139,6 +180,57 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requests.first?.candidateHints, [])
     }
 
+    func testRecommendationCallsProviderForThreeCharacterRawInputWithoutLockedPrefix() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "API latency 可以继续优化。", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "api",
+            lockedPrefix: nil,
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected provider-backed recommendation")
+        }
+        XCTAssertEqual(candidate.displayText, "API latency 可以继续优化。")
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.rawInput, "api")
+        XCTAssertEqual(requests.first?.candidateHints, [])
+    }
+
+    func testRecommendationSkipsTwoCharacterRawInputWithRawTooShortReason() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "你好", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "ni",
+            lockedPrefix: nil,
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedPrefixTooShort && $0.reason == "raw_too_short"
+        })
+    }
+
     func testShortLockedPrefixDoesNotUseCandidateHintsToBypassCloudThreshold() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
@@ -164,7 +256,9 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
         XCTAssertTrue(requests.isEmpty)
-        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedPrefixTooShort && $0.reason == "prefix_too_short"
+        })
     }
 
     func testLockedPrefixWhitespaceIsPreservedInRecommendationDisplayText() async {
@@ -256,7 +350,45 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
         XCTAssertTrue(requests.isEmpty)
-        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedPrefixTooShort && $0.reason == "prefix_too_short"
+        })
+    }
+
+    func testRecommendationCancellationDuringDebounceRecordsNewInputReason() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "API latency 可以继续优化。", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 200,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "api",
+            lockedPrefix: nil,
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let task = Task {
+            await runtime.recommendation(for: request)
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        task.cancel()
+
+        let state = await task.value
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .idle)
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .debounceStart && $0.reason == "waiting_for_idle"
+        })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .cancelled && $0.reason == "debounce_cancelled_by_new_input"
+        })
     }
 
     func testRecommendationDiagnosticsRecordStructuredSchemaFallback() async {

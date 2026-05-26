@@ -22,7 +22,7 @@ enum PromptBuilder {
     lockedPrefix is text the user has already confirmed. Unconfirmed input-method candidates are not user intent.
     Rules:
     - If lockedPrefix is present, text must be only the suffix after lockedPrefix. Do not include, paraphrase, translate, rewrite, or polish lockedPrefix.
-    - If lockedPrefix is absent, text must be a complete commit-ready recommendation inferred from rawInput, contextDocuments, appContext, and locale.
+    - If lockedPrefix is absent, rawInput may be pinyin, English, or a technical token; text must be a complete commit-ready recommendation inferred from rawInput, contextDocuments, appContext, and locale.
     - Do not assume the input method's first conversion candidate or current highlighted candidate is user intent.
     - Prefer one concise, immediately useful recommendation in the same language and intent implied by lockedPrefix, rawInput, contextDocuments, and locale.
     - Empty candidates are allowed only when lockedPrefix/rawInput are unsafe, impossible, or nonsensical.

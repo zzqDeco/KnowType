@@ -5,7 +5,7 @@
 Current responsibilities:
 
 - `AIRecommendationRuntime` builds real-time provider requests from raw input, optional user-confirmed `lockedPrefix`, app context, `ENV.md`, `CORRECTION.md`, and optional `LEXICAL_PROFILE.md`.
-- `AIRecommendationRuntime` debounces, hard-times out after 10 seconds by default, caches, sanitizes returned continuations when a locked prefix exists, and reports ready/unavailable/ineligible state through `AIRecommendationState`.
+- `AIRecommendationRuntime` debounces for 350 ms by default, hard-times out after 10 seconds by default, caches, sanitizes returned continuations when a locked prefix exists, and reports ready/unavailable/ineligible state through `AIRecommendationState`.
 - `AIRecommendationDiagnosticSink` records request substates through macOS unified logging by default. Events carry request/composition identifiers, lengths, counts, elapsed milliseconds, and normalized reasons, but never raw input, candidate text, context document bodies, or API keys.
 - `LexicalContextBuilder` produces top-K local lexical and tone summaries from recent commits, selection history, and stored Rime userdb terms; current composition candidates, full DB files, and raw logs are not sent.
 - `LexicalProfileStore` persists canonical lexical profile JSON under Application Support and mirrors readable `~/.knowtype/LEXICAL_PROFILE.md` for diagnostics.
@@ -24,6 +24,7 @@ Testing concerns:
 
 - provider requests must carry context documents; current-page Rime candidates must not be sent to providers or become locked prefixes unless the user has confirmed them
 - when `lockedPrefix` is absent, provider `text` is a full commit-ready recommendation inferred from raw input and context, not a suffix that must be attached to a candidate hint
+- no-locked-prefix real-time recommendation can trigger once raw input reaches three visible characters; locked-prefix recommendation keeps the stricter two-Han-or-six-visible-character threshold
 - when `lockedPrefix` is present, returned text must stay prefix-locked
 - lexical profile hash changes must invalidate AI recommendation cache entries
 - Rime userdb parser tests must cover malformed rows, protected-token filtering, frequency ranking, and UTF-8 Chinese terms

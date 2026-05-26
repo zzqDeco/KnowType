@@ -1613,6 +1613,33 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAIRecommendationSchedulesForThreeCharacterRawInputWithoutHints() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "api" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        let requests = await aiProvider.requests
+        let request = try XCTUnwrap(requests.last)
+
+        XCTAssertNil(request.lockedPrefix)
+        XCTAssertEqual(request.rawInput, "api")
+        XCTAssertEqual(request.candidateHints, [])
+    }
+
+    @MainActor
     func testAIRecommendationRequestMergesPersistentLexicalProfile() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
