@@ -69,7 +69,7 @@ final class CandidatePanelPresenter: @unchecked Sendable {
         }
         let windowState = frame.panelModel.windowState
         fputs(
-            "KnowType panel frame: reason=\(frame.visibilityReason.rawValue) compositionID=\(frame.compositionID) rawRevision=\(frame.rawRevision) rawLength=\(frame.rawLength) anchorSource=\(frame.anchorSource.rawValue) visible=\(windowState.isVisible) layoutMode=\(windowState.layoutMode.rawValue)\n",
+            "KnowType panel frame: reason=\(frame.visibilityReason.rawValue) compositionID=\(frame.compositionID) rawRevision=\(frame.rawRevision) rawLength=\(frame.rawLength) anchorSource=\(frame.anchorSource.rawValue) visible=\(windowState.isVisible) layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue)\n",
             stderr
         )
     }

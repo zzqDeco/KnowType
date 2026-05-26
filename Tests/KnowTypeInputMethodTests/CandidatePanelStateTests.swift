@@ -18,6 +18,19 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .rawInput)
     }
 
+    func testPlacementPreferenceIsStoredInVisibleWindowState() {
+        var state = CandidatePanelState()
+
+        state.update(
+            rawInput: "wo jue",
+            suggestion: nil,
+            anchorRect: CGRect(x: 10, y: 20, width: 1, height: 18),
+            placementPreference: .preferVisualAbove
+        )
+
+        XCTAssertEqual(state.windowState.placementPreference, .preferVisualAbove)
+    }
+
     func testSuggestionStateSeparatesPrefixAndContinuationRows() {
         var state = CandidatePanelState()
 

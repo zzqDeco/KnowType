@@ -68,6 +68,29 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(modelCount, 2)
     }
 
+    @MainActor
+    func testUpdateHonorsVisualAbovePlacementPreference() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+
+        controller.update(
+            state: visibleState(
+                anchor: CGRect(x: 100, y: 400, width: 0, height: 18),
+                placementPreference: .preferVisualAbove
+            ),
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(window.frameOrigins, [NSPoint(x: 100, y: 424)])
+        XCTAssertEqual(contentView.layoutPlans.last?.verticalPlacement, .visualAboveCaret)
+    }
+
     func testPlacementAvoidsVisibleFrameEdges() {
         let engine = layoutEngine()
         let screenProvider = FakeCandidatePanelScreenProvider(
@@ -369,7 +392,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         anchor: CGRect,
         prefixTexts: [String] = [],
         paging: CandidatePanelPagingState = CandidatePanelPagingState(),
-        layoutMode: CandidatePanelLayoutMode = .adaptive
+        layoutMode: CandidatePanelLayoutMode = .adaptive,
+        placementPreference: CandidatePanelPlacementPreference = .automatic
     ) -> CandidatePanelState {
         CandidatePanelState(
             windowState: CandidatePanelWindowState(
@@ -388,7 +412,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                     continuationCandidates: []
                 ),
                 paging: paging,
-                layoutMode: layoutMode
+                layoutMode: layoutMode,
+                placementPreference: placementPreference
             )
         )
     }

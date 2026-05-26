@@ -281,9 +281,10 @@ shortcut label; rows without shortcuts reserve no shortcut space.
 
 The native AppKit candidate panel is a borderless non-activating `NSPanel` at `.popUpMenu` window level, with
 all-spaces/full-screen auxiliary behavior, `isFloatingPanel`, `worksWhenModal`, and `hidesOnDeactivate = false`.
-This keeps the panel above Spotlight and search-like overlays while avoiding private APIs, screen-saver level, or
-shielding levels. The visual style uses compact rows, `hudWindow` material, dynamic system colors, and continuous
-corners so it stays close to macOS native candidate panels.
+Panel placement is search-aware: ordinary text fields prefer the visual-below-caret placement, while Spotlight
+uses a visual-above-caret preference so search result overlays do not cover candidates. This avoids private APIs,
+screen-saver level, or shielding levels. The visual style uses compact rows, `hudWindow` material, dynamic system
+colors, and continuous corners so it stays close to macOS native candidate panels.
 
 Because the panel does not hide automatically on app deactivation, the input-method coordinator explicitly hides it
 on commit, cancel, deactivate, close, reset, and native composition end. Candidate-panel publication is frame-based:
@@ -292,7 +293,8 @@ updates carry `CandidatePanelVisibilityReason`, composition id, raw revision, ra
 after composition teardown. A transient empty Rime snapshot does not hide the panel while KnowType still has non-empty
 raw input; the presenter keeps a raw/preedit fallback frame until Rime context recovers or composition ends. With
 `KNOWTYPE_PANEL_DEBUG=1`, panel logs include frame or cleanup reasons such as `composition_active`,
-`composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`.
+`composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`,
+plus placement preference and the final visual-above/visual-below choice.
 Deactivation uses the current IMK client as a fallback when the callback sender is not an `IMKTextInput`, so pending
 raw text is not dropped. It still avoids `setMarkedText("")` on deactivate; native handled/no-commit end states clear
 marked text through the normal client path because composition has ended without inserted text.

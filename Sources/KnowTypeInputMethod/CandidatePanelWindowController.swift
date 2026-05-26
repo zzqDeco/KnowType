@@ -137,7 +137,8 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         guard let layoutPlan = effectiveLayoutEngine.layout(
             model: renderModel,
             anchorRect: windowState.anchorRect,
-            screenProvider: screenProvider
+            screenProvider: screenProvider,
+            placementPreference: windowState.placementPreference
         ) else {
             panel.orderOut(nil)
             return
@@ -186,7 +187,7 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
             return
         }
         fputs(
-            "KnowType panel layout: layoutMode=\(windowState.layoutMode.rawValue) pageSize=\(windowState.paging.pageSize) renderRows=\(renderModel.rows.count) orientation=\(layoutPlan.orientation)\n",
+            "KnowType panel layout: layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue) verticalPlacement=\(layoutPlan.verticalPlacement.rawValue) pageSize=\(windowState.paging.pageSize) renderRows=\(renderModel.rows.count) orientation=\(layoutPlan.orientation) anchorRect=\(windowState.anchorRect) origin=\(layoutPlan.panelOrigin)\n",
             stderr
         )
     }

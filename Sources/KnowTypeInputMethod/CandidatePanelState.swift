@@ -11,6 +11,7 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
     public var selection: CandidatePanelSelection?
     public var paging: CandidatePanelPagingState
     public var layoutMode: CandidatePanelLayoutMode
+    public var placementPreference: CandidatePanelPlacementPreference
 
     public init(
         isVisible: Bool = false,
@@ -23,7 +24,8 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
         ),
         selection: CandidatePanelSelection? = nil,
         paging: CandidatePanelPagingState = CandidatePanelPagingState(),
-        layoutMode: CandidatePanelLayoutMode = .adaptive
+        layoutMode: CandidatePanelLayoutMode = .adaptive,
+        placementPreference: CandidatePanelPlacementPreference = .automatic
     ) {
         self.isVisible = isVisible
         self.anchorRect = anchorRect
@@ -32,6 +34,7 @@ public struct CandidatePanelWindowState: Sendable, Equatable {
         self.selection = selection
         self.paging = paging
         self.layoutMode = layoutMode
+        self.placementPreference = placementPreference
     }
 }
 
@@ -79,6 +82,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         isDisplayable: Bool = true,
         pageSize: Int = CandidatePanelPagingState.defaultPageSize,
         layoutMode: CandidatePanelLayoutMode = .adaptive,
+        placementPreference: CandidatePanelPlacementPreference = .automatic,
         aiRecommendation: AIRecommendationState = .idle,
         preferredSelection: CandidatePanelSelection? = nil
     ) {
@@ -108,7 +112,8 @@ public struct CandidatePanelState: Sendable, Equatable {
             viewModel: viewModel,
             selection: selection,
             paging: isVisible ? paging : CandidatePanelPagingState(pageSize: pageSize),
-            layoutMode: layoutMode
+            layoutMode: layoutMode,
+            placementPreference: placementPreference
         )
     }
 
