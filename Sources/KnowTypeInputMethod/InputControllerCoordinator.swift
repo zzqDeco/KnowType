@@ -642,6 +642,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client?.bundleIdentifier
     }
 
+    private func candidatePanelPlacementPreference(
+        client: InputControllerClient?
+    ) -> CandidatePanelPlacementPreference {
+        appBundleIdentifier(client: client) == "com.apple.Spotlight"
+            ? .preferVisualAbove
+            : .automatic
+    }
+
     private func publishLocalSuggestion(client: InputControllerClient?) {
         cancelPendingSuggestionRefresh()
         publishLocalSuggestionSynchronously(client: client)
@@ -1809,7 +1817,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
             return
         }
-        updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: client))
+        updateCandidatePanel(
+            suggestion: suggestion,
+            anchorResult: candidateAnchorResult(client: client),
+            placementPreference: candidatePanelPlacementPreference(client: client)
+        )
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, client: InputControllerClient?) {
@@ -1818,7 +1830,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
         guard enablesAsyncSuggestionRefresh else {
-            updateCandidatePanel(suggestion: suggestion, anchorResult: candidateAnchorResult(client: client))
+            updateCandidatePanel(
+                suggestion: suggestion,
+                anchorResult: candidateAnchorResult(client: client),
+                placementPreference: candidatePanelPlacementPreference(client: client)
+            )
             return
         }
         scheduleCandidatePanelUpdate(suggestion: suggestion, client: client)
@@ -1844,14 +1860,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             self.updateCandidatePanel(
                 suggestion: suggestion,
-                anchorResult: self.candidateAnchorResult(client: client)
+                anchorResult: self.candidateAnchorResult(client: client),
+                placementPreference: self.candidatePanelPlacementPreference(client: client)
             )
         }
         panelUpdateTask = task
         taskSupervisor.replace(.panelRender, with: task)
     }
 
-    private func updateCandidatePanel(suggestion: SuggestionResponse?, anchorResult: CandidateAnchorResult) {
+    private func updateCandidatePanel(
+        suggestion: SuggestionResponse?,
+        anchorResult: CandidateAnchorResult,
+        placementPreference: CandidatePanelPlacementPreference
+    ) {
         guard canPublishCandidatePanel(suggestion: suggestion) else {
             hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
             return
@@ -1866,6 +1887,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             isDisplayable: isDisplayable,
             pageSize: effectivePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode,
+            placementPreference: placementPreference,
             aiRecommendation: aiRecommendationState,
             preferredSelection: nativeHighlightedSelection(for: suggestion)
         )
@@ -2338,7 +2360,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             self.updateCandidatePanel(
                 suggestion: self.lastSuggestion,
-                anchorResult: self.candidateAnchorResult(client: client)
+                anchorResult: self.candidateAnchorResult(client: client),
+                placementPreference: self.candidatePanelPlacementPreference(client: client)
             )
         }
     }

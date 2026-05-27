@@ -89,6 +89,7 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
     private func verticalLayoutPlan() -> CandidatePanelLayoutPlan {
         CandidatePanelLayoutPlan(
             orientation: .vertical,
+            verticalPlacement: .visualBelowCaret,
             panelSize: CGSize(width: 320, height: 73),
             panelOrigin: .zero,
             contentInsets: CandidatePanelLayoutInsets(top: 5, left: 6, bottom: 5, right: 6),

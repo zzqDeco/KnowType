@@ -16,6 +16,11 @@ used by the AppKit panel.
 
 - Adaptive layout prefers horizontal pages for compact candidates and switches
   to vertical rows for long phrases.
+- Placement is explicit: automatic and visual-below preferences try the
+  below-caret origin first, while Spotlight can request visual-above placement
+  to avoid its search results overlay.
+- If the preferred side does not fit inside the screen visible frame, layout
+  tries the opposite side before clamping the preferred origin.
 - Constrained vertical layouts compress row height and spacing before hiding the
   panel.
 - Layout must never drop selectable rows after shortcut labels are assigned.

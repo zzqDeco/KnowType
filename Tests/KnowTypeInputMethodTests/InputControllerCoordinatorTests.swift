@@ -66,6 +66,26 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
     }
 
+    func testSpotlightClientPrefersVisualAboveCandidatePanelPlacement() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Spotlight"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.placementPreference, .preferVisualAbove)
+    }
+
+    func testNonSpotlightClientUsesAutomaticCandidatePanelPlacement() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.placementPreference, .automatic)
+    }
+
     func testTextOnlySpaceCommitIgnoresStaleHostMarkedRange() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
