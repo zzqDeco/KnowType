@@ -258,8 +258,22 @@ public final class AIAcceptedLearningStore:
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder.dateDecodingStrategy = .iso8601
         self.records = Self.loadRecords(from: historyURL, decoder: decoder)
-        self.summary = Self.loadSummary(from: summaryURL, decoder: decoder)
-            ?? Self.buildSummary(records: records, generatedAt: Date())
+        let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
+        let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
+        let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
+        self.summary = summaryIsCurrent ? loadedSummary : rebuiltSummary
+        if !summaryIsCurrent {
+            do {
+                try persistSummary(summary)
+            } catch {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .lexicalProfileFallback,
+                        reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
+                    )
+                )
+            }
+        }
     }
 
     public static func inMemory(
@@ -411,12 +425,7 @@ public final class AIAcceptedLearningStore:
 
         do {
             try withAcceptedLearningFileLock {
-                if let summaryURL {
-                    try atomicWrite(try encoder.encode(nextSummary), to: summaryURL)
-                }
-                if let mirrorURL {
-                    try atomicWrite(Data(Self.renderMarkdown(nextSummary).utf8), to: mirrorURL)
-                }
+                try persistSummary(nextSummary)
             }
         } catch {
             diagnosticSink.record(
@@ -487,10 +496,25 @@ public final class AIAcceptedLearningStore:
         )
     }
 
+    private static func summary(
+        _ summary: AIAcceptedLanguageSummary?,
+        matches records: [AIAcceptedLearningRecord]
+    ) -> Bool {
+        guard let rebuilt = buildSummary(records: records, generatedAt: Date()) else {
+            return summary == nil
+        }
+        guard let summary else {
+            return false
+        }
+        return summary.acceptedCount == records.count
+            && summary.historyHash == rebuilt.historyHash
+    }
+
     private static func boundedCommit(_ text: String) -> String? {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty,
-              !TextProtection.containsSecretLikeContent(clean) else {
+              !TextProtection.containsSecretLikeContent(clean),
+              !TextProtection.requiresNoCorrection(clean) else {
             return nil
         }
         if clean.count <= 48 {
@@ -586,6 +610,26 @@ public final class AIAcceptedLearningStore:
             withIntermediateDirectories: true
         )
         try data.write(to: url, options: .atomic)
+    }
+
+    private func persistSummary(_ summary: AIAcceptedLanguageSummary?) throws {
+        if let summary {
+            if let summaryURL {
+                try atomicWrite(try encoder.encode(summary), to: summaryURL)
+            }
+            if let mirrorURL {
+                try atomicWrite(Data(Self.renderMarkdown(summary).utf8), to: mirrorURL)
+            }
+            return
+        }
+        if let summaryURL,
+           fileManager.fileExists(atPath: summaryURL.path) {
+            try fileManager.removeItem(at: summaryURL)
+        }
+        if let mirrorURL,
+           fileManager.fileExists(atPath: mirrorURL.path) {
+            try fileManager.removeItem(at: mirrorURL)
+        }
     }
 
     private static func defaultApplicationSupportAIDirectory(fileManager: FileManager) -> URL {

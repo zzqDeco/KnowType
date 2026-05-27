@@ -1133,7 +1133,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
                shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(selectedNativeCandidate) {
                 let result = commitResult(for: action, client: client)
                 learnSelectedPrefix(action: action, result: result, client: client)
-                return applyCommitResult(result, client: client)
+                return applyCommitResult(
+                    result,
+                    client: client,
+                    acceptedAIRecommendation: acceptedAIRecommendationCandidate(for: action, result: result)
+                )
             }
             if let selectedNativeCandidate,
                shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate),
@@ -1153,7 +1157,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let result = commitResult(for: action, client: client)
         learnSelectedPrefix(action: action, result: result, client: client)
-        return applyCommitResult(result, client: client)
+        return applyCommitResult(
+            result,
+            client: client,
+            acceptedAIRecommendation: acceptedAIRecommendationCandidate(for: action, result: result)
+        )
     }
 
     private func shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(
@@ -1168,10 +1176,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     @discardableResult
-    private func applyCommitResult(_ result: InputCommitResult, client: InputControllerClient?) -> Bool {
+    private func applyCommitResult(
+        _ result: InputCommitResult,
+        client: InputControllerClient?,
+        acceptedAIRecommendation: AIRecommendationCandidate? = nil
+    ) -> Bool {
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
-            recordTypingCommit(text, client: client)
+            recordTypingCommit(
+                text,
+                client: client,
+                acceptedAIRecommendation: acceptedAIRecommendation
+            )
             insert(text, client: client)
             resetComposition()
             return true
@@ -1562,14 +1578,21 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return true
     }
 
-    private func recordTypingCommit(_ text: String, client: InputControllerClient?) {
+    private func recordTypingCommit(
+        _ text: String,
+        client: InputControllerClient?,
+        acceptedAIRecommendation: AIRecommendationCandidate? = nil
+    ) {
         let appBundleID = appBundleIdentifier(client: client)
-        let commitKind = typingCommitKind(for: text)
-        let candidateSource = typingCandidateSource(for: text)
+        let commitKind = acceptedAIRecommendation == nil ? typingCommitKind(for: text) : .ai
+        let candidateSource = acceptedAIRecommendation
+            .map { "ai:\($0.provider)" }
+            ?? typingCandidateSource(for: text)
         if commitKind == .ai {
             recordAcceptedAICommit(
                 text,
                 appBundleID: appBundleID,
+                acceptedAIRecommendation: acceptedAIRecommendation,
                 candidateSource: candidateSource
             )
         }
@@ -1601,10 +1624,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func recordAcceptedAICommit(
         _ text: String,
         appBundleID: String?,
+        acceptedAIRecommendation: AIRecommendationCandidate?,
         candidateSource: String
     ) {
         guard let aiAcceptedLearningRecorder,
-              case .ready(let candidate) = aiRecommendationState,
+              let candidate = acceptedAIRecommendation,
               candidate.displayText == text else {
             return
         }
@@ -1674,10 +1698,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func typingCommitKind(for text: String) -> AITypingCommitKind {
-        if case .ready(let candidate) = aiRecommendationState,
-           candidate.displayText == text {
-            return .ai
-        }
         if text == rawBuffer {
             return .raw
         }
@@ -1688,10 +1708,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func typingCandidateSource(for text: String) -> String {
-        if case .ready(let candidate) = aiRecommendationState,
-           candidate.displayText == text {
-            return "ai:\(candidate.provider)"
-        }
         if text == rawBuffer {
             return "raw"
         }
@@ -1702,6 +1718,29 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return source
         }
         return rawBuffer.isEmpty ? "symbol" : "traditional"
+    }
+
+    private func acceptedAIRecommendationCandidate(
+        for action: InputAction,
+        result: InputCommitResult
+    ) -> AIRecommendationCandidate? {
+        guard case .commit(let text) = result,
+              case .ready(let candidate) = aiRecommendationState,
+              candidate.displayText == text else {
+            return nil
+        }
+        if action == .tab {
+            return candidate
+        }
+        if case .optionNumber(1) = action {
+            return candidate
+        }
+        if action == .space,
+           let selectedNativeCandidate,
+           case .aiRecommendation = selectedNativeCandidate.kind {
+            return candidate
+        }
+        return nil
     }
 
     private func resetComposition() {

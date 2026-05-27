@@ -68,6 +68,104 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .acceptedLearningSkippedSecret })
     }
 
+    func testStoreRepairsStaleSummaryOnLoad() throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let first = AIAcceptedLearningRecord(
+            acceptedAt: Date(timeIntervalSince1970: 1),
+            schemaID: "pinyin_simp",
+            rawInput: "json",
+            acceptedText: "JSON Schema 可以继续推进",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let second = AIAcceptedLearningRecord(
+            acceptedAt: Date(timeIntervalSince1970: 2),
+            schemaID: "pinyin_simp",
+            rawInput: "api",
+            acceptedText: "API 设计可以保持简洁",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let historyLines = try [first, second]
+            .map { try String(data: encoder.encode($0), encoding: .utf8) ?? "" }
+            .joined(separator: "\n") + "\n"
+        try historyLines.write(to: historyURL, atomically: true, encoding: .utf8)
+        let staleSummary = AIAcceptedLanguageSummary(
+            generatedAt: Date(timeIntervalSince1970: 3),
+            historyHash: "stale",
+            acceptedCount: 1,
+            termProfile: first.extractedTerms,
+            styleProfile: ToneProfile(),
+            recentAcceptedCommits: [first.acceptedText],
+            sourceSummary: ["accepted-ai-summary: terms=1 commits=1 history=stale"]
+        )
+        try encoder.encode(staleSummary).write(to: summaryURL, options: .atomic)
+
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0
+        )
+        let repairedSummary = try XCTUnwrap(store.snapshot())
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let savedSummary = try decoder.decode(AIAcceptedLanguageSummary.self, from: Data(contentsOf: summaryURL))
+        let mirror = try String(contentsOf: mirrorURL, encoding: .utf8)
+
+        XCTAssertEqual(repairedSummary.acceptedCount, 2)
+        XCTAssertEqual(savedSummary.acceptedCount, 2)
+        XCTAssertEqual(savedSummary.historyHash, repairedSummary.historyHash)
+        XCTAssertNotEqual(repairedSummary.historyHash, "stale")
+        XCTAssertTrue(mirror.contains("Accepted count: 2"))
+    }
+
+    func testLevelZeroAcceptedTextStaysInHistoryButOutOfInjectedSummary() async throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0
+        )
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "url",
+                acceptedText: "https://example.com/private/path",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let historyContent = try String(contentsOf: historyURL, encoding: .utf8)
+        let summary = try XCTUnwrap(store.snapshot())
+        let lexical = LexicalContextBuilder().snapshot(
+            acceptedAITerms: summary.termProfile,
+            acceptedAIRecentCommits: summary.recentAcceptedCommits,
+            acceptedAISourceSummary: summary.sourceSummary
+        )
+
+        XCTAssertEqual(store.allRecords().count, 1)
+        XCTAssertTrue(historyContent.contains("example.com"))
+        XCTAssertEqual(summary.acceptedCount, 1)
+        XCTAssertFalse(summary.recentAcceptedCommits.contains { $0.contains("example.com") })
+        XCTAssertFalse(summary.termProfile.contains { $0.text.contains("example.com") })
+        XCTAssertFalse(lexical?.markdown.contains("example.com") ?? false)
+    }
+
     func testLexicalContextMergesAcceptedTechnicalTermsWithoutFullHistory() throws {
         let summary = AIAcceptedLanguageSummary(
             historyHash: "abc123",

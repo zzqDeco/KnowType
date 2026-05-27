@@ -393,6 +393,12 @@ public struct LexicalContextBuilder: Sendable {
         if clean.range(of: #"(?i)^(https?://|www\.|[A-Za-z]:[\\/]|/|~/|\./|\.\./)"#, options: .regularExpression) != nil {
             return nil
         }
+        if clean.range(of: #"(?i)^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$"#, options: .regularExpression) != nil {
+            return nil
+        }
+        if clean.range(of: #"(?i)^[A-Z0-9.-]+\.[A-Z]{2,}([/?#].*)?$"#, options: .regularExpression) != nil {
+            return nil
+        }
         let hasHan = clean.range(of: #"\p{Han}"#, options: .regularExpression) != nil
         let hasWord = clean.range(of: #"[A-Za-z_]"#, options: .regularExpression) != nil
         guard hasHan || hasWord else {

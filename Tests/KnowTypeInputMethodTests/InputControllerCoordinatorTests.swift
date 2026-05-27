@@ -2913,6 +2913,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeCommitMatchingReadyAITextDoesNotRecordAcceptedLearningHistory() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "你")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder,
+                spaceCommit: "你"
+            )
+        )
+
+        for character in "nihao" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
+    }
+
+    @MainActor
     func testNativeHighlightDoesNotRestartAIRecommendation() async {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()
