@@ -241,7 +241,10 @@ AI context files live under `~/.knowtype/`. `ENV.md` stores local context
 memory for the AI recommendation slot, `CORRECTION.md` stores user-editable AI
 correction instructions, and `LEXICAL_PROFILE.md` mirrors the local top-K
 lexical profile built from Rime userdb frequency plus recent KnowType commits
-and selections. The canonical lexical profile JSON lives under
+and selections plus bounded summaries of AI recommendations the user explicitly
+accepted. The full accepted-AI history is stored locally under Application
+Support and is not injected directly into provider requests. The canonical
+lexical profile JSON lives under
 `~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
 on these files.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
@@ -308,6 +311,9 @@ appears only when raw input or confirmed prefix looks like a credential, such as
 API keys, bearer tokens, JWTs, private keys, or password/token assignments.
 Secret-like Rime candidate hints are filtered without disabling the whole
 request.
+Accepted AI learning uses the same secret-like hard block: credential-shaped
+accepted text is not recorded, while ordinary technical text can be summarized
+locally for future recommendations.
 
 Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`,
 `InputMethodKit`, `snake_case`, and `camelCase` are preserved or canonicalized.

@@ -6,6 +6,7 @@ import KnowTypeCore
 final class LexicalProfileRuntime: @unchecked Sendable {
     private let store: LexicalProfileStore
     private let rimeMaintenanceService: (any RimeUserDBTextSnapshotProviding)?
+    private let acceptedLearningProvider: (any AIAcceptedLearningSnapshotProviding)?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let builder = LexicalContextBuilder()
     private let refreshGate: LexicalProfileRefreshGate
@@ -14,11 +15,13 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     init(
         store: LexicalProfileStore,
         rimeMaintenanceService: (any RimeUserDBTextSnapshotProviding)?,
+        acceptedLearningProvider: (any AIAcceptedLearningSnapshotProviding)? = nil,
         diagnosticSink: any AIRecommendationDiagnosticSink,
         refreshGate: LexicalProfileRefreshGate
     ) {
         self.store = store
         self.rimeMaintenanceService = rimeMaintenanceService
+        self.acceptedLearningProvider = acceptedLearningProvider
         self.diagnosticSink = diagnosticSink
         self.refreshGate = refreshGate
         diagnosticSink.record(
@@ -40,9 +43,13 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     ) -> LexicalContextSnapshot? {
         let persisted = store.currentProfile()
         let persistedLexicalContext = persisted?.schemaID == schemaID ? persisted?.lexicalContext : nil
+        let acceptedSummary = acceptedLearningProvider?.snapshot()
         return builder.snapshot(
             recentCommits: recentCommits,
             selectionHistory: selectionHistory,
+            acceptedAITerms: acceptedSummary?.termProfile ?? [],
+            acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
+            acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
             persistentTerms: persistedLexicalContext?.terms ?? [],
             persistentRecentCommits: persistedLexicalContext?.recentCommits ?? [],
             persistentSourceSummary: persistedLexicalContext?.sourceSummary ?? []
@@ -71,6 +78,7 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         let builder = builder
         let parser = RimeUserDBTextParser(maxTerms: 64)
         let refreshGate = refreshGate
+        let acceptedLearningProvider = acceptedLearningProvider
 
         let task = Task.detached(priority: .utility) {
             do {
@@ -100,6 +108,7 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                     )
                 )
                 let terms = parser.parse(snapshot)
+                let acceptedSummary = acceptedLearningProvider?.snapshot()
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(
                         stage: .rimeUserDBParse,
@@ -110,6 +119,9 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                 guard let lexical = builder.snapshot(
                     recentCommits: recentCommits,
                     selectionHistory: selectionHistory,
+                    acceptedAITerms: acceptedSummary?.termProfile ?? [],
+                    acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
+                    acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
                     persistentTerms: terms,
                     persistentSourceSummary: [
                         "rime-userdb-snapshot: \(Self.pathHash(snapshot.fileURL.path))"
@@ -149,6 +161,16 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                         reason: "generation=\(generation)"
                     )
                 )
+                if let acceptedSummary {
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .acceptedLearningProfileMerged,
+                            candidateCount: acceptedSummary.termProfile.count,
+                            acceptedCount: acceptedSummary.acceptedCount,
+                            reason: "history=\(String(acceptedSummary.historyHash.prefix(8)))"
+                        )
+                    )
+                }
             } catch {
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(

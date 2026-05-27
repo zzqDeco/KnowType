@@ -37,6 +37,10 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case rimeUserDBParse = "rime_userdb_parse"
     case lexicalProfileUpdated = "lexical_profile_updated"
     case lexicalProfileFallback = "lexical_profile_fallback"
+    case acceptedLearningRecorded = "accepted_learning_recorded"
+    case acceptedLearningSkippedSecret = "accepted_learning_skipped_secret"
+    case acceptedLearningTermsExtracted = "accepted_learning_terms_extracted"
+    case acceptedLearningProfileMerged = "accepted_learning_profile_merged"
 }
 
 public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
@@ -81,6 +85,12 @@ public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
 
 public protocol AIRecommendationDiagnosticSink: Sendable {
     func record(_ event: AIRecommendationDiagnosticEvent)
+}
+
+public struct NoopAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSink {
+    public init() {}
+
+    public func record(_: AIRecommendationDiagnosticEvent) {}
 }
 
 public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSink {

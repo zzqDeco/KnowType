@@ -145,14 +145,18 @@ public struct LexicalContextBuilder: Sendable {
         rimeCandidates: [String] = [],
         recentCommits: [String] = [],
         selectionHistory: [String] = [],
+        acceptedAITerms: [LexicalContextTerm] = [],
+        acceptedAIRecentCommits: [String] = [],
+        acceptedAISourceSummary: [String] = [],
         persistentTerms: [LexicalContextTerm] = [],
         persistentRecentCommits: [String] = [],
         persistentSourceSummary: [String] = []
     ) -> LexicalContextSnapshot? {
         var scores: [String: (score: Double, source: String)] = [:]
-        addTerms(persistentTerms, to: &scores)
         addTerms(selectionHistory.reversed(), source: "selection-history", baseScore: 0.86, to: &scores)
+        addAcceptedTerms(acceptedAITerms, to: &scores)
         addTerms(recentCommits.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
+        addTerms(persistentTerms, to: &scores)
 
         let terms = scores
             .map { text, value in
@@ -166,8 +170,11 @@ public struct LexicalContextBuilder: Sendable {
             }
             .prefix(maxTerms)
 
-        let commits = (persistentRecentCommits + recentCommits)
-            .compactMap(Self.sanitizedProfileText)
+        let commits = (
+            persistentRecentCommits.compactMap(Self.sanitizedProfileText)
+                + acceptedAIRecentCommits.compactMap(Self.sanitizedAcceptedProfileText)
+                + recentCommits.compactMap(Self.sanitizedProfileText)
+        )
             .suffix(maxRecentCommits)
 
         let snapshot = LexicalContextSnapshot(
@@ -177,6 +184,9 @@ public struct LexicalContextBuilder: Sendable {
             sourceSummary: sourceSummary(
                 recentCommits: recentCommits,
                 selectionHistory: selectionHistory,
+                acceptedAITerms: acceptedAITerms,
+                acceptedAIRecentCommits: acceptedAIRecentCommits,
+                acceptedAISourceSummary: acceptedAISourceSummary,
                 persistentTerms: persistentTerms,
                 persistentSourceSummary: persistentSourceSummary
             )
@@ -221,7 +231,28 @@ public struct LexicalContextBuilder: Sendable {
         }
     }
 
+    private func addAcceptedTerms(
+        _ terms: [LexicalContextTerm],
+        to scores: inout [String: (score: Double, source: String)]
+    ) {
+        for term in terms {
+            guard let clean = Self.sanitizedAcceptedProfileText(term.text) else {
+                continue
+            }
+            let nextScore = max(0, min(1, term.score)) * 0.82
+            if let existing = scores[clean] {
+                scores[clean] = (score: existing.score + nextScore * 0.25, source: existing.source)
+            } else {
+                scores[clean] = (score: nextScore, source: "accepted-ai")
+            }
+        }
+    }
+
     private func toneProfile(from recentCommits: [String]) -> ToneProfile {
+        acceptedStyleProfile(from: recentCommits)
+    }
+
+    public func acceptedStyleProfile(from recentCommits: [String]) -> ToneProfile {
         guard !recentCommits.isEmpty else {
             return ToneProfile()
         }
@@ -268,14 +299,19 @@ public struct LexicalContextBuilder: Sendable {
     private func sourceSummary(
         recentCommits: [String],
         selectionHistory: [String],
+        acceptedAITerms: [LexicalContextTerm],
+        acceptedAIRecentCommits: [String],
+        acceptedAISourceSummary: [String],
         persistentTerms: [LexicalContextTerm],
         persistentSourceSummary: [String]
     ) -> [String] {
         var summary = [
             "recent-commits: \(recentCommits.count)",
             "selection-history: \(selectionHistory.count)",
+            "accepted-ai: terms=\(acceptedAITerms.count) commits=\(acceptedAIRecentCommits.count)",
             "rime-userdb: \(persistentTerms.count)"
         ]
+        summary.append(contentsOf: acceptedAISourceSummary)
         summary.append(contentsOf: persistentSourceSummary)
         return summary
     }
@@ -338,6 +374,28 @@ public struct LexicalContextBuilder: Sendable {
         let hasHan = clean.range(of: #"\p{Han}"#, options: .regularExpression) != nil
         let isTechnicalToken = clean.range(of: #"^[A-Za-z0-9_./:-]{2,}$"#, options: .regularExpression) != nil
         guard hasHan || !isTechnicalToken else {
+            return nil
+        }
+        return clean
+    }
+
+    public static func sanitizedAcceptedProfileText(_ text: String) -> String? {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 80 else {
+            return nil
+        }
+        if TextProtection.containsSecretLikeContent(clean) {
+            return nil
+        }
+        if clean.range(of: #"^\d+$"#, options: .regularExpression) != nil {
+            return nil
+        }
+        if clean.range(of: #"(?i)^(https?://|www\.|[A-Za-z]:[\\/]|/|~/|\./|\.\./)"#, options: .regularExpression) != nil {
+            return nil
+        }
+        let hasHan = clean.range(of: #"\p{Han}"#, options: .regularExpression) != nil
+        let hasWord = clean.range(of: #"[A-Za-z_]"#, options: .regularExpression) != nil
+        guard hasHan || hasWord else {
             return nil
         }
         return clean

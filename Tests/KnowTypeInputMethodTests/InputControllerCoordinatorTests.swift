@@ -2799,11 +2799,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let client = FakeInputControllerClient()
         let persistence = FakeUserSelectionHistoryPersistence()
         let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
         let (coordinator, host, persistenceSpy) = makeCoordinator(
             client: client,
             persistence: persistence,
             provider: RecordingContinuationProvider(),
             aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
             enablesAsyncSuggestionRefresh: true,
             conversionEngine: RecordingNativeConversionEngine(
                 candidates: ["你"],
@@ -2832,6 +2834,82 @@ final class InputControllerCoordinatorTests: XCTestCase {
             NSRange(location: NSNotFound, length: NSNotFound)
         )
         XCTAssertEqual(persistenceSpy.recordedSelections, [])
+        let recorded = await waitUntilOnMainActor {
+            acceptedLearning.allRecords().count == 1
+        }
+        XCTAssertTrue(recorded)
+        XCTAssertEqual(acceptedLearning.allRecords().first?.acceptedText, "AI 续写")
+    }
+
+    @MainActor
+    func testTabAcceptedAIRecommendationRecordsAcceptedLearningHistory() async throws {
+        let client = FakeInputControllerClient()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        let recorded = await waitUntilOnMainActor {
+            acceptedLearning.allRecords().count == 1
+                && acceptedLearning.snapshot()?.termProfile.contains { $0.text == "JSON" } == true
+        }
+        XCTAssertTrue(recorded)
+        let record = try XCTUnwrap(acceptedLearning.allRecords().first)
+        XCTAssertEqual(record.rawInput, "zhegeapi")
+        XCTAssertEqual(record.acceptedText, "JSON Schema 可以继续")
+        XCTAssertEqual(record.provider, "ai-test")
+        XCTAssertEqual(record.commitKind, "ai")
+        XCTAssertEqual(record.candidateSource, "ai:ai-test")
+        XCTAssertTrue(record.extractedTerms.contains { $0.text == "JSON" })
+        XCTAssertTrue(acceptedLearning.snapshot()?.termProfile.contains { $0.text == "JSON" } == true)
+    }
+
+    @MainActor
+    func testNativeCommitDoesNotRecordAcceptedLearningHistory() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiAcceptedLearning: acceptedLearning,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder,
+                spaceCommit: "你"
+            )
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
     }
 
     @MainActor
@@ -3088,6 +3166,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         provider: (any LLMProvider)? = nil,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
         lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
@@ -3122,6 +3201,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
+            aiAcceptedLearning: aiAcceptedLearning,
             aiDiagnosticSink: aiDiagnosticSink,
             lexicalProfileStore: lexicalProfileStore,
             lexicalProfileRefreshGate: lexicalProfileRefreshGate,

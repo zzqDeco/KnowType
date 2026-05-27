@@ -7,8 +7,9 @@ Current responsibilities:
 - `AIRecommendationRuntime` builds real-time provider requests from raw input, optional user-confirmed `lockedPrefix`, app context, `ENV.md`, `CORRECTION.md`, and optional `LEXICAL_PROFILE.md`.
 - `AIRecommendationRuntime` debounces for 350 ms by default, hard-times out after 10 seconds by default, caches, sanitizes returned continuations when a locked prefix exists, and reports ready/unavailable/ineligible state through `AIRecommendationState`.
 - `AIRecommendationDiagnosticSink` records request substates through macOS unified logging by default. Events carry request/composition identifiers, lengths, counts, elapsed milliseconds, and normalized reasons, but never raw input, candidate text, context document bodies, or API keys.
-- `LexicalContextBuilder` produces top-K local lexical and tone summaries from recent commits, selection history, and stored Rime userdb terms; current composition candidates, full DB files, and raw logs are not sent.
+- `LexicalContextBuilder` produces top-K local lexical and tone summaries from recent commits, selection history, accepted AI summaries, and stored Rime userdb terms; current composition candidates, full DB files, full accepted-learning history, and raw logs are not sent.
 - `LexicalProfileStore` persists canonical lexical profile JSON under Application Support and mirrors readable `~/.knowtype/LEXICAL_PROFILE.md` for diagnostics.
+- `AIAcceptedLearningStore` appends full local history for AI recommendations the user explicitly accepts, writes `accepted-ai-summary.json`, and mirrors bounded diagnostics to `~/.knowtype/ACCEPTED_AI_LEARNING.md`; only the summary can feed `LEXICAL_PROFILE.md`.
 - `AIRecommendationRuntime` only hard-blocks cloud AI recommendation when raw
   input or confirmed `lockedPrefix` contains secret-like credentials.
 - Input-method callers keep noisy Level 0/protected app commits and protected
@@ -34,3 +35,4 @@ Testing concerns:
 - diagnostic tests should use an injected sink and assert stage names without relying on OSLog
 - failure cooldown must suppress repeated provider calls
 - context digest must preserve `User Notes` in `ENV.md`
+- accepted AI learning must skip secret-like content, record only explicit AI commits, and never write Rime userdb

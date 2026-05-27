@@ -41,6 +41,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var delayedReanchorGeneration = 0
     private let aiRecommendationProvider: (any AIRecommendationProviding)?
     private let aiContextEventRecorder: (any AIContextEventRecording)?
+    private let aiAcceptedLearningRecorder: (any AIAcceptedLearningRecording)?
     private let aiDiagnosticSink: any AIRecommendationDiagnosticSink
     private var aiRecommendationTask: Task<Void, Never>?
     private var aiRecommendationState: AIRecommendationState = .idle
@@ -70,6 +71,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
         lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
@@ -105,10 +107,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
             .loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
         self.aiRecommendationProvider = aiRecommendationProvider
         self.aiContextEventRecorder = aiContextEventRecorder
+        self.aiAcceptedLearningRecorder = aiAcceptedLearning
         self.aiDiagnosticSink = aiDiagnosticSink
         self.lexicalProfileRuntime = LexicalProfileRuntime(
             store: lexicalProfileStore,
             rimeMaintenanceService: rimeUserDBTextProvider,
+            acceptedLearningProvider: aiAcceptedLearning,
             diagnosticSink: aiDiagnosticSink,
             refreshGate: lexicalProfileRefreshGate
         )
@@ -1560,6 +1564,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func recordTypingCommit(_ text: String, client: InputControllerClient?) {
         let appBundleID = appBundleIdentifier(client: client)
+        let commitKind = typingCommitKind(for: text)
+        let candidateSource = typingCandidateSource(for: text)
+        if commitKind == .ai {
+            recordAcceptedAICommit(
+                text,
+                appBundleID: appBundleID,
+                candidateSource: candidateSource
+            )
+        }
         guard !TextProtection.requiresNoCorrection(text, appBundleID: appBundleID),
               !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
             return
@@ -1576,12 +1589,38 @@ final class InputControllerCoordinator: @unchecked Sendable {
             appName: appBundleIdentifier(client: client),
             rawInput: rawBuffer.isEmpty ? nil : rawBuffer,
             committedText: text,
-            commitKind: typingCommitKind(for: text),
-            candidateSource: typingCandidateSource(for: text),
+            commitKind: commitKind,
+            candidateSource: candidateSource,
             deleteCountBeforeCommit: deleteCountBeforeCommit
         )
         Task.detached(priority: .utility) { [aiContextEventRecorder] in
             await aiContextEventRecorder.record(event)
+        }
+    }
+
+    private func recordAcceptedAICommit(
+        _ text: String,
+        appBundleID: String?,
+        candidateSource: String
+    ) {
+        guard let aiAcceptedLearningRecorder,
+              case .ready(let candidate) = aiRecommendationState,
+              candidate.displayText == text else {
+            return
+        }
+        let lockedPrefix = candidate.prefixText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let record = AIAcceptedLearningRecord(
+            schemaID: conversionEngine.activeSchemaID,
+            appBundleID: appBundleID,
+            rawInput: rawBuffer.isEmpty ? nil : rawBuffer,
+            lockedPrefix: lockedPrefix.isEmpty ? nil : lockedPrefix,
+            acceptedText: text,
+            provider: candidate.provider,
+            contextVersion: candidate.contextVersion,
+            candidateSource: candidateSource
+        )
+        Task.detached(priority: .utility) { [aiAcceptedLearningRecorder] in
+            await aiAcceptedLearningRecorder.recordAcceptedAI(record)
         }
     }
 
