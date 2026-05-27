@@ -245,6 +245,7 @@ public final class AIAcceptedLearningStore:
     private let lock = NSLock()
     private var records: [AIAcceptedLearningRecord]
     private var summary: AIAcceptedLanguageSummary?
+    private var schemaSummaries: [String: AIAcceptedLanguageSummary]
     private var summaryTask: Task<Void, Never>?
 
     public init(
@@ -270,6 +271,7 @@ public final class AIAcceptedLearningStore:
         let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
         let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
         self.summary = summaryIsCurrent ? loadedSummary : rebuiltSummary
+        self.schemaSummaries = Self.buildSchemaSummaries(records: records, generatedAt: Date())
         if !summaryIsCurrent {
             do {
                 try persistSummary(summary)
@@ -359,9 +361,9 @@ public final class AIAcceptedLearningStore:
             return snapshot()
         }
         lock.lock()
-        let filteredRecords = records.filter { $0.schemaID == schemaID }
+        let current = schemaSummaries[schemaID]
         lock.unlock()
-        return Self.buildSummary(records: filteredRecords, generatedAt: Date())
+        return current
     }
 
     public func allRecords() -> [AIAcceptedLearningRecord] {
@@ -431,10 +433,13 @@ public final class AIAcceptedLearningStore:
         let currentRecords = records
         lock.unlock()
 
-        let nextSummary = Self.buildSummary(records: currentRecords, generatedAt: Date())
+        let generatedAt = Date()
+        let nextSummary = Self.buildSummary(records: currentRecords, generatedAt: generatedAt)
+        let nextSchemaSummaries = Self.buildSchemaSummaries(records: currentRecords, generatedAt: generatedAt)
 
         lock.lock()
         summary = nextSummary
+        schemaSummaries = nextSchemaSummaries
         lock.unlock()
 
         guard let nextSummary else {
@@ -514,6 +519,20 @@ public final class AIAcceptedLearningStore:
             sourceSummary: [
                 "accepted-ai-summary: terms=\(terms.count) commits=\(recentCommits.count) history=\(String(historyHash.prefix(8)))"
             ]
+        )
+    }
+
+    private static func buildSchemaSummaries(
+        records: [AIAcceptedLearningRecord],
+        generatedAt: Date
+    ) -> [String: AIAcceptedLanguageSummary] {
+        Dictionary(
+            uniqueKeysWithValues: Dictionary(grouping: records, by: \.schemaID).compactMap { schemaID, schemaRecords in
+                guard let summary = buildSummary(records: schemaRecords, generatedAt: generatedAt) else {
+                    return nil
+                }
+                return (schemaID, summary)
+            }
         )
     }
 

@@ -1597,12 +1597,21 @@ final class InputControllerCoordinator: @unchecked Sendable {
             .map { "ai:\($0.provider)" }
             ?? typingCandidateSource(for: text)
         if commitKind == .ai {
-            recordAcceptedAICommit(
-                text,
-                appBundleID: appBundleID,
-                acceptedAIRecommendation: acceptedAIRecommendation,
-                candidateSource: candidateSource
-            )
+            if TextProtection.requiresNoCorrection("knowtype", appBundleID: appBundleID) {
+                aiDiagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .acceptedLearningSkippedSecret,
+                        reason: "protected_app_context"
+                    )
+                )
+            } else {
+                recordAcceptedAICommit(
+                    text,
+                    appBundleID: appBundleID,
+                    acceptedAIRecommendation: acceptedAIRecommendation,
+                    candidateSource: candidateSource
+                )
+            }
         }
         guard !TextProtection.requiresNoCorrection(text, appBundleID: appBundleID),
               !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {

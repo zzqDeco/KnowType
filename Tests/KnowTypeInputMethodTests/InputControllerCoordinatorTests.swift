@@ -2889,6 +2889,45 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testProtectedAppAcceptedAIRecommendationDoesNotRecordAcceptedLearningHistory() async throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "JSON Schema 可以继续")
+        XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
+        XCTAssertNil(acceptedLearning.snapshot())
+    }
+
+    @MainActor
     func testPanelClickAcceptedAIRecommendationRecordsAcceptedLearningHistory() async throws {
         let client = FakeInputControllerClient()
         let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")

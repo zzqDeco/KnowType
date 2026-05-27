@@ -208,6 +208,29 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(doublePinyin.termProfile.contains { $0.text == "API" })
     }
 
+    func testSchemaSnapshotUsesCachedSummaryUntilBackgroundRefresh() async throws {
+        let store = AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 2_000_000_000
+        )
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        XCTAssertEqual(store.allRecords().count, 1)
+        XCTAssertNil(store.snapshot(schemaID: "pinyin_simp"))
+    }
+
     func testMultilineRecentAcceptedCommitIsFlattenedForPromptMarkdown() async throws {
         let store = AIAcceptedLearningStore.inMemory()
 
