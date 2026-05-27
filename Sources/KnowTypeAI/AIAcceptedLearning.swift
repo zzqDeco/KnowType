@@ -99,6 +99,13 @@ public protocol AIAcceptedLearningRecording: Sendable {
 
 public protocol AIAcceptedLearningSnapshotProviding: Sendable {
     func snapshot() -> AIAcceptedLanguageSummary?
+    func snapshot(schemaID: String?) -> AIAcceptedLanguageSummary?
+}
+
+public extension AIAcceptedLearningSnapshotProviding {
+    func snapshot(schemaID _: String?) -> AIAcceptedLanguageSummary? {
+        snapshot()
+    }
 }
 
 public struct AIAcceptedTermExtractor: Sendable {
@@ -111,7 +118,8 @@ public struct AIAcceptedTermExtractor: Sendable {
     public func extractTerms(from text: String) -> [LexicalContextTerm] {
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty,
-              !TextProtection.containsSecretLikeContent(clean) else {
+              !TextProtection.containsSecretLikeContent(clean),
+              !TextProtection.requiresNoCorrection(clean) else {
             return []
         }
 
@@ -346,6 +354,16 @@ public final class AIAcceptedLearningStore:
         return current
     }
 
+    public func snapshot(schemaID: String?) -> AIAcceptedLanguageSummary? {
+        guard let schemaID else {
+            return snapshot()
+        }
+        lock.lock()
+        let filteredRecords = records.filter { $0.schemaID == schemaID }
+        lock.unlock()
+        return Self.buildSummary(records: filteredRecords, generatedAt: Date())
+    }
+
     public func allRecords() -> [AIAcceptedLearningRecord] {
         lock.lock()
         let current = records
@@ -447,6 +465,9 @@ public final class AIAcceptedLearningStore:
 
         var termScores: [String: (score: Double, source: String)] = [:]
         for record in records {
+            guard !TextProtection.requiresNoCorrection(record.acceptedText) else {
+                continue
+            }
             for term in record.extractedTerms {
                 guard let clean = LexicalContextBuilder.sanitizedAcceptedProfileText(term.text) else {
                     continue
@@ -511,7 +532,9 @@ public final class AIAcceptedLearningStore:
     }
 
     private static func boundedCommit(_ text: String) -> String? {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         guard !clean.isEmpty,
               !TextProtection.containsSecretLikeContent(clean),
               !TextProtection.requiresNoCorrection(clean) else {

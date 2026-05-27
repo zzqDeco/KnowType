@@ -153,10 +153,24 @@ public struct LexicalContextBuilder: Sendable {
         persistentSourceSummary: [String] = []
     ) -> LexicalContextSnapshot? {
         var scores: [String: (score: Double, source: String)] = [:]
+        let hasAcceptedContext = !acceptedAITerms.isEmpty
+            || !acceptedAIRecentCommits.isEmpty
+            || !acceptedAISourceSummary.isEmpty
+        let persistentTermsForMerge = hasAcceptedContext
+            ? persistentTerms.filter { $0.source != "accepted-ai" }
+            : persistentTerms
+        let acceptedCommitSet = Set(acceptedAIRecentCommits.compactMap(Self.sanitizedAcceptedProfileText))
+        let persistentRecentCommitsForMerge = persistentRecentCommits
+            .compactMap(Self.sanitizedProfileText)
+            .filter { !acceptedCommitSet.contains($0) }
+        let persistentSourceSummaryForMerge = hasAcceptedContext
+            ? persistentSourceSummary.filter { !$0.hasPrefix("accepted-ai") }
+            : persistentSourceSummary
+
         addTerms(selectionHistory.reversed(), source: "selection-history", baseScore: 0.86, to: &scores)
         addAcceptedTerms(acceptedAITerms, to: &scores)
         addTerms(recentCommits.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
-        addTerms(persistentTerms, to: &scores)
+        addTerms(persistentTermsForMerge, to: &scores)
 
         let terms = scores
             .map { text, value in
@@ -171,7 +185,7 @@ public struct LexicalContextBuilder: Sendable {
             .prefix(maxTerms)
 
         let commits = (
-            persistentRecentCommits.compactMap(Self.sanitizedProfileText)
+            persistentRecentCommitsForMerge
                 + acceptedAIRecentCommits.compactMap(Self.sanitizedAcceptedProfileText)
                 + recentCommits.compactMap(Self.sanitizedProfileText)
         )
@@ -187,8 +201,8 @@ public struct LexicalContextBuilder: Sendable {
                 acceptedAITerms: acceptedAITerms,
                 acceptedAIRecentCommits: acceptedAIRecentCommits,
                 acceptedAISourceSummary: acceptedAISourceSummary,
-                persistentTerms: persistentTerms,
-                persistentSourceSummary: persistentSourceSummary
+                persistentTerms: persistentTermsForMerge,
+                persistentSourceSummary: persistentSourceSummaryForMerge
             )
         )
         return snapshot.isEmpty ? nil : snapshot

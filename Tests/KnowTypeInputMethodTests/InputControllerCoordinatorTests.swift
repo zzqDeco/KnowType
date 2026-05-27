@@ -2889,6 +2889,42 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testPanelClickAcceptedAIRecommendationRecordsAcceptedLearningHistory() async throws {
+        let client = FakeInputControllerClient()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个方案"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegefangan" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        coordinator.commitCandidatePanelSelection(.aiRecommendation, client: client)
+
+        let recorded = await waitUntilOnMainActor {
+            acceptedLearning.allRecords().count == 1
+        }
+        XCTAssertTrue(recorded)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "AI 续写")
+        XCTAssertEqual(acceptedLearning.allRecords().first?.acceptedText, "AI 续写")
+        XCTAssertEqual(acceptedLearning.allRecords().first?.candidateSource, "ai:ai-test")
+    }
+
+    @MainActor
     func testNativeCommitDoesNotRecordAcceptedLearningHistory() async {
         let client = FakeInputControllerClient()
         let recorder = NativeSelectionRecorder()

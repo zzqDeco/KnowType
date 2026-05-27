@@ -43,7 +43,7 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     ) -> LexicalContextSnapshot? {
         let persisted = store.currentProfile()
         let persistedLexicalContext = persisted?.schemaID == schemaID ? persisted?.lexicalContext : nil
-        let acceptedSummary = acceptedLearningProvider?.snapshot()
+        let acceptedSummary = acceptedLearningProvider?.snapshot(schemaID: schemaID)
         return builder.snapshot(
             recentCommits: recentCommits,
             selectionHistory: selectionHistory,
@@ -78,7 +78,6 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         let builder = builder
         let parser = RimeUserDBTextParser(maxTerms: 64)
         let refreshGate = refreshGate
-        let acceptedLearningProvider = acceptedLearningProvider
 
         let task = Task.detached(priority: .utility) {
             do {
@@ -108,7 +107,6 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                     )
                 )
                 let terms = parser.parse(snapshot)
-                let acceptedSummary = acceptedLearningProvider?.snapshot()
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(
                         stage: .rimeUserDBParse,
@@ -119,9 +117,6 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                 guard let lexical = builder.snapshot(
                     recentCommits: recentCommits,
                     selectionHistory: selectionHistory,
-                    acceptedAITerms: acceptedSummary?.termProfile ?? [],
-                    acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
-                    acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
                     persistentTerms: terms,
                     persistentSourceSummary: [
                         "rime-userdb-snapshot: \(Self.pathHash(snapshot.fileURL.path))"
@@ -161,16 +156,6 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                         reason: "generation=\(generation)"
                     )
                 )
-                if let acceptedSummary {
-                    diagnosticSink.record(
-                        AIRecommendationDiagnosticEvent(
-                            stage: .acceptedLearningProfileMerged,
-                            candidateCount: acceptedSummary.termProfile.count,
-                            acceptedCount: acceptedSummary.acceptedCount,
-                            reason: "history=\(String(acceptedSummary.historyHash.prefix(8)))"
-                        )
-                    )
-                }
             } catch {
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(

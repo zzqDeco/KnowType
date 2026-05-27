@@ -210,7 +210,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let result = resultForNumberSelection(inputSelection, client: client)
         learnSelectedPrefix(action: .space, result: result, client: client)
-        _ = applyCommitResult(result, client: client)
+        _ = applyCommitResult(
+            result,
+            client: client,
+            acceptedAIRecommendation: acceptedAIRecommendationCandidate(for: .space, result: result)
+        )
     }
 
     @discardableResult
@@ -369,7 +373,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     }
                     let result = resultForNumberSelection(inputSelection, client: client)
                     learnSelectedPrefix(action: .space, result: result, client: client)
-                    return applyCommitResult(result, client: client)
+                    return applyCommitResult(
+                        result,
+                        client: client,
+                        acceptedAIRecommendation: acceptedAIRecommendationCandidate(for: .space, result: result)
+                    )
                 }
                 return appendComposition(String(number), client: client)
             }

@@ -160,10 +160,70 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
 
         XCTAssertEqual(store.allRecords().count, 1)
         XCTAssertTrue(historyContent.contains("example.com"))
+        XCTAssertTrue(store.allRecords().first?.extractedTerms.isEmpty == true)
         XCTAssertEqual(summary.acceptedCount, 1)
         XCTAssertFalse(summary.recentAcceptedCommits.contains { $0.contains("example.com") })
         XCTAssertFalse(summary.termProfile.contains { $0.text.contains("example.com") })
         XCTAssertFalse(lexical?.markdown.contains("example.com") ?? false)
+    }
+
+    func testSnapshotCanFilterAcceptedSummaryBySchema() async throws {
+        let store = AIAcceptedLearningStore.inMemory()
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "double_pinyin",
+                rawInput: "api",
+                acceptedText: "API 设计可以保持简洁",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let full = try XCTUnwrap(store.snapshot())
+        let pinyin = try XCTUnwrap(store.snapshot(schemaID: "pinyin_simp"))
+        let doublePinyin = try XCTUnwrap(store.snapshot(schemaID: "double_pinyin"))
+        let provider: AIAcceptedLearningSnapshotProviding = store
+        let pinyinViaProtocol = try XCTUnwrap(provider.snapshot(schemaID: "pinyin_simp"))
+
+        XCTAssertEqual(full.acceptedCount, 2)
+        XCTAssertEqual(pinyin.acceptedCount, 1)
+        XCTAssertEqual(pinyinViaProtocol.acceptedCount, 1)
+        XCTAssertTrue(pinyin.termProfile.contains { $0.text == "JSON" })
+        XCTAssertTrue(pinyinViaProtocol.termProfile.contains { $0.text == "JSON" })
+        XCTAssertFalse(pinyinViaProtocol.termProfile.contains { $0.text == "API" })
+        XCTAssertFalse(pinyin.termProfile.contains { $0.text == "API" })
+        XCTAssertEqual(doublePinyin.acceptedCount, 1)
+        XCTAssertTrue(doublePinyin.termProfile.contains { $0.text == "API" })
+    }
+
+    func testMultilineRecentAcceptedCommitIsFlattenedForPromptMarkdown() async throws {
+        let store = AIAcceptedLearningStore.inMemory()
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "fangan",
+                acceptedText: "第一行建议\n第二行继续",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let summary = try XCTUnwrap(store.snapshot())
+        XCTAssertEqual(summary.recentAcceptedCommits, ["第一行建议 第二行继续"])
     }
 
     func testLexicalContextMergesAcceptedTechnicalTermsWithoutFullHistory() throws {
@@ -197,6 +257,36 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(snapshot.recentCommits.contains("JSON Schema 可以继续推进这个方案"))
         XCTAssertTrue(snapshot.sourceSummary.contains("accepted-ai-summary: terms=2 commits=1 history=abc123"))
         XCTAssertTrue(snapshot.sourceSummary.contains("rime-userdb: 1"))
+    }
+
+    func testLexicalContextDoesNotDoubleCountPersistedAcceptedSummary() throws {
+        let snapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                acceptedAITerms: [
+                    LexicalContextTerm(text: "JSON", score: 1, source: "accepted-ai")
+                ],
+                acceptedAIRecentCommits: ["JSON Schema 可以继续推进这个方案"],
+                acceptedAISourceSummary: ["accepted-ai-summary: terms=1 commits=1 history=fresh"],
+                persistentTerms: [
+                    LexicalContextTerm(text: "JSON", score: 1, source: "accepted-ai"),
+                    LexicalContextTerm(text: "长期高频", score: 1, source: "rime-userdb")
+                ],
+                persistentRecentCommits: [
+                    "JSON Schema 可以继续推进这个方案",
+                    "长期提交可以保留"
+                ],
+                persistentSourceSummary: [
+                    "accepted-ai-summary: terms=1 commits=1 history=stale",
+                    "rime-userdb-snapshot: abc"
+                ]
+            )
+        )
+
+        XCTAssertEqual(snapshot.terms.filter { $0.text == "JSON" }.count, 1)
+        XCTAssertEqual(snapshot.recentCommits.filter { $0 == "JSON Schema 可以继续推进这个方案" }.count, 1)
+        XCTAssertFalse(snapshot.sourceSummary.contains("accepted-ai-summary: terms=1 commits=1 history=stale"))
+        XCTAssertTrue(snapshot.sourceSummary.contains("accepted-ai-summary: terms=1 commits=1 history=fresh"))
+        XCTAssertTrue(snapshot.sourceSummary.contains("rime-userdb-snapshot: abc"))
     }
 }
 
