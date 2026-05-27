@@ -6,6 +6,7 @@ import KnowTypeCore
 final class LexicalProfileRuntime: @unchecked Sendable {
     private let store: LexicalProfileStore
     private let rimeMaintenanceService: (any RimeUserDBTextSnapshotProviding)?
+    private let acceptedLearningProvider: (any AIAcceptedLearningSnapshotProviding)?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let builder = LexicalContextBuilder()
     private let refreshGate: LexicalProfileRefreshGate
@@ -14,11 +15,13 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     init(
         store: LexicalProfileStore,
         rimeMaintenanceService: (any RimeUserDBTextSnapshotProviding)?,
+        acceptedLearningProvider: (any AIAcceptedLearningSnapshotProviding)? = nil,
         diagnosticSink: any AIRecommendationDiagnosticSink,
         refreshGate: LexicalProfileRefreshGate
     ) {
         self.store = store
         self.rimeMaintenanceService = rimeMaintenanceService
+        self.acceptedLearningProvider = acceptedLearningProvider
         self.diagnosticSink = diagnosticSink
         self.refreshGate = refreshGate
         diagnosticSink.record(
@@ -40,9 +43,13 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     ) -> LexicalContextSnapshot? {
         let persisted = store.currentProfile()
         let persistedLexicalContext = persisted?.schemaID == schemaID ? persisted?.lexicalContext : nil
+        let acceptedSummary = acceptedLearningProvider?.snapshot(schemaID: schemaID)
         return builder.snapshot(
             recentCommits: recentCommits,
             selectionHistory: selectionHistory,
+            acceptedAITerms: acceptedSummary?.termProfile ?? [],
+            acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
+            acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
             persistentTerms: persistedLexicalContext?.terms ?? [],
             persistentRecentCommits: persistedLexicalContext?.recentCommits ?? [],
             persistentSourceSummary: persistedLexicalContext?.sourceSummary ?? []

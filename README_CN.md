@@ -213,8 +213,10 @@ profile 可以留空 model，并通过 `/v1/models` 发现。
 
 AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
 记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明，`LEXICAL_PROFILE.md`
-是由 Rime userdb 词频、KnowType 近期提交和选择历史合成的本地 top-K 词汇画像镜像。
-Canonical JSON 存在 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
+是由 Rime userdb 词频、KnowType 近期提交、选择历史，以及用户明确接受过的
+AI 推荐摘要合成的本地 top-K 词汇画像镜像。完整 accepted-AI 历史只保存在本机
+Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
+`~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
 这些文件。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
@@ -270,6 +272,8 @@ Level 0 纠错保护用于避免把本应原样提交的文本改写，例如 UR
 实时 AI 推荐使用更窄的云端隐私门禁：只有 raw input 或已确认前缀疑似包含
 API key、Bearer token、JWT、私钥、password/token 赋值等 credential 时才显示
 `AI 已禁用`。
+Accepted AI learning 也只用 secret-like hard block：疑似 credential 的 AI
+接受文本不会被记录，普通技术文本可以留在本地摘要中用于后续推荐。
 
 `API`、`JSON`、`FastAPI`、`iOS`、`macOS`、`InputMethodKit`、
 `snake_case`、`camelCase` 等技术 token 会被保留或规范化。

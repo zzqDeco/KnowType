@@ -170,6 +170,8 @@ Core candidate types:
 - `AIRecommendationCandidate`: ready AI slot payload with the locked prefix, optional continuation, display text, provider, confidence, and context version.
 - `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
+- `AIAcceptedLearningRecord`: local-only JSONL record for an AI recommendation the user explicitly accepted.
+- `AIAcceptedLanguageSummary`: bounded accepted-AI term, style, and recent-commit summary used by lexical profile merging.
 - `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
 - `RimeMaintenanceService`: background owner of explicit `sync_user_data`, userdb snapshot discovery, and idle/manual maintenance policy.
 - `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, and schedules background profile refresh from existing userdb snapshots.
@@ -391,6 +393,17 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - writes a readable markdown mirror to `~/.knowtype/LEXICAL_PROFILE.md`
 - stores only top-K terms, recent commits, source counts, and tone metrics
 - never stores full Rime userdb exports, raw provider responses, or API keys
+
+`AIAcceptedLearningStore`:
+
+- appends full accepted AI commit history to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-learning.jsonl`
+- writes bounded language-habit summary JSON to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-summary.json`
+- mirrors summary diagnostics to `~/.knowtype/ACCEPTED_AI_LEARNING.md`
+- skips records containing secret-like raw input, locked prefix, or accepted text
+- feeds only bounded summary terms and recent short accepted commits into
+  `LEXICAL_PROFILE.md`; it never writes Rime userdb or calls `sync_user_data`
 
 Rime userdb profile refresh is a background-only input-method task. It calls
 librime sync as a best-effort freshness step, reads the live active schema from
