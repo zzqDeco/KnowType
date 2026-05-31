@@ -174,7 +174,7 @@ Core candidate types:
 - `AIAcceptedLanguageSummary`: bounded accepted-AI term, style, and recent-commit summary used by lexical profile merging.
 - `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
 - `RimeMaintenanceService`: background owner of explicit `sync_user_data`, userdb snapshot discovery, and idle/manual maintenance policy.
-- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, and schedules background profile refresh from existing userdb snapshots.
+- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, schedules background profile refresh from existing userdb snapshots, and clears summary-ready observer state when refreshes are cancelled during controller close.
 - `LexicalContextSnapshot`: top-K lexical/tone summary rendered as `LEXICAL_PROFILE.md` and hashed into AI cache keys.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 - `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.

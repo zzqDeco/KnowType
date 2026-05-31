@@ -172,6 +172,52 @@ final class LexicalProfileRuntimeTests: XCTestCase {
         XCTAssertFalse(markdown.contains("旧提交不应出现"))
         XCTAssertFalse(markdown.contains("旧选择不应出现"))
     }
+
+    func testCancelRefreshClearsSummaryReadyContext() async throws {
+        let directory = temporaryDirectory()
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let store = LexicalProfileStore(
+            jsonURL: directory.appendingPathComponent("lexical-profile.json"),
+            markdownURL: markdownURL
+        )
+        let acceptedLearning = AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        let rimeProvider = StaticRimeUserDBTextSnapshotProvider()
+        let runtime = LexicalProfileRuntime(
+            store: store,
+            rimeMaintenanceService: rimeProvider,
+            acceptedLearningProvider: acceptedLearning,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            refreshGate: LexicalProfileRefreshGate()
+        )
+
+        runtime.scheduleRefresh(
+            reason: "commit",
+            schemaID: "pinyin_simp",
+            recentCommits: ["关闭后的提交不应写入"],
+            selectionHistory: []
+        )
+        runtime.cancelRefresh()
+        await acceptedLearning.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        try await Task.sleep(nanoseconds: 900_000_000)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: markdownURL.path))
+        let requestCount = await rimeProvider.requestCount
+        XCTAssertEqual(requestCount, 0)
+    }
 }
 
 private actor StaticRimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {

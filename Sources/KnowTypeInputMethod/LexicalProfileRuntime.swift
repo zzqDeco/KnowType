@@ -71,7 +71,9 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         stateLock.lock()
         refreshTask?.cancel()
         refreshTask = nil
+        latestRefreshContext = nil
         stateLock.unlock()
+        Self.summaryReadyObserverRegistry.unregister(runtime: self)
     }
 
     func scheduleRefresh(
@@ -80,13 +82,25 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         recentCommits: [String],
         selectionHistory: [String]
     ) {
-        Self.summaryReadyObserverRegistry.markCurrent(self)
         let context = LexicalProfileRefreshContext(
             schemaID: schemaID,
             recentCommits: recentCommits,
             selectionHistory: selectionHistory
         )
 
+        Self.summaryReadyObserverRegistry.markCurrent(self)
+        stateLock.lock()
+        scheduleRefreshLocked(
+            reason: reason,
+            context: context
+        )
+        stateLock.unlock()
+    }
+
+    private func scheduleRefreshLocked(
+        reason: String,
+        context: LexicalProfileRefreshContext
+    ) {
         let store = store
         let rimeMaintenanceService = rimeMaintenanceService
         let diagnosticSink = diagnosticSink
@@ -95,12 +109,11 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         let refreshGate = refreshGate
         let acceptedLearningProvider = acceptedLearningProvider
 
-        stateLock.lock()
-        latestRefreshContext = context
         guard let rimeMaintenanceService else {
-            stateLock.unlock()
+            latestRefreshContext = nil
             return
         }
+        latestRefreshContext = context
         let generation = refreshGate.next()
         refreshTask?.cancel()
         let task = Task.detached(priority: .utility) {
@@ -115,12 +128,12 @@ final class LexicalProfileRuntime: @unchecked Sendable {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
                     stage: .rimeUserDBSnapshotLoadStart,
-                    candidateCount: recentCommits.count + selectionHistory.count,
+                    candidateCount: context.recentCommits.count + context.selectionHistory.count,
                     reason: reason
                 )
             )
             do {
-                let snapshot = try await rimeMaintenanceService.userDBTextSnapshot(schemaID: schemaID)
+                let snapshot = try await rimeMaintenanceService.userDBTextSnapshot(schemaID: context.schemaID)
                 guard !Task.isCancelled else {
                     return
                 }
@@ -138,10 +151,10 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                         reason: "schema=\(snapshot.schemaID)"
                     )
                 )
-                let acceptedSummary = acceptedLearningProvider?.snapshot(schemaID: schemaID)
+                let acceptedSummary = acceptedLearningProvider?.snapshot(schemaID: context.schemaID)
                 guard let lexical = builder.snapshot(
-                    recentCommits: recentCommits,
-                    selectionHistory: selectionHistory,
+                    recentCommits: context.recentCommits,
+                    selectionHistory: context.selectionHistory,
                     acceptedAITerms: acceptedSummary?.termProfile ?? [],
                     acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
                     acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
@@ -164,7 +177,7 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                 }
                 let transaction = try store.prepareSave(
                     snapshot: lexical,
-                    schemaID: schemaID,
+                    schemaID: context.schemaID,
                     rimeSnapshotURL: snapshot.fileURL,
                     rimeSnapshotModifiedAt: snapshot.modifiedAt
                 )
@@ -194,23 +207,20 @@ final class LexicalProfileRuntime: @unchecked Sendable {
             }
         }
         refreshTask = task
-        stateLock.unlock()
     }
 
     fileprivate func handleAcceptedSummaryReady(_ event: AIAcceptedLearningSummaryReadyEvent) {
         stateLock.lock()
-        let context = latestRefreshContext
-        stateLock.unlock()
-        guard let context,
+        guard let context = latestRefreshContext,
               context.schemaID == event.schemaID else {
+            stateLock.unlock()
             return
         }
-        scheduleRefresh(
+        scheduleRefreshLocked(
             reason: "accepted-ai-summary",
-            schemaID: context.schemaID,
-            recentCommits: context.recentCommits,
-            selectionHistory: context.selectionHistory
+            context: context
         )
+        stateLock.unlock()
     }
 
     private static func pathHash(_ path: String) -> String {

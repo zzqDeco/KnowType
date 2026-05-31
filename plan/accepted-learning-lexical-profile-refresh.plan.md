@@ -21,6 +21,8 @@ request-time lexical context.
   the runtime that most recently scheduled a refresh handles the event.
 - Refresh task cancellation and generation assignment are serialized to avoid
   dropping the summary-triggered refresh during concurrent commit/summary paths.
+- Refresh cancellation clears the latest summary-ready context and unregisters
+  the runtime, so a closed controller cannot be reactivated by a delayed summary.
 - Persistent lexical profile writes merge accepted-AI terms, bounded recent
   accepted commits, and accepted summary source lines.
 
