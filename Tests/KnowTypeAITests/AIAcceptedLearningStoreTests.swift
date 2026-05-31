@@ -379,6 +379,24 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(snapshot.sourceSummary.contains("accepted-ai-summary: terms=1 commits=1 history=fresh"))
         XCTAssertTrue(snapshot.sourceSummary.contains("rime-userdb-snapshot: abc"))
     }
+
+    func testLexicalContextDoesNotDoubleCountCurrentRecentAcceptedCommit() throws {
+        let snapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                recentCommits: [
+                    "JSON Schema 可以继续推进这个方案",
+                    "另外这个方向可以保留"
+                ],
+                acceptedAIRecentCommits: ["JSON Schema 可以继续推进这个方案"],
+                acceptedAISourceSummary: ["accepted-ai-summary: terms=1 commits=1 history=fresh"]
+            )
+        )
+
+        XCTAssertEqual(snapshot.recentCommits.filter { $0 == "JSON Schema 可以继续推进这个方案" }.count, 1)
+        XCTAssertTrue(snapshot.recentCommits.contains("另外这个方向可以保留"))
+        XCTAssertTrue(snapshot.sourceSummary.contains("recent-commits: 1"))
+        XCTAssertTrue(snapshot.sourceSummary.contains("accepted-ai: terms=0 commits=1"))
+    }
 }
 
 private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @unchecked Sendable {

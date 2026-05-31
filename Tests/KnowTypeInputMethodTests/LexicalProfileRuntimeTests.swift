@@ -104,6 +104,7 @@ final class LexicalProfileRuntimeTests: XCTestCase {
         let markdown = try String(contentsOf: markdownURL, encoding: .utf8)
         XCTAssertTrue(markdown.contains("accepted-ai: terms="))
         XCTAssertTrue(markdown.contains("commits=1"))
+        XCTAssertEqual(markdown.components(separatedBy: "- JSON Schema 可以继续推进\n").count - 1, 1)
     }
 
     func testSummaryReadyRefreshUsesMostRecentlyScheduledRuntimeContext() async throws {
