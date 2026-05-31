@@ -11,6 +11,9 @@ history is local-only; provider requests receive only the accepted summary after
 Summary rebuilds are delayed and run on a utility task. After a rebuild is
 persisted, the store emits summary-ready metadata containing only schema id,
 history hash, and counts. It does not emit raw input or accepted text.
+It emits ready events only for schemas whose accepted history changed since the
+previous rebuild, so schema-specific lexical profile refreshes are not retriggered
+by unchanged cached summaries.
 
 Privacy rules:
 

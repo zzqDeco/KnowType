@@ -277,6 +277,7 @@ public final class AIAcceptedLearningStore:
     private var records: [AIAcceptedLearningRecord]
     private var summary: AIAcceptedLanguageSummary?
     private var schemaSummaries: [String: AIAcceptedLanguageSummary]
+    private var pendingSummarySchemaIDs: Set<String>
     private var summaryTask: Task<Void, Never>?
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
 
@@ -304,6 +305,7 @@ public final class AIAcceptedLearningStore:
         let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
         self.summary = summaryIsCurrent ? loadedSummary : rebuiltSummary
         self.schemaSummaries = Self.buildSchemaSummaries(records: records, generatedAt: Date())
+        self.pendingSummarySchemaIDs = []
         if !summaryIsCurrent {
             do {
                 try persistSummary(summary)
@@ -444,6 +446,7 @@ public final class AIAcceptedLearningStore:
         }
         lock.lock()
         records.append(record)
+        pendingSummarySchemaIDs.insert(record.schemaID)
         lock.unlock()
         scheduleSummaryRebuild()
     }
@@ -480,6 +483,8 @@ public final class AIAcceptedLearningStore:
     private func rebuildSummary() {
         lock.lock()
         let currentRecords = records
+        let changedSchemaIDs = pendingSummarySchemaIDs
+        pendingSummarySchemaIDs.removeAll()
         lock.unlock()
 
         let generatedAt = Date()
@@ -500,7 +505,10 @@ public final class AIAcceptedLearningStore:
                 try persistSummary(nextSummary)
             }
             notifySummaryReady(
-                Self.summaryReadyEvents(from: nextSchemaSummaries)
+                Self.summaryReadyEvents(
+                    from: nextSchemaSummaries,
+                    changedSchemaIDs: changedSchemaIDs
+                )
             )
         } catch {
             diagnosticSink.record(
@@ -509,6 +517,9 @@ public final class AIAcceptedLearningStore:
                     reason: "accepted_learning_summary_write_failed:\(String(describing: type(of: error)))"
                 )
             )
+            lock.lock()
+            pendingSummarySchemaIDs.formUnion(changedSchemaIDs)
+            lock.unlock()
         }
     }
 
@@ -606,9 +617,11 @@ public final class AIAcceptedLearningStore:
     }
 
     private static func summaryReadyEvents(
-        from schemaSummaries: [String: AIAcceptedLanguageSummary]
+        from schemaSummaries: [String: AIAcceptedLanguageSummary],
+        changedSchemaIDs: Set<String>
     ) -> [AIAcceptedLearningSummaryReadyEvent] {
         schemaSummaries
+            .filter { changedSchemaIDs.contains($0.key) }
             .map { schemaID, summary in
                 AIAcceptedLearningSummaryReadyEvent(
                     schemaID: schemaID,

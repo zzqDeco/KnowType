@@ -406,6 +406,7 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   `LEXICAL_PROFILE.md`; it never writes Rime userdb or calls `sync_user_data`
 - emits summary-ready metadata after a delayed summary rebuild is persisted; the
   event contains only schema id, history hash, and counts, not user text
+- emits summary-ready metadata only for schemas changed by the current rebuild
 
 Rime userdb profile refresh is a background-only input-method task. It calls
 librime sync as a best-effort freshness step, reads the live active schema from

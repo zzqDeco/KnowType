@@ -13,6 +13,8 @@ request-time lexical context.
 
 - `AIAcceptedLearningStore` publishes summary-ready metadata after a summary
   rebuild is persisted.
+- Summary-ready metadata is scoped to schemas whose accepted history changed
+  since the previous rebuild.
 - `LexicalProfileRuntime` subscribes to summary-ready events and schedules a
   second background refresh for the latest matching schema.
 - Summary-ready observation is centralized per accepted-learning store, and only

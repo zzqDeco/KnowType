@@ -263,6 +263,42 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertEqual(event.recentCommitCount, summary.recentAcceptedCommits.count)
     }
 
+    func testSummaryReadyObserverOnlyEmitsChangedSchemas() async throws {
+        let recorder = SummaryReadyEventRecorder()
+        let store = AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        store.addSummaryReadyObserver { event in
+            recorder.record(event)
+        }
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "double_pinyin",
+                rawInput: "api",
+                acceptedText: "API 设计可以保持简洁",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        XCTAssertEqual(recorder.events.map(\.schemaID), ["pinyin_simp", "double_pinyin"])
+    }
+
     func testMultilineRecentAcceptedCommitIsFlattenedForPromptMarkdown() async throws {
         let store = AIAcceptedLearningStore.inMemory()
 
