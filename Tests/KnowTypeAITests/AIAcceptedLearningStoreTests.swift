@@ -231,6 +231,74 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertNil(store.snapshot(schemaID: "pinyin_simp"))
     }
 
+    func testSummaryReadyObserverReceivesMetadataOnlyAfterRebuild() async throws {
+        let recorder = SummaryReadyEventRecorder()
+        let store = AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        store.addSummaryReadyObserver { event in
+            recorder.record(event)
+        }
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let event = try XCTUnwrap(recorder.events.first)
+        let summary = try XCTUnwrap(store.snapshot(schemaID: "pinyin_simp"))
+        XCTAssertEqual(event.schemaID, "pinyin_simp")
+        XCTAssertEqual(event.historyHash, summary.historyHash)
+        XCTAssertEqual(event.acceptedCount, 1)
+        XCTAssertEqual(event.termCount, summary.termProfile.count)
+        XCTAssertEqual(event.recentCommitCount, summary.recentAcceptedCommits.count)
+    }
+
+    func testSummaryReadyObserverOnlyEmitsChangedSchemas() async throws {
+        let recorder = SummaryReadyEventRecorder()
+        let store = AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        store.addSummaryReadyObserver { event in
+            recorder.record(event)
+        }
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "double_pinyin",
+                rawInput: "api",
+                acceptedText: "API 设计可以保持简洁",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        XCTAssertEqual(recorder.events.map(\.schemaID), ["pinyin_simp", "double_pinyin"])
+    }
+
     func testMultilineRecentAcceptedCommitIsFlattenedForPromptMarkdown() async throws {
         let store = AIAcceptedLearningStore.inMemory()
 
@@ -311,6 +379,24 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(snapshot.sourceSummary.contains("accepted-ai-summary: terms=1 commits=1 history=fresh"))
         XCTAssertTrue(snapshot.sourceSummary.contains("rime-userdb-snapshot: abc"))
     }
+
+    func testLexicalContextDoesNotDoubleCountCurrentRecentAcceptedCommit() throws {
+        let snapshot = try XCTUnwrap(
+            LexicalContextBuilder().snapshot(
+                recentCommits: [
+                    "JSON Schema 可以继续推进这个方案",
+                    "另外这个方向可以保留"
+                ],
+                acceptedAIRecentCommits: ["JSON Schema 可以继续推进这个方案"],
+                acceptedAISourceSummary: ["accepted-ai-summary: terms=1 commits=1 history=fresh"]
+            )
+        )
+
+        XCTAssertEqual(snapshot.recentCommits.filter { $0 == "JSON Schema 可以继续推进这个方案" }.count, 1)
+        XCTAssertTrue(snapshot.recentCommits.contains("另外这个方向可以保留"))
+        XCTAssertTrue(snapshot.sourceSummary.contains("recent-commits: 1"))
+        XCTAssertTrue(snapshot.sourceSummary.contains("accepted-ai: terms=0 commits=1"))
+    }
 }
 
 private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @unchecked Sendable {
@@ -324,6 +410,24 @@ private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @un
     }
 
     var events: [AIRecommendationDiagnosticEvent] {
+        lock.lock()
+        let events = recordedEvents
+        lock.unlock()
+        return events
+    }
+}
+
+private final class SummaryReadyEventRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [AIAcceptedLearningSummaryReadyEvent] = []
+
+    func record(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+
+    var events: [AIAcceptedLearningSummaryReadyEvent] {
         lock.lock()
         let events = recordedEvents
         lock.unlock()

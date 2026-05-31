@@ -174,7 +174,7 @@ Core candidate types:
 - `AIAcceptedLanguageSummary`: bounded accepted-AI term, style, and recent-commit summary used by lexical profile merging.
 - `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
 - `RimeMaintenanceService`: background owner of explicit `sync_user_data`, userdb snapshot discovery, and idle/manual maintenance policy.
-- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, and schedules background profile refresh from existing userdb snapshots.
+- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, schedules background profile refresh from existing userdb snapshots, and clears summary-ready observer state when refreshes are cancelled during controller close.
 - `LexicalContextSnapshot`: top-K lexical/tone summary rendered as `LEXICAL_PROFILE.md` and hashed into AI cache keys.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 - `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.
@@ -404,6 +404,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - skips records containing secret-like raw input, locked prefix, or accepted text
 - feeds only bounded summary terms and recent short accepted commits into
   `LEXICAL_PROFILE.md`; it never writes Rime userdb or calls `sync_user_data`
+- emits summary-ready metadata after a delayed summary rebuild is persisted; the
+  event contains only schema id, history hash, and counts, not user text
+- emits summary-ready metadata only for schemas changed by the current rebuild
 
 Rime userdb profile refresh is a background-only input-method task. It calls
 librime sync as a best-effort freshness step, reads the live active schema from

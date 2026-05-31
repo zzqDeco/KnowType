@@ -159,7 +159,11 @@ public struct LexicalContextBuilder: Sendable {
         let persistentTermsForMerge = hasAcceptedContext
             ? persistentTerms.filter { $0.source != "accepted-ai" }
             : persistentTerms
-        let acceptedCommitSet = Set(acceptedAIRecentCommits.compactMap(Self.sanitizedAcceptedProfileText))
+        let acceptedRecentCommitsForMerge = acceptedAIRecentCommits.compactMap(Self.sanitizedAcceptedProfileText)
+        let acceptedCommitSet = Set(acceptedRecentCommitsForMerge)
+        let currentRecentCommitsForMerge = recentCommits
+            .compactMap(Self.sanitizedProfileText)
+            .filter { !acceptedCommitSet.contains($0) }
         let persistentRecentCommitsForMerge = persistentRecentCommits
             .compactMap(Self.sanitizedProfileText)
             .filter { !acceptedCommitSet.contains($0) }
@@ -169,7 +173,7 @@ public struct LexicalContextBuilder: Sendable {
 
         addTerms(selectionHistory.reversed(), source: "selection-history", baseScore: 0.86, to: &scores)
         addAcceptedTerms(acceptedAITerms, to: &scores)
-        addTerms(recentCommits.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
+        addTerms(currentRecentCommitsForMerge.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
         addTerms(persistentTermsForMerge, to: &scores)
 
         let terms = scores
@@ -186,8 +190,8 @@ public struct LexicalContextBuilder: Sendable {
 
         let commits = (
             persistentRecentCommitsForMerge
-                + acceptedAIRecentCommits.compactMap(Self.sanitizedAcceptedProfileText)
-                + recentCommits.compactMap(Self.sanitizedProfileText)
+                + acceptedRecentCommitsForMerge
+                + currentRecentCommitsForMerge
         )
             .suffix(maxRecentCommits)
 
@@ -196,7 +200,7 @@ public struct LexicalContextBuilder: Sendable {
             recentCommits: Array(commits),
             toneProfile: toneProfile(from: Array(commits)),
             sourceSummary: sourceSummary(
-                recentCommits: recentCommits,
+                recentCommits: currentRecentCommitsForMerge,
                 selectionHistory: selectionHistory,
                 acceptedAITerms: acceptedAITerms,
                 acceptedAIRecentCommits: acceptedAIRecentCommits,

@@ -4,13 +4,17 @@ import KnowTypeAI
 import KnowTypeCore
 
 final class LexicalProfileRuntime: @unchecked Sendable {
+    private static let summaryReadyObserverRegistry = AcceptedSummaryRefreshObserverRegistry()
+
     private let store: LexicalProfileStore
     private let rimeMaintenanceService: (any RimeUserDBTextSnapshotProviding)?
     private let acceptedLearningProvider: (any AIAcceptedLearningSnapshotProviding)?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let builder = LexicalContextBuilder()
     private let refreshGate: LexicalProfileRefreshGate
+    private let stateLock = NSLock()
     private var refreshTask: Task<Void, Never>?
+    private var latestRefreshContext: LexicalProfileRefreshContext?
 
     init(
         store: LexicalProfileStore,
@@ -24,12 +28,19 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         self.acceptedLearningProvider = acceptedLearningProvider
         self.diagnosticSink = diagnosticSink
         self.refreshGate = refreshGate
+        if let observer = acceptedLearningProvider as? (any AIAcceptedLearningSummaryObserving & AnyObject) {
+            Self.summaryReadyObserverRegistry.ensureObserver(provider: observer)
+        }
         diagnosticSink.record(
             AIRecommendationDiagnosticEvent(
                 stage: .lexicalProfileLoad,
                 reason: store.currentSnapshot() == nil ? "empty" : "loaded"
             )
         )
+    }
+
+    deinit {
+        Self.summaryReadyObserverRegistry.unregister(runtime: self)
     }
 
     func currentProfile() -> PersistentLexicalProfile? {
@@ -57,8 +68,12 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     }
 
     func cancelRefresh() {
+        stateLock.lock()
         refreshTask?.cancel()
         refreshTask = nil
+        latestRefreshContext = nil
+        stateLock.unlock()
+        Self.summaryReadyObserverRegistry.unregister(runtime: self)
     }
 
     func scheduleRefresh(
@@ -67,18 +82,40 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         recentCommits: [String],
         selectionHistory: [String]
     ) {
-        guard let rimeMaintenanceService else {
-            return
-        }
-        let generation = refreshGate.next()
-        cancelRefresh()
+        let context = LexicalProfileRefreshContext(
+            schemaID: schemaID,
+            recentCommits: recentCommits,
+            selectionHistory: selectionHistory
+        )
 
+        Self.summaryReadyObserverRegistry.markCurrent(self)
+        stateLock.lock()
+        scheduleRefreshLocked(
+            reason: reason,
+            context: context
+        )
+        stateLock.unlock()
+    }
+
+    private func scheduleRefreshLocked(
+        reason: String,
+        context: LexicalProfileRefreshContext
+    ) {
         let store = store
+        let rimeMaintenanceService = rimeMaintenanceService
         let diagnosticSink = diagnosticSink
         let builder = builder
         let parser = RimeUserDBTextParser(maxTerms: 64)
         let refreshGate = refreshGate
+        let acceptedLearningProvider = acceptedLearningProvider
 
+        guard let rimeMaintenanceService else {
+            latestRefreshContext = nil
+            return
+        }
+        latestRefreshContext = context
+        let generation = refreshGate.next()
+        refreshTask?.cancel()
         let task = Task.detached(priority: .utility) {
             do {
                 try await Task.sleep(nanoseconds: 500_000_000)
@@ -91,12 +128,12 @@ final class LexicalProfileRuntime: @unchecked Sendable {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
                     stage: .rimeUserDBSnapshotLoadStart,
-                    candidateCount: recentCommits.count + selectionHistory.count,
+                    candidateCount: context.recentCommits.count + context.selectionHistory.count,
                     reason: reason
                 )
             )
             do {
-                let snapshot = try await rimeMaintenanceService.userDBTextSnapshot(schemaID: schemaID)
+                let snapshot = try await rimeMaintenanceService.userDBTextSnapshot(schemaID: context.schemaID)
                 guard !Task.isCancelled else {
                     return
                 }
@@ -114,9 +151,13 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                         reason: "schema=\(snapshot.schemaID)"
                     )
                 )
+                let acceptedSummary = acceptedLearningProvider?.snapshot(schemaID: context.schemaID)
                 guard let lexical = builder.snapshot(
-                    recentCommits: recentCommits,
-                    selectionHistory: selectionHistory,
+                    recentCommits: context.recentCommits,
+                    selectionHistory: context.selectionHistory,
+                    acceptedAITerms: acceptedSummary?.termProfile ?? [],
+                    acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
+                    acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
                     persistentTerms: terms,
                     persistentSourceSummary: [
                         "rime-userdb-snapshot: \(Self.pathHash(snapshot.fileURL.path))"
@@ -136,7 +177,7 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                 }
                 let transaction = try store.prepareSave(
                     snapshot: lexical,
-                    schemaID: schemaID,
+                    schemaID: context.schemaID,
                     rimeSnapshotURL: snapshot.fileURL,
                     rimeSnapshotModifiedAt: snapshot.modifiedAt
                 )
@@ -168,10 +209,85 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         refreshTask = task
     }
 
+    fileprivate func handleAcceptedSummaryReady(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        stateLock.lock()
+        guard let context = latestRefreshContext,
+              context.schemaID == event.schemaID else {
+            stateLock.unlock()
+            return
+        }
+        scheduleRefreshLocked(
+            reason: "accepted-ai-summary",
+            context: context
+        )
+        stateLock.unlock()
+    }
+
     private static func pathHash(_ path: String) -> String {
         SHA256.hash(data: Data(path.utf8))
             .prefix(6)
             .map { String(format: "%02x", $0) }
             .joined()
     }
+}
+
+private final class AcceptedSummaryRefreshObserverRegistry: @unchecked Sendable {
+    private struct Registration {
+        var provider: any AIAcceptedLearningSummaryObserving
+        var providerID: ObjectIdentifier
+        var observerID: UUID
+    }
+
+    private let lock = NSLock()
+    private var registration: Registration?
+    private weak var currentRuntime: LexicalProfileRuntime?
+
+    func ensureObserver(provider: any AIAcceptedLearningSummaryObserving & AnyObject) {
+        let providerID = ObjectIdentifier(provider)
+        lock.lock()
+        if registration?.providerID == providerID {
+            lock.unlock()
+            return
+        }
+        if let registration {
+            registration.provider.removeSummaryReadyObserver(registration.observerID)
+        }
+        let observerID = provider.addSummaryReadyObserver { [weak self] event in
+            self?.handle(event)
+        }
+        registration = Registration(
+            provider: provider,
+            providerID: providerID,
+            observerID: observerID
+        )
+        currentRuntime = nil
+        lock.unlock()
+    }
+
+    func markCurrent(_ runtime: LexicalProfileRuntime) {
+        lock.lock()
+        currentRuntime = runtime
+        lock.unlock()
+    }
+
+    func unregister(runtime: LexicalProfileRuntime) {
+        lock.lock()
+        if currentRuntime === runtime {
+            currentRuntime = nil
+        }
+        lock.unlock()
+    }
+
+    private func handle(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        lock.lock()
+        let runtime = currentRuntime
+        lock.unlock()
+        runtime?.handleAcceptedSummaryReady(event)
+    }
+}
+
+private struct LexicalProfileRefreshContext: Sendable {
+    var schemaID: String
+    var recentCommits: [String]
+    var selectionHistory: [String]
 }

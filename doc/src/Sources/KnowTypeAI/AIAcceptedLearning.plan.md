@@ -7,6 +7,17 @@ It appends full accepted-AI history to Application Support JSONL, builds a
 bounded language summary, and writes a readable diagnostics mirror. The full
 history is local-only; provider requests receive only the accepted summary after
 `LexicalProfileRuntime` merges it into `LEXICAL_PROFILE.md`.
+If the accepted text is also present in the current recent-commits slice that
+triggered the refresh, `LexicalContextBuilder` keeps the accepted summary as the
+canonical source and filters that duplicate current commit before rendering the
+request or persistent lexical context.
+
+Summary rebuilds are delayed and run on a utility task. After a rebuild is
+persisted, the store emits summary-ready metadata containing only schema id,
+history hash, and counts. It does not emit raw input or accepted text.
+It emits ready events only for schemas whose accepted history changed since the
+previous rebuild, so schema-specific lexical profile refreshes are not retriggered
+by unchanged cached summaries.
 
 Privacy rules:
 
