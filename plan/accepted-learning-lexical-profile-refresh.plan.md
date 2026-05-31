@@ -15,6 +15,10 @@ request-time lexical context.
   rebuild is persisted.
 - `LexicalProfileRuntime` subscribes to summary-ready events and schedules a
   second background refresh for the latest matching schema.
+- Summary-ready observation is centralized per accepted-learning store, and only
+  the runtime that most recently scheduled a refresh handles the event.
+- Refresh task cancellation and generation assignment are serialized to avoid
+  dropping the summary-triggered refresh during concurrent commit/summary paths.
 - Persistent lexical profile writes merge accepted-AI terms, bounded recent
   accepted commits, and accepted summary source lines.
 

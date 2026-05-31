@@ -105,6 +105,73 @@ final class LexicalProfileRuntimeTests: XCTestCase {
         XCTAssertTrue(markdown.contains("accepted-ai: terms="))
         XCTAssertTrue(markdown.contains("commits=1"))
     }
+
+    func testSummaryReadyRefreshUsesMostRecentlyScheduledRuntimeContext() async throws {
+        let directory = temporaryDirectory()
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let store = LexicalProfileStore(
+            jsonURL: directory.appendingPathComponent("lexical-profile.json"),
+            markdownURL: markdownURL
+        )
+        let acceptedLearning = AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        let sharedGate = LexicalProfileRefreshGate()
+        let rimeProvider = StaticRimeUserDBTextSnapshotProvider()
+        let staleRuntime = LexicalProfileRuntime(
+            store: store,
+            rimeMaintenanceService: rimeProvider,
+            acceptedLearningProvider: acceptedLearning,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            refreshGate: sharedGate
+        )
+        let currentRuntime = LexicalProfileRuntime(
+            store: store,
+            rimeMaintenanceService: rimeProvider,
+            acceptedLearningProvider: acceptedLearning,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            refreshGate: sharedGate
+        )
+
+        staleRuntime.scheduleRefresh(
+            reason: "commit",
+            schemaID: "pinyin_simp",
+            recentCommits: ["旧提交不应出现"],
+            selectionHistory: ["旧选择不应出现"]
+        )
+        currentRuntime.scheduleRefresh(
+            reason: "commit",
+            schemaID: "pinyin_simp",
+            recentCommits: ["最新提交应该保留"],
+            selectionHistory: ["最新选择应该保留"]
+        )
+        await acceptedLearning.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let acceptedRefresh = await waitUntil(timeoutNanoseconds: 3_000_000_000) {
+            guard let markdown = try? String(contentsOf: markdownURL, encoding: .utf8) else {
+                return false
+            }
+            return markdown.contains("accepted-ai-summary: terms=")
+                && markdown.contains("最新提交应该保留")
+                && markdown.contains("最新选择应该保留")
+        }
+        XCTAssertTrue(acceptedRefresh)
+        let markdown = try String(contentsOf: markdownURL, encoding: .utf8)
+        XCTAssertFalse(markdown.contains("旧提交不应出现"))
+        XCTAssertFalse(markdown.contains("旧选择不应出现"))
+    }
 }
 
 private actor StaticRimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProviding {

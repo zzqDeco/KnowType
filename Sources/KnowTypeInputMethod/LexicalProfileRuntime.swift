@@ -4,16 +4,17 @@ import KnowTypeAI
 import KnowTypeCore
 
 final class LexicalProfileRuntime: @unchecked Sendable {
+    private static let summaryReadyObserverRegistry = AcceptedSummaryRefreshObserverRegistry()
+
     private let store: LexicalProfileStore
     private let rimeMaintenanceService: (any RimeUserDBTextSnapshotProviding)?
     private let acceptedLearningProvider: (any AIAcceptedLearningSnapshotProviding)?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let builder = LexicalContextBuilder()
     private let refreshGate: LexicalProfileRefreshGate
-    private let latestContextLock = NSLock()
+    private let stateLock = NSLock()
     private var refreshTask: Task<Void, Never>?
     private var latestRefreshContext: LexicalProfileRefreshContext?
-    private var acceptedSummaryObserver: (observer: any AIAcceptedLearningSummaryObserving, id: UUID)?
 
     init(
         store: LexicalProfileStore,
@@ -27,11 +28,8 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         self.acceptedLearningProvider = acceptedLearningProvider
         self.diagnosticSink = diagnosticSink
         self.refreshGate = refreshGate
-        if let observer = acceptedLearningProvider as? any AIAcceptedLearningSummaryObserving {
-            let id = observer.addSummaryReadyObserver { [weak self] event in
-                self?.handleAcceptedSummaryReady(event)
-            }
-            acceptedSummaryObserver = (observer, id)
+        if let observer = acceptedLearningProvider as? (any AIAcceptedLearningSummaryObserving & AnyObject) {
+            Self.summaryReadyObserverRegistry.ensureObserver(provider: observer)
         }
         diagnosticSink.record(
             AIRecommendationDiagnosticEvent(
@@ -42,9 +40,7 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     }
 
     deinit {
-        if let acceptedSummaryObserver {
-            acceptedSummaryObserver.observer.removeSummaryReadyObserver(acceptedSummaryObserver.id)
-        }
+        Self.summaryReadyObserverRegistry.unregister(runtime: self)
     }
 
     func currentProfile() -> PersistentLexicalProfile? {
@@ -72,8 +68,10 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     }
 
     func cancelRefresh() {
+        stateLock.lock()
         refreshTask?.cancel()
         refreshTask = nil
+        stateLock.unlock()
     }
 
     func scheduleRefresh(
@@ -82,28 +80,29 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         recentCommits: [String],
         selectionHistory: [String]
     ) {
+        Self.summaryReadyObserverRegistry.markCurrent(self)
         let context = LexicalProfileRefreshContext(
             schemaID: schemaID,
             recentCommits: recentCommits,
             selectionHistory: selectionHistory
         )
-        latestContextLock.lock()
-        latestRefreshContext = context
-        latestContextLock.unlock()
-
-        guard let rimeMaintenanceService else {
-            return
-        }
-        let generation = refreshGate.next()
-        cancelRefresh()
 
         let store = store
+        let rimeMaintenanceService = rimeMaintenanceService
         let diagnosticSink = diagnosticSink
         let builder = builder
         let parser = RimeUserDBTextParser(maxTerms: 64)
         let refreshGate = refreshGate
         let acceptedLearningProvider = acceptedLearningProvider
 
+        stateLock.lock()
+        latestRefreshContext = context
+        guard let rimeMaintenanceService else {
+            stateLock.unlock()
+            return
+        }
+        let generation = refreshGate.next()
+        refreshTask?.cancel()
         let task = Task.detached(priority: .utility) {
             do {
                 try await Task.sleep(nanoseconds: 500_000_000)
@@ -195,12 +194,13 @@ final class LexicalProfileRuntime: @unchecked Sendable {
             }
         }
         refreshTask = task
+        stateLock.unlock()
     }
 
-    private func handleAcceptedSummaryReady(_ event: AIAcceptedLearningSummaryReadyEvent) {
-        latestContextLock.lock()
+    fileprivate func handleAcceptedSummaryReady(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        stateLock.lock()
         let context = latestRefreshContext
-        latestContextLock.unlock()
+        stateLock.unlock()
         guard let context,
               context.schemaID == event.schemaID else {
             return
@@ -218,6 +218,61 @@ final class LexicalProfileRuntime: @unchecked Sendable {
             .prefix(6)
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+}
+
+private final class AcceptedSummaryRefreshObserverRegistry: @unchecked Sendable {
+    private struct Registration {
+        var provider: any AIAcceptedLearningSummaryObserving
+        var providerID: ObjectIdentifier
+        var observerID: UUID
+    }
+
+    private let lock = NSLock()
+    private var registration: Registration?
+    private weak var currentRuntime: LexicalProfileRuntime?
+
+    func ensureObserver(provider: any AIAcceptedLearningSummaryObserving & AnyObject) {
+        let providerID = ObjectIdentifier(provider)
+        lock.lock()
+        if registration?.providerID == providerID {
+            lock.unlock()
+            return
+        }
+        if let registration {
+            registration.provider.removeSummaryReadyObserver(registration.observerID)
+        }
+        let observerID = provider.addSummaryReadyObserver { [weak self] event in
+            self?.handle(event)
+        }
+        registration = Registration(
+            provider: provider,
+            providerID: providerID,
+            observerID: observerID
+        )
+        currentRuntime = nil
+        lock.unlock()
+    }
+
+    func markCurrent(_ runtime: LexicalProfileRuntime) {
+        lock.lock()
+        currentRuntime = runtime
+        lock.unlock()
+    }
+
+    func unregister(runtime: LexicalProfileRuntime) {
+        lock.lock()
+        if currentRuntime === runtime {
+            currentRuntime = nil
+        }
+        lock.unlock()
+    }
+
+    private func handle(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        lock.lock()
+        let runtime = currentRuntime
+        lock.unlock()
+        runtime?.handleAcceptedSummaryReady(event)
     }
 }
 
