@@ -231,6 +231,38 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertNil(store.snapshot(schemaID: "pinyin_simp"))
     }
 
+    func testSummaryReadyObserverReceivesMetadataOnlyAfterRebuild() async throws {
+        let recorder = SummaryReadyEventRecorder()
+        let store = AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        store.addSummaryReadyObserver { event in
+            recorder.record(event)
+        }
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                rawInput: "json",
+                acceptedText: "JSON Schema 可以继续推进",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let event = try XCTUnwrap(recorder.events.first)
+        let summary = try XCTUnwrap(store.snapshot(schemaID: "pinyin_simp"))
+        XCTAssertEqual(event.schemaID, "pinyin_simp")
+        XCTAssertEqual(event.historyHash, summary.historyHash)
+        XCTAssertEqual(event.acceptedCount, 1)
+        XCTAssertEqual(event.termCount, summary.termProfile.count)
+        XCTAssertEqual(event.recentCommitCount, summary.recentAcceptedCommits.count)
+    }
+
     func testMultilineRecentAcceptedCommitIsFlattenedForPromptMarkdown() async throws {
         let store = AIAcceptedLearningStore.inMemory()
 
@@ -324,6 +356,24 @@ private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @un
     }
 
     var events: [AIRecommendationDiagnosticEvent] {
+        lock.lock()
+        let events = recordedEvents
+        lock.unlock()
+        return events
+    }
+}
+
+private final class SummaryReadyEventRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [AIAcceptedLearningSummaryReadyEvent] = []
+
+    func record(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+
+    var events: [AIAcceptedLearningSummaryReadyEvent] {
         lock.lock()
         let events = recordedEvents
         lock.unlock()

@@ -8,6 +8,10 @@ bounded language summary, and writes a readable diagnostics mirror. The full
 history is local-only; provider requests receive only the accepted summary after
 `LexicalProfileRuntime` merges it into `LEXICAL_PROFILE.md`.
 
+Summary rebuilds are delayed and run on a utility task. After a rebuild is
+persisted, the store emits summary-ready metadata containing only schema id,
+history hash, and counts. It does not emit raw input or accepted text.
+
 Privacy rules:
 
 - skip the whole accepted-learning record when raw input, locked prefix, or

@@ -404,6 +404,8 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - skips records containing secret-like raw input, locked prefix, or accepted text
 - feeds only bounded summary terms and recent short accepted commits into
   `LEXICAL_PROFILE.md`; it never writes Rime userdb or calls `sync_user_data`
+- emits summary-ready metadata after a delayed summary rebuild is persisted; the
+  event contains only schema id, history hash, and counts, not user text
 
 Rime userdb profile refresh is a background-only input-method task. It calls
 librime sync as a best-effort freshness step, reads the live active schema from

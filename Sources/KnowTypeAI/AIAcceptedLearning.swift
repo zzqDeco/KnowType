@@ -102,6 +102,36 @@ public protocol AIAcceptedLearningSnapshotProviding: Sendable {
     func snapshot(schemaID: String?) -> AIAcceptedLanguageSummary?
 }
 
+public struct AIAcceptedLearningSummaryReadyEvent: Sendable, Equatable {
+    public var schemaID: String
+    public var historyHash: String
+    public var acceptedCount: Int
+    public var termCount: Int
+    public var recentCommitCount: Int
+
+    public init(
+        schemaID: String,
+        historyHash: String,
+        acceptedCount: Int,
+        termCount: Int,
+        recentCommitCount: Int
+    ) {
+        self.schemaID = schemaID
+        self.historyHash = historyHash
+        self.acceptedCount = acceptedCount
+        self.termCount = termCount
+        self.recentCommitCount = recentCommitCount
+    }
+}
+
+public protocol AIAcceptedLearningSummaryObserving: Sendable {
+    @discardableResult
+    func addSummaryReadyObserver(
+        _ observer: @escaping @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void
+    ) -> UUID
+    func removeSummaryReadyObserver(_ id: UUID)
+}
+
 public extension AIAcceptedLearningSnapshotProviding {
     func snapshot(schemaID _: String?) -> AIAcceptedLanguageSummary? {
         snapshot()
@@ -232,6 +262,7 @@ public struct AIAcceptedTermExtractor: Sendable {
 public final class AIAcceptedLearningStore:
     AIAcceptedLearningRecording,
     AIAcceptedLearningSnapshotProviding,
+    AIAcceptedLearningSummaryObserving,
     @unchecked Sendable
 {
     private let historyURL: URL?
@@ -247,6 +278,7 @@ public final class AIAcceptedLearningStore:
     private var summary: AIAcceptedLanguageSummary?
     private var schemaSummaries: [String: AIAcceptedLanguageSummary]
     private var summaryTask: Task<Void, Never>?
+    private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
 
     public init(
         historyURL: URL? = AIAcceptedLearningStore.defaultHistoryURL(),
@@ -373,6 +405,23 @@ public final class AIAcceptedLearningStore:
         return current
     }
 
+    @discardableResult
+    public func addSummaryReadyObserver(
+        _ observer: @escaping @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void
+    ) -> UUID {
+        let id = UUID()
+        lock.lock()
+        summaryObservers[id] = observer
+        lock.unlock()
+        return id
+    }
+
+    public func removeSummaryReadyObserver(_ id: UUID) {
+        lock.lock()
+        summaryObservers.removeValue(forKey: id)
+        lock.unlock()
+    }
+
     private func append(_ record: AIAcceptedLearningRecord) throws {
         try withAcceptedLearningFileLock {
             if let historyURL {
@@ -450,6 +499,9 @@ public final class AIAcceptedLearningStore:
             try withAcceptedLearningFileLock {
                 try persistSummary(nextSummary)
             }
+            notifySummaryReady(
+                Self.summaryReadyEvents(from: nextSchemaSummaries)
+            )
         } catch {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
@@ -457,6 +509,23 @@ public final class AIAcceptedLearningStore:
                     reason: "accepted_learning_summary_write_failed:\(String(describing: type(of: error)))"
                 )
             )
+        }
+    }
+
+    private func notifySummaryReady(_ events: [AIAcceptedLearningSummaryReadyEvent]) {
+        guard !events.isEmpty else {
+            return
+        }
+        lock.lock()
+        let observers = Array(summaryObservers.values)
+        lock.unlock()
+        guard !observers.isEmpty else {
+            return
+        }
+        for event in events {
+            for observer in observers {
+                observer(event)
+            }
         }
     }
 
@@ -534,6 +603,22 @@ public final class AIAcceptedLearningStore:
                 return (schemaID, summary)
             }
         )
+    }
+
+    private static func summaryReadyEvents(
+        from schemaSummaries: [String: AIAcceptedLanguageSummary]
+    ) -> [AIAcceptedLearningSummaryReadyEvent] {
+        schemaSummaries
+            .map { schemaID, summary in
+                AIAcceptedLearningSummaryReadyEvent(
+                    schemaID: schemaID,
+                    historyHash: summary.historyHash,
+                    acceptedCount: summary.acceptedCount,
+                    termCount: summary.termProfile.count,
+                    recentCommitCount: summary.recentAcceptedCommits.count
+                )
+            }
+            .sorted { $0.schemaID < $1.schemaID }
     }
 
     private static func summary(

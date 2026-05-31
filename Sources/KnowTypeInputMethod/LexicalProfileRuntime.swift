@@ -10,7 +10,10 @@ final class LexicalProfileRuntime: @unchecked Sendable {
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let builder = LexicalContextBuilder()
     private let refreshGate: LexicalProfileRefreshGate
+    private let latestContextLock = NSLock()
     private var refreshTask: Task<Void, Never>?
+    private var latestRefreshContext: LexicalProfileRefreshContext?
+    private var acceptedSummaryObserver: (observer: any AIAcceptedLearningSummaryObserving, id: UUID)?
 
     init(
         store: LexicalProfileStore,
@@ -24,12 +27,24 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         self.acceptedLearningProvider = acceptedLearningProvider
         self.diagnosticSink = diagnosticSink
         self.refreshGate = refreshGate
+        if let observer = acceptedLearningProvider as? any AIAcceptedLearningSummaryObserving {
+            let id = observer.addSummaryReadyObserver { [weak self] event in
+                self?.handleAcceptedSummaryReady(event)
+            }
+            acceptedSummaryObserver = (observer, id)
+        }
         diagnosticSink.record(
             AIRecommendationDiagnosticEvent(
                 stage: .lexicalProfileLoad,
                 reason: store.currentSnapshot() == nil ? "empty" : "loaded"
             )
         )
+    }
+
+    deinit {
+        if let acceptedSummaryObserver {
+            acceptedSummaryObserver.observer.removeSummaryReadyObserver(acceptedSummaryObserver.id)
+        }
     }
 
     func currentProfile() -> PersistentLexicalProfile? {
@@ -67,6 +82,15 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         recentCommits: [String],
         selectionHistory: [String]
     ) {
+        let context = LexicalProfileRefreshContext(
+            schemaID: schemaID,
+            recentCommits: recentCommits,
+            selectionHistory: selectionHistory
+        )
+        latestContextLock.lock()
+        latestRefreshContext = context
+        latestContextLock.unlock()
+
         guard let rimeMaintenanceService else {
             return
         }
@@ -78,6 +102,7 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         let builder = builder
         let parser = RimeUserDBTextParser(maxTerms: 64)
         let refreshGate = refreshGate
+        let acceptedLearningProvider = acceptedLearningProvider
 
         let task = Task.detached(priority: .utility) {
             do {
@@ -114,9 +139,13 @@ final class LexicalProfileRuntime: @unchecked Sendable {
                         reason: "schema=\(snapshot.schemaID)"
                     )
                 )
+                let acceptedSummary = acceptedLearningProvider?.snapshot(schemaID: schemaID)
                 guard let lexical = builder.snapshot(
                     recentCommits: recentCommits,
                     selectionHistory: selectionHistory,
+                    acceptedAITerms: acceptedSummary?.termProfile ?? [],
+                    acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
+                    acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
                     persistentTerms: terms,
                     persistentSourceSummary: [
                         "rime-userdb-snapshot: \(Self.pathHash(snapshot.fileURL.path))"
@@ -168,10 +197,32 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         refreshTask = task
     }
 
+    private func handleAcceptedSummaryReady(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        latestContextLock.lock()
+        let context = latestRefreshContext
+        latestContextLock.unlock()
+        guard let context,
+              context.schemaID == event.schemaID else {
+            return
+        }
+        scheduleRefresh(
+            reason: "accepted-ai-summary",
+            schemaID: context.schemaID,
+            recentCommits: context.recentCommits,
+            selectionHistory: context.selectionHistory
+        )
+    }
+
     private static func pathHash(_ path: String) -> String {
         SHA256.hash(data: Data(path.utf8))
             .prefix(6)
             .map { String(format: "%02x", $0) }
             .joined()
     }
+}
+
+private struct LexicalProfileRefreshContext: Sendable {
+    var schemaID: String
+    var recentCommits: [String]
+    var selectionHistory: [String]
 }
