@@ -124,8 +124,9 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
 
         let history = acceptedLearningHistory(at: historyURL)
         let summary = acceptedLearningSummaryFile(at: summaryURL)
+        let summaryExists = fileManager.fileExists(atPath: summaryURL.path)
         let summaryState: String
-        if history.recordCount == 0, summary == nil {
+        if history.recordCount == 0, summary == nil, !summaryExists {
             summaryState = SettingsLocalization.string(
                 "settings.diagnostics.acceptedLearning.summary.current",
                 preferredLanguages: preferredLanguages
@@ -137,7 +138,7 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
                 "settings.diagnostics.acceptedLearning.summary.current",
                 preferredLanguages: preferredLanguages
             )
-        } else if summary == nil {
+        } else if summary == nil, !summaryExists {
             summaryState = Self.missing(preferredLanguages)
         } else {
             summaryState = SettingsLocalization.string(

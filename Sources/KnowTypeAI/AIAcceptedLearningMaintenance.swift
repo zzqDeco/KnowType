@@ -62,6 +62,8 @@ public struct AIAcceptedLearningMaintenance {
     public var mirrorURL: URL
     public var lexicalJSONURL: URL
     public var lexicalMarkdownURL: URL
+    public var clearMarkerURL: URL
+    public var lockURL: URL
     public var fileManager: FileManager
 
     public init(
@@ -77,6 +79,10 @@ public struct AIAcceptedLearningMaintenance {
         self.mirrorURL = mirrorURL
         self.lexicalJSONURL = lexicalJSONURL
         self.lexicalMarkdownURL = lexicalMarkdownURL
+        self.clearMarkerURL = acceptedLearningClearMarkerURL(historyURL: historyURL)
+            ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+        self.lockURL = acceptedLearningLockURL(historyURL: historyURL)
+            ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
         self.fileManager = fileManager
     }
 
@@ -84,9 +90,10 @@ public struct AIAcceptedLearningMaintenance {
         let loaded = loadRecords()
         let records = loaded.records
         let historyHash = records.isEmpty ? nil : AIAcceptedLearningStore.historyHash(records)
-        let summary = loadSummary()
+        let loadedSummary = loadSummary()
+        let summary = loadedSummary.summary
         let summaryIsCurrent: Bool
-        if records.isEmpty {
+        if records.isEmpty, !loadedSummary.exists {
             summaryIsCurrent = summary == nil
         } else {
             summaryIsCurrent = summary?.acceptedCount == records.count
@@ -96,6 +103,8 @@ public struct AIAcceptedLearningMaintenance {
         var warnings = loaded.warnings
         if !records.isEmpty, summary == nil {
             warnings.append("summary_missing")
+        } else if loadedSummary.exists, loadedSummary.summary == nil {
+            warnings.append("summary_unreadable")
         } else if !summaryIsCurrent {
             warnings.append("summary_stale")
         }
@@ -140,9 +149,9 @@ public struct AIAcceptedLearningMaintenance {
 
     @discardableResult
     public func rebuild() throws -> AIAcceptedLearningMaintenanceStatus {
-        let records = loadRecords().records
-        let summary = AIAcceptedLearningStore.buildSummary(records: records, generatedAt: Date())
-        try withAcceptedLearningFileLock {
+        try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
+            let records = loadRecords().records
+            let summary = AIAcceptedLearningStore.buildSummary(records: records, generatedAt: Date())
             if let summary {
                 try atomicWrite(encode(summary), to: summaryURL)
                 try atomicWrite(Data(AIAcceptedLearningStore.renderMarkdown(summary).utf8), to: mirrorURL)
@@ -159,10 +168,12 @@ public struct AIAcceptedLearningMaintenance {
         guard confirm else {
             throw Error.clearRequiresConfirmation
         }
-        try withAcceptedLearningFileLock {
+        try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
+            try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
+            try scrubAcceptedAIFromLexicalProfile()
         }
         return status(action: "cleared")
     }
@@ -189,13 +200,14 @@ public struct AIAcceptedLearningMaintenance {
         return (records, warnings)
     }
 
-    private func loadSummary() -> AIAcceptedLanguageSummary? {
+    private func loadSummary() -> (exists: Bool, summary: AIAcceptedLanguageSummary?) {
+        let exists = fileManager.fileExists(atPath: summaryURL.path)
         guard let data = try? Data(contentsOf: summaryURL) else {
-            return nil
+            return (exists, nil)
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(AIAcceptedLanguageSummary.self, from: data)
+        return (exists, try? decoder.decode(AIAcceptedLanguageSummary.self, from: data))
     }
 
     private func markdownContainsAcceptedAISummary() -> Bool {
@@ -225,6 +237,68 @@ public struct AIAcceptedLearningMaintenance {
             return
         }
         try fileManager.removeItem(at: url)
+    }
+
+    private func clearMarkerPayload() -> Data {
+        let payload: [String: Any] = [
+            "schemaVersion": 1,
+            "clearedAt": dateString(Date())
+        ]
+        let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        return data ?? Data()
+    }
+
+    private func scrubAcceptedAIFromLexicalProfile() throws {
+        guard fileManager.fileExists(atPath: lexicalJSONURL.path),
+              let data = try? Data(contentsOf: lexicalJSONURL) else {
+            if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
+                try scrubAcceptedAIFromLexicalMarkdownOnly()
+            }
+            return
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let profile = try? decoder.decode(PersistentLexicalProfile.self, from: data) else {
+            if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
+                try scrubAcceptedAIFromLexicalMarkdownOnly()
+            }
+            return
+        }
+
+        let hadAcceptedSource = profile.lexicalContext.sourceSummary.contains {
+            $0.hasPrefix("accepted-ai")
+        } || profile.lexicalContext.terms.contains { $0.source == "accepted-ai" }
+        guard hadAcceptedSource else {
+            return
+        }
+
+        let scrubbedContext = LexicalContextSnapshot(
+            terms: profile.lexicalContext.terms.filter { $0.source != "accepted-ai" },
+            recentCommits: [],
+            toneProfile: ToneProfile(),
+            sourceSummary: profile.lexicalContext.sourceSummary.filter { !$0.hasPrefix("accepted-ai") }
+        )
+        let scrubbedProfile = PersistentLexicalProfile(
+            generatedAt: Date(),
+            schemaID: profile.schemaID,
+            rimeSnapshotPath: profile.rimeSnapshotPath,
+            rimeSnapshotModifiedAt: profile.rimeSnapshotModifiedAt,
+            lexicalContext: scrubbedContext
+        )
+        try atomicWrite(encode(scrubbedProfile), to: lexicalJSONURL)
+        try atomicWrite(Data(scrubbedContext.markdown.utf8), to: lexicalMarkdownURL)
+    }
+
+    private func scrubAcceptedAIFromLexicalMarkdownOnly() throws {
+        guard let content = try? String(contentsOf: lexicalMarkdownURL, encoding: .utf8),
+              content.contains("accepted-ai") else {
+            return
+        }
+        let lines = content
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+            .filter { !$0.contains("accepted-ai") }
+        try atomicWrite(Data((lines.joined(separator: "\n") + "\n").utf8), to: lexicalMarkdownURL)
     }
 
     private func modificationDateString(_ url: URL) -> String? {

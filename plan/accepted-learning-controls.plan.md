@@ -16,9 +16,12 @@ learning data explicitly.
   freshness, and whether `LEXICAL_PROFILE.md` contains accepted-AI summary.
 - `rebuild [--json]` rebuilds `accepted-ai-summary.json` and
   `ACCEPTED_AI_LEARNING.md` from full local history.
-- `clear --yes [--json]` deletes only accepted-learning history, summary, and
-  mirror files; it does not delete lexical profile, Rime, provider, Keychain,
-  ENV, or CORRECTION data.
+- `clear --yes [--json]` deletes accepted-learning history, summary, and mirror
+  files, writes a clear marker for running stores, and scrubs accepted-AI
+  lexical-profile context without deleting Rime, provider, Keychain, ENV, or
+  CORRECTION data.
+- Runtime and maintenance writes share an interprocess lock file so rebuild,
+  clear, and accepted-record appends do not publish stale summaries.
 - Diagnostics and Settings display accepted-learning status without showing raw
   input or accepted text.
 

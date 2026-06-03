@@ -1,12 +1,49 @@
+import Darwin
 import CryptoKit
 import Foundation
 import KnowTypeCore
 
 let acceptedLearningFileLock = NSLock()
 
-func withAcceptedLearningFileLock<T>(_ body: () throws -> T) rethrows -> T {
+func acceptedLearningLockURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
+}
+
+func acceptedLearningClearMarkerURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+}
+
+func withAcceptedLearningFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
     acceptedLearningFileLock.lock()
-    defer { acceptedLearningFileLock.unlock() }
+    defer {
+        acceptedLearningFileLock.unlock()
+    }
+
+    guard let lockURL else {
+        return try body()
+    }
+
+    try fileManager.createDirectory(
+        at: lockURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    if !fileManager.fileExists(atPath: lockURL.path) {
+        fileManager.createFile(atPath: lockURL.path, contents: nil)
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
     return try body()
 }
 
@@ -280,6 +317,7 @@ public final class AIAcceptedLearningStore:
     private var pendingSummarySchemaIDs: Set<String>
     private var summaryTask: Task<Void, Never>?
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
+    private var lastClearMarkerModifiedAt: Date?
 
     public init(
         historyURL: URL? = AIAcceptedLearningStore.defaultHistoryURL(),
@@ -300,9 +338,15 @@ public final class AIAcceptedLearningStore:
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder.dateDecodingStrategy = .iso8601
         self.records = Self.loadRecords(from: historyURL, decoder: decoder)
+        self.lastClearMarkerModifiedAt = Self.fileModificationDate(
+            acceptedLearningClearMarkerURL(historyURL: historyURL),
+            fileManager: fileManager
+        )
         let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
         let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
+        let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
         let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
+            && (!summaryFileExists || loadedSummary != nil)
         self.summary = summaryIsCurrent ? loadedSummary : rebuiltSummary
         self.schemaSummaries = Self.buildSchemaSummaries(records: records, generatedAt: Date())
         self.pendingSummarySchemaIDs = []
@@ -425,7 +469,8 @@ public final class AIAcceptedLearningStore:
     }
 
     private func append(_ record: AIAcceptedLearningRecord) throws {
-        try withAcceptedLearningFileLock {
+        try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
+            syncRecordsAfterExternalClearLocked()
             if let historyURL {
                 try fileManager.createDirectory(
                     at: historyURL.deletingLastPathComponent(),
@@ -443,11 +488,11 @@ public final class AIAcceptedLearningStore:
                     try line.write(to: historyURL, options: .atomic)
                 }
             }
+            lock.lock()
+            records.append(record)
+            pendingSummarySchemaIDs.insert(record.schemaID)
+            lock.unlock()
         }
-        lock.lock()
-        records.append(record)
-        pendingSummarySchemaIDs.insert(record.schemaID)
-        lock.unlock()
         scheduleSummaryRebuild()
     }
 
@@ -481,35 +526,36 @@ public final class AIAcceptedLearningStore:
     }
 
     private func rebuildSummary() {
-        lock.lock()
-        let currentRecords = records
-        let changedSchemaIDs = pendingSummarySchemaIDs
-        pendingSummarySchemaIDs.removeAll()
-        lock.unlock()
-
-        let generatedAt = Date()
-        let nextSummary = Self.buildSummary(records: currentRecords, generatedAt: generatedAt)
-        let nextSchemaSummaries = Self.buildSchemaSummaries(records: currentRecords, generatedAt: generatedAt)
-
-        lock.lock()
-        summary = nextSummary
-        schemaSummaries = nextSchemaSummaries
-        lock.unlock()
-
-        guard let nextSummary else {
-            return
-        }
-
+        var changedSchemaIDsForRetry: Set<String> = []
         do {
-            try withAcceptedLearningFileLock {
+            let events = try withAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) { () -> [AIAcceptedLearningSummaryReadyEvent] in
+                syncRecordsAfterExternalClearLocked()
+                lock.lock()
+                let currentRecords = records
+                let changedSchemaIDs = pendingSummarySchemaIDs
+                changedSchemaIDsForRetry = changedSchemaIDs
+                pendingSummarySchemaIDs.removeAll()
+                lock.unlock()
+
+                let generatedAt = Date()
+                let nextSummary = Self.buildSummary(records: currentRecords, generatedAt: generatedAt)
+                let nextSchemaSummaries = Self.buildSchemaSummaries(records: currentRecords, generatedAt: generatedAt)
+
+                lock.lock()
+                summary = nextSummary
+                schemaSummaries = nextSchemaSummaries
+                lock.unlock()
+
                 try persistSummary(nextSummary)
-            }
-            notifySummaryReady(
-                Self.summaryReadyEvents(
+                return Self.summaryReadyEvents(
                     from: nextSchemaSummaries,
                     changedSchemaIDs: changedSchemaIDs
                 )
-            )
+            }
+            notifySummaryReady(events)
         } catch {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
@@ -518,9 +564,30 @@ public final class AIAcceptedLearningStore:
                 )
             )
             lock.lock()
-            pendingSummarySchemaIDs.formUnion(changedSchemaIDs)
+            pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
             lock.unlock()
         }
+    }
+
+    private func syncRecordsAfterExternalClearLocked() {
+        guard let markerURL = acceptedLearningClearMarkerURL(historyURL: historyURL) else {
+            return
+        }
+        let markerModifiedAt = Self.fileModificationDate(markerURL, fileManager: fileManager)
+        guard let markerModifiedAt,
+              lastClearMarkerModifiedAt == nil || markerModifiedAt > (lastClearMarkerModifiedAt ?? .distantPast) else {
+            return
+        }
+        let reloadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: Date())
+        let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: Date())
+        lock.lock()
+        records = reloadedRecords
+        summary = reloadedSummary
+        schemaSummaries = reloadedSchemaSummaries
+        pendingSummarySchemaIDs.removeAll()
+        lastClearMarkerModifiedAt = markerModifiedAt
+        lock.unlock()
     }
 
     private func notifySummaryReady(_ events: [AIAcceptedLearningSummaryReadyEvent]) {
@@ -742,6 +809,14 @@ public final class AIAcceptedLearningStore:
             return nil
         }
         return try? decoder.decode(AIAcceptedLanguageSummary.self, from: data)
+    }
+
+    private static func fileModificationDate(_ url: URL?, fileManager: FileManager) -> Date? {
+        guard let url,
+              let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return attributes[.modificationDate] as? Date
     }
 
     private func atomicWrite(_ data: Data, to url: URL) throws {

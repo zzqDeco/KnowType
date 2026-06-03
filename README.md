@@ -247,8 +247,10 @@ Support and is not injected directly into provider requests. The canonical
 lexical profile JSON lives under
 `~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
 on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
-`clear --yes` to inspect, rebuild, or delete accepted-AI learning data without
-touching Rime, provider, Keychain, ENV, CORRECTION, or lexical profile files.
+`clear --yes` to inspect, rebuild, or delete accepted-AI learning data. Clear
+removes accepted-learning history/summary/mirror files and scrubs accepted-AI
+context from the lexical profile without deleting Rime, provider, Keychain, ENV,
+or CORRECTION data.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS

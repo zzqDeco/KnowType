@@ -238,10 +238,11 @@ def accepted_learning_status(app_support, home):
         history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
     summary = load_json(summary_path)
+    summary_exists = summary_path.is_file()
     if records:
         is_current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash") == history_hash
     else:
-        is_current = summary is None
+        is_current = summary is None and not summary_exists
 
     try:
         lexical_markdown = lexical_markdown_path.read_text(encoding="utf-8")
@@ -253,6 +254,8 @@ def accepted_learning_status(app_support, home):
         warnings.append(f"invalid_history_lines:{invalid_lines}")
     if records and not summary:
         warnings.append("summary_missing")
+    elif summary_exists and summary is None:
+        warnings.append("summary_unreadable")
     elif not is_current:
         warnings.append("summary_stale")
 

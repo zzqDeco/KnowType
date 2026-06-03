@@ -114,8 +114,9 @@ struct KnowTypeAcceptedLearningTool {
           knowtype-accepted-learning-tool clear --yes [--json]
 
         Maintains KnowType accepted AI learning history, summary, and readable mirror.
-        The clear command only deletes accepted-learning files and never deletes Rime,
-        provider, Keychain, ENV.md, CORRECTION.md, or LEXICAL_PROFILE.md data.
+        The clear command deletes accepted-learning files and scrubs accepted-AI
+        lexical-profile context. It never deletes Rime, provider, Keychain,
+        ENV.md, or CORRECTION.md data.
         """
     }
 }

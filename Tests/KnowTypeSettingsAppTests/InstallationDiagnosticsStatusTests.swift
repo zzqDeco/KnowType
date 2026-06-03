@@ -152,6 +152,35 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         XCTAssertEqual(status.rollbackCommand, "./scripts/rollback-inputmethod.sh --to 20260524T000000Z-0000-0.1.0-1")
     }
 
+    func testAcceptedLearningCorruptSummaryIsShownAsStale() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-accepted-learning-status-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let home = root.appendingPathComponent("Home", isDirectory: true)
+        let support = root.appendingPathComponent("Support/KnowType", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: support.appendingPathComponent("AI", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".knowtype", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data("{not-json".utf8).write(to: support.appendingPathComponent("AI/accepted-ai-summary.json"))
+
+        let status = InstallationDiagnosticsStatus(
+            applicationSupportURL: support,
+            homeDirectoryURL: home,
+            inputMethodBundleURL: root.appendingPathComponent("KnowType.app", isDirectory: true),
+            preferencePaneURL: root.appendingPathComponent("KnowType.prefPane", isDirectory: true),
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+
+        XCTAssertEqual(value("Summary 状态", in: status.acceptedLearningRows), "过期")
+    }
+
     private func makeBundle(at url: URL, version: String, build: String) throws {
         let contents = url.appendingPathComponent("Contents", isDirectory: true)
         try FileManager.default.createDirectory(

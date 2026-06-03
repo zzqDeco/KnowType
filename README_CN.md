@@ -218,8 +218,10 @@ AI 推荐摘要合成的本地 top-K 词汇画像镜像。完整 accepted-AI 历
 Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
 这些文件。可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或
-`clear --yes` 查看、重建或删除 accepted-AI learning 数据；这些命令不会触碰
-Rime、provider、Keychain、ENV、CORRECTION 或 lexical profile 文件。
+`clear --yes` 查看、重建或删除 accepted-AI learning 数据；clear 会删除
+accepted-learning history/summary/mirror，并从 lexical profile 中清理
+accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或 CORRECTION
+数据。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
 输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给
