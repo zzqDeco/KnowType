@@ -127,6 +127,67 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(mirror.contains("Accepted count: 2"))
     }
 
+    func testStoreStartupRepairWaitsForAcceptedLearningFileLock() throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let record = AIAcceptedLearningRecord(
+            acceptedAt: Date(timeIntervalSince1970: 1),
+            schemaID: "pinyin_simp",
+            rawInput: "json",
+            acceptedText: "JSON Schema 可以继续推进",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try String(data: encoder.encode(record), encoding: .utf8)?
+            .appending("\n")
+            .write(to: historyURL, atomically: true, encoding: .utf8)
+        let staleSummary = AIAcceptedLanguageSummary(
+            historyHash: "stale",
+            acceptedCount: 0,
+            termProfile: [],
+            styleProfile: ToneProfile(),
+            recentAcceptedCommits: [],
+            sourceSummary: ["accepted-ai-summary: terms=0 commits=0 history=stale"]
+        )
+        try encoder.encode(staleSummary).write(to: summaryURL, options: .atomic)
+
+        let started = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        let result = StartupLoadRecorder()
+        try withAcceptedLearningFileLock(
+            lockURL: acceptedLearningLockURL(historyURL: historyURL),
+            fileManager: .default
+        ) {
+            DispatchQueue.global(qos: .utility).async {
+                started.signal()
+                let store = AIAcceptedLearningStore(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    summaryDelayNanoseconds: 0
+                )
+                result.record(count: store.allRecords().count)
+                finished.signal()
+            }
+            XCTAssertEqual(started.wait(timeout: .now() + 1), .success)
+            XCTAssertEqual(finished.wait(timeout: .now() + 0.1), .timedOut)
+            try FileManager.default.removeItem(at: historyURL)
+            try FileManager.default.removeItem(at: summaryURL)
+            try Data("{\"schemaVersion\":1}".utf8)
+                .write(to: acceptedLearningClearMarkerURL(historyURL: historyURL)!, options: .atomic)
+        }
+
+        XCTAssertEqual(finished.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(result.count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: summaryURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: mirrorURL.path))
+    }
+
     func testMaintenanceStatusRebuildAndClearStayScopedToAcceptedLearningFiles() async throws {
         let directory = temporaryDirectory()
         let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
@@ -655,6 +716,24 @@ private final class SummaryReadyEventRecorder: @unchecked Sendable {
         let events = recordedEvents
         lock.unlock()
         return events
+    }
+}
+
+private final class StartupLoadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedCount: Int?
+
+    func record(count: Int) {
+        lock.lock()
+        recordedCount = count
+        lock.unlock()
+    }
+
+    var count: Int? {
+        lock.lock()
+        let count = recordedCount
+        lock.unlock()
+        return count
     }
 }
 

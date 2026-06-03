@@ -20,8 +20,9 @@ learning data explicitly.
   files, writes a clear marker for running stores, and scrubs accepted-AI
   lexical-profile context without deleting Rime, provider, Keychain, ENV, or
   CORRECTION data.
-- Runtime and maintenance writes share an interprocess lock file so rebuild,
-  clear, and accepted-record appends do not publish stale summaries.
+- Runtime startup repair and maintenance writes share an interprocess lock file
+  so rebuild, clear, startup repair, and accepted-record appends do not publish
+  stale summaries.
 - Diagnostics and Settings display accepted-learning status without showing raw
   input or accepted text.
 

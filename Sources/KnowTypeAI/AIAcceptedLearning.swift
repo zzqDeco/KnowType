@@ -319,6 +319,13 @@ public final class AIAcceptedLearningStore:
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
     private var lastClearMarkerModifiedAt: Date?
 
+    private struct StartupState {
+        var records: [AIAcceptedLearningRecord]
+        var summary: AIAcceptedLanguageSummary?
+        var schemaSummaries: [String: AIAcceptedLanguageSummary]
+        var lastClearMarkerModifiedAt: Date?
+    }
+
     public init(
         historyURL: URL? = AIAcceptedLearningStore.defaultHistoryURL(),
         summaryURL: URL? = AIAcceptedLearningStore.defaultSummaryURL(),
@@ -327,40 +334,69 @@ public final class AIAcceptedLearningStore:
         diagnosticSink: any AIRecommendationDiagnosticSink = NoopAIRecommendationDiagnosticSink(),
         summaryDelayNanoseconds: UInt64 = 2_000_000_000
     ) {
+        let configuredEncoder = JSONEncoder()
+        configuredEncoder.dateEncodingStrategy = .iso8601
+        let configuredDecoder = JSONDecoder()
+        configuredDecoder.dateDecodingStrategy = .iso8601
+        let startupState: StartupState
+        let startupRepairErrorReason: String?
+        do {
+            startupState = try withAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                try Self.loadStartupState(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    encoder: configuredEncoder,
+                    decoder: configuredDecoder,
+                    repairPersistentSummary: true
+                )
+            }
+            startupRepairErrorReason = nil
+        } catch {
+            startupState = (try? Self.loadStartupState(
+                historyURL: historyURL,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager,
+                encoder: configuredEncoder,
+                decoder: configuredDecoder,
+                repairPersistentSummary: false
+            )) ?? StartupState(
+                records: [],
+                summary: nil,
+                schemaSummaries: [:],
+                lastClearMarkerModifiedAt: Self.fileModificationDate(
+                    acceptedLearningClearMarkerURL(historyURL: historyURL),
+                    fileManager: fileManager
+                )
+            )
+            startupRepairErrorReason = String(describing: type(of: error))
+        }
+
         self.historyURL = historyURL
         self.summaryURL = summaryURL
         self.mirrorURL = mirrorURL
         self.fileManager = fileManager
         self.diagnosticSink = diagnosticSink
         self.summaryDelayNanoseconds = summaryDelayNanoseconds
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
-        self.encoder.dateEncodingStrategy = .iso8601
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.records = Self.loadRecords(from: historyURL, decoder: decoder)
-        self.lastClearMarkerModifiedAt = Self.fileModificationDate(
-            acceptedLearningClearMarkerURL(historyURL: historyURL),
-            fileManager: fileManager
-        )
-        let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
-        let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
-        let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
-        let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
-            && (!summaryFileExists || loadedSummary != nil)
-        self.summary = summaryIsCurrent ? loadedSummary : rebuiltSummary
-        self.schemaSummaries = Self.buildSchemaSummaries(records: records, generatedAt: Date())
+        self.encoder = configuredEncoder
+        self.decoder = configuredDecoder
+        self.records = startupState.records
+        self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
+        self.summary = startupState.summary
+        self.schemaSummaries = startupState.schemaSummaries
         self.pendingSummarySchemaIDs = []
-        if !summaryIsCurrent {
-            do {
-                try persistSummary(summary)
-            } catch {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .lexicalProfileFallback,
-                        reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
-                    )
+        if let startupRepairErrorReason {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_summary_repair_failed:\(startupRepairErrorReason)"
                 )
-            }
+            )
         }
     }
 
@@ -811,6 +847,42 @@ public final class AIAcceptedLearningStore:
         return try? decoder.decode(AIAcceptedLanguageSummary.self, from: data)
     }
 
+    private static func loadStartupState(
+        historyURL: URL?,
+        summaryURL: URL?,
+        mirrorURL: URL?,
+        fileManager: FileManager,
+        encoder: JSONEncoder,
+        decoder: JSONDecoder,
+        repairPersistentSummary: Bool
+    ) throws -> StartupState {
+        let records = Self.loadRecords(from: historyURL, decoder: decoder)
+        let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
+        let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
+        let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
+            && (!summaryFileExists || loadedSummary != nil)
+        let nextSummary = summaryIsCurrent ? loadedSummary : rebuiltSummary
+        if repairPersistentSummary, !summaryIsCurrent {
+            try persistSummary(
+                nextSummary,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                encoder: encoder,
+                fileManager: fileManager
+            )
+        }
+        return StartupState(
+            records: records,
+            summary: nextSummary,
+            schemaSummaries: Self.buildSchemaSummaries(records: records, generatedAt: Date()),
+            lastClearMarkerModifiedAt: Self.fileModificationDate(
+                acceptedLearningClearMarkerURL(historyURL: historyURL),
+                fileManager: fileManager
+            )
+        )
+    }
+
     private static func fileModificationDate(_ url: URL?, fileManager: FileManager) -> Date? {
         guard let url,
               let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
@@ -820,6 +892,10 @@ public final class AIAcceptedLearningStore:
     }
 
     private func atomicWrite(_ data: Data, to url: URL) throws {
+        try Self.atomicWrite(data, to: url, fileManager: fileManager)
+    }
+
+    private static func atomicWrite(_ data: Data, to url: URL, fileManager: FileManager) throws {
         try fileManager.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -828,12 +904,28 @@ public final class AIAcceptedLearningStore:
     }
 
     private func persistSummary(_ summary: AIAcceptedLanguageSummary?) throws {
+        try Self.persistSummary(
+            summary,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            encoder: encoder,
+            fileManager: fileManager
+        )
+    }
+
+    private static func persistSummary(
+        _ summary: AIAcceptedLanguageSummary?,
+        summaryURL: URL?,
+        mirrorURL: URL?,
+        encoder: JSONEncoder,
+        fileManager: FileManager
+    ) throws {
         if let summary {
             if let summaryURL {
-                try atomicWrite(try encoder.encode(summary), to: summaryURL)
+                try atomicWrite(try encoder.encode(summary), to: summaryURL, fileManager: fileManager)
             }
             if let mirrorURL {
-                try atomicWrite(Data(Self.renderMarkdown(summary).utf8), to: mirrorURL)
+                try atomicWrite(Data(Self.renderMarkdown(summary).utf8), to: mirrorURL, fileManager: fileManager)
             }
             return
         }

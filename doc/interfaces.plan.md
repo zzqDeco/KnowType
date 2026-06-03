@@ -419,8 +419,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   marker for running stores, and scrubs accepted-AI terms/source lines from the
   persistent lexical profile; it does not delete ENV, CORRECTION, provider
   profiles, Keychain secrets, or Rime userdb
-- runtime and maintenance writes use a shared lock file so rebuild, clear, and
-  accepted-record appends do not publish stale summaries across processes
+- runtime and maintenance writes, including startup summary repair, use a shared
+  lock file so rebuild, clear, startup repair, and accepted-record appends do not
+  publish stale summaries across processes
 - `diagnose-inputmethod.sh --json` includes `userData.acceptedLearning` with the
   same status shape subset used by settings diagnostics
 

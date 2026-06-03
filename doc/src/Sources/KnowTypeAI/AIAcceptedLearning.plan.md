@@ -23,12 +23,12 @@ by unchanged cached summaries.
 data. It powers `knowtype-accepted-learning-tool` and the
 `scripts/accepted-learning.sh` wrapper with read-only status, explicit rebuild,
 and guarded clear operations. Rebuild reuses the same summary builder used by
-runtime learning. Runtime and maintenance writes share an interprocess lock
-file. Clear removes accepted-learning history, summary, and mirror files, writes
-a clear marker so a running store drops stale in-memory records before the next
-append or rebuild, and scrubs accepted-AI context from the persistent lexical
-profile. It never touches Rime, provider profiles, Keychain data, ENV, or
-CORRECTION.
+runtime learning. Runtime startup repair and maintenance writes share an
+interprocess lock file. Clear removes accepted-learning history, summary, and
+mirror files, writes a clear marker so a running store drops stale in-memory
+records before the next append or rebuild, and scrubs accepted-AI context from
+the persistent lexical profile. It never touches Rime, provider profiles,
+Keychain data, ENV, or CORRECTION.
 
 Privacy rules:
 
