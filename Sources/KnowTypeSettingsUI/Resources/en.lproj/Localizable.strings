@@ -121,6 +121,7 @@
 "settings.diagnostics.section.runtime" = "Runtime";
 "settings.diagnostics.section.ai" = "AI Status";
 "settings.diagnostics.section.userData" = "User Data";
+"settings.diagnostics.section.acceptedLearning" = "AI Learning";
 "settings.diagnostics.section.backup" = "Backup & Rollback";
 "settings.diagnostics.refresh" = "Refresh Status";
 "settings.diagnostics.install.version" = "Version";
@@ -146,6 +147,15 @@
 "settings.diagnostics.userData.env" = "ENV.md";
 "settings.diagnostics.userData.correction" = "CORRECTION.md";
 "settings.diagnostics.userData.lexicalMarkdown" = "LEXICAL_PROFILE.md";
+"settings.diagnostics.acceptedLearning.records" = "Accepted Records";
+"settings.diagnostics.acceptedLearning.summary" = "Summary";
+"settings.diagnostics.acceptedLearning.summary.current" = "Current";
+"settings.diagnostics.acceptedLearning.summary.stale" = "Stale";
+"settings.diagnostics.acceptedLearning.generatedAt" = "Last Summary";
+"settings.diagnostics.acceptedLearning.terms" = "Accepted Terms";
+"settings.diagnostics.acceptedLearning.recentCommits" = "Recent Commits";
+"settings.diagnostics.acceptedLearning.lexicalInjected" = "In LEXICAL_PROFILE.md";
+"settings.diagnostics.acceptedLearning.commands" = "Maintenance Commands";
 "settings.diagnostics.backup.count" = "Backup Count";
 "settings.diagnostics.backup.latest" = "Latest Backup";
 "settings.diagnostics.backup.version" = "Backup Version";
@@ -155,6 +165,8 @@
 "settings.diagnostics.status.missing" = "Missing";
 "settings.diagnostics.status.enabled" = "Enabled";
 "settings.diagnostics.status.disabled" = "Off";
+"settings.diagnostics.status.yes" = "Yes";
+"settings.diagnostics.status.no" = "No";
 "settings.diagnostics.commands" = "Commands";
 "settings.diagnostics.step.build.title" = "Build and Sign";
 "settings.diagnostics.step.build.detail" = "Run the input-method bundle build script. The script prefers an available Apple Development signing identity and falls back to ad-hoc signing only when no certificate is available.";

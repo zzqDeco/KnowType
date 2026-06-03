@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import KnowTypeAI
+import KnowTypeCore
 @testable import KnowTypeInputMethod
 
 final class LexicalProfileRuntimeTests: XCTestCase {
@@ -172,6 +173,67 @@ final class LexicalProfileRuntimeTests: XCTestCase {
         let markdown = try String(contentsOf: markdownURL, encoding: .utf8)
         XCTAssertFalse(markdown.contains("旧提交不应出现"))
         XCTAssertFalse(markdown.contains("旧选择不应出现"))
+    }
+
+    func testLexicalContextReloadsScrubbedProfileAfterAcceptedLearningClear() throws {
+        let directory = temporaryDirectory()
+        let jsonURL = directory.appendingPathComponent("lexical-profile.json")
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let store = LexicalProfileStore(jsonURL: jsonURL, markdownURL: markdownURL)
+        let staleAcceptedContext = LexicalContextSnapshot(
+            terms: [
+                LexicalContextTerm(text: "JSON", score: 1, source: "accepted-ai"),
+                LexicalContextTerm(text: "长期高频", score: 0.9, source: "rime-userdb")
+            ],
+            recentCommits: ["JSON Schema 可以继续推进", "普通提交保留"],
+            toneProfile: ToneProfile(),
+            sourceSummary: [
+                "accepted-ai-summary: terms=1 commits=1 history=abc123",
+                "rime-userdb: 1"
+            ]
+        )
+        try store.save(
+            snapshot: staleAcceptedContext,
+            schemaID: "pinyin_simp",
+            rimeSnapshotURL: nil,
+            rimeSnapshotModifiedAt: nil
+        )
+        let scrubbedContext = LexicalContextSnapshot(
+            terms: [LexicalContextTerm(text: "长期高频", score: 0.9, source: "rime-userdb")],
+            recentCommits: ["普通提交保留"],
+            toneProfile: ToneProfile(),
+            sourceSummary: ["rime-userdb: 1"]
+        )
+        let scrubbedProfile = PersistentLexicalProfile(
+            schemaID: "pinyin_simp",
+            rimeSnapshotPath: nil,
+            rimeSnapshotModifiedAt: nil,
+            lexicalContext: scrubbedContext
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(scrubbedProfile).write(to: jsonURL, options: .atomic)
+        try Data(scrubbedContext.markdown.utf8).write(to: markdownURL)
+        let runtime = LexicalProfileRuntime(
+            store: store,
+            rimeMaintenanceService: nil,
+            acceptedLearningProvider: AIAcceptedLearningStore.inMemory(),
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            refreshGate: LexicalProfileRefreshGate()
+        )
+
+        let lexical = try XCTUnwrap(runtime.lexicalContextSnapshot(
+            schemaID: "pinyin_simp",
+            recentCommits: [],
+            selectionHistory: []
+        ))
+
+        XCTAssertFalse(lexical.terms.contains { $0.source == "accepted-ai" })
+        XCTAssertFalse(lexical.sourceSummary.contains { $0.hasPrefix("accepted-ai-summary:") })
+        XCTAssertFalse(lexical.recentCommits.contains("JSON Schema 可以继续推进"))
+        XCTAssertTrue(lexical.recentCommits.contains("普通提交保留"))
+        XCTAssertTrue(lexical.terms.contains { $0.text == "长期高频" })
     }
 
     func testCancelRefreshClearsSummaryReadyContext() async throws {

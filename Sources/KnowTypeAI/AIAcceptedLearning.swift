@@ -1,12 +1,49 @@
+import Darwin
 import CryptoKit
 import Foundation
 import KnowTypeCore
 
-private let acceptedLearningFileLock = NSLock()
+let acceptedLearningFileLock = NSLock()
 
-private func withAcceptedLearningFileLock<T>(_ body: () throws -> T) rethrows -> T {
+func acceptedLearningLockURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
+}
+
+func acceptedLearningClearMarkerURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+}
+
+func withAcceptedLearningFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
     acceptedLearningFileLock.lock()
-    defer { acceptedLearningFileLock.unlock() }
+    defer {
+        acceptedLearningFileLock.unlock()
+    }
+
+    guard let lockURL else {
+        return try body()
+    }
+
+    try fileManager.createDirectory(
+        at: lockURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    if !fileManager.fileExists(atPath: lockURL.path) {
+        fileManager.createFile(atPath: lockURL.path, contents: nil)
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
     return try body()
 }
 
@@ -280,6 +317,14 @@ public final class AIAcceptedLearningStore:
     private var pendingSummarySchemaIDs: Set<String>
     private var summaryTask: Task<Void, Never>?
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
+    private var lastClearMarkerModifiedAt: Date?
+
+    private struct StartupState {
+        var records: [AIAcceptedLearningRecord]
+        var summary: AIAcceptedLanguageSummary?
+        var schemaSummaries: [String: AIAcceptedLanguageSummary]
+        var lastClearMarkerModifiedAt: Date?
+    }
 
     public init(
         historyURL: URL? = AIAcceptedLearningStore.defaultHistoryURL(),
@@ -289,34 +334,69 @@ public final class AIAcceptedLearningStore:
         diagnosticSink: any AIRecommendationDiagnosticSink = NoopAIRecommendationDiagnosticSink(),
         summaryDelayNanoseconds: UInt64 = 2_000_000_000
     ) {
+        let configuredEncoder = JSONEncoder()
+        configuredEncoder.dateEncodingStrategy = .iso8601
+        let configuredDecoder = JSONDecoder()
+        configuredDecoder.dateDecodingStrategy = .iso8601
+        let startupState: StartupState
+        let startupRepairErrorReason: String?
+        do {
+            startupState = try withAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                try Self.loadStartupState(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    encoder: configuredEncoder,
+                    decoder: configuredDecoder,
+                    repairPersistentSummary: true
+                )
+            }
+            startupRepairErrorReason = nil
+        } catch {
+            startupState = (try? Self.loadStartupState(
+                historyURL: historyURL,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager,
+                encoder: configuredEncoder,
+                decoder: configuredDecoder,
+                repairPersistentSummary: false
+            )) ?? StartupState(
+                records: [],
+                summary: nil,
+                schemaSummaries: [:],
+                lastClearMarkerModifiedAt: Self.fileModificationDate(
+                    acceptedLearningClearMarkerURL(historyURL: historyURL),
+                    fileManager: fileManager
+                )
+            )
+            startupRepairErrorReason = String(describing: type(of: error))
+        }
+
         self.historyURL = historyURL
         self.summaryURL = summaryURL
         self.mirrorURL = mirrorURL
         self.fileManager = fileManager
         self.diagnosticSink = diagnosticSink
         self.summaryDelayNanoseconds = summaryDelayNanoseconds
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
-        self.encoder.dateEncodingStrategy = .iso8601
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.records = Self.loadRecords(from: historyURL, decoder: decoder)
-        let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
-        let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
-        let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
-        self.summary = summaryIsCurrent ? loadedSummary : rebuiltSummary
-        self.schemaSummaries = Self.buildSchemaSummaries(records: records, generatedAt: Date())
+        self.encoder = configuredEncoder
+        self.decoder = configuredDecoder
+        self.records = startupState.records
+        self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
+        self.summary = startupState.summary
+        self.schemaSummaries = startupState.schemaSummaries
         self.pendingSummarySchemaIDs = []
-        if !summaryIsCurrent {
-            do {
-                try persistSummary(summary)
-            } catch {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .lexicalProfileFallback,
-                        reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
-                    )
+        if let startupRepairErrorReason {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_summary_repair_failed:\(startupRepairErrorReason)"
                 )
-            }
+            )
         }
     }
 
@@ -384,6 +464,7 @@ public final class AIAcceptedLearningStore:
     }
 
     public func snapshot() -> AIAcceptedLanguageSummary? {
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = summary
         lock.unlock()
@@ -394,6 +475,7 @@ public final class AIAcceptedLearningStore:
         guard let schemaID else {
             return snapshot()
         }
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = schemaSummaries[schemaID]
         lock.unlock()
@@ -401,6 +483,7 @@ public final class AIAcceptedLearningStore:
     }
 
     public func allRecords() -> [AIAcceptedLearningRecord] {
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = records
         lock.unlock()
@@ -425,7 +508,8 @@ public final class AIAcceptedLearningStore:
     }
 
     private func append(_ record: AIAcceptedLearningRecord) throws {
-        try withAcceptedLearningFileLock {
+        try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
+            syncRecordsAfterExternalClearLocked()
             if let historyURL {
                 try fileManager.createDirectory(
                     at: historyURL.deletingLastPathComponent(),
@@ -443,11 +527,11 @@ public final class AIAcceptedLearningStore:
                     try line.write(to: historyURL, options: .atomic)
                 }
             }
+            lock.lock()
+            records.append(record)
+            pendingSummarySchemaIDs.insert(record.schemaID)
+            lock.unlock()
         }
-        lock.lock()
-        records.append(record)
-        pendingSummarySchemaIDs.insert(record.schemaID)
-        lock.unlock()
         scheduleSummaryRebuild()
     }
 
@@ -481,35 +565,36 @@ public final class AIAcceptedLearningStore:
     }
 
     private func rebuildSummary() {
-        lock.lock()
-        let currentRecords = records
-        let changedSchemaIDs = pendingSummarySchemaIDs
-        pendingSummarySchemaIDs.removeAll()
-        lock.unlock()
-
-        let generatedAt = Date()
-        let nextSummary = Self.buildSummary(records: currentRecords, generatedAt: generatedAt)
-        let nextSchemaSummaries = Self.buildSchemaSummaries(records: currentRecords, generatedAt: generatedAt)
-
-        lock.lock()
-        summary = nextSummary
-        schemaSummaries = nextSchemaSummaries
-        lock.unlock()
-
-        guard let nextSummary else {
-            return
-        }
-
+        var changedSchemaIDsForRetry: Set<String> = []
         do {
-            try withAcceptedLearningFileLock {
+            let events = try withAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) { () -> [AIAcceptedLearningSummaryReadyEvent] in
+                syncRecordsAfterExternalClearLocked()
+                lock.lock()
+                let currentRecords = records
+                let changedSchemaIDs = pendingSummarySchemaIDs
+                changedSchemaIDsForRetry = changedSchemaIDs
+                pendingSummarySchemaIDs.removeAll()
+                lock.unlock()
+
+                let generatedAt = Date()
+                let nextSummary = Self.buildSummary(records: currentRecords, generatedAt: generatedAt)
+                let nextSchemaSummaries = Self.buildSchemaSummaries(records: currentRecords, generatedAt: generatedAt)
+
+                lock.lock()
+                summary = nextSummary
+                schemaSummaries = nextSchemaSummaries
+                lock.unlock()
+
                 try persistSummary(nextSummary)
-            }
-            notifySummaryReady(
-                Self.summaryReadyEvents(
+                return Self.summaryReadyEvents(
                     from: nextSchemaSummaries,
                     changedSchemaIDs: changedSchemaIDs
                 )
-            )
+            }
+            notifySummaryReady(events)
         } catch {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
@@ -518,9 +603,39 @@ public final class AIAcceptedLearningStore:
                 )
             )
             lock.lock()
-            pendingSummarySchemaIDs.formUnion(changedSchemaIDs)
+            pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
             lock.unlock()
         }
+    }
+
+    private func syncRecordsAfterExternalClearLocked() {
+        guard let markerURL = acceptedLearningClearMarkerURL(historyURL: historyURL) else {
+            return
+        }
+        let markerModifiedAt = Self.fileModificationDate(markerURL, fileManager: fileManager)
+        guard let markerModifiedAt else {
+            return
+        }
+        lock.lock()
+        let shouldReload = lastClearMarkerModifiedAt == nil || markerModifiedAt > (lastClearMarkerModifiedAt ?? .distantPast)
+        lock.unlock()
+        guard shouldReload else {
+            return
+        }
+        let reloadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: Date())
+        let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: Date())
+        lock.lock()
+        records = reloadedRecords
+        summary = reloadedSummary
+        schemaSummaries = reloadedSchemaSummaries
+        pendingSummarySchemaIDs.removeAll()
+        lastClearMarkerModifiedAt = markerModifiedAt
+        lock.unlock()
+    }
+
+    private func syncRecordsAfterExternalClear() {
+        syncRecordsAfterExternalClearLocked()
     }
 
     private func notifySummaryReady(_ events: [AIAcceptedLearningSummaryReadyEvent]) {
@@ -540,7 +655,7 @@ public final class AIAcceptedLearningStore:
         }
     }
 
-    private static func buildSummary(
+    public static func buildSummary(
         records: [AIAcceptedLearningRecord],
         generatedAt: Date
     ) -> AIAcceptedLanguageSummary? {
@@ -663,14 +778,14 @@ public final class AIAcceptedLearningStore:
         return String(clean.prefix(48)) + "..."
     }
 
-    private static func historyHash(_ records: [AIAcceptedLearningRecord]) -> String {
+    public static func historyHash(_ records: [AIAcceptedLearningRecord]) -> String {
         let joined = records.map(\.textHash).joined(separator: "\n")
         return SHA256.hash(data: Data(joined.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
     }
 
-    private static func renderMarkdown(_ summary: AIAcceptedLanguageSummary) -> String {
+    public static func renderMarkdown(_ summary: AIAcceptedLanguageSummary) -> String {
         var lines: [String] = [
             "# KnowType Accepted AI Learning",
             "",
@@ -744,7 +859,55 @@ public final class AIAcceptedLearningStore:
         return try? decoder.decode(AIAcceptedLanguageSummary.self, from: data)
     }
 
+    private static func loadStartupState(
+        historyURL: URL?,
+        summaryURL: URL?,
+        mirrorURL: URL?,
+        fileManager: FileManager,
+        encoder: JSONEncoder,
+        decoder: JSONDecoder,
+        repairPersistentSummary: Bool
+    ) throws -> StartupState {
+        let records = Self.loadRecords(from: historyURL, decoder: decoder)
+        let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
+        let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
+        let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
+            && (!summaryFileExists || loadedSummary != nil)
+        let nextSummary = summaryIsCurrent ? loadedSummary : rebuiltSummary
+        if repairPersistentSummary, !summaryIsCurrent {
+            try persistSummary(
+                nextSummary,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                encoder: encoder,
+                fileManager: fileManager
+            )
+        }
+        return StartupState(
+            records: records,
+            summary: nextSummary,
+            schemaSummaries: Self.buildSchemaSummaries(records: records, generatedAt: Date()),
+            lastClearMarkerModifiedAt: Self.fileModificationDate(
+                acceptedLearningClearMarkerURL(historyURL: historyURL),
+                fileManager: fileManager
+            )
+        )
+    }
+
+    private static func fileModificationDate(_ url: URL?, fileManager: FileManager) -> Date? {
+        guard let url,
+              let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return attributes[.modificationDate] as? Date
+    }
+
     private func atomicWrite(_ data: Data, to url: URL) throws {
+        try Self.atomicWrite(data, to: url, fileManager: fileManager)
+    }
+
+    private static func atomicWrite(_ data: Data, to url: URL, fileManager: FileManager) throws {
         try fileManager.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -753,12 +916,28 @@ public final class AIAcceptedLearningStore:
     }
 
     private func persistSummary(_ summary: AIAcceptedLanguageSummary?) throws {
+        try Self.persistSummary(
+            summary,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            encoder: encoder,
+            fileManager: fileManager
+        )
+    }
+
+    private static func persistSummary(
+        _ summary: AIAcceptedLanguageSummary?,
+        summaryURL: URL?,
+        mirrorURL: URL?,
+        encoder: JSONEncoder,
+        fileManager: FileManager
+    ) throws {
         if let summary {
             if let summaryURL {
-                try atomicWrite(try encoder.encode(summary), to: summaryURL)
+                try atomicWrite(try encoder.encode(summary), to: summaryURL, fileManager: fileManager)
             }
             if let mirrorURL {
-                try atomicWrite(Data(Self.renderMarkdown(summary).utf8), to: mirrorURL)
+                try atomicWrite(Data(Self.renderMarkdown(summary).utf8), to: mirrorURL, fileManager: fileManager)
             }
             return
         }

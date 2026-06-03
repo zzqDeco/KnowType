@@ -408,6 +408,33 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   event contains only schema id, history hash, and counts, not user text
 - emits summary-ready metadata only for schemas changed by the current rebuild
 
+`knowtype-accepted-learning-tool` and `scripts/accepted-learning.sh`:
+
+- expose read-only `status`, explicit `rebuild`, and guarded `clear --yes`
+  maintenance commands for accepted AI learning
+- report only paths, counts, hashes, mtimes, and freshness state; they never
+  print raw input, accepted text, locked prefix, or full history
+- `clear --yes` deletes only `accepted-ai-learning.jsonl`,
+  `accepted-ai-summary.json`, and `ACCEPTED_AI_LEARNING.md`, writes a clear
+  marker for running stores, and scrubs accepted-AI terms/source lines and
+  matching accepted recent commits from the persistent lexical profile while
+  preserving non-AI recent commits and tone data; when accepted history is
+  unavailable, markdown-only scrub removes accepted-AI marker/source lines but
+  preserves unknown recent commits; it does not delete ENV, CORRECTION,
+  provider profiles, Keychain secrets, or Rime userdb
+- runtime and maintenance writes, including startup summary repair, use a shared
+  lock file so rebuild, clear, startup repair, and accepted-record appends do not
+  publish stale summaries across processes
+- runtime snapshot reads observe the clear marker before returning accepted-AI
+  summaries so active input-method processes stop injecting cleared learning
+  without requiring a restart or another accepted record
+- `LexicalProfileRuntime` reloads the persisted lexical profile when its
+  in-memory cache still contains accepted-AI source data after accepted learning
+  has been cleared, and it filters any remaining accepted-AI terms/source lines
+  before building request-time `LEXICAL_PROFILE.md`
+- `diagnose-inputmethod.sh --json` includes `userData.acceptedLearning` with the
+  same status shape subset used by settings diagnostics
+
 Rime userdb profile refresh is a background-only input-method task. It calls
 librime sync as a best-effort freshness step, reads the live active schema from
 the Rime session, resolves that schema's `translator/user_dict` or

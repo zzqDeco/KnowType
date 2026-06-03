@@ -118,9 +118,11 @@ print_json_snapshot() {
   KNOWTYPE_DIAG_RIME_USER_DATA="${KNOWTYPE_RIME_USER_DATA_DIR:-$(knowtype_app_support_dir)/Rime}" \
   python3 - <<'PY'
 import json
+import hashlib
 import os
 import plistlib
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 def file_mtime(path):
@@ -128,6 +130,12 @@ def file_mtime(path):
         return Path(path).stat().st_mtime
     except OSError:
         return None
+
+def file_mtime_iso(path):
+    value = file_mtime(path)
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
 
 def load_json(path):
     try:
@@ -201,6 +209,92 @@ def backup_summary(root):
         "latest": backups[0] if backups else None,
     }
 
+def accepted_learning_status(app_support, home):
+    history_path = Path(app_support) / "AI" / "accepted-ai-learning.jsonl"
+    summary_path = Path(app_support) / "AI" / "accepted-ai-summary.json"
+    mirror_path = Path(home) / ".knowtype" / "ACCEPTED_AI_LEARNING.md"
+    lexical_json_path = Path(app_support) / "AI" / "lexical-profile.json"
+    lexical_markdown_path = Path(home) / ".knowtype" / "LEXICAL_PROFILE.md"
+
+    records = []
+    invalid_lines = 0
+    if history_path.is_file():
+        try:
+            with history_path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        records.append(json.loads(line))
+                    except Exception:
+                        invalid_lines += 1
+        except Exception:
+            invalid_lines += 1
+
+    history_hash = None
+    if records:
+        joined = "\n".join(str(record.get("textHash", "")) for record in records)
+        history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+    summary = load_json(summary_path)
+    summary_exists = summary_path.is_file()
+    if records:
+        is_current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash") == history_hash
+    else:
+        is_current = summary is None and not summary_exists
+
+    try:
+        lexical_markdown = lexical_markdown_path.read_text(encoding="utf-8")
+    except Exception:
+        lexical_markdown = ""
+
+    warnings = []
+    if invalid_lines:
+        warnings.append(f"invalid_history_lines:{invalid_lines}")
+    if records and not summary:
+        warnings.append("summary_missing")
+    elif summary_exists and summary is None:
+        warnings.append("summary_unreadable")
+    elif not is_current:
+        warnings.append("summary_stale")
+
+    return {
+        "schemaVersion": 1,
+        "history": {
+            "path": str(history_path),
+            "exists": history_path.is_file(),
+            "recordCount": len(records),
+            "historyHash": history_hash,
+            "mtime": file_mtime_iso(history_path),
+        },
+        "summary": {
+            "path": str(summary_path),
+            "exists": summary_path.is_file(),
+            "acceptedCount": summary.get("acceptedCount", 0) if isinstance(summary, dict) else 0,
+            "historyHash": summary.get("historyHash") if isinstance(summary, dict) else None,
+            "termCount": len(summary.get("termProfile", [])) if isinstance(summary, dict) else 0,
+            "recentCommitCount": len(summary.get("recentAcceptedCommits", [])) if isinstance(summary, dict) else 0,
+            "generatedAt": summary.get("generatedAt") if isinstance(summary, dict) else None,
+            "mtime": file_mtime_iso(summary_path),
+            "isCurrentWithHistory": is_current,
+        },
+        "mirror": {
+            "path": str(mirror_path),
+            "exists": mirror_path.is_file(),
+            "mtime": file_mtime_iso(mirror_path),
+        },
+        "lexicalProfile": {
+            "jsonPath": str(lexical_json_path),
+            "markdownPath": str(lexical_markdown_path),
+            "jsonExists": lexical_json_path.is_file(),
+            "markdownExists": lexical_markdown_path.is_file(),
+            "containsAcceptedAISummary": "accepted-ai-summary:" in lexical_markdown,
+            "mtime": file_mtime_iso(lexical_markdown_path),
+        },
+        "warnings": warnings,
+    }
+
 bundle_path = os.environ["KNOWTYPE_DIAG_BUNDLE_PATH"]
 prefpane_path = os.environ["KNOWTYPE_DIAG_PREFPANE_PATH"]
 install_state_path = os.environ["KNOWTYPE_DIAG_INSTALL_STATE_PATH"]
@@ -248,6 +342,7 @@ user_data = {
         "exists": (home / ".knowtype" / "LEXICAL_PROFILE.md").is_file(),
         "mtime": file_mtime(home / ".knowtype" / "LEXICAL_PROFILE.md"),
     },
+    "acceptedLearning": accepted_learning_status(app_support, home),
 }
 
 snapshot = {
@@ -868,6 +963,9 @@ PROVIDER_JSON="$APP_SUPPORT/providers.json"
 HISTORY_JSON="$APP_SUPPORT/user-selection-history.json"
 LEXICON_DIR="$APP_SUPPORT/Lexicons"
 AI_PROFILE_JSON="$APP_SUPPORT/AI/lexical-profile.json"
+ACCEPTED_HISTORY_JSONL="$APP_SUPPORT/AI/accepted-ai-learning.jsonl"
+ACCEPTED_SUMMARY_JSON="$APP_SUPPORT/AI/accepted-ai-summary.json"
+ACCEPTED_MIRROR_MD="$HOME/.knowtype/ACCEPTED_AI_LEARNING.md"
 ENV_MD="$HOME/.knowtype/ENV.md"
 CORRECTION_MD="$HOME/.knowtype/CORRECTION.md"
 LEXICAL_PROFILE_MD="$HOME/.knowtype/LEXICAL_PROFILE.md"
@@ -920,6 +1018,97 @@ for profile_path in "$AI_PROFILE_JSON" "$ENV_MD" "$CORRECTION_MD" "$LEXICAL_PROF
     info "user data file has not been created yet: $profile_path"
   fi
 done
+
+accepted_learning_summary="$(
+  KNOWTYPE_ACCEPTED_HISTORY="$ACCEPTED_HISTORY_JSONL" \
+  KNOWTYPE_ACCEPTED_SUMMARY="$ACCEPTED_SUMMARY_JSON" \
+  KNOWTYPE_ACCEPTED_MIRROR="$ACCEPTED_MIRROR_MD" \
+  KNOWTYPE_LEXICAL_PROFILE="$LEXICAL_PROFILE_MD" \
+  python3 - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+
+history = Path(os.environ["KNOWTYPE_ACCEPTED_HISTORY"])
+summary_path = Path(os.environ["KNOWTYPE_ACCEPTED_SUMMARY"])
+mirror = Path(os.environ["KNOWTYPE_ACCEPTED_MIRROR"])
+lexical = Path(os.environ["KNOWTYPE_LEXICAL_PROFILE"])
+
+records = []
+invalid = 0
+history_read_failed = False
+if history.is_file():
+    try:
+        with history.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    invalid += 1
+    except Exception:
+        history_read_failed = True
+
+history_hash = ""
+if records:
+    history_hash = hashlib.sha256("\n".join(str(record.get("textHash", "")) for record in records).encode("utf-8")).hexdigest()[:8]
+
+summary = None
+summary_exists = summary_path.is_file()
+if summary_exists:
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        summary = None
+
+if records:
+    current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash", "").startswith(history_hash)
+else:
+    current = summary is None and not summary_exists
+
+try:
+    lexical_has_accepted = "accepted-ai-summary:" in lexical.read_text(encoding="utf-8")
+except Exception:
+    lexical_has_accepted = False
+
+print(f"records={len(records)}")
+print(f"historyHash={history_hash or 'none'}")
+print(f"summaryExists={'yes' if summary_exists else 'no'}")
+print(f"summaryCurrent={'yes' if current else 'no'}")
+print(f"acceptedCount={summary.get('acceptedCount', 0) if summary else 0}")
+print(f"termCount={len(summary.get('termProfile', [])) if summary else 0}")
+print(f"recentCommitCount={len(summary.get('recentAcceptedCommits', [])) if summary else 0}")
+print(f"lexicalInjected={'yes' if lexical_has_accepted else 'no'}")
+print(f"mirrorExists={'yes' if mirror.is_file() else 'no'}")
+print(f"invalidLines={invalid}")
+print(f"historyReadFailed={'yes' if history_read_failed else 'no'}")
+PY
+)"
+
+accepted_records="$(awk -F= '/^records=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_history_hash="$(awk -F= '/^historyHash=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_summary_exists="$(awk -F= '/^summaryExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_summary_current="$(awk -F= '/^summaryCurrent=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_terms="$(awk -F= '/^termCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_commits="$(awk -F= '/^recentCommitCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_lexical_injected="$(awk -F= '/^lexicalInjected=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_mirror_exists="$(awk -F= '/^mirrorExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_invalid_lines="$(awk -F= '/^invalidLines=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_history_read_failed="$(awk -F= '/^historyReadFailed=/{print $2}' <<<"$accepted_learning_summary")"
+
+info "accepted AI learning: records=$accepted_records hash=$accepted_history_hash summary=$accepted_summary_exists terms=$accepted_terms commits=$accepted_commits lexicalInjected=$accepted_lexical_injected mirror=$accepted_mirror_exists"
+if [[ "$accepted_summary_current" != "yes" ]]; then
+  warn "accepted AI learning summary is stale or missing; run ./scripts/accepted-learning.sh rebuild"
+fi
+if [[ "${accepted_invalid_lines:-0}" != "0" ]]; then
+  warn "accepted AI learning history has $accepted_invalid_lines invalid line(s)"
+fi
+if [[ "$accepted_history_read_failed" == "yes" ]]; then
+  warn "accepted AI learning history could not be read"
+fi
 
 if (( SHOW_LOGS == 1 )); then
   echo

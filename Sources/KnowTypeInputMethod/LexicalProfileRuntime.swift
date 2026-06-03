@@ -52,18 +52,26 @@ final class LexicalProfileRuntime: @unchecked Sendable {
         recentCommits: [String],
         selectionHistory: [String]
     ) -> LexicalContextSnapshot? {
-        let persisted = store.currentProfile()
-        let persistedLexicalContext = persisted?.schemaID == schemaID ? persisted?.lexicalContext : nil
         let acceptedSummary = acceptedLearningProvider?.snapshot(schemaID: schemaID)
+        var persisted = store.currentProfile()
+        var persistedLexicalContext = persisted?.schemaID == schemaID ? persisted?.lexicalContext : nil
+        if acceptedSummary == nil, Self.containsAcceptedAI(persistedLexicalContext) {
+            persisted = store.reloadFromDisk()
+            persistedLexicalContext = persisted?.schemaID == schemaID ? persisted?.lexicalContext : nil
+        }
+        let persistedStillHasAcceptedAI = acceptedSummary == nil && Self.containsAcceptedAI(persistedLexicalContext)
+        let persistentTerms = (persistedLexicalContext?.terms ?? []).filter { $0.source != "accepted-ai" }
+        let persistentRecentCommits = persistedStillHasAcceptedAI ? [] : (persistedLexicalContext?.recentCommits ?? [])
+        let persistentSourceSummary = (persistedLexicalContext?.sourceSummary ?? []).filter { !$0.hasPrefix("accepted-ai") }
         return builder.snapshot(
             recentCommits: recentCommits,
             selectionHistory: selectionHistory,
             acceptedAITerms: acceptedSummary?.termProfile ?? [],
             acceptedAIRecentCommits: acceptedSummary?.recentAcceptedCommits ?? [],
             acceptedAISourceSummary: acceptedSummary?.sourceSummary ?? [],
-            persistentTerms: persistedLexicalContext?.terms ?? [],
-            persistentRecentCommits: persistedLexicalContext?.recentCommits ?? [],
-            persistentSourceSummary: persistedLexicalContext?.sourceSummary ?? []
+            persistentTerms: persistentTerms,
+            persistentRecentCommits: persistentRecentCommits,
+            persistentSourceSummary: persistentSourceSummary
         )
     }
 
@@ -228,6 +236,14 @@ final class LexicalProfileRuntime: @unchecked Sendable {
             .prefix(6)
             .map { String(format: "%02x", $0) }
             .joined()
+    }
+
+    private static func containsAcceptedAI(_ context: LexicalContextSnapshot?) -> Bool {
+        guard let context else {
+            return false
+        }
+        return context.terms.contains { $0.source == "accepted-ai" }
+            || context.sourceSummary.contains { $0.hasPrefix("accepted-ai") }
     }
 }
 

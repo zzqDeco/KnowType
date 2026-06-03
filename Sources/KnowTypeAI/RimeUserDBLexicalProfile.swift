@@ -241,6 +241,17 @@ public final class LexicalProfileStore: @unchecked Sendable {
         currentProfile()?.lexicalContext
     }
 
+    public func reloadFromDisk() -> PersistentLexicalProfile? {
+        guard let jsonURL else {
+            return currentProfile()
+        }
+        let reloaded = Self.loadProfile(from: jsonURL, fileManager: fileManager)
+        lock.lock()
+        profile = reloaded
+        lock.unlock()
+        return reloaded
+    }
+
     @discardableResult
     public func save(
         snapshot: LexicalContextSnapshot,
