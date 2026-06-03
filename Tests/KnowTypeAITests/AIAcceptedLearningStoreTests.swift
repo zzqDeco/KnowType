@@ -463,6 +463,46 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(markdown.contains("普通提交保留"))
     }
 
+    func testMaintenanceClearMarkdownOnlyPreservesUnknownRecentCommitsWhenHistoryIsMissing() throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let lexicalMarkdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        try Data(
+            """
+            # LEXICAL_PROFILE.md
+
+            ## Recent Terms
+            - JSON [accepted-ai, 1.00]
+            - 长期高频 [rime-userdb, 0.90]
+
+            ## Recent Commits
+            - JSON Schema 可以继续推进
+            - 普通提交保留
+
+            ## Sources
+            - accepted-ai-summary: terms=1 commits=1 history=abc123
+            - rime-userdb: 1
+            """.utf8
+        ).write(to: lexicalMarkdownURL)
+
+        let maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            lexicalJSONURL: directory.appendingPathComponent("missing-lexical-profile.json"),
+            lexicalMarkdownURL: lexicalMarkdownURL
+        )
+        try maintenance.clear(confirm: true)
+
+        let markdown = try String(contentsOf: lexicalMarkdownURL, encoding: .utf8)
+        XCTAssertFalse(markdown.contains("accepted-ai"))
+        XCTAssertTrue(markdown.contains("长期高频"))
+        XCTAssertTrue(markdown.contains("JSON Schema 可以继续推进"))
+        XCTAssertTrue(markdown.contains("普通提交保留"))
+    }
+
     func testMaintenanceStatusTreatsUnreadableSummaryAsStale() throws {
         let directory = temporaryDirectory()
         let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")

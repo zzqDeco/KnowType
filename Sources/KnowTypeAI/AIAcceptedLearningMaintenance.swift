@@ -253,10 +253,7 @@ public struct AIAcceptedLearningMaintenance {
         guard fileManager.fileExists(atPath: lexicalJSONURL.path),
               let data = try? Data(contentsOf: lexicalJSONURL) else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly(
-                    acceptedCommitTexts: acceptedCommitTexts,
-                    removeRecentCommitsWhenUnknown: true
-                )
+                try scrubAcceptedAIFromLexicalMarkdownOnly(acceptedCommitTexts: acceptedCommitTexts)
             }
             return
         }
@@ -264,10 +261,7 @@ public struct AIAcceptedLearningMaintenance {
         decoder.dateDecodingStrategy = .iso8601
         guard let profile = try? decoder.decode(PersistentLexicalProfile.self, from: data) else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly(
-                    acceptedCommitTexts: acceptedCommitTexts,
-                    removeRecentCommitsWhenUnknown: true
-                )
+                try scrubAcceptedAIFromLexicalMarkdownOnly(acceptedCommitTexts: acceptedCommitTexts)
             }
             return
         }
@@ -277,10 +271,7 @@ public struct AIAcceptedLearningMaintenance {
         } || profile.lexicalContext.terms.contains { $0.source == "accepted-ai" }
         guard hadAcceptedSource else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly(
-                    acceptedCommitTexts: acceptedCommitTexts,
-                    removeRecentCommitsWhenUnknown: false
-                )
+                try scrubAcceptedAIFromLexicalMarkdownOnly(acceptedCommitTexts: acceptedCommitTexts)
             }
             return
         }
@@ -306,8 +297,7 @@ public struct AIAcceptedLearningMaintenance {
     }
 
     private func scrubAcceptedAIFromLexicalMarkdownOnly(
-        acceptedCommitTexts: Set<String>,
-        removeRecentCommitsWhenUnknown: Bool
+        acceptedCommitTexts: Set<String>
     ) throws {
         guard let content = try? String(contentsOf: lexicalMarkdownURL, encoding: .utf8),
               content.contains("accepted-ai") || !acceptedCommitTexts.isEmpty else {
@@ -338,8 +328,7 @@ public struct AIAcceptedLearningMaintenance {
             }
             if inRecentCommits, line.hasPrefix("- ") {
                 let commit = normalizedCommitText(String(line.dropFirst(2)))
-                if acceptedCommitTexts.contains(commit)
-                    || (acceptedCommitTexts.isEmpty && removeRecentCommitsWhenUnknown) {
+                if acceptedCommitTexts.contains(commit) {
                     removedRecentCommit = true
                     continue
                 }

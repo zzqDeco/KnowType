@@ -20,12 +20,16 @@ learning data explicitly.
   files, writes a clear marker for running stores, and scrubs accepted-AI
   lexical-profile terms/source lines plus matching accepted recent commits
   without deleting Rime, provider, Keychain, ENV, CORRECTION, or non-AI lexical
-  recent/tone data.
+  recent/tone data. When history is unavailable, markdown-only scrub preserves
+  unknown recent commits because it cannot prove they came from accepted AI.
 - Runtime startup repair and maintenance writes share an interprocess lock file
   so rebuild, clear, startup repair, and accepted-record appends do not publish
   stale summaries.
 - Runtime snapshot reads observe clear markers before returning accepted-AI
   summaries, so active input-method processes stop injecting cleared learning.
+- Request-time lexical profile generation reloads the scrubbed persistent
+  profile when the in-memory lexical cache still contains accepted-AI source
+  data after clear, then filters any remaining accepted-AI terms/source lines.
 - Diagnostics and Settings display accepted-learning status without showing raw
   input or accepted text.
 

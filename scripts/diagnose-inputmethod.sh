@@ -1037,23 +1037,28 @@ lexical = Path(os.environ["KNOWTYPE_LEXICAL_PROFILE"])
 
 records = []
 invalid = 0
+history_read_failed = False
 if history.is_file():
-    with history.open(encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except Exception:
-                invalid += 1
+    try:
+        with history.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    invalid += 1
+    except Exception:
+        history_read_failed = True
 
 history_hash = ""
 if records:
     history_hash = hashlib.sha256("\n".join(str(record.get("textHash", "")) for record in records).encode("utf-8")).hexdigest()[:8]
 
 summary = None
-if summary_path.is_file():
+summary_exists = summary_path.is_file()
+if summary_exists:
     try:
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
     except Exception:
@@ -1062,7 +1067,7 @@ if summary_path.is_file():
 if records:
     current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash", "").startswith(history_hash)
 else:
-    current = summary is None
+    current = summary is None and not summary_exists
 
 try:
     lexical_has_accepted = "accepted-ai-summary:" in lexical.read_text(encoding="utf-8")
@@ -1071,7 +1076,7 @@ except Exception:
 
 print(f"records={len(records)}")
 print(f"historyHash={history_hash or 'none'}")
-print(f"summaryExists={'yes' if summary else 'no'}")
+print(f"summaryExists={'yes' if summary_exists else 'no'}")
 print(f"summaryCurrent={'yes' if current else 'no'}")
 print(f"acceptedCount={summary.get('acceptedCount', 0) if summary else 0}")
 print(f"termCount={len(summary.get('termProfile', [])) if summary else 0}")
@@ -1079,6 +1084,7 @@ print(f"recentCommitCount={len(summary.get('recentAcceptedCommits', [])) if summ
 print(f"lexicalInjected={'yes' if lexical_has_accepted else 'no'}")
 print(f"mirrorExists={'yes' if mirror.is_file() else 'no'}")
 print(f"invalidLines={invalid}")
+print(f"historyReadFailed={'yes' if history_read_failed else 'no'}")
 PY
 )"
 
@@ -1091,6 +1097,7 @@ accepted_commits="$(awk -F= '/^recentCommitCount=/{print $2}' <<<"$accepted_lear
 accepted_lexical_injected="$(awk -F= '/^lexicalInjected=/{print $2}' <<<"$accepted_learning_summary")"
 accepted_mirror_exists="$(awk -F= '/^mirrorExists=/{print $2}' <<<"$accepted_learning_summary")"
 accepted_invalid_lines="$(awk -F= '/^invalidLines=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_history_read_failed="$(awk -F= '/^historyReadFailed=/{print $2}' <<<"$accepted_learning_summary")"
 
 info "accepted AI learning: records=$accepted_records hash=$accepted_history_hash summary=$accepted_summary_exists terms=$accepted_terms commits=$accepted_commits lexicalInjected=$accepted_lexical_injected mirror=$accepted_mirror_exists"
 if [[ "$accepted_summary_current" != "yes" ]]; then
@@ -1098,6 +1105,9 @@ if [[ "$accepted_summary_current" != "yes" ]]; then
 fi
 if [[ "${accepted_invalid_lines:-0}" != "0" ]]; then
   warn "accepted AI learning history has $accepted_invalid_lines invalid line(s)"
+fi
+if [[ "$accepted_history_read_failed" == "yes" ]]; then
+  warn "accepted AI learning history could not be read"
 fi
 
 if (( SHOW_LOGS == 1 )); then

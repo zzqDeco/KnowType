@@ -418,14 +418,20 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   `accepted-ai-summary.json`, and `ACCEPTED_AI_LEARNING.md`, writes a clear
   marker for running stores, and scrubs accepted-AI terms/source lines and
   matching accepted recent commits from the persistent lexical profile while
-  preserving non-AI recent commits and tone data; it does not delete ENV,
-  CORRECTION, provider profiles, Keychain secrets, or Rime userdb
+  preserving non-AI recent commits and tone data; when accepted history is
+  unavailable, markdown-only scrub removes accepted-AI marker/source lines but
+  preserves unknown recent commits; it does not delete ENV, CORRECTION,
+  provider profiles, Keychain secrets, or Rime userdb
 - runtime and maintenance writes, including startup summary repair, use a shared
   lock file so rebuild, clear, startup repair, and accepted-record appends do not
   publish stale summaries across processes
 - runtime snapshot reads observe the clear marker before returning accepted-AI
   summaries so active input-method processes stop injecting cleared learning
   without requiring a restart or another accepted record
+- `LexicalProfileRuntime` reloads the persisted lexical profile when its
+  in-memory cache still contains accepted-AI source data after accepted learning
+  has been cleared, and it filters any remaining accepted-AI terms/source lines
+  before building request-time `LEXICAL_PROFILE.md`
 - `diagnose-inputmethod.sh --json` includes `userData.acceptedLearning` with the
   same status shape subset used by settings diagnostics
 
