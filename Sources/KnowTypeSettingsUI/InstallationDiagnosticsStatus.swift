@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import KnowTypeCore
 import KnowTypeProviders
 
@@ -7,6 +8,8 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
     var runtimeRows: [SettingsKeyValuePresentation]
     var aiRows: [SettingsKeyValuePresentation]
     var userDataRows: [SettingsKeyValuePresentation]
+    var acceptedLearningRows: [SettingsKeyValuePresentation]
+    var acceptedLearningCommands: [String]
     var backupRows: [SettingsKeyValuePresentation]
     var rollbackCommand: String?
 
@@ -65,6 +68,19 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
             Self.fileRow("settings.diagnostics.userData.lexicalMarkdown", homeURL.appendingPathComponent(".knowtype/LEXICAL_PROFILE.md"), fileManager, preferredLanguages)
         ]
 
+        let acceptedLearning = Self.acceptedLearningSummary(
+            supportURL: supportURL,
+            homeURL: homeURL,
+            fileManager: fileManager,
+            preferredLanguages: preferredLanguages
+        )
+        acceptedLearningRows = acceptedLearning
+        acceptedLearningCommands = [
+            "./scripts/accepted-learning.sh status",
+            "./scripts/accepted-learning.sh rebuild",
+            "./scripts/accepted-learning.sh clear --yes"
+        ]
+
         backupRows = [
             Self.row("settings.diagnostics.backup.count", "\(backupSummary.count)", preferredLanguages),
             Self.row("settings.diagnostics.backup.latest", backupSummary.latestID ?? Self.missing(preferredLanguages), preferredLanguages),
@@ -94,6 +110,96 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
         let modifiedAt = (attributes?[.modificationDate] as? Date)
             .map(Self.dateString(_:)) ?? Self.exists(true, preferredLanguages)
         return Self.row(key, modifiedAt, preferredLanguages)
+    }
+
+    private static func acceptedLearningSummary(
+        supportURL: URL,
+        homeURL: URL,
+        fileManager: FileManager,
+        preferredLanguages: [String]
+    ) -> [SettingsKeyValuePresentation] {
+        let historyURL = supportURL.appendingPathComponent("AI/accepted-ai-learning.jsonl")
+        let summaryURL = supportURL.appendingPathComponent("AI/accepted-ai-summary.json")
+        let lexicalMarkdownURL = homeURL.appendingPathComponent(".knowtype/LEXICAL_PROFILE.md")
+
+        let history = acceptedLearningHistory(at: historyURL)
+        let summary = acceptedLearningSummaryFile(at: summaryURL)
+        let summaryState: String
+        if history.recordCount == 0, summary == nil {
+            summaryState = SettingsLocalization.string(
+                "settings.diagnostics.acceptedLearning.summary.current",
+                preferredLanguages: preferredLanguages
+            )
+        } else if let summary,
+                  summary.acceptedCount == history.recordCount,
+                  summary.historyHash == history.historyHash {
+            summaryState = SettingsLocalization.string(
+                "settings.diagnostics.acceptedLearning.summary.current",
+                preferredLanguages: preferredLanguages
+            )
+        } else if summary == nil {
+            summaryState = Self.missing(preferredLanguages)
+        } else {
+            summaryState = SettingsLocalization.string(
+                "settings.diagnostics.acceptedLearning.summary.stale",
+                preferredLanguages: preferredLanguages
+            )
+        }
+
+        let lexicalInjected = (try? String(contentsOf: lexicalMarkdownURL, encoding: .utf8))
+            .map { $0.contains("accepted-ai-summary:") } ?? false
+
+        return [
+            Self.row("settings.diagnostics.acceptedLearning.records", "\(history.recordCount)", preferredLanguages),
+            Self.row("settings.diagnostics.acceptedLearning.summary", summaryState, preferredLanguages),
+            Self.row("settings.diagnostics.acceptedLearning.generatedAt", summary?.generatedAt ?? Self.missing(preferredLanguages), preferredLanguages),
+            Self.row("settings.diagnostics.acceptedLearning.terms", "\(summary?.termCount ?? 0)", preferredLanguages),
+            Self.row("settings.diagnostics.acceptedLearning.recentCommits", "\(summary?.recentCommitCount ?? 0)", preferredLanguages),
+            Self.row(
+                "settings.diagnostics.acceptedLearning.lexicalInjected",
+                SettingsLocalization.string(
+                    lexicalInjected ? "settings.diagnostics.status.yes" : "settings.diagnostics.status.no",
+                    preferredLanguages: preferredLanguages
+                ),
+                preferredLanguages
+            )
+        ]
+    }
+
+    private static func acceptedLearningHistory(at url: URL) -> (recordCount: Int, historyHash: String?) {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return (0, nil)
+        }
+        var textHashes: [String] = []
+        for line in content.split(whereSeparator: \.isNewline) {
+            guard let data = String(line).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let textHash = object["textHash"] as? String else {
+                continue
+            }
+            textHashes.append(textHash)
+        }
+        guard !textHashes.isEmpty else {
+            return (0, nil)
+        }
+        let hash = SHA256.hash(data: Data(textHashes.joined(separator: "\n").utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return (textHashes.count, hash)
+    }
+
+    private static func acceptedLearningSummaryFile(at url: URL) -> AcceptedLearningSummaryFile? {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return AcceptedLearningSummaryFile(
+            generatedAt: object["generatedAt"] as? String,
+            historyHash: object["historyHash"] as? String,
+            acceptedCount: object["acceptedCount"] as? Int ?? 0,
+            termCount: (object["termProfile"] as? [Any])?.count ?? 0,
+            recentCommitCount: (object["recentAcceptedCommits"] as? [Any])?.count ?? 0
+        )
     }
 
     private static func exists(_ value: Bool, _ preferredLanguages: [String]) -> String {
@@ -262,4 +368,12 @@ private struct BackupSummary: Equatable, Sendable {
     var count: Int
     var latestID: String?
     var latestVersionBuild: String?
+}
+
+private struct AcceptedLearningSummaryFile: Equatable, Sendable {
+    var generatedAt: String?
+    var historyHash: String?
+    var acceptedCount: Int
+    var termCount: Int
+    var recentCommitCount: Int
 }

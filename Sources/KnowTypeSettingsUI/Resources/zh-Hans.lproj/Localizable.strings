@@ -121,6 +121,7 @@
 "settings.diagnostics.section.runtime" = "Runtime";
 "settings.diagnostics.section.ai" = "AI 状态";
 "settings.diagnostics.section.userData" = "用户数据";
+"settings.diagnostics.section.acceptedLearning" = "AI 学习";
 "settings.diagnostics.section.backup" = "备份与回滚";
 "settings.diagnostics.refresh" = "刷新状态";
 "settings.diagnostics.install.version" = "版本";
@@ -146,6 +147,15 @@
 "settings.diagnostics.userData.env" = "ENV.md";
 "settings.diagnostics.userData.correction" = "CORRECTION.md";
 "settings.diagnostics.userData.lexicalMarkdown" = "LEXICAL_PROFILE.md";
+"settings.diagnostics.acceptedLearning.records" = "接受记录数";
+"settings.diagnostics.acceptedLearning.summary" = "Summary 状态";
+"settings.diagnostics.acceptedLearning.summary.current" = "当前";
+"settings.diagnostics.acceptedLearning.summary.stale" = "过期";
+"settings.diagnostics.acceptedLearning.generatedAt" = "最近总结";
+"settings.diagnostics.acceptedLearning.terms" = "接受词条";
+"settings.diagnostics.acceptedLearning.recentCommits" = "近期提交";
+"settings.diagnostics.acceptedLearning.lexicalInjected" = "已进入 LEXICAL_PROFILE.md";
+"settings.diagnostics.acceptedLearning.commands" = "维护命令";
 "settings.diagnostics.backup.count" = "备份数量";
 "settings.diagnostics.backup.latest" = "最新备份";
 "settings.diagnostics.backup.version" = "备份版本";
@@ -155,6 +165,8 @@
 "settings.diagnostics.status.missing" = "缺失";
 "settings.diagnostics.status.enabled" = "已启用";
 "settings.diagnostics.status.disabled" = "已关闭";
+"settings.diagnostics.status.yes" = "是";
+"settings.diagnostics.status.no" = "否";
 "settings.diagnostics.commands" = "命令";
 "settings.diagnostics.step.build.title" = "构建并签名";
 "settings.diagnostics.step.build.detail" = "运行输入法 bundle 构建脚本。脚本会优先选择可用的 Apple Development 签名身份，只有找不到证书时才回退到 ad-hoc 签名。";

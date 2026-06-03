@@ -571,6 +571,17 @@ private struct DiagnosticsSettingsView: View {
                 }
             }
 
+            Section(settingsString("settings.diagnostics.section.acceptedLearning")) {
+                ForEach(status.acceptedLearningRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+                DisclosureGroup(settingsString("settings.diagnostics.acceptedLearning.commands")) {
+                    ForEach(status.acceptedLearningCommands, id: \.self) { command in
+                        MonospacedText(command)
+                    }
+                }
+            }
+
             Section(settingsString("settings.diagnostics.section.backup")) {
                 ForEach(status.backupRows, id: \.label) { row in
                     LabeledContent(row.label, value: row.value)

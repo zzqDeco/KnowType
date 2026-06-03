@@ -127,6 +127,107 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(mirror.contains("Accepted count: 2"))
     }
 
+    func testMaintenanceStatusRebuildAndClearStayScopedToAcceptedLearningFiles() async throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let lexicalJSONURL = directory.appendingPathComponent("lexical-profile.json")
+        let lexicalMarkdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let record = AIAcceptedLearningRecord(
+            acceptedAt: Date(timeIntervalSince1970: 1),
+            schemaID: "pinyin_simp",
+            rawInput: "json",
+            acceptedText: "JSON Schema 可以继续推进",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try String(data: encoder.encode(record), encoding: .utf8)?
+            .appending("\n")
+            .write(to: historyURL, atomically: true, encoding: .utf8)
+        let staleSummary = AIAcceptedLanguageSummary(
+            historyHash: "stale",
+            acceptedCount: 0,
+            termProfile: [],
+            styleProfile: ToneProfile(),
+            recentAcceptedCommits: [],
+            sourceSummary: ["accepted-ai-summary: terms=0 commits=0 history=stale"]
+        )
+        try encoder.encode(staleSummary).write(to: summaryURL, options: .atomic)
+        try Data("{}".utf8).write(to: lexicalJSONURL)
+        try Data("- accepted-ai-summary: terms=1 commits=1 history=old\n".utf8).write(to: lexicalMarkdownURL)
+
+        let maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            lexicalJSONURL: lexicalJSONURL,
+            lexicalMarkdownURL: lexicalMarkdownURL
+        )
+
+        let stale = maintenance.status()
+        XCTAssertEqual(stale.history.recordCount, 1)
+        XCTAssertFalse(stale.summary.isCurrentWithHistory)
+        XCTAssertTrue(stale.warnings.contains("summary_stale"))
+
+        let rebuilt = try maintenance.rebuild()
+        XCTAssertEqual(rebuilt.action, "rebuilt")
+        XCTAssertTrue(rebuilt.summary.isCurrentWithHistory)
+        XCTAssertEqual(rebuilt.summary.acceptedCount, 1)
+        XCTAssertGreaterThan(rebuilt.summary.termCount, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: mirrorURL.path))
+
+        XCTAssertThrowsError(try maintenance.clear(confirm: false)) { error in
+            XCTAssertEqual(error as? AIAcceptedLearningMaintenance.Error, .clearRequiresConfirmation)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: historyURL.path))
+
+        let cleared = try maintenance.clear(confirm: true)
+        XCTAssertEqual(cleared.action, "cleared")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: historyURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: summaryURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: mirrorURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: lexicalJSONURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: lexicalMarkdownURL.path))
+    }
+
+    func testMaintenanceStatusJSONDoesNotExposeAcceptedTextOrRawInput() throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let record = AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            rawInput: "secret raw should not appear",
+            acceptedText: "JSON Schema 可以继续推进",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try String(data: encoder.encode(record), encoding: .utf8)?
+            .appending("\n")
+            .write(to: historyURL, atomically: true, encoding: .utf8)
+
+        let maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            lexicalJSONURL: directory.appendingPathComponent("lexical-profile.json"),
+            lexicalMarkdownURL: directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        )
+        let status = maintenance.status()
+        let statusJSON = try XCTUnwrap(String(data: JSONEncoder().encode(status), encoding: .utf8))
+
+        XCTAssertFalse(statusJSON.contains("JSON Schema 可以继续推进"))
+        XCTAssertFalse(statusJSON.contains("secret raw should not appear"))
+        XCTAssertTrue(statusJSON.contains("\"recordCount\":1"))
+    }
+
     func testLevelZeroAcceptedTextStaysInHistoryButOutOfInjectedSummary() async throws {
         let directory = temporaryDirectory()
         let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")

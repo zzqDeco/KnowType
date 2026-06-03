@@ -246,7 +246,9 @@ accepted. The full accepted-AI history is stored locally under Application
 Support and is not injected directly into provider requests. The canonical
 lexical profile JSON lives under
 `~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
-on these files.
+on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
+`clear --yes` to inspect, rebuild, or delete accepted-AI learning data without
+touching Rime, provider, Keychain, ENV, CORRECTION, or lexical profile files.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS

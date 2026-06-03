@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import KnowTypeCore
 import KnowTypeProviders
 import XCTest
@@ -30,7 +31,39 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         try Data("{}".utf8).write(to: support.appendingPathComponent("AI/lexical-profile.json"))
         try Data("env".utf8).write(to: home.appendingPathComponent(".knowtype/ENV.md"))
         try Data("correction".utf8).write(to: home.appendingPathComponent(".knowtype/CORRECTION.md"))
-        try Data("lexical".utf8).write(to: home.appendingPathComponent(".knowtype/LEXICAL_PROFILE.md"))
+        try Data("lexical\n- accepted-ai-summary: terms=1 commits=1 history=abc123\n".utf8)
+            .write(to: home.appendingPathComponent(".knowtype/LEXICAL_PROFILE.md"))
+        let acceptedTextHash = sha256("JSON Schema 可以继续推进")
+        let acceptedHistoryHash = sha256(acceptedTextHash)
+        try Data(
+            """
+            {"schemaVersion":1,"acceptedAt":"2026-05-24T00:00:00Z","schemaID":"pinyin_simp","rawInput":"json","acceptedText":"JSON Schema 可以继续推进","provider":"ai-test","contextVersion":"test","textHash":"\(acceptedTextHash)","commitKind":"ai","candidateSource":"ai:ai-test","extractedTerms":[]}
+
+            """.utf8
+        ).write(to: support.appendingPathComponent("AI/accepted-ai-learning.jsonl"))
+        try writeJSON(
+            [
+                "schemaVersion": 1,
+                "generatedAt": "2026-05-24T00:01:00Z",
+                "historyHash": acceptedHistoryHash,
+                "acceptedCount": 1,
+                "termProfile": [
+                    ["text": "JSON", "score": 1.0, "source": "accepted-ai"]
+                ],
+                "styleProfile": [
+                    "register": "neutral",
+                    "technicalDensity": 0.5,
+                    "codeSwitchingRatio": 0.2,
+                    "punctuationStyle": "standard",
+                    "connectors": [],
+                    "endings": []
+                ],
+                "recentAcceptedCommits": ["JSON Schema 可以继续推进"],
+                "sourceSummary": ["accepted-ai-summary: terms=1 commits=1 history=\(String(acceptedHistoryHash.prefix(8)))"]
+            ],
+            to: support.appendingPathComponent("AI/accepted-ai-summary.json")
+        )
+        try Data("Accepted count: 1\n".utf8).write(to: home.appendingPathComponent(".knowtype/ACCEPTED_AI_LEARNING.md"))
 
         try writeJSON(
             [
@@ -109,6 +142,12 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         XCTAssertEqual(value("本地 fallback", in: status.aiRows), "已关闭")
         XCTAssertTrue(value("默认 provider", in: status.aiRows).contains("gpt-5.3-codex-spark"))
         XCTAssertNotEqual(value("ENV.md", in: status.userDataRows), "缺失")
+        XCTAssertEqual(value("接受记录数", in: status.acceptedLearningRows), "1")
+        XCTAssertEqual(value("Summary 状态", in: status.acceptedLearningRows), "当前")
+        XCTAssertEqual(value("接受词条", in: status.acceptedLearningRows), "1")
+        XCTAssertEqual(value("近期提交", in: status.acceptedLearningRows), "1")
+        XCTAssertEqual(value("已进入 LEXICAL_PROFILE.md", in: status.acceptedLearningRows), "是")
+        XCTAssertTrue(status.acceptedLearningCommands.contains("./scripts/accepted-learning.sh rebuild"))
         XCTAssertEqual(value("备份数量", in: status.backupRows), "1")
         XCTAssertEqual(status.rollbackCommand, "./scripts/rollback-inputmethod.sh --to 20260524T000000Z-0000-0.1.0-1")
     }
@@ -140,5 +179,11 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
 
     private func value(_ label: String, in rows: [SettingsKeyValuePresentation]) -> String {
         rows.first { $0.label == label }?.value ?? ""
+    }
+
+    private func sha256(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 }

@@ -408,6 +408,19 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   event contains only schema id, history hash, and counts, not user text
 - emits summary-ready metadata only for schemas changed by the current rebuild
 
+`knowtype-accepted-learning-tool` and `scripts/accepted-learning.sh`:
+
+- expose read-only `status`, explicit `rebuild`, and guarded `clear --yes`
+  maintenance commands for accepted AI learning
+- report only paths, counts, hashes, mtimes, and freshness state; they never
+  print raw input, accepted text, locked prefix, or full history
+- `clear --yes` deletes only `accepted-ai-learning.jsonl`,
+  `accepted-ai-summary.json`, and `ACCEPTED_AI_LEARNING.md`; it does not delete
+  `LEXICAL_PROFILE.md`, ENV, CORRECTION, provider profiles, Keychain secrets,
+  Rime userdb, or lexical profile JSON
+- `diagnose-inputmethod.sh --json` includes `userData.acceptedLearning` with the
+  same status shape subset used by settings diagnostics
+
 Rime userdb profile refresh is a background-only input-method task. It calls
 librime sync as a best-effort freshness step, reads the live active schema from
 the Rime session, resolves that schema's `translator/user_dict` or

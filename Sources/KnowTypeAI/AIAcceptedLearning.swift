@@ -2,9 +2,9 @@ import CryptoKit
 import Foundation
 import KnowTypeCore
 
-private let acceptedLearningFileLock = NSLock()
+let acceptedLearningFileLock = NSLock()
 
-private func withAcceptedLearningFileLock<T>(_ body: () throws -> T) rethrows -> T {
+func withAcceptedLearningFileLock<T>(_ body: () throws -> T) rethrows -> T {
     acceptedLearningFileLock.lock()
     defer { acceptedLearningFileLock.unlock() }
     return try body()
@@ -540,7 +540,7 @@ public final class AIAcceptedLearningStore:
         }
     }
 
-    private static func buildSummary(
+    public static func buildSummary(
         records: [AIAcceptedLearningRecord],
         generatedAt: Date
     ) -> AIAcceptedLanguageSummary? {
@@ -663,14 +663,14 @@ public final class AIAcceptedLearningStore:
         return String(clean.prefix(48)) + "..."
     }
 
-    private static func historyHash(_ records: [AIAcceptedLearningRecord]) -> String {
+    public static func historyHash(_ records: [AIAcceptedLearningRecord]) -> String {
         let joined = records.map(\.textHash).joined(separator: "\n")
         return SHA256.hash(data: Data(joined.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
     }
 
-    private static func renderMarkdown(_ summary: AIAcceptedLanguageSummary) -> String {
+    public static func renderMarkdown(_ summary: AIAcceptedLanguageSummary) -> String {
         var lines: [String] = [
             "# KnowType Accepted AI Learning",
             "",

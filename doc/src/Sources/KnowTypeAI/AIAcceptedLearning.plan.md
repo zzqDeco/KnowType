@@ -19,6 +19,14 @@ It emits ready events only for schemas whose accepted history changed since the
 previous rebuild, so schema-specific lexical profile refreshes are not retriggered
 by unchanged cached summaries.
 
+`AIAcceptedLearningMaintenance` is the non-runtime control surface for this
+data. It powers `knowtype-accepted-learning-tool` and the
+`scripts/accepted-learning.sh` wrapper with read-only status, explicit rebuild,
+and guarded clear operations. Rebuild reuses the same summary builder used by
+runtime learning. Clear removes only accepted-learning history, summary, and
+mirror files; it never touches Rime, provider profiles, Keychain data, ENV,
+CORRECTION, or `LEXICAL_PROFILE.md`.
+
 Privacy rules:
 
 - skip the whole accepted-learning record when raw input, locked prefix, or
