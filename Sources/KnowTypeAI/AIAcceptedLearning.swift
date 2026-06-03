@@ -464,6 +464,7 @@ public final class AIAcceptedLearningStore:
     }
 
     public func snapshot() -> AIAcceptedLanguageSummary? {
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = summary
         lock.unlock()
@@ -474,6 +475,7 @@ public final class AIAcceptedLearningStore:
         guard let schemaID else {
             return snapshot()
         }
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = schemaSummaries[schemaID]
         lock.unlock()
@@ -481,6 +483,7 @@ public final class AIAcceptedLearningStore:
     }
 
     public func allRecords() -> [AIAcceptedLearningRecord] {
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = records
         lock.unlock()
@@ -610,8 +613,13 @@ public final class AIAcceptedLearningStore:
             return
         }
         let markerModifiedAt = Self.fileModificationDate(markerURL, fileManager: fileManager)
-        guard let markerModifiedAt,
-              lastClearMarkerModifiedAt == nil || markerModifiedAt > (lastClearMarkerModifiedAt ?? .distantPast) else {
+        guard let markerModifiedAt else {
+            return
+        }
+        lock.lock()
+        let shouldReload = lastClearMarkerModifiedAt == nil || markerModifiedAt > (lastClearMarkerModifiedAt ?? .distantPast)
+        lock.unlock()
+        guard shouldReload else {
             return
         }
         let reloadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
@@ -624,6 +632,10 @@ public final class AIAcceptedLearningStore:
         pendingSummarySchemaIDs.removeAll()
         lastClearMarkerModifiedAt = markerModifiedAt
         lock.unlock()
+    }
+
+    private func syncRecordsAfterExternalClear() {
+        syncRecordsAfterExternalClearLocked()
     }
 
     private func notifySummaryReady(_ events: [AIAcceptedLearningSummaryReadyEvent]) {

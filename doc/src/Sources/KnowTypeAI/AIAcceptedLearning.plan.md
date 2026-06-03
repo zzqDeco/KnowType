@@ -26,9 +26,10 @@ and guarded clear operations. Rebuild reuses the same summary builder used by
 runtime learning. Runtime startup repair and maintenance writes share an
 interprocess lock file. Clear removes accepted-learning history, summary, and
 mirror files, writes a clear marker so a running store drops stale in-memory
-records before the next append or rebuild, and scrubs accepted-AI context from
-the persistent lexical profile. It never touches Rime, provider profiles,
-Keychain data, ENV, or CORRECTION.
+records before the next snapshot, append, or rebuild, and scrubs accepted-AI
+terms/source lines plus matching accepted recent commits from the persistent
+lexical profile while preserving non-AI recent commits and tone data. It never
+touches Rime, provider profiles, Keychain data, ENV, or CORRECTION.
 
 Privacy rules:
 

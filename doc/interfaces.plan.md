@@ -416,12 +416,16 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   print raw input, accepted text, locked prefix, or full history
 - `clear --yes` deletes only `accepted-ai-learning.jsonl`,
   `accepted-ai-summary.json`, and `ACCEPTED_AI_LEARNING.md`, writes a clear
-  marker for running stores, and scrubs accepted-AI terms/source lines from the
-  persistent lexical profile; it does not delete ENV, CORRECTION, provider
-  profiles, Keychain secrets, or Rime userdb
+  marker for running stores, and scrubs accepted-AI terms/source lines and
+  matching accepted recent commits from the persistent lexical profile while
+  preserving non-AI recent commits and tone data; it does not delete ENV,
+  CORRECTION, provider profiles, Keychain secrets, or Rime userdb
 - runtime and maintenance writes, including startup summary repair, use a shared
   lock file so rebuild, clear, startup repair, and accepted-record appends do not
   publish stale summaries across processes
+- runtime snapshot reads observe the clear marker before returning accepted-AI
+  summaries so active input-method processes stop injecting cleared learning
+  without requiring a restart or another accepted record
 - `diagnose-inputmethod.sh --json` includes `userData.acceptedLearning` with the
   same status shape subset used by settings diagnostics
 

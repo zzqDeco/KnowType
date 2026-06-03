@@ -169,11 +169,12 @@ public struct AIAcceptedLearningMaintenance {
             throw Error.clearRequiresConfirmation
         }
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
+            let acceptedCommitTexts = acceptedCommitTextVariants(from: loadRecords().records)
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
             try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
-            try scrubAcceptedAIFromLexicalProfile()
+            try scrubAcceptedAIFromLexicalProfile(acceptedCommitTexts: acceptedCommitTexts)
         }
         return status(action: "cleared")
     }
@@ -248,11 +249,14 @@ public struct AIAcceptedLearningMaintenance {
         return data ?? Data()
     }
 
-    private func scrubAcceptedAIFromLexicalProfile() throws {
+    private func scrubAcceptedAIFromLexicalProfile(acceptedCommitTexts: Set<String>) throws {
         guard fileManager.fileExists(atPath: lexicalJSONURL.path),
               let data = try? Data(contentsOf: lexicalJSONURL) else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly()
+                try scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    removeRecentCommitsWhenUnknown: true
+                )
             }
             return
         }
@@ -260,7 +264,10 @@ public struct AIAcceptedLearningMaintenance {
         decoder.dateDecodingStrategy = .iso8601
         guard let profile = try? decoder.decode(PersistentLexicalProfile.self, from: data) else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly()
+                try scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    removeRecentCommitsWhenUnknown: true
+                )
             }
             return
         }
@@ -269,13 +276,22 @@ public struct AIAcceptedLearningMaintenance {
             $0.hasPrefix("accepted-ai")
         } || profile.lexicalContext.terms.contains { $0.source == "accepted-ai" }
         guard hadAcceptedSource else {
+            if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
+                try scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    removeRecentCommitsWhenUnknown: false
+                )
+            }
             return
         }
 
+        let scrubbedRecentCommits = profile.lexicalContext.recentCommits.filter {
+            !acceptedCommitTexts.contains(normalizedCommitText($0))
+        }
         let scrubbedContext = LexicalContextSnapshot(
             terms: profile.lexicalContext.terms.filter { $0.source != "accepted-ai" },
-            recentCommits: [],
-            toneProfile: ToneProfile(),
+            recentCommits: scrubbedRecentCommits,
+            toneProfile: profile.lexicalContext.toneProfile,
             sourceSummary: profile.lexicalContext.sourceSummary.filter { !$0.hasPrefix("accepted-ai") }
         )
         let scrubbedProfile = PersistentLexicalProfile(
@@ -289,16 +305,76 @@ public struct AIAcceptedLearningMaintenance {
         try atomicWrite(Data(scrubbedContext.markdown.utf8), to: lexicalMarkdownURL)
     }
 
-    private func scrubAcceptedAIFromLexicalMarkdownOnly() throws {
+    private func scrubAcceptedAIFromLexicalMarkdownOnly(
+        acceptedCommitTexts: Set<String>,
+        removeRecentCommitsWhenUnknown: Bool
+    ) throws {
         guard let content = try? String(contentsOf: lexicalMarkdownURL, encoding: .utf8),
-              content.contains("accepted-ai") else {
+              content.contains("accepted-ai") || !acceptedCommitTexts.isEmpty else {
             return
         }
+        var output: [String] = []
+        var inRecentCommits = false
+        var removedRecentCommit = false
+        var recentCommitItemCount = 0
         let lines = content
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
-            .filter { !$0.contains("accepted-ai") }
-        try atomicWrite(Data((lines.joined(separator: "\n") + "\n").utf8), to: lexicalMarkdownURL)
+        for line in lines {
+            if line.hasPrefix("## ") {
+                if inRecentCommits, recentCommitItemCount == 0 {
+                    output.append("- No recent committed text yet.")
+                    output.append("")
+                }
+                inRecentCommits = line == "## Recent Commits"
+                if inRecentCommits {
+                    recentCommitItemCount = 0
+                }
+                output.append(line)
+                continue
+            }
+            if line.contains("accepted-ai") {
+                continue
+            }
+            if inRecentCommits, line.hasPrefix("- ") {
+                let commit = normalizedCommitText(String(line.dropFirst(2)))
+                if acceptedCommitTexts.contains(commit)
+                    || (acceptedCommitTexts.isEmpty && removeRecentCommitsWhenUnknown) {
+                    removedRecentCommit = true
+                    continue
+                }
+                recentCommitItemCount += 1
+            }
+            output.append(line)
+        }
+        if inRecentCommits, recentCommitItemCount == 0 {
+            output.append("- No recent committed text yet.")
+        }
+        guard removedRecentCommit || content.contains("accepted-ai") else {
+            return
+        }
+        try atomicWrite(Data((output.joined(separator: "\n") + "\n").utf8), to: lexicalMarkdownURL)
+    }
+
+    private func acceptedCommitTextVariants(from records: [AIAcceptedLearningRecord]) -> Set<String> {
+        Set(
+            records.flatMap { record in
+                let clean = normalizedCommitText(record.acceptedText)
+                guard !clean.isEmpty else {
+                    return [String]()
+                }
+                if clean.count <= 48 {
+                    return [clean]
+                }
+                return [clean, String(clean.prefix(48)) + "..."]
+            }
+        )
+    }
+
+    private func normalizedCommitText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     }
 
     private func modificationDateString(_ url: URL) -> String? {
