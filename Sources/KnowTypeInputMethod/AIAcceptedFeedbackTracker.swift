@@ -48,6 +48,8 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
     func armAcceptedSpan(
         acceptID: UUID,
         acceptedText: String,
+        trackingText: String? = nil,
+        trackingOffsetUTF16: Int = 0,
         schemaID: String,
         appBundleID: String?,
         provider: String,
@@ -64,15 +66,20 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
             cancel(reason: "pre_insert_range_unverified")
             return false
         }
+        let trackedText = trackingText ?? acceptedText
         let acceptedLength = (acceptedText as NSString).length
-        guard acceptedLength > 0 else {
+        let trackedLength = (trackedText as NSString).length
+        guard trackedLength > 0,
+              trackingOffsetUTF16 >= 0,
+              trackingOffsetUTF16 + trackedLength <= acceptedLength else {
             cancel(reason: "empty_accepted_text")
             return false
         }
-        let startLocation = Self.acceptedSpanStartLocation(
+        let acceptedStartLocation = Self.acceptedSpanStartLocation(
             selectedRange: selectedRange,
             markedRange: client.markedRange
         )
+        let startLocation = acceptedStartLocation + trackingOffsetUTF16
         let active = ActiveSpan(
             acceptID: acceptID,
             clientID: client.feedbackTrackingID,
@@ -81,9 +88,9 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
             provider: provider,
             contextVersion: contextVersion,
             acceptedTextHash: Self.hash(acceptedText),
-            currentText: acceptedText,
+            currentText: trackedText,
             startLocation: startLocation,
-            endLocation: startLocation + acceptedLength,
+            endLocation: startLocation + trackedLength,
             createdAt: now(),
             isVerified: false,
             pendingRanges: [],

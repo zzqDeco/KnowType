@@ -1715,9 +1715,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return nil
         }
         let acceptID = UUID()
+        let trackingTarget = acceptedFeedbackTrackingTarget(
+            text: text,
+            acceptedAIRecommendation: candidate
+        )
         _ = aiAcceptedFeedbackTracker.armAcceptedSpan(
             acceptID: acceptID,
             acceptedText: text,
+            trackingText: trackingTarget.text,
+            trackingOffsetUTF16: trackingTarget.offsetUTF16,
             schemaID: conversionEngine.activeSchemaID,
             appBundleID: appBundleID,
             provider: candidate.provider,
@@ -1725,6 +1731,27 @@ final class InputControllerCoordinator: @unchecked Sendable {
             client: client
         )
         return acceptID
+    }
+
+    private func acceptedFeedbackTrackingTarget(
+        text: String,
+        acceptedAIRecommendation candidate: AIRecommendationCandidate
+    ) -> (text: String, offsetUTF16: Int) {
+        let prefix = candidate.prefixText
+        guard candidate.continuationText != nil,
+              !prefix.isEmpty,
+              text.hasPrefix(prefix) else {
+            return (text, 0)
+        }
+        let prefixLength = (prefix as NSString).length
+        guard prefixLength < (text as NSString).length else {
+            return (text, 0)
+        }
+        let generatedText = (text as NSString).substring(from: prefixLength)
+        guard !generatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return (text, 0)
+        }
+        return (generatedText, prefixLength)
     }
 
     private func recordLexicalCommit(_ text: String) {

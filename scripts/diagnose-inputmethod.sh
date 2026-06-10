@@ -241,6 +241,31 @@ def accepted_learning_status(app_support, home):
     records, invalid_lines = load_jsonl(history_path)
     feedback_records, invalid_feedback_lines = load_jsonl(feedback_history_path)
 
+    def valid_feedback_record(record):
+        if not isinstance(record, dict):
+            return False
+        ranges = record.get("deletedRanges", [])
+        if not isinstance(ranges, list):
+            return False
+        if any(not isinstance(item, dict) for item in ranges):
+            return False
+        texts = record.get("deletedTexts", [])
+        if not isinstance(texts, list):
+            return False
+        try:
+            float(record.get("deletedRatio", 0))
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    valid_feedback_records = []
+    for record in feedback_records:
+        if valid_feedback_record(record):
+            valid_feedback_records.append(record)
+        else:
+            invalid_feedback_lines += 1
+    feedback_records = valid_feedback_records
+
     def feedback_hash_fragment(record):
         return "|".join([
             str(record.get("acceptID", "")),

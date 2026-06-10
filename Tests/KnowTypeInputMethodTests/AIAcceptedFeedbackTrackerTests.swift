@@ -72,6 +72,79 @@ final class AIAcceptedFeedbackTrackerTests: XCTestCase {
         XCTAssertEqual(store.allRecords().first?.deletedTexts, ["进"])
     }
 
+    func testTrackingOffsetRejectsDeletionInsideConfirmedPrefix() async throws {
+        let store = AIAcceptedFeedbackStore.inMemory()
+        let tracker = AIAcceptedFeedbackTracker(
+            recorder: store,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceNanoseconds: 0
+        )
+        let client = FeedbackTrackerClient(selectedRange: NSRange(location: 10, length: 0))
+        let prefix = "我觉得这个方案"
+        let suffix = "需要调整"
+        let acceptedText = prefix + suffix
+        let prefixLength = (prefix as NSString).length
+
+        XCTAssertTrue(
+            tracker.armAcceptedSpan(
+                acceptID: UUID(),
+                acceptedText: acceptedText,
+                trackingText: suffix,
+                trackingOffsetUTF16: prefixLength,
+                schemaID: "pinyin_simp",
+                appBundleID: "com.apple.TextEdit",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                client: client
+            )
+        )
+        client.selectedRangeValue = NSRange(location: 10 + (acceptedText as NSString).length, length: 0)
+        tracker.verifyPostInsertCaret(client: client)
+
+        client.selectedRangeValue = NSRange(location: 10 + prefixLength, length: 0)
+        XCTAssertFalse(tracker.observeDeleteBackward(client: client))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertTrue(store.allRecords().isEmpty)
+    }
+
+    func testTrackingOffsetRecordsDeletionInsideGeneratedSuffix() async throws {
+        let store = AIAcceptedFeedbackStore.inMemory()
+        let tracker = AIAcceptedFeedbackTracker(
+            recorder: store,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceNanoseconds: 0
+        )
+        let client = FeedbackTrackerClient(selectedRange: NSRange(location: 10, length: 0))
+        let prefix = "我觉得这个方案"
+        let suffix = "需要调整"
+        let acceptedText = prefix + suffix
+        let prefixLength = (prefix as NSString).length
+
+        XCTAssertTrue(
+            tracker.armAcceptedSpan(
+                acceptID: UUID(),
+                acceptedText: acceptedText,
+                trackingText: suffix,
+                trackingOffsetUTF16: prefixLength,
+                schemaID: "pinyin_simp",
+                appBundleID: "com.apple.TextEdit",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                client: client
+            )
+        )
+        client.selectedRangeValue = NSRange(location: 10 + (acceptedText as NSString).length, length: 0)
+        tracker.verifyPostInsertCaret(client: client)
+
+        XCTAssertTrue(tracker.observeDeleteBackward(client: client))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let record = try XCTUnwrap(store.allRecords().first)
+        XCTAssertEqual(record.deletedTexts, ["整"])
+        XCTAssertEqual(record.deletedRanges.first?.location, 10 + prefixLength + (suffix as NSString).length - 1)
+    }
+
     func testMovedCursorCancelsTrackingWithoutFeedback() async throws {
         let store = AIAcceptedFeedbackStore.inMemory()
         let tracker = AIAcceptedFeedbackTracker(
