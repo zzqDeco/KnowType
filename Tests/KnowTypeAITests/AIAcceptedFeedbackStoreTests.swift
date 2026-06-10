@@ -31,6 +31,24 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         XCTAssertEqual(snapshot?.markdown.contains("accepted-ai-feedback-summary:"), true)
     }
 
+    func testContextMarkdownIncludesReplacementPatterns() {
+        let summary = AIAcceptedFeedbackSummary(
+            generatedAt: Date(timeIntervalSince1970: 0),
+            historyHash: "hash",
+            feedbackCount: 1,
+            strongCount: 1,
+            avoidTerms: ["冗长表达"],
+            styleAdjustments: ["Prefer shorter AI continuations when context is ambiguous."],
+            replacementPatterns: ["冗长表达 -> 简洁说法"],
+            sourceSummary: ["accepted-ai-feedback-summary: records=1 strong=1 history=hash"]
+        )
+
+        let markdown = AIAcceptedFeedbackStore.renderContextMarkdown(summary)
+
+        XCTAssertTrue(markdown.contains("## Replacement Patterns"))
+        XCTAssertTrue(markdown.contains("冗长表达 -> 简洁说法"))
+    }
+
     func testSecretLikeFeedbackIsSkipped() async throws {
         let store = AIAcceptedFeedbackStore.inMemory()
         await store.recordAcceptedFeedback(

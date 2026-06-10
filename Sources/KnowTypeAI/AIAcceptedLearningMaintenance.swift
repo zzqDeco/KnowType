@@ -239,14 +239,19 @@ public struct AIAcceptedLearningMaintenance {
                 try removeIfExists(summaryURL)
                 try removeIfExists(mirrorURL)
             }
-            let feedbackRecords = loadFeedbackRecords().records
-            let feedbackSummary = AIAcceptedFeedbackStore.buildSummary(records: feedbackRecords, generatedAt: Date())
-            if let feedbackSummary {
-                try atomicWrite(encode(feedbackSummary), to: feedbackSummaryURL)
-                try atomicWrite(Data(AIAcceptedFeedbackStore.renderMarkdown(feedbackSummary).utf8), to: feedbackMirrorURL)
-            } else {
-                try removeIfExists(feedbackSummaryURL)
-                try removeIfExists(feedbackMirrorURL)
+            try withAcceptedFeedbackFileLock(
+                lockURL: acceptedFeedbackLockURL(historyURL: feedbackHistoryURL),
+                fileManager: fileManager
+            ) {
+                let feedbackRecords = loadFeedbackRecords().records
+                let feedbackSummary = AIAcceptedFeedbackStore.buildSummary(records: feedbackRecords, generatedAt: Date())
+                if let feedbackSummary {
+                    try atomicWrite(encode(feedbackSummary), to: feedbackSummaryURL)
+                    try atomicWrite(Data(AIAcceptedFeedbackStore.renderMarkdown(feedbackSummary).utf8), to: feedbackMirrorURL)
+                } else {
+                    try removeIfExists(feedbackSummaryURL)
+                    try removeIfExists(feedbackMirrorURL)
+                }
             }
         }
         return status(action: "rebuilt")
@@ -262,9 +267,14 @@ public struct AIAcceptedLearningMaintenance {
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
-            try removeIfExists(feedbackHistoryURL)
-            try removeIfExists(feedbackSummaryURL)
-            try removeIfExists(feedbackMirrorURL)
+            try withAcceptedFeedbackFileLock(
+                lockURL: acceptedFeedbackLockURL(historyURL: feedbackHistoryURL),
+                fileManager: fileManager
+            ) {
+                try removeIfExists(feedbackHistoryURL)
+                try removeIfExists(feedbackSummaryURL)
+                try removeIfExists(feedbackMirrorURL)
+            }
             try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
             try scrubAcceptedAIFromLexicalProfile(acceptedCommitTexts: acceptedCommitTexts)
         }

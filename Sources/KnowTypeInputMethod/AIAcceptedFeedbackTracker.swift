@@ -72,7 +72,7 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
         let startLocation = selectedRange.location
         let active = ActiveSpan(
             acceptID: acceptID,
-            clientID: ObjectIdentifier(client),
+            clientID: client.feedbackTrackingID,
             schemaID: schemaID,
             appBundleID: appBundleID,
             provider: provider,
@@ -106,7 +106,7 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
             lock.unlock()
             return
         }
-        guard ObjectIdentifier(client) == active.clientID else {
+        guard client.feedbackTrackingID == active.clientID else {
             lock.unlock()
             cancel(reason: "post_insert_client_changed")
             return
@@ -144,7 +144,7 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
             cancel(reason: "expired")
             return false
         }
-        guard ObjectIdentifier(client) == active.clientID else {
+        guard client.feedbackTrackingID == active.clientID else {
             lock.unlock()
             cancel(reason: "delete_client_changed")
             return false
@@ -192,7 +192,7 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
         guard var active = activeSpan,
               active.isVerified,
               !active.pendingRanges.isEmpty,
-              ObjectIdentifier(client) == active.clientID,
+              client.feedbackTrackingID == active.clientID,
               Self.isKnownCollapsedRange(client.selectedRange),
               client.selectedRange.location >= active.startLocation,
               client.selectedRange.location <= active.endLocation else {

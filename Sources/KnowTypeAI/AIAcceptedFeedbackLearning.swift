@@ -1,6 +1,9 @@
+import Darwin
 import CryptoKit
 import Foundation
 import KnowTypeCore
+
+let acceptedFeedbackFileLock = NSLock()
 
 public enum AIAcceptedFeedbackStrength: String, Codable, Sendable, Equatable {
     case weak
@@ -263,7 +266,7 @@ public final class AIAcceptedFeedbackStore:
     }
 
     private func append(_ record: AIAcceptedFeedbackRecord) throws {
-        try withAcceptedLearningFileLock(lockURL: acceptedFeedbackLockURL(historyURL: historyURL), fileManager: fileManager) {
+        try withAcceptedFeedbackFileLock(lockURL: acceptedFeedbackLockURL(historyURL: historyURL), fileManager: fileManager) {
             if let historyURL {
                 try fileManager.createDirectory(
                     at: historyURL.deletingLastPathComponent(),
@@ -317,7 +320,7 @@ public final class AIAcceptedFeedbackStore:
 
     private func rebuildSummary() {
         do {
-            try withAcceptedLearningFileLock(lockURL: acceptedFeedbackLockURL(historyURL: historyURL), fileManager: fileManager) {
+            try withAcceptedFeedbackFileLock(lockURL: acceptedFeedbackLockURL(historyURL: historyURL), fileManager: fileManager) {
                 lock.lock()
                 let currentRecords = records
                 lock.unlock()
@@ -481,6 +484,13 @@ public final class AIAcceptedFeedbackStore:
             summary.styleAdjustments.prefix(6).forEach { lines.append("- \($0)") }
         }
         lines.append("")
+        lines.append("## Replacement Patterns")
+        if summary.replacementPatterns.isEmpty {
+            lines.append("- none")
+        } else {
+            summary.replacementPatterns.prefix(6).forEach { lines.append("- \($0)") }
+        }
+        lines.append("")
         lines.append("## Sources")
         summary.sourceSummary.forEach { lines.append("- \($0)") }
         return lines.joined(separator: "\n") + "\n"
@@ -641,4 +651,38 @@ public final class AIAcceptedFeedbackStore:
 
 func acceptedFeedbackLockURL(historyURL: URL?) -> URL? {
     historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-feedback.lock")
+}
+
+func withAcceptedFeedbackFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
+    acceptedFeedbackFileLock.lock()
+    defer {
+        acceptedFeedbackFileLock.unlock()
+    }
+
+    guard let lockURL else {
+        return try body()
+    }
+
+    try fileManager.createDirectory(
+        at: lockURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    if !fileManager.fileExists(atPath: lockURL.path) {
+        fileManager.createFile(atPath: lockURL.path, contents: nil)
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
+    return try body()
 }

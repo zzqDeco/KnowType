@@ -94,19 +94,66 @@ final class AIAcceptedFeedbackTrackerTests: XCTestCase {
 
         XCTAssertTrue(store.allRecords().isEmpty)
     }
+
+    func testFreshAdapterForSameUnderlyingClientKeepsTracking() async throws {
+        let store = AIAcceptedFeedbackStore.inMemory()
+        let tracker = AIAcceptedFeedbackTracker(
+            recorder: store,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceNanoseconds: 0
+        )
+        let underlyingClient = NSObject()
+        let acceptedText = "这个方案需要调整"
+        let acceptClient = FeedbackTrackerClient(
+            selectedRange: NSRange(location: 6, length: 0),
+            identityObject: underlyingClient
+        )
+        XCTAssertTrue(
+            tracker.armAcceptedSpan(
+                acceptID: UUID(),
+                acceptedText: acceptedText,
+                schemaID: "pinyin_simp",
+                appBundleID: "com.apple.TextEdit",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                client: acceptClient
+            )
+        )
+
+        let verifyClient = FeedbackTrackerClient(
+            selectedRange: NSRange(location: 6 + (acceptedText as NSString).length, length: 0),
+            identityObject: underlyingClient
+        )
+        tracker.verifyPostInsertCaret(client: verifyClient)
+        let deleteClient = FeedbackTrackerClient(
+            selectedRange: NSRange(location: 6 + (acceptedText as NSString).length, length: 0),
+            identityObject: underlyingClient
+        )
+
+        XCTAssertTrue(tracker.observeDeleteBackward(client: deleteClient))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(store.allRecords().count, 1)
+    }
 }
 
 private final class FeedbackTrackerClient: InputControllerClient, @unchecked Sendable {
     var selectedRangeValue: NSRange
     var bundleIdentifier: String? = "com.apple.TextEdit"
     var markedRange: NSRange?
+    let identityObject: AnyObject
 
-    init(selectedRange: NSRange) {
+    init(selectedRange: NSRange, identityObject: AnyObject? = nil) {
         selectedRangeValue = selectedRange
+        self.identityObject = identityObject ?? NSObject()
     }
 
     var selectedRange: NSRange {
         selectedRangeValue
+    }
+
+    var feedbackTrackingID: ObjectIdentifier {
+        ObjectIdentifier(identityObject)
     }
 
     func firstRect(forCharacterRange _: NSRange) -> CGRect {
