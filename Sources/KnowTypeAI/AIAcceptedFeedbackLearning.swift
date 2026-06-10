@@ -459,8 +459,8 @@ public final class AIAcceptedFeedbackStore:
 
         let replacementPatterns = promotedRecords
             .compactMap { record -> String? in
-                guard let replacement = boundedText(record.replacementText),
-                      let deleted = replacementDeletedText(for: record).flatMap(boundedText) else {
+                guard let replacement = boundedFeedbackSummaryText(record.replacementText),
+                      let deleted = replacementDeletedText(for: record).flatMap(boundedFeedbackSummaryText) else {
                     return nil
                 }
                 return "\(deleted) -> \(replacement)"
@@ -676,6 +676,13 @@ public final class AIAcceptedFeedbackStore:
             return clean
         }
         return String(clean.prefix(36)) + "..."
+    }
+
+    private static func boundedFeedbackSummaryText(_ text: String?) -> String? {
+        guard let clean = boundedText(text) else {
+            return nil
+        }
+        return LexicalContextBuilder.sanitizedAcceptedProfileText(clean)
     }
 
     private static func loadRecords(

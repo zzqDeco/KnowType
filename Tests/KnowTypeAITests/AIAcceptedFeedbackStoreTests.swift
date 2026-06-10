@@ -100,6 +100,53 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshot()?.summary.replacementPatterns, [])
     }
 
+    func testReplacementPatternsSkipProtectedSummaryTextButKeepHistory() async throws {
+        let store = AIAcceptedFeedbackStore.inMemory()
+        await store.recordAcceptedFeedback(
+            AIAcceptedFeedbackRecord(
+                acceptID: UUID(),
+                schemaID: "pinyin_simp",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                acceptedTextHash: "abc",
+                deletedRanges: [AIAcceptedFeedbackTextRange(location: 10, length: 17)],
+                deletedTexts: ["alice@example.com"],
+                deletedVisibleCharacterCount: 17,
+                deletedRatio: 0.5,
+                strength: .medium,
+                replacementText: "/Users/example/project",
+                reason: "replacement_commit"
+            )
+        )
+
+        XCTAssertEqual(store.allRecords().count, 1)
+        XCTAssertEqual(store.snapshot()?.summary.replacementPatterns, [])
+        XCTAssertFalse(store.snapshot()?.markdown.contains("alice@example.com") ?? true)
+        XCTAssertFalse(store.snapshot()?.markdown.contains("/Users/example/project") ?? true)
+    }
+
+    func testReplacementPatternsKeepOrdinaryLanguageSummaryText() async throws {
+        let store = AIAcceptedFeedbackStore.inMemory()
+        await store.recordAcceptedFeedback(
+            AIAcceptedFeedbackRecord(
+                acceptID: UUID(),
+                schemaID: "pinyin_simp",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                acceptedTextHash: "abc",
+                deletedRanges: [AIAcceptedFeedbackTextRange(location: 10, length: 4)],
+                deletedTexts: ["冗长表达"],
+                deletedVisibleCharacterCount: 4,
+                deletedRatio: 0.5,
+                strength: .medium,
+                replacementText: "简洁说法",
+                reason: "replacement_commit"
+            )
+        )
+
+        XCTAssertEqual(store.snapshot()?.summary.replacementPatterns, ["冗长表达 -> 简洁说法"])
+    }
+
     func testHistoryHashIncludesSummaryDrivingTextFields() {
         let acceptID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
         let base = AIAcceptedFeedbackRecord(
