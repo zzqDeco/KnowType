@@ -71,6 +71,106 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         XCTAssertNil(store.snapshot())
     }
 
+    func testStartupRepairsMissingFeedbackSummaryOnDisk() throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-feedback.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-feedback-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_FEEDBACK.md")
+        let record = AIAcceptedFeedbackRecord(
+            acceptID: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            schemaID: "pinyin_simp",
+            provider: "test-provider",
+            contextVersion: "ctx",
+            acceptedTextHash: "abc",
+            deletedRanges: [AIAcceptedFeedbackTextRange(location: 2, length: 8)],
+            deletedTexts: ["冗长表达"],
+            deletedVisibleCharacterCount: 4,
+            deletedRatio: 0.5,
+            strength: .medium,
+            reason: "delete_idle"
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var line = try encoder.encode(record)
+        line.append(0x0A)
+        try line.write(to: historyURL, options: .atomic)
+
+        let store = AIAcceptedFeedbackStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL
+        )
+
+        XCTAssertEqual(store.snapshot()?.summary.feedbackCount, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: summaryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: mirrorURL.path))
+    }
+
+    func testRunningStoreDropsFeedbackAfterExternalClear() async throws {
+        let directory = temporaryDirectory()
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let feedbackHistoryURL = directory.appendingPathComponent("accepted-ai-feedback.jsonl")
+        let feedbackSummaryURL = directory.appendingPathComponent("accepted-ai-feedback-summary.json")
+        let feedbackMirrorURL = directory.appendingPathComponent("ACCEPTED_AI_FEEDBACK.md")
+        let lexicalJSONURL = directory.appendingPathComponent("lexical-profile.json")
+        let lexicalMarkdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let store = AIAcceptedFeedbackStore(
+            historyURL: feedbackHistoryURL,
+            summaryURL: feedbackSummaryURL,
+            mirrorURL: feedbackMirrorURL,
+            summaryDelayNanoseconds: 0
+        )
+        await store.recordAcceptedFeedback(
+            AIAcceptedFeedbackRecord(
+                acceptID: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+                schemaID: "pinyin_simp",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                acceptedTextHash: "old",
+                deletedRanges: [AIAcceptedFeedbackTextRange(location: 2, length: 8)],
+                deletedTexts: ["旧表达"],
+                deletedVisibleCharacterCount: 3,
+                deletedRatio: 0.5,
+                strength: .medium,
+                reason: "delete_idle"
+            )
+        )
+        XCTAssertEqual(store.allRecords().count, 1)
+        let maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            feedbackHistoryURL: feedbackHistoryURL,
+            feedbackSummaryURL: feedbackSummaryURL,
+            feedbackMirrorURL: feedbackMirrorURL,
+            lexicalJSONURL: lexicalJSONURL,
+            lexicalMarkdownURL: lexicalMarkdownURL
+        )
+
+        _ = try maintenance.clear(confirm: true)
+
+        XCTAssertTrue(store.allRecords().isEmpty)
+        XCTAssertNil(store.snapshot())
+        await store.recordAcceptedFeedback(
+            AIAcceptedFeedbackRecord(
+                acceptID: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+                schemaID: "pinyin_simp",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                acceptedTextHash: "new",
+                deletedRanges: [AIAcceptedFeedbackTextRange(location: 2, length: 8)],
+                deletedTexts: ["新表达"],
+                deletedVisibleCharacterCount: 3,
+                deletedRatio: 0.5,
+                strength: .medium,
+                reason: "delete_idle"
+            )
+        )
+        XCTAssertEqual(store.allRecords().map(\.acceptedTextHash), ["new"])
+    }
+
     func testMaintenanceRebuildAndClearCoverFeedbackFiles() throws {
         let directory = temporaryDirectory()
         let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")

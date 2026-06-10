@@ -205,6 +205,34 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
         flushPending(reason: "replacement_commit")
     }
 
+    func preserveForReplacementComposition(client: InputControllerClient?) -> Bool {
+        guard let client else {
+            cancel(reason: "replacement_composition_missing_client")
+            return false
+        }
+        lock.lock()
+        guard var active = activeSpan else {
+            lock.unlock()
+            return false
+        }
+        guard active.isVerified,
+              !active.pendingRanges.isEmpty,
+              now().timeIntervalSince(active.createdAt) <= ttlSeconds,
+              client.feedbackTrackingID == active.clientID,
+              Self.isKnownCollapsedRange(client.selectedRange),
+              client.selectedRange.location >= active.startLocation,
+              client.selectedRange.location <= active.endLocation else {
+            lock.unlock()
+            cancel(reason: "replacement_composition_unverified")
+            return false
+        }
+        active.debounceTask?.cancel()
+        active.debounceTask = nil
+        activeSpan = active
+        lock.unlock()
+        return true
+    }
+
     func cancel(reason: String) {
         lock.lock()
         let hadActiveSpan = activeSpan != nil

@@ -1866,7 +1866,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
         if rawBuffer.isEmpty {
-            aiAcceptedFeedbackTracker.cancel(reason: "new_composition")
+            if !aiAcceptedFeedbackTracker.preserveForReplacementComposition(client: client) {
+                aiAcceptedFeedbackTracker.cancel(reason: "new_composition")
+            }
             reloadInputModeDefaultsIfNeeded(client: client)
             reloadRuntimePreferencesIfNeeded()
             reloadRuntimeLexiconEngineIfNeeded()

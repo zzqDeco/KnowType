@@ -135,6 +135,40 @@ final class AIAcceptedFeedbackTrackerTests: XCTestCase {
 
         XCTAssertEqual(store.allRecords().count, 1)
     }
+
+    func testReplacementCompositionPreservesPendingDeletionUntilCommit() async throws {
+        let store = AIAcceptedFeedbackStore.inMemory()
+        let tracker = AIAcceptedFeedbackTracker(
+            recorder: store,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceNanoseconds: 10_000_000_000
+        )
+        let client = FeedbackTrackerClient(selectedRange: NSRange(location: 10, length: 0))
+        let acceptedText = "这个方案需要调整"
+        XCTAssertTrue(
+            tracker.armAcceptedSpan(
+                acceptID: UUID(),
+                acceptedText: acceptedText,
+                schemaID: "pinyin_simp",
+                appBundleID: "com.apple.TextEdit",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                client: client
+            )
+        )
+        let acceptedLength = (acceptedText as NSString).length
+        client.selectedRangeValue = NSRange(location: 10 + acceptedLength, length: 0)
+        tracker.verifyPostInsertCaret(client: client)
+        XCTAssertTrue(tracker.observeDeleteBackward(client: client))
+
+        client.selectedRangeValue = NSRange(location: 10 + acceptedLength - 1, length: 0)
+        XCTAssertTrue(tracker.preserveForReplacementComposition(client: client))
+        tracker.observeVerifiedReplacementCommit("优化", client: client)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(store.allRecords().count, 1)
+        XCTAssertEqual(store.allRecords().first?.replacementText, "优化")
+    }
 }
 
 private final class FeedbackTrackerClient: InputControllerClient, @unchecked Sendable {

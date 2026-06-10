@@ -158,6 +158,7 @@ public final class AIAcceptedFeedbackStore:
     private var summary: AIAcceptedFeedbackSummary?
     private var schemaSummaries: [String: AIAcceptedFeedbackSummary]
     private var summaryTask: Task<Void, Never>?
+    private var lastClearMarkerModifiedAt: Date?
 
     public init(
         historyURL: URL? = AIAcceptedFeedbackStore.defaultHistoryURL(),
@@ -174,6 +175,7 @@ public final class AIAcceptedFeedbackStore:
         let loadedRecords = Self.loadRecords(from: historyURL, decoder: configuredDecoder)
         let loadedSummary = Self.loadSummary(from: summaryURL, decoder: configuredDecoder)
         let rebuiltSummary = Self.buildSummary(records: loadedRecords, generatedAt: Date())
+        let summaryMatches = Self.summary(loadedSummary, matches: loadedRecords)
         self.historyURL = historyURL
         self.summaryURL = summaryURL
         self.mirrorURL = mirrorURL
@@ -183,8 +185,29 @@ public final class AIAcceptedFeedbackStore:
         self.encoder = configuredEncoder
         self.decoder = configuredDecoder
         self.records = loadedRecords
-        self.summary = Self.summary(loadedSummary, matches: loadedRecords) ? loadedSummary : rebuiltSummary
+        self.summary = summaryMatches ? loadedSummary : rebuiltSummary
         self.schemaSummaries = Self.buildSchemaSummaries(records: loadedRecords, generatedAt: Date())
+        self.lastClearMarkerModifiedAt = Self.fileModificationDate(
+            acceptedFeedbackClearMarkerURL(historyURL: historyURL),
+            fileManager: fileManager
+        )
+        if !summaryMatches {
+            do {
+                try withAcceptedFeedbackFileLock(
+                    lockURL: acceptedFeedbackLockURL(historyURL: historyURL),
+                    fileManager: fileManager
+                ) {
+                    try persistSummary(rebuiltSummary)
+                }
+            } catch {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .lexicalProfileFallback,
+                        reason: "accepted_feedback_summary_repair_failed:\(String(describing: type(of: error)))"
+                    )
+                )
+            }
+        }
     }
 
     public static func inMemory(
@@ -242,6 +265,7 @@ public final class AIAcceptedFeedbackStore:
     }
 
     public func snapshot() -> AIAcceptedFeedbackContextSnapshot? {
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = summary
         lock.unlock()
@@ -252,6 +276,7 @@ public final class AIAcceptedFeedbackStore:
         guard let schemaID else {
             return snapshot()
         }
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = schemaSummaries[schemaID]
         lock.unlock()
@@ -259,6 +284,7 @@ public final class AIAcceptedFeedbackStore:
     }
 
     public func allRecords() -> [AIAcceptedFeedbackRecord] {
+        syncRecordsAfterExternalClear()
         lock.lock()
         let current = records
         lock.unlock()
@@ -267,6 +293,7 @@ public final class AIAcceptedFeedbackStore:
 
     private func append(_ record: AIAcceptedFeedbackRecord) throws {
         try withAcceptedFeedbackFileLock(lockURL: acceptedFeedbackLockURL(historyURL: historyURL), fileManager: fileManager) {
+            syncRecordsAfterExternalClearLocked()
             if let historyURL {
                 try fileManager.createDirectory(
                     at: historyURL.deletingLastPathComponent(),
@@ -321,6 +348,7 @@ public final class AIAcceptedFeedbackStore:
     private func rebuildSummary() {
         do {
             try withAcceptedFeedbackFileLock(lockURL: acceptedFeedbackLockURL(historyURL: historyURL), fileManager: fileManager) {
+                syncRecordsAfterExternalClearLocked()
                 lock.lock()
                 let currentRecords = records
                 lock.unlock()
@@ -341,6 +369,52 @@ public final class AIAcceptedFeedbackStore:
                 )
             )
         }
+    }
+
+    private func syncRecordsAfterExternalClear() {
+        do {
+            try withAcceptedFeedbackFileLock(
+                lockURL: acceptedFeedbackLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                syncRecordsAfterExternalClearLocked()
+            }
+        } catch {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_feedback_clear_sync_failed:\(String(describing: type(of: error)))"
+                )
+            )
+        }
+    }
+
+    private func syncRecordsAfterExternalClearLocked() {
+        guard let markerURL = acceptedFeedbackClearMarkerURL(historyURL: historyURL) else {
+            return
+        }
+        let markerModifiedAt = Self.fileModificationDate(markerURL, fileManager: fileManager)
+        guard let markerModifiedAt else {
+            return
+        }
+        lock.lock()
+        let shouldReload = lastClearMarkerModifiedAt == nil || markerModifiedAt > (lastClearMarkerModifiedAt ?? .distantPast)
+        lock.unlock()
+        guard shouldReload else {
+            return
+        }
+        let reloadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let generatedAt = Date()
+        let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: generatedAt)
+        let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: generatedAt)
+        lock.lock()
+        records = reloadedRecords
+        summary = reloadedSummary
+        schemaSummaries = reloadedSchemaSummaries
+        lastClearMarkerModifiedAt = markerModifiedAt
+        summaryTask?.cancel()
+        summaryTask = nil
+        lock.unlock()
     }
 
     public static func buildSummary(
@@ -608,6 +682,13 @@ public final class AIAcceptedFeedbackStore:
         return try? decoder.decode(AIAcceptedFeedbackSummary.self, from: data)
     }
 
+    private static func fileModificationDate(_ url: URL?, fileManager: FileManager) -> Date? {
+        guard let url else {
+            return nil
+        }
+        return try? fileManager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+    }
+
     private func persistSummary(_ summary: AIAcceptedFeedbackSummary?) throws {
         if let summary {
             if let summaryURL {
@@ -651,6 +732,10 @@ public final class AIAcceptedFeedbackStore:
 
 func acceptedFeedbackLockURL(historyURL: URL?) -> URL? {
     historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-feedback.lock")
+}
+
+func acceptedFeedbackClearMarkerURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-feedback.clear.json")
 }
 
 func withAcceptedFeedbackFileLock<T>(

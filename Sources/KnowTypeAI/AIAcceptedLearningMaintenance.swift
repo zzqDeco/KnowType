@@ -93,6 +93,7 @@ public struct AIAcceptedLearningMaintenance {
     public var lexicalJSONURL: URL
     public var lexicalMarkdownURL: URL
     public var clearMarkerURL: URL
+    public var feedbackClearMarkerURL: URL
     public var lockURL: URL
     public var fileManager: FileManager
 
@@ -117,6 +118,8 @@ public struct AIAcceptedLearningMaintenance {
         self.lexicalMarkdownURL = lexicalMarkdownURL
         self.clearMarkerURL = acceptedLearningClearMarkerURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+        self.feedbackClearMarkerURL = acceptedFeedbackClearMarkerURL(historyURL: feedbackHistoryURL)
+            ?? feedbackHistoryURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-feedback.clear.json")
         self.lockURL = acceptedLearningLockURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
         self.fileManager = fileManager
@@ -274,6 +277,7 @@ public struct AIAcceptedLearningMaintenance {
                 try removeIfExists(feedbackHistoryURL)
                 try removeIfExists(feedbackSummaryURL)
                 try removeIfExists(feedbackMirrorURL)
+                try atomicWrite(clearMarkerPayload(), to: feedbackClearMarkerURL)
             }
             try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
             try scrubAcceptedAIFromLexicalProfile(acceptedCommitTexts: acceptedCommitTexts)
