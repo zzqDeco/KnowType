@@ -460,7 +460,7 @@ public final class AIAcceptedFeedbackStore:
         let replacementPatterns = promotedRecords
             .compactMap { record -> String? in
                 guard let replacement = boundedText(record.replacementText),
-                      let deleted = record.deletedTexts.first.flatMap(boundedText) else {
+                      let deleted = replacementDeletedText(for: record).flatMap(boundedText) else {
                     return nil
                 }
                 return "\(deleted) -> \(replacement)"
@@ -636,6 +636,29 @@ public final class AIAcceptedFeedbackStore:
             terms.append(normalized)
         }
         return Array(Set(terms)).sorted()
+    }
+
+    private static func replacementDeletedText(for record: AIAcceptedFeedbackRecord) -> String? {
+        let fragments = zip(record.deletedRanges, record.deletedTexts)
+            .sorted { lhs, rhs in
+                if lhs.0.location == rhs.0.location {
+                    return lhs.0.length < rhs.0.length
+                }
+                return lhs.0.location < rhs.0.location
+            }
+        guard let first = fragments.first else {
+            return nil
+        }
+        var expectedLocation = first.0.location
+        var parts: [String] = []
+        for (range, text) in fragments {
+            guard range.location == expectedLocation else {
+                return nil
+            }
+            parts.append(text)
+            expectedLocation += range.length
+        }
+        return parts.joined()
     }
 
     private static func boundedText(_ text: String?) -> String? {
