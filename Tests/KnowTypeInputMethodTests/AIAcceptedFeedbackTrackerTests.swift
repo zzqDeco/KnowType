@@ -40,6 +40,38 @@ final class AIAcceptedFeedbackTrackerTests: XCTestCase {
         XCTAssertEqual(records[0].deletedRanges.first?.location, 10 + (acceptedText as NSString).length - 1)
     }
 
+    func testMarkedRangeProvidesAcceptedSpanStartWhenCompositionIsActive() async throws {
+        let store = AIAcceptedFeedbackStore.inMemory()
+        let tracker = AIAcceptedFeedbackTracker(
+            recorder: store,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceNanoseconds: 0
+        )
+        let client = FeedbackTrackerClient(selectedRange: NSRange(location: 12, length: 0))
+        client.markedRange = NSRange(location: 10, length: 2)
+        let acceptedText = "这个方案需要继续推进"
+
+        XCTAssertTrue(
+            tracker.armAcceptedSpan(
+                acceptID: UUID(),
+                acceptedText: acceptedText,
+                schemaID: "pinyin_simp",
+                appBundleID: "com.apple.TextEdit",
+                provider: "test-provider",
+                contextVersion: "ctx",
+                client: client
+            )
+        )
+        client.selectedRangeValue = NSRange(location: 10 + (acceptedText as NSString).length, length: 0)
+        tracker.verifyPostInsertCaret(client: client)
+
+        XCTAssertTrue(tracker.observeDeleteBackward(client: client))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(store.allRecords().count, 1)
+        XCTAssertEqual(store.allRecords().first?.deletedTexts, ["进"])
+    }
+
     func testMovedCursorCancelsTrackingWithoutFeedback() async throws {
         let store = AIAcceptedFeedbackStore.inMemory()
         let tracker = AIAcceptedFeedbackTracker(

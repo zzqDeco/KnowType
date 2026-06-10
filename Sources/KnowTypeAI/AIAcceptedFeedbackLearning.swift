@@ -489,6 +489,8 @@ public final class AIAcceptedFeedbackStore:
                 record.acceptID.uuidString,
                 record.acceptedTextHash,
                 record.deletedRanges.map { "\($0.location):\($0.length)" }.joined(separator: ","),
+                record.deletedTexts.joined(separator: "\u{1F}"),
+                record.replacementText ?? "",
                 String(format: "%.4f", record.deletedRatio),
                 record.strength.rawValue
             ].joined(separator: "|")

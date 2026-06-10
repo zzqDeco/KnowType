@@ -1704,12 +1704,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
               candidate.displayText == text else {
             return nil
         }
+        let appBundleID = appBundleIdentifier(client: client)
+        guard !TextProtection.requiresNoCorrection("knowtype", appBundleID: appBundleID) else {
+            aiDiagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .acceptedFeedbackTrackingCancelled,
+                    reason: "protected_app_context"
+                )
+            )
+            return nil
+        }
         let acceptID = UUID()
         _ = aiAcceptedFeedbackTracker.armAcceptedSpan(
             acceptID: acceptID,
             acceptedText: text,
             schemaID: conversionEngine.activeSchemaID,
-            appBundleID: appBundleIdentifier(client: client),
+            appBundleID: appBundleID,
             provider: candidate.provider,
             contextVersion: candidate.contextVersion,
             client: client

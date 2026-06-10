@@ -49,6 +49,61 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         XCTAssertTrue(markdown.contains("冗长表达 -> 简洁说法"))
     }
 
+    func testHistoryHashIncludesSummaryDrivingTextFields() {
+        let acceptID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let base = AIAcceptedFeedbackRecord(
+            acceptID: acceptID,
+            schemaID: "pinyin_simp",
+            provider: "test-provider",
+            contextVersion: "ctx",
+            acceptedTextHash: "abc",
+            deletedRanges: [AIAcceptedFeedbackTextRange(location: 10, length: 4)],
+            deletedTexts: ["冗长表达"],
+            deletedVisibleCharacterCount: 4,
+            deletedRatio: 0.5,
+            strength: .medium,
+            replacementText: "简洁说法",
+            reason: "replacement_commit"
+        )
+        let changedDeletedText = AIAcceptedFeedbackRecord(
+            acceptID: acceptID,
+            schemaID: "pinyin_simp",
+            provider: "test-provider",
+            contextVersion: "ctx",
+            acceptedTextHash: "abc",
+            deletedRanges: [AIAcceptedFeedbackTextRange(location: 10, length: 4)],
+            deletedTexts: ["别的表达"],
+            deletedVisibleCharacterCount: 4,
+            deletedRatio: 0.5,
+            strength: .medium,
+            replacementText: "简洁说法",
+            reason: "replacement_commit"
+        )
+        let changedReplacementText = AIAcceptedFeedbackRecord(
+            acceptID: acceptID,
+            schemaID: "pinyin_simp",
+            provider: "test-provider",
+            contextVersion: "ctx",
+            acceptedTextHash: "abc",
+            deletedRanges: [AIAcceptedFeedbackTextRange(location: 10, length: 4)],
+            deletedTexts: ["冗长表达"],
+            deletedVisibleCharacterCount: 4,
+            deletedRatio: 0.5,
+            strength: .medium,
+            replacementText: "另一种说法",
+            reason: "replacement_commit"
+        )
+
+        XCTAssertNotEqual(
+            AIAcceptedFeedbackStore.historyHash([base]),
+            AIAcceptedFeedbackStore.historyHash([changedDeletedText])
+        )
+        XCTAssertNotEqual(
+            AIAcceptedFeedbackStore.historyHash([base]),
+            AIAcceptedFeedbackStore.historyHash([changedReplacementText])
+        )
+    }
+
     func testSecretLikeFeedbackIsSkipped() async throws {
         let store = AIAcceptedFeedbackStore.inMemory()
         await store.recordAcceptedFeedback(

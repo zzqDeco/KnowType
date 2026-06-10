@@ -69,7 +69,10 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
             cancel(reason: "empty_accepted_text")
             return false
         }
-        let startLocation = selectedRange.location
+        let startLocation = Self.acceptedSpanStartLocation(
+            selectedRange: selectedRange,
+            markedRange: client.markedRange
+        )
         let active = ActiveSpan(
             acceptID: acceptID,
             clientID: client.feedbackTrackingID,
@@ -358,6 +361,18 @@ final class AIAcceptedFeedbackTracker: @unchecked Sendable {
             location: activeStart + composedRange.location,
             length: composedRange.length
         )
+    }
+
+    private static func acceptedSpanStartLocation(selectedRange: NSRange, markedRange: NSRange?) -> Int {
+        guard let markedRange,
+              markedRange.location != NSNotFound,
+              markedRange.length != NSNotFound,
+              markedRange.length > 0,
+              selectedRange.location >= markedRange.location,
+              selectedRange.location <= markedRange.location + markedRange.length else {
+            return selectedRange.location
+        }
+        return markedRange.location
     }
 
     private static func isKnownCollapsedRange(_ range: NSRange) -> Bool {
