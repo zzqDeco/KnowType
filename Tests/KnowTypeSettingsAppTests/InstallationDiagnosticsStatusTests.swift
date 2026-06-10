@@ -70,13 +70,15 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
                 acceptID,
                 acceptedTextHash,
                 "12:4",
+                "冗长表达",
+                "简洁说法",
                 "0.5000",
                 "strong"
             ].joined(separator: "|")
         )
         try Data(
             """
-            {"schemaVersion":1,"observedAt":"2026-05-24T00:02:00Z","acceptID":"\(acceptID)","schemaID":"pinyin_simp","provider":"ai-test","contextVersion":"test","acceptedTextHash":"\(acceptedTextHash)","deletedRanges":[{"location":12,"length":4}],"deletedTexts":["冗长表达"],"deletedVisibleCharacterCount":4,"deletedRatio":0.5,"strength":"strong","reason":"delete_idle"}
+            {"schemaVersion":1,"observedAt":"2026-05-24T00:02:00Z","acceptID":"\(acceptID)","schemaID":"pinyin_simp","provider":"ai-test","contextVersion":"test","acceptedTextHash":"\(acceptedTextHash)","deletedRanges":[{"location":12,"length":4}],"deletedTexts":["冗长表达"],"deletedVisibleCharacterCount":4,"deletedRatio":0.5,"strength":"strong","replacementText":"简洁说法","reason":"delete_idle"}
 
             """.utf8
         ).write(to: support.appendingPathComponent("AI/accepted-ai-feedback.jsonl"))
@@ -89,7 +91,9 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
                 "strongCount": 1,
                 "avoidTerms": ["冗长表达"],
                 "styleAdjustments": ["Prefer shorter AI continuations when context is ambiguous."],
-                "replacementPatterns": [],
+                "replacementPatterns": [
+                    ["deleted": "冗长表达", "replacement": "简洁说法"]
+                ],
                 "sourceSummary": ["accepted-ai-feedback-summary: records=1 strong=1 history=\(String(acceptedFeedbackHash.prefix(8)))"]
             ],
             to: support.appendingPathComponent("AI/accepted-ai-feedback-summary.json")

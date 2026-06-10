@@ -272,10 +272,13 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
                 .map { "\($0["location"] ?? ""):\($0["length"] ?? "")" }
                 .joined(separator: ",")
             let ratio = String(format: "%.4f", object["deletedRatio"] as? Double ?? 0)
+            let deletedTexts = (object["deletedTexts"] as? [String] ?? []).joined(separator: "\u{1F}")
             fragments.append([
                 object["acceptID"] as? String ?? "",
                 object["acceptedTextHash"] as? String ?? "",
                 ranges,
+                deletedTexts,
+                object["replacementText"] as? String ?? "",
                 ratio,
                 object["strength"] as? String ?? ""
             ].joined(separator: "|"))

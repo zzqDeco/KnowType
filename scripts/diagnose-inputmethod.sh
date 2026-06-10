@@ -241,12 +241,25 @@ def accepted_learning_status(app_support, home):
     records, invalid_lines = load_jsonl(history_path)
     feedback_records, invalid_feedback_lines = load_jsonl(feedback_history_path)
 
+    def feedback_hash_fragment(record):
+        return "|".join([
+            str(record.get("acceptID", "")),
+            str(record.get("acceptedTextHash", "")),
+            ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
+            "\u001f".join(str(item) for item in record.get("deletedTexts", [])),
+            str(record.get("replacementText", "")),
+            f"{float(record.get('deletedRatio', 0)):.4f}",
+            str(record.get("strength", "")),
+        ])
+
     history_hash = None
     if records:
         joined = "\n".join(str(record.get("textHash", "")) for record in records)
         history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
     summary = load_json(summary_path)
+    if not isinstance(summary, dict):
+        summary = None
     summary_exists = summary_path.is_file()
     if records:
         is_current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash") == history_hash
@@ -255,16 +268,12 @@ def accepted_learning_status(app_support, home):
 
     feedback_history_hash = None
     if feedback_records:
-        joined = "\n".join("|".join([
-            str(record.get("acceptID", "")),
-            str(record.get("acceptedTextHash", "")),
-            ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
-            f"{float(record.get('deletedRatio', 0)):.4f}",
-            str(record.get("strength", "")),
-        ]) for record in feedback_records)
+        joined = "\n".join(feedback_hash_fragment(record) for record in feedback_records)
         feedback_history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
     feedback_summary = load_json(feedback_summary_path)
+    if not isinstance(feedback_summary, dict):
+        feedback_summary = None
     feedback_summary_exists = feedback_summary_path.is_file()
     if feedback_records:
         feedback_is_current = bool(feedback_summary) and feedback_summary.get("feedbackCount") == len(feedback_records) and feedback_summary.get("historyHash") == feedback_history_hash
@@ -281,16 +290,16 @@ def accepted_learning_status(app_support, home):
         warnings.append(f"invalid_history_lines:{invalid_lines}")
     if invalid_feedback_lines:
         warnings.append(f"invalid_feedback_history_lines:{invalid_feedback_lines}")
-    if records and not summary:
-        warnings.append("summary_missing")
-    elif summary_exists and summary is None:
+    if summary_exists and summary is None:
         warnings.append("summary_unreadable")
+    elif records and not summary:
+        warnings.append("summary_missing")
     elif not is_current:
         warnings.append("summary_stale")
-    if feedback_records and not feedback_summary:
-        warnings.append("feedback_summary_missing")
-    elif feedback_summary_exists and feedback_summary is None:
+    if feedback_summary_exists and feedback_summary is None:
         warnings.append("feedback_summary_unreadable")
+    elif feedback_records and not feedback_summary:
+        warnings.append("feedback_summary_missing")
     elif not feedback_is_current:
         warnings.append("feedback_summary_stale")
 
@@ -1127,6 +1136,17 @@ def load_jsonl(path):
 records, invalid, history_read_failed = load_jsonl(history)
 feedback_records, feedback_invalid, feedback_read_failed = load_jsonl(feedback_history)
 
+def feedback_hash_fragment(record):
+    return "|".join([
+        str(record.get("acceptID", "")),
+        str(record.get("acceptedTextHash", "")),
+        ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
+        "\u001f".join(str(item) for item in record.get("deletedTexts", [])),
+        str(record.get("replacementText", "")),
+        f"{float(record.get('deletedRatio', 0)):.4f}",
+        str(record.get("strength", "")),
+    ])
+
 history_hash = ""
 if records:
     history_hash = hashlib.sha256("\n".join(str(record.get("textHash", "")) for record in records).encode("utf-8")).hexdigest()[:8]
@@ -1138,6 +1158,8 @@ if summary_exists:
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
     except Exception:
         summary = None
+if not isinstance(summary, dict):
+    summary = None
 
 if records:
     current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash", "").startswith(history_hash)
@@ -1146,13 +1168,7 @@ else:
 
 feedback_hash = ""
 if feedback_records:
-    joined = "\n".join("|".join([
-        str(record.get("acceptID", "")),
-        str(record.get("acceptedTextHash", "")),
-        ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
-        f"{float(record.get('deletedRatio', 0)):.4f}",
-        str(record.get("strength", "")),
-    ]) for record in feedback_records)
+    joined = "\n".join(feedback_hash_fragment(record) for record in feedback_records)
     feedback_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:8]
 
 feedback_summary = None
@@ -1162,6 +1178,8 @@ if feedback_summary_exists:
         feedback_summary = json.loads(feedback_summary_path.read_text(encoding="utf-8"))
     except Exception:
         feedback_summary = None
+if not isinstance(feedback_summary, dict):
+    feedback_summary = None
 
 if feedback_records:
     feedback_current = bool(feedback_summary) and feedback_summary.get("feedbackCount") == len(feedback_records) and feedback_summary.get("historyHash", "").startswith(feedback_hash)
