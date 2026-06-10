@@ -43,3 +43,11 @@ Privacy rules:
 - do not log accepted text or raw input
 - allow ordinary technical text such as `JSON`, `API`, and `snake_case`
 - never write Rime userdb or call `sync_user_data`
+
+`Sources/KnowTypeAI/AIAcceptedFeedbackLearning.swift` owns the separate
+negative-signal data path. It records only verified post-accept edits supplied
+by the input-method tracker, builds a bounded feedback summary, and renders
+`AI_FEEDBACK.md` for provider requests. The summary is a soft style signal that
+can lower the chance of repeated deleted phrases or overly long continuations;
+it never turns ordinary Backspace events into feedback, never exposes full edit
+history to providers, and never writes Rime userdb.

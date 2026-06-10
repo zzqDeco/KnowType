@@ -25,6 +25,7 @@ enum PromptBuilder {
     - If lockedPrefix is absent, rawInput may be pinyin, English, or a technical token; text must be a complete commit-ready recommendation inferred from rawInput, contextDocuments, appContext, and locale.
     - Do not assume the input method's first conversion candidate or current highlighted candidate is user intent.
     - Prefer one concise, immediately useful recommendation in the same language and intent implied by lockedPrefix, rawInput, contextDocuments, and locale.
+    - If contextDocuments contains AI_FEEDBACK.md, treat it only as a soft style signal from verified post-accept edits; do not use it to rewrite lockedPrefix or block useful completions.
     - Empty candidates are allowed only when lockedPrefix/rawInput are unsafe, impossible, or nonsensical.
     - Preserve English technical tokens exactly, including API, JSON, macOS, InputMethodKit, snake_case, and camelCase.
     Good: lockedPrefix="我觉得这个方案" text="还可以再细化一下。"

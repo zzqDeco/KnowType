@@ -214,14 +214,16 @@ profile 可以留空 model，并通过 `/v1/models` 发现。
 AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
 记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明，`LEXICAL_PROFILE.md`
 是由 Rime userdb 词频、KnowType 近期提交、选择历史，以及用户明确接受过的
-AI 推荐摘要合成的本地 top-K 词汇画像镜像。完整 accepted-AI 历史只保存在本机
+AI 推荐摘要合成的本地 top-K 词汇画像镜像。用户接受 AI 推荐后立即发生、
+且光标范围可验证的编辑会单独汇总为本地 AI feedback；普通 Backspace 不会
+自动当成负反馈。完整 accepted-AI 和 feedback 历史只保存在本机
 Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
 这些文件。可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或
-`clear --yes` 查看、重建或删除 accepted-AI learning 数据；clear 会删除
-accepted-learning history/summary/mirror，并从 lexical profile 中清理
-accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或 CORRECTION
-数据。
+`clear --yes` 查看、重建或删除 accepted-AI learning/feedback 数据；clear 会
+删除 accepted-learning/feedback history/summary/mirror，并从 lexical profile
+中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或
+CORRECTION 数据。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
 输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给
@@ -277,7 +279,8 @@ Level 0 纠错保护用于避免把本应原样提交的文本改写，例如 UR
 API key、Bearer token、JWT、私钥、password/token 赋值等 credential 时才显示
 `AI 已禁用`。
 Accepted AI learning 也只用 secret-like hard block：疑似 credential 的 AI
-接受文本不会被记录，普通技术文本可以留在本地摘要中用于后续推荐。
+接受文本不会被记录，普通技术文本可以留在本地摘要中用于后续推荐。AI feedback
+learning 同样只拦截 secret-like 内容，并且只记录可验证的 post-accept edit。
 
 `API`、`JSON`、`FastAPI`、`iOS`、`macOS`、`InputMethodKit`、
 `snake_case`、`camelCase` 等技术 token 会被保留或规范化。

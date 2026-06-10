@@ -34,6 +34,10 @@ public struct AIUserDirectory: Sendable, Equatable {
     public var acceptedLearningMirrorURL: URL {
         rootURL.appendingPathComponent("ACCEPTED_AI_LEARNING.md", isDirectory: false)
     }
+
+    public var acceptedFeedbackMirrorURL: URL {
+        rootURL.appendingPathComponent("ACCEPTED_AI_FEEDBACK.md", isDirectory: false)
+    }
 }
 
 public struct AIDocumentSnapshot: Sendable, Equatable {

@@ -582,6 +582,12 @@ private struct DiagnosticsSettingsView: View {
                 }
             }
 
+            Section(settingsString("settings.diagnostics.section.acceptedFeedback")) {
+                ForEach(status.acceptedFeedbackRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+            }
+
             Section(settingsString("settings.diagnostics.section.backup")) {
                 ForEach(status.backupRows, id: \.label) { row in
                     LabeledContent(row.label, value: row.value)

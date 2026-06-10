@@ -9,6 +9,7 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
     var aiRows: [SettingsKeyValuePresentation]
     var userDataRows: [SettingsKeyValuePresentation]
     var acceptedLearningRows: [SettingsKeyValuePresentation]
+    var acceptedFeedbackRows: [SettingsKeyValuePresentation]
     var acceptedLearningCommands: [String]
     var backupRows: [SettingsKeyValuePresentation]
     var rollbackCommand: String?
@@ -75,6 +76,12 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
             preferredLanguages: preferredLanguages
         )
         acceptedLearningRows = acceptedLearning
+        acceptedFeedbackRows = Self.acceptedFeedbackSummary(
+            supportURL: supportURL,
+            homeURL: homeURL,
+            fileManager: fileManager,
+            preferredLanguages: preferredLanguages
+        )
         acceptedLearningCommands = [
             "./scripts/accepted-learning.sh status",
             "./scripts/accepted-learning.sh rebuild",
@@ -167,6 +174,54 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
         ]
     }
 
+    private static func acceptedFeedbackSummary(
+        supportURL: URL,
+        homeURL: URL,
+        fileManager: FileManager,
+        preferredLanguages: [String]
+    ) -> [SettingsKeyValuePresentation] {
+        let historyURL = supportURL.appendingPathComponent("AI/accepted-ai-feedback.jsonl")
+        let summaryURL = supportURL.appendingPathComponent("AI/accepted-ai-feedback-summary.json")
+        let mirrorURL = homeURL.appendingPathComponent(".knowtype/ACCEPTED_AI_FEEDBACK.md")
+        let history = acceptedFeedbackHistory(at: historyURL)
+        let summary = acceptedFeedbackSummaryFile(at: summaryURL)
+        let summaryExists = fileManager.fileExists(atPath: summaryURL.path)
+        let summaryState: String
+        if history.recordCount == 0, summary == nil, !summaryExists {
+            summaryState = SettingsLocalization.string(
+                "settings.diagnostics.acceptedLearning.summary.current",
+                preferredLanguages: preferredLanguages
+            )
+        } else if let summary,
+                  summary.feedbackCount == history.recordCount,
+                  summary.historyHash == history.historyHash {
+            summaryState = SettingsLocalization.string(
+                "settings.diagnostics.acceptedLearning.summary.current",
+                preferredLanguages: preferredLanguages
+            )
+        } else if summary == nil, !summaryExists {
+            summaryState = Self.missing(preferredLanguages)
+        } else {
+            summaryState = SettingsLocalization.string(
+                "settings.diagnostics.acceptedLearning.summary.stale",
+                preferredLanguages: preferredLanguages
+            )
+        }
+
+        return [
+            Self.row("settings.diagnostics.acceptedFeedback.records", "\(history.recordCount)", preferredLanguages),
+            Self.row("settings.diagnostics.acceptedFeedback.summary", summaryState, preferredLanguages),
+            Self.row("settings.diagnostics.acceptedFeedback.generatedAt", summary?.generatedAt ?? Self.missing(preferredLanguages), preferredLanguages),
+            Self.row("settings.diagnostics.acceptedFeedback.strong", "\(summary?.strongCount ?? 0)", preferredLanguages),
+            Self.row("settings.diagnostics.acceptedFeedback.avoidTerms", "\(summary?.avoidTermCount ?? 0)", preferredLanguages),
+            Self.row(
+                "settings.diagnostics.acceptedFeedback.mirror",
+                Self.exists(fileManager.fileExists(atPath: mirrorURL.path), preferredLanguages),
+                preferredLanguages
+            )
+        ]
+    }
+
     private static func acceptedLearningHistory(at url: URL) -> (recordCount: Int, historyHash: String?) {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
             return (0, nil)
@@ -200,6 +255,51 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
             acceptedCount: object["acceptedCount"] as? Int ?? 0,
             termCount: (object["termProfile"] as? [Any])?.count ?? 0,
             recentCommitCount: (object["recentAcceptedCommits"] as? [Any])?.count ?? 0
+        )
+    }
+
+    private static func acceptedFeedbackHistory(at url: URL) -> (recordCount: Int, historyHash: String?) {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return (0, nil)
+        }
+        var fragments: [String] = []
+        for line in content.split(whereSeparator: \.isNewline) {
+            guard let data = String(line).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            let ranges = (object["deletedRanges"] as? [[String: Any]] ?? [])
+                .map { "\($0["location"] ?? ""):\($0["length"] ?? "")" }
+                .joined(separator: ",")
+            let ratio = String(format: "%.4f", object["deletedRatio"] as? Double ?? 0)
+            fragments.append([
+                object["acceptID"] as? String ?? "",
+                object["acceptedTextHash"] as? String ?? "",
+                ranges,
+                ratio,
+                object["strength"] as? String ?? ""
+            ].joined(separator: "|"))
+        }
+        guard !fragments.isEmpty else {
+            return (0, nil)
+        }
+        let hash = SHA256.hash(data: Data(fragments.joined(separator: "\n").utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return (fragments.count, hash)
+    }
+
+    private static func acceptedFeedbackSummaryFile(at url: URL) -> AcceptedFeedbackSummaryFile? {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return AcceptedFeedbackSummaryFile(
+            generatedAt: object["generatedAt"] as? String,
+            historyHash: object["historyHash"] as? String,
+            feedbackCount: object["feedbackCount"] as? Int ?? 0,
+            strongCount: object["strongCount"] as? Int ?? 0,
+            avoidTermCount: (object["avoidTerms"] as? [Any])?.count ?? 0
         )
     }
 
@@ -377,4 +477,12 @@ private struct AcceptedLearningSummaryFile: Equatable, Sendable {
     var acceptedCount: Int
     var termCount: Int
     var recentCommitCount: Int
+}
+
+private struct AcceptedFeedbackSummaryFile: Equatable, Sendable {
+    var generatedAt: String?
+    var historyHash: String?
+    var feedbackCount: Int
+    var strongCount: Int
+    var avoidTermCount: Int
 }

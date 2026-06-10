@@ -16,6 +16,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         var environmentHash: String
         var correctionHash: String
         var lexicalHash: String
+        var feedbackHash: String
     }
 
     private struct CacheEntry {
@@ -148,7 +149,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 localeRawValue: request.locale.rawValue,
                 environmentHash: environment.sha256,
                 correctionHash: correction.sha256,
-                lexicalHash: request.lexicalContext?.sha256 ?? ""
+                lexicalHash: request.lexicalContext?.sha256 ?? "",
+                feedbackHash: request.feedbackContext?.sha256 ?? ""
             )
             if let cached = cache[key], cached.expiresAt > Date() {
                 record(
@@ -174,6 +176,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             ]
             if let lexicalContext = request.lexicalContext {
                 contextDocuments["LEXICAL_PROFILE.md"] = lexicalContext.markdown
+            }
+            if let feedbackContext = request.feedbackContext {
+                contextDocuments["AI_FEEDBACK.md"] = feedbackContext.markdown
             }
 
             let llmRequest = LLMRequest(

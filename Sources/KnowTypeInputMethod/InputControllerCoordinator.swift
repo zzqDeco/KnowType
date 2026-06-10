@@ -42,6 +42,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let aiRecommendationProvider: (any AIRecommendationProviding)?
     private let aiContextEventRecorder: (any AIContextEventRecording)?
     private let aiAcceptedLearningRecorder: (any AIAcceptedLearningRecording)?
+    private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
+    private let aiAcceptedFeedbackTracker: AIAcceptedFeedbackTracker
     private let aiDiagnosticSink: any AIRecommendationDiagnosticSink
     private var aiRecommendationTask: Task<Void, Never>?
     private var aiRecommendationState: AIRecommendationState = .idle
@@ -72,6 +74,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
+        aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
         lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
@@ -108,6 +111,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.aiRecommendationProvider = aiRecommendationProvider
         self.aiContextEventRecorder = aiContextEventRecorder
         self.aiAcceptedLearningRecorder = aiAcceptedLearning
+        self.aiAcceptedFeedbackProvider = aiAcceptedFeedback
+        self.aiAcceptedFeedbackTracker = AIAcceptedFeedbackTracker(
+            recorder: aiAcceptedFeedback,
+            diagnosticSink: aiDiagnosticSink
+        )
         self.aiDiagnosticSink = aiDiagnosticSink
         self.lexicalProfileRuntime = LexicalProfileRuntime(
             store: lexicalProfileStore,
@@ -249,6 +257,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func deactivateServer(client: InputControllerClient?) {
         flushUserSelectionHistory()
+        aiAcceptedFeedbackTracker.cancel(reason: "deactivate")
         _ = finishCompositionLifecycle(reason: .deactivate, client: client, commitPolicy: .commitRawIfNeeded)
     }
 
@@ -262,6 +271,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationGeneration += 1
         aiRecommendationTask?.cancel()
         aiRecommendationTask = nil
+        aiAcceptedFeedbackTracker.cancel(reason: "input_controller_will_close")
         lexicalProfileRuntime.cancelRefresh()
         panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
@@ -306,6 +316,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return commitSymbol(symbol, client: client)
         case .deleteBackward:
             guard !rawBuffer.isEmpty else {
+                _ = aiAcceptedFeedbackTracker.observeDeleteBackward(client: client)
                 recordExternalDelete(client: client)
                 return false
             }
@@ -861,7 +872,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: locale,
             compositionID: currentCompositionID,
             requestID: requestID,
-            lexicalContext: lexicalContextSnapshot(for: suggestion)
+            lexicalContext: lexicalContextSnapshot(for: suggestion),
+            feedbackContext: aiAcceptedFeedbackProvider?.snapshot(schemaID: conversionEngine.activeSchemaID)
         )
         recordAIDiagnostic(
             .scheduled,
@@ -1191,12 +1203,23 @@ final class InputControllerCoordinator: @unchecked Sendable {
     ) -> Bool {
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
-            recordTypingCommit(
-                text,
+            let acceptID = prepareAcceptedFeedbackTracking(
+                text: text,
                 client: client,
                 acceptedAIRecommendation: acceptedAIRecommendation
             )
+            recordTypingCommit(
+                text,
+                client: client,
+                acceptedAIRecommendation: acceptedAIRecommendation,
+                acceptID: acceptID
+            )
             insert(text, client: client)
+            if acceptID != nil {
+                host?.scheduleDelayedReanchor { [weak self, client] in
+                    self?.aiAcceptedFeedbackTracker.verifyPostInsertCaret(client: client)
+                }
+            }
             resetComposition()
             return true
         case .requestPolishAndKeepComposition(let text):
@@ -1574,6 +1597,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard let lifecycleClient = client ?? host?.currentClient else {
             return false
         }
+        aiAcceptedFeedbackTracker.cancel(reason: "idle_passthrough")
         let replacementRange = replacementRangeForCommit()
         _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
         traceClientWrite(
@@ -1589,7 +1613,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func recordTypingCommit(
         _ text: String,
         client: InputControllerClient?,
-        acceptedAIRecommendation: AIRecommendationCandidate? = nil
+        acceptedAIRecommendation: AIRecommendationCandidate? = nil,
+        acceptID: UUID? = nil
     ) {
         let appBundleID = appBundleIdentifier(client: client)
         let commitKind = acceptedAIRecommendation == nil ? typingCommitKind(for: text) : .ai
@@ -1609,9 +1634,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     text,
                     appBundleID: appBundleID,
                     acceptedAIRecommendation: acceptedAIRecommendation,
-                    candidateSource: candidateSource
+                    candidateSource: candidateSource,
+                    acceptID: acceptID
                 )
             }
+        } else {
+            aiAcceptedFeedbackTracker.observeVerifiedReplacementCommit(text, client: client)
         }
         guard !TextProtection.requiresNoCorrection(text, appBundleID: appBundleID),
               !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
@@ -1642,7 +1670,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ text: String,
         appBundleID: String?,
         acceptedAIRecommendation: AIRecommendationCandidate?,
-        candidateSource: String
+        candidateSource: String,
+        acceptID: UUID?
     ) {
         guard let aiAcceptedLearningRecorder,
               let candidate = acceptedAIRecommendation,
@@ -1651,6 +1680,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let lockedPrefix = candidate.prefixText.trimmingCharacters(in: .whitespacesAndNewlines)
         let record = AIAcceptedLearningRecord(
+            acceptID: acceptID,
             schemaID: conversionEngine.activeSchemaID,
             appBundleID: appBundleID,
             rawInput: rawBuffer.isEmpty ? nil : rawBuffer,
@@ -1663,6 +1693,28 @@ final class InputControllerCoordinator: @unchecked Sendable {
         Task.detached(priority: .utility) { [aiAcceptedLearningRecorder] in
             await aiAcceptedLearningRecorder.recordAcceptedAI(record)
         }
+    }
+
+    private func prepareAcceptedFeedbackTracking(
+        text: String,
+        client: InputControllerClient?,
+        acceptedAIRecommendation: AIRecommendationCandidate?
+    ) -> UUID? {
+        guard let candidate = acceptedAIRecommendation,
+              candidate.displayText == text else {
+            return nil
+        }
+        let acceptID = UUID()
+        _ = aiAcceptedFeedbackTracker.armAcceptedSpan(
+            acceptID: acceptID,
+            acceptedText: text,
+            schemaID: conversionEngine.activeSchemaID,
+            appBundleID: appBundleIdentifier(client: client),
+            provider: candidate.provider,
+            contextVersion: candidate.contextVersion,
+            client: client
+        )
+        return acceptID
     }
 
     private func recordLexicalCommit(_ text: String) {
@@ -1814,6 +1866,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
         if rawBuffer.isEmpty {
+            aiAcceptedFeedbackTracker.cancel(reason: "new_composition")
             reloadInputModeDefaultsIfNeeded(client: client)
             reloadRuntimePreferencesIfNeeded()
             reloadRuntimeLexiconEngineIfNeeded()

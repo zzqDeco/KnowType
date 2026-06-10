@@ -242,15 +242,18 @@ memory for the AI recommendation slot, `CORRECTION.md` stores user-editable AI
 correction instructions, and `LEXICAL_PROFILE.md` mirrors the local top-K
 lexical profile built from Rime userdb frequency plus recent KnowType commits
 and selections plus bounded summaries of AI recommendations the user explicitly
-accepted. The full accepted-AI history is stored locally under Application
+accepted. Verified edits made immediately after accepting AI recommendations
+are summarized separately as local AI feedback; ordinary Backspace is ignored
+unless the cursor range proves the edit is inside the just-accepted AI span.
+The full accepted-AI and feedback history is stored locally under Application
 Support and is not injected directly into provider requests. The canonical
 lexical profile JSON lives under
 `~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
 on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
-`clear --yes` to inspect, rebuild, or delete accepted-AI learning data. Clear
-removes accepted-learning history/summary/mirror files and scrubs accepted-AI
-context from the lexical profile without deleting Rime, provider, Keychain, ENV,
-or CORRECTION data.
+`clear --yes` to inspect, rebuild, or delete accepted-AI learning and feedback
+data. Clear removes accepted-learning/feedback history, summary, and mirror
+files and scrubs accepted-AI context from the lexical profile without deleting
+Rime, provider, Keychain, ENV, or CORRECTION data.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS
@@ -317,7 +320,8 @@ Secret-like Rime candidate hints are filtered without disabling the whole
 request.
 Accepted AI learning uses the same secret-like hard block: credential-shaped
 accepted text is not recorded, while ordinary technical text can be summarized
-locally for future recommendations.
+locally for future recommendations. AI feedback learning follows the same
+secret-only block and records only verified post-accept edits.
 
 Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`,
 `InputMethodKit`, `snake_case`, and `camelCase` are preserved or canonicalized.

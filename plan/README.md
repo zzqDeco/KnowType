@@ -77,6 +77,7 @@ when converting a shipped plan into a short record.
 | [ai-accepted-learning.plan.md](ai-accepted-learning.plan.md) | Locally record accepted AI recommendations and summarize them into the bounded lexical profile | Active |
 | [accepted-learning-lexical-profile-refresh.plan.md](accepted-learning-lexical-profile-refresh.plan.md) | Refresh persistent lexical profile after accepted-AI summary rebuilds become ready | Active |
 | [accepted-learning-controls.plan.md](accepted-learning-controls.plan.md) | Local status, rebuild, and clear controls for accepted AI learning | Active |
+| [ai-accepted-feedback-learning.plan.md](ai-accepted-feedback-learning.plan.md) | Learn only from verified edits inside recently accepted AI text spans | Active |
 | [provider-live-smoke-timeout-alignment.plan.md](provider-live-smoke-timeout-alignment.plan.md) | Align env-gated provider live smoke timeout with the AI runtime budget | Active |
 | [provider-live-smoke-model-alignment.plan.md](provider-live-smoke-model-alignment.plan.md) | Align env-gated continuation live smoke with the explicit product model under test | Active |
 | [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |

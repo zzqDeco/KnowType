@@ -122,6 +122,7 @@
 "settings.diagnostics.section.ai" = "AI 状态";
 "settings.diagnostics.section.userData" = "用户数据";
 "settings.diagnostics.section.acceptedLearning" = "AI 学习";
+"settings.diagnostics.section.acceptedFeedback" = "AI 反馈学习";
 "settings.diagnostics.section.backup" = "备份与回滚";
 "settings.diagnostics.refresh" = "刷新状态";
 "settings.diagnostics.install.version" = "版本";
@@ -156,6 +157,12 @@
 "settings.diagnostics.acceptedLearning.recentCommits" = "近期提交";
 "settings.diagnostics.acceptedLearning.lexicalInjected" = "已进入 LEXICAL_PROFILE.md";
 "settings.diagnostics.acceptedLearning.commands" = "维护命令";
+"settings.diagnostics.acceptedFeedback.records" = "反馈记录数";
+"settings.diagnostics.acceptedFeedback.summary" = "Feedback Summary";
+"settings.diagnostics.acceptedFeedback.generatedAt" = "最近总结";
+"settings.diagnostics.acceptedFeedback.strong" = "强反馈";
+"settings.diagnostics.acceptedFeedback.avoidTerms" = "降权词条";
+"settings.diagnostics.acceptedFeedback.mirror" = "ACCEPTED_AI_FEEDBACK.md";
 "settings.diagnostics.backup.count" = "备份数量";
 "settings.diagnostics.backup.latest" = "最新备份";
 "settings.diagnostics.backup.version" = "备份版本";

@@ -122,6 +122,7 @@
 "settings.diagnostics.section.ai" = "AI Status";
 "settings.diagnostics.section.userData" = "User Data";
 "settings.diagnostics.section.acceptedLearning" = "AI Learning";
+"settings.diagnostics.section.acceptedFeedback" = "AI Feedback Learning";
 "settings.diagnostics.section.backup" = "Backup & Rollback";
 "settings.diagnostics.refresh" = "Refresh Status";
 "settings.diagnostics.install.version" = "Version";
@@ -156,6 +157,12 @@
 "settings.diagnostics.acceptedLearning.recentCommits" = "Recent Commits";
 "settings.diagnostics.acceptedLearning.lexicalInjected" = "In LEXICAL_PROFILE.md";
 "settings.diagnostics.acceptedLearning.commands" = "Maintenance Commands";
+"settings.diagnostics.acceptedFeedback.records" = "Feedback Records";
+"settings.diagnostics.acceptedFeedback.summary" = "Feedback Summary";
+"settings.diagnostics.acceptedFeedback.generatedAt" = "Last Summary";
+"settings.diagnostics.acceptedFeedback.strong" = "Strong Feedback";
+"settings.diagnostics.acceptedFeedback.avoidTerms" = "Avoid Terms";
+"settings.diagnostics.acceptedFeedback.mirror" = "ACCEPTED_AI_FEEDBACK.md";
 "settings.diagnostics.backup.count" = "Backup Count";
 "settings.diagnostics.backup.latest" = "Latest Backup";
 "settings.diagnostics.backup.version" = "Backup Version";

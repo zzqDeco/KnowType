@@ -64,6 +64,37 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
             to: support.appendingPathComponent("AI/accepted-ai-summary.json")
         )
         try Data("Accepted count: 1\n".utf8).write(to: home.appendingPathComponent(".knowtype/ACCEPTED_AI_LEARNING.md"))
+        let acceptID = "11111111-1111-1111-1111-111111111111"
+        let acceptedFeedbackHash = sha256(
+            [
+                acceptID,
+                acceptedTextHash,
+                "12:4",
+                "0.5000",
+                "strong"
+            ].joined(separator: "|")
+        )
+        try Data(
+            """
+            {"schemaVersion":1,"observedAt":"2026-05-24T00:02:00Z","acceptID":"\(acceptID)","schemaID":"pinyin_simp","provider":"ai-test","contextVersion":"test","acceptedTextHash":"\(acceptedTextHash)","deletedRanges":[{"location":12,"length":4}],"deletedTexts":["冗长表达"],"deletedVisibleCharacterCount":4,"deletedRatio":0.5,"strength":"strong","reason":"delete_idle"}
+
+            """.utf8
+        ).write(to: support.appendingPathComponent("AI/accepted-ai-feedback.jsonl"))
+        try writeJSON(
+            [
+                "schemaVersion": 1,
+                "generatedAt": "2026-05-24T00:03:00Z",
+                "historyHash": acceptedFeedbackHash,
+                "feedbackCount": 1,
+                "strongCount": 1,
+                "avoidTerms": ["冗长表达"],
+                "styleAdjustments": ["Prefer shorter AI continuations when context is ambiguous."],
+                "replacementPatterns": [],
+                "sourceSummary": ["accepted-ai-feedback-summary: records=1 strong=1 history=\(String(acceptedFeedbackHash.prefix(8)))"]
+            ],
+            to: support.appendingPathComponent("AI/accepted-ai-feedback-summary.json")
+        )
+        try Data("Feedback count: 1\n".utf8).write(to: home.appendingPathComponent(".knowtype/ACCEPTED_AI_FEEDBACK.md"))
 
         try writeJSON(
             [
@@ -147,6 +178,11 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         XCTAssertEqual(value("接受词条", in: status.acceptedLearningRows), "1")
         XCTAssertEqual(value("近期提交", in: status.acceptedLearningRows), "1")
         XCTAssertEqual(value("已进入 LEXICAL_PROFILE.md", in: status.acceptedLearningRows), "是")
+        XCTAssertEqual(value("反馈记录数", in: status.acceptedFeedbackRows), "1")
+        XCTAssertEqual(value("Feedback Summary", in: status.acceptedFeedbackRows), "当前")
+        XCTAssertEqual(value("强反馈", in: status.acceptedFeedbackRows), "1")
+        XCTAssertEqual(value("降权词条", in: status.acceptedFeedbackRows), "1")
+        XCTAssertEqual(value("ACCEPTED_AI_FEEDBACK.md", in: status.acceptedFeedbackRows), "存在")
         XCTAssertTrue(status.acceptedLearningCommands.contains("./scripts/accepted-learning.sh rebuild"))
         XCTAssertEqual(value("备份数量", in: status.backupRows), "1")
         XCTAssertEqual(status.rollbackCommand, "./scripts/rollback-inputmethod.sh --to 20260524T000000Z-0000-0.1.0-1")
