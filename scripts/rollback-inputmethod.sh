@@ -79,12 +79,25 @@ cleanup_restore_staging() {
 trap cleanup_restore_staging EXIT
 
 require_input_method_host_stopped() {
-  if pgrep -x KnowTypeInputMethodApp >/dev/null 2>&1; then
+  if knowtype_input_method_host_is_running; then
     echo "error: KnowTypeInputMethodApp is running." >&2
     echo "Switch to another input source and quit the running KnowType host, then rerun rollback." >&2
     echo "Rollback will not kill the host because process shutdown can flush Rime user data." >&2
     exit 1
   fi
+}
+
+knowtype_input_method_host_is_running() {
+  local command executable
+  while IFS= read -r command; do
+    executable="${command%% *}"
+    case "$executable" in
+      KnowTypeInputMethodApp|*/KnowTypeInputMethodApp)
+        return 0
+        ;;
+    esac
+  done < <(ps -axo command= 2>/dev/null)
+  return 1
 }
 
 list_backups() {

@@ -47,7 +47,9 @@ Installs the locally built KnowType input method bundle into
   selected preferences even when the live current source is ABC.
 - If `KnowTypeInputMethodApp` is already running, the installer aborts before the
   build/replace phase instead of killing it, because process shutdown can flush
-  Rime user data and would violate the install/user-data boundary.
+  Rime user data and would violate the install/user-data boundary. The check
+  matches the full process command basename rather than a truncated process
+  name.
 - Local installs inject a timestamp `CFBundleVersion` by default so
   LaunchServices and TIS do not keep reusing stale metadata from a previous
   development build with the same source-controlled version.
