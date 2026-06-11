@@ -248,11 +248,10 @@ require_input_method_host_stopped() {
 }
 
 knowtype_input_method_host_is_running() {
-  local command executable
+  local command
   while IFS= read -r command; do
-    executable="${command%% *}"
-    case "$executable" in
-      KnowTypeInputMethodApp|*/KnowTypeInputMethodApp)
+    case "$command" in
+      KnowTypeInputMethodApp|KnowTypeInputMethodApp\ *|*/KnowTypeInputMethodApp|*/KnowTypeInputMethodApp\ *)
         return 0
         ;;
     esac
