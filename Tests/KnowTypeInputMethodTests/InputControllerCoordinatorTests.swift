@@ -2928,6 +2928,52 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testProtectedAppAcceptedAIRecommendationDoesNotRecordAcceptedFeedback() async throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedFeedback = AIAcceptedFeedbackStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedFeedback: acceptedFeedback,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+        client.selectedRangeValue = NSRange(location: 10 + ("JSON Schema 可以继续" as NSString).length, length: 0)
+        host.runScheduledOperations()
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 51),
+                client: client
+            )
+        )
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(acceptedFeedback.allRecords().isEmpty)
+        XCTAssertNil(acceptedFeedback.snapshot())
+    }
+
+    @MainActor
     func testPanelClickAcceptedAIRecommendationRecordsAcceptedLearningHistory() async throws {
         let client = FakeInputControllerClient()
         let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
@@ -3275,6 +3321,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
+        aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
         lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
@@ -3310,6 +3357,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiRecommendationProvider: aiRecommendationProvider,
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: aiAcceptedLearning,
+            aiAcceptedFeedback: aiAcceptedFeedback,
             aiDiagnosticSink: aiDiagnosticSink,
             lexicalProfileStore: lexicalProfileStore,
             lexicalProfileRefreshGate: lexicalProfileRefreshGate,

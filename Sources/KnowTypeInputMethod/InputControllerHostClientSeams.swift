@@ -3,6 +3,7 @@ import KnowTypeCore
 
 protocol InputControllerClient: AnyObject, Sendable, InputClientGeometryProviding {
     var bundleIdentifier: String? { get }
+    var feedbackTrackingID: ObjectIdentifier { get }
 
     func setMarkedText(
         _ text: String,
@@ -10,6 +11,12 @@ protocol InputControllerClient: AnyObject, Sendable, InputClientGeometryProvidin
         replacementRange: NSRange
     )
     func insertText(_ text: String, replacementRange: NSRange)
+}
+
+extension InputControllerClient {
+    var feedbackTrackingID: ObjectIdentifier {
+        ObjectIdentifier(self)
+    }
 }
 
 protocol InputControllerHost: AnyObject {
@@ -45,6 +52,10 @@ final class IMKInputControllerClientAdapter: InputControllerClient, @unchecked S
 
     var bundleIdentifier: String? {
         client.bundleIdentifier()
+    }
+
+    var feedbackTrackingID: ObjectIdentifier {
+        ObjectIdentifier(client as AnyObject)
     }
 
     var selectedRange: NSRange {

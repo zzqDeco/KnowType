@@ -212,25 +212,70 @@ def backup_summary(root):
 def accepted_learning_status(app_support, home):
     history_path = Path(app_support) / "AI" / "accepted-ai-learning.jsonl"
     summary_path = Path(app_support) / "AI" / "accepted-ai-summary.json"
+    feedback_history_path = Path(app_support) / "AI" / "accepted-ai-feedback.jsonl"
+    feedback_summary_path = Path(app_support) / "AI" / "accepted-ai-feedback-summary.json"
     mirror_path = Path(home) / ".knowtype" / "ACCEPTED_AI_LEARNING.md"
+    feedback_mirror_path = Path(home) / ".knowtype" / "ACCEPTED_AI_FEEDBACK.md"
     lexical_json_path = Path(app_support) / "AI" / "lexical-profile.json"
     lexical_markdown_path = Path(home) / ".knowtype" / "LEXICAL_PROFILE.md"
 
-    records = []
-    invalid_lines = 0
-    if history_path.is_file():
+    def load_jsonl(path):
+        rows = []
+        invalid = 0
+        if not path.is_file():
+            return rows, invalid
         try:
-            with history_path.open(encoding="utf-8") as handle:
+            with path.open(encoding="utf-8") as handle:
                 for line in handle:
                     line = line.strip()
                     if not line:
                         continue
                     try:
-                        records.append(json.loads(line))
+                        rows.append(json.loads(line))
                     except Exception:
-                        invalid_lines += 1
+                        invalid += 1
         except Exception:
-            invalid_lines += 1
+            invalid += 1
+        return rows, invalid
+
+    records, invalid_lines = load_jsonl(history_path)
+    feedback_records, invalid_feedback_lines = load_jsonl(feedback_history_path)
+
+    def valid_feedback_record(record):
+        if not isinstance(record, dict):
+            return False
+        ranges = record.get("deletedRanges", [])
+        if not isinstance(ranges, list):
+            return False
+        if any(not isinstance(item, dict) for item in ranges):
+            return False
+        texts = record.get("deletedTexts", [])
+        if not isinstance(texts, list):
+            return False
+        try:
+            float(record.get("deletedRatio", 0))
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    valid_feedback_records = []
+    for record in feedback_records:
+        if valid_feedback_record(record):
+            valid_feedback_records.append(record)
+        else:
+            invalid_feedback_lines += 1
+    feedback_records = valid_feedback_records
+
+    def feedback_hash_fragment(record):
+        return "|".join([
+            str(record.get("acceptID", "")),
+            str(record.get("acceptedTextHash", "")),
+            ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
+            "\u001f".join(str(item) for item in record.get("deletedTexts", [])),
+            str(record.get("replacementText", "")),
+            f"{float(record.get('deletedRatio', 0)):.4f}",
+            str(record.get("strength", "")),
+        ])
 
     history_hash = None
     if records:
@@ -238,11 +283,27 @@ def accepted_learning_status(app_support, home):
         history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
     summary = load_json(summary_path)
+    if not isinstance(summary, dict):
+        summary = None
     summary_exists = summary_path.is_file()
     if records:
         is_current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash") == history_hash
     else:
         is_current = summary is None and not summary_exists
+
+    feedback_history_hash = None
+    if feedback_records:
+        joined = "\n".join(feedback_hash_fragment(record) for record in feedback_records)
+        feedback_history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+    feedback_summary = load_json(feedback_summary_path)
+    if not isinstance(feedback_summary, dict):
+        feedback_summary = None
+    feedback_summary_exists = feedback_summary_path.is_file()
+    if feedback_records:
+        feedback_is_current = bool(feedback_summary) and feedback_summary.get("feedbackCount") == len(feedback_records) and feedback_summary.get("historyHash") == feedback_history_hash
+    else:
+        feedback_is_current = feedback_summary is None and not feedback_summary_exists
 
     try:
         lexical_markdown = lexical_markdown_path.read_text(encoding="utf-8")
@@ -252,12 +313,20 @@ def accepted_learning_status(app_support, home):
     warnings = []
     if invalid_lines:
         warnings.append(f"invalid_history_lines:{invalid_lines}")
-    if records and not summary:
-        warnings.append("summary_missing")
-    elif summary_exists and summary is None:
+    if invalid_feedback_lines:
+        warnings.append(f"invalid_feedback_history_lines:{invalid_feedback_lines}")
+    if summary_exists and summary is None:
         warnings.append("summary_unreadable")
+    elif records and not summary:
+        warnings.append("summary_missing")
     elif not is_current:
         warnings.append("summary_stale")
+    if feedback_summary_exists and feedback_summary is None:
+        warnings.append("feedback_summary_unreadable")
+    elif feedback_records and not feedback_summary:
+        warnings.append("feedback_summary_missing")
+    elif not feedback_is_current:
+        warnings.append("feedback_summary_stale")
 
     return {
         "schemaVersion": 1,
@@ -283,6 +352,31 @@ def accepted_learning_status(app_support, home):
             "path": str(mirror_path),
             "exists": mirror_path.is_file(),
             "mtime": file_mtime_iso(mirror_path),
+        },
+        "feedback": {
+            "history": {
+                "path": str(feedback_history_path),
+                "exists": feedback_history_path.is_file(),
+                "recordCount": len(feedback_records),
+                "historyHash": feedback_history_hash,
+                "mtime": file_mtime_iso(feedback_history_path),
+            },
+            "summary": {
+                "path": str(feedback_summary_path),
+                "exists": feedback_summary_path.is_file(),
+                "feedbackCount": feedback_summary.get("feedbackCount", 0) if isinstance(feedback_summary, dict) else 0,
+                "strongCount": feedback_summary.get("strongCount", 0) if isinstance(feedback_summary, dict) else 0,
+                "avoidTermCount": len(feedback_summary.get("avoidTerms", [])) if isinstance(feedback_summary, dict) else 0,
+                "historyHash": feedback_summary.get("historyHash") if isinstance(feedback_summary, dict) else None,
+                "generatedAt": feedback_summary.get("generatedAt") if isinstance(feedback_summary, dict) else None,
+                "mtime": file_mtime_iso(feedback_summary_path),
+                "isCurrentWithHistory": feedback_is_current,
+            },
+            "mirror": {
+                "path": str(feedback_mirror_path),
+                "exists": feedback_mirror_path.is_file(),
+                "mtime": file_mtime_iso(feedback_mirror_path),
+            },
         },
         "lexicalProfile": {
             "jsonPath": str(lexical_json_path),
@@ -966,6 +1060,9 @@ AI_PROFILE_JSON="$APP_SUPPORT/AI/lexical-profile.json"
 ACCEPTED_HISTORY_JSONL="$APP_SUPPORT/AI/accepted-ai-learning.jsonl"
 ACCEPTED_SUMMARY_JSON="$APP_SUPPORT/AI/accepted-ai-summary.json"
 ACCEPTED_MIRROR_MD="$HOME/.knowtype/ACCEPTED_AI_LEARNING.md"
+ACCEPTED_FEEDBACK_JSONL="$APP_SUPPORT/AI/accepted-ai-feedback.jsonl"
+ACCEPTED_FEEDBACK_SUMMARY_JSON="$APP_SUPPORT/AI/accepted-ai-feedback-summary.json"
+ACCEPTED_FEEDBACK_MIRROR_MD="$HOME/.knowtype/ACCEPTED_AI_FEEDBACK.md"
 ENV_MD="$HOME/.knowtype/ENV.md"
 CORRECTION_MD="$HOME/.knowtype/CORRECTION.md"
 LEXICAL_PROFILE_MD="$HOME/.knowtype/LEXICAL_PROFILE.md"
@@ -1023,6 +1120,9 @@ accepted_learning_summary="$(
   KNOWTYPE_ACCEPTED_HISTORY="$ACCEPTED_HISTORY_JSONL" \
   KNOWTYPE_ACCEPTED_SUMMARY="$ACCEPTED_SUMMARY_JSON" \
   KNOWTYPE_ACCEPTED_MIRROR="$ACCEPTED_MIRROR_MD" \
+  KNOWTYPE_ACCEPTED_FEEDBACK="$ACCEPTED_FEEDBACK_JSONL" \
+  KNOWTYPE_ACCEPTED_FEEDBACK_SUMMARY="$ACCEPTED_FEEDBACK_SUMMARY_JSON" \
+  KNOWTYPE_ACCEPTED_FEEDBACK_MIRROR="$ACCEPTED_FEEDBACK_MIRROR_MD" \
   KNOWTYPE_LEXICAL_PROFILE="$LEXICAL_PROFILE_MD" \
   python3 - <<'PY'
 import hashlib
@@ -1033,24 +1133,44 @@ from pathlib import Path
 history = Path(os.environ["KNOWTYPE_ACCEPTED_HISTORY"])
 summary_path = Path(os.environ["KNOWTYPE_ACCEPTED_SUMMARY"])
 mirror = Path(os.environ["KNOWTYPE_ACCEPTED_MIRROR"])
+feedback_history = Path(os.environ["KNOWTYPE_ACCEPTED_FEEDBACK"])
+feedback_summary_path = Path(os.environ["KNOWTYPE_ACCEPTED_FEEDBACK_SUMMARY"])
+feedback_mirror = Path(os.environ["KNOWTYPE_ACCEPTED_FEEDBACK_MIRROR"])
 lexical = Path(os.environ["KNOWTYPE_LEXICAL_PROFILE"])
 
-records = []
-invalid = 0
-history_read_failed = False
-if history.is_file():
+def load_jsonl(path):
+    rows = []
+    invalid = 0
+    read_failed = False
+    if not path.is_file():
+        return rows, invalid, read_failed
     try:
-        with history.open(encoding="utf-8") as handle:
+        with path.open(encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    records.append(json.loads(line))
+                    rows.append(json.loads(line))
                 except Exception:
                     invalid += 1
     except Exception:
-        history_read_failed = True
+        read_failed = True
+    return rows, invalid, read_failed
+
+records, invalid, history_read_failed = load_jsonl(history)
+feedback_records, feedback_invalid, feedback_read_failed = load_jsonl(feedback_history)
+
+def feedback_hash_fragment(record):
+    return "|".join([
+        str(record.get("acceptID", "")),
+        str(record.get("acceptedTextHash", "")),
+        ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
+        "\u001f".join(str(item) for item in record.get("deletedTexts", [])),
+        str(record.get("replacementText", "")),
+        f"{float(record.get('deletedRatio', 0)):.4f}",
+        str(record.get("strength", "")),
+    ])
 
 history_hash = ""
 if records:
@@ -1063,11 +1183,33 @@ if summary_exists:
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
     except Exception:
         summary = None
+if not isinstance(summary, dict):
+    summary = None
 
 if records:
     current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash", "").startswith(history_hash)
 else:
     current = summary is None and not summary_exists
+
+feedback_hash = ""
+if feedback_records:
+    joined = "\n".join(feedback_hash_fragment(record) for record in feedback_records)
+    feedback_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:8]
+
+feedback_summary = None
+feedback_summary_exists = feedback_summary_path.is_file()
+if feedback_summary_exists:
+    try:
+        feedback_summary = json.loads(feedback_summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        feedback_summary = None
+if not isinstance(feedback_summary, dict):
+    feedback_summary = None
+
+if feedback_records:
+    feedback_current = bool(feedback_summary) and feedback_summary.get("feedbackCount") == len(feedback_records) and feedback_summary.get("historyHash", "").startswith(feedback_hash)
+else:
+    feedback_current = feedback_summary is None and not feedback_summary_exists
 
 try:
     lexical_has_accepted = "accepted-ai-summary:" in lexical.read_text(encoding="utf-8")
@@ -1085,6 +1227,15 @@ print(f"lexicalInjected={'yes' if lexical_has_accepted else 'no'}")
 print(f"mirrorExists={'yes' if mirror.is_file() else 'no'}")
 print(f"invalidLines={invalid}")
 print(f"historyReadFailed={'yes' if history_read_failed else 'no'}")
+print(f"feedbackRecords={len(feedback_records)}")
+print(f"feedbackHash={feedback_hash or 'none'}")
+print(f"feedbackSummaryExists={'yes' if feedback_summary_exists else 'no'}")
+print(f"feedbackSummaryCurrent={'yes' if feedback_current else 'no'}")
+print(f"feedbackStrongCount={feedback_summary.get('strongCount', 0) if feedback_summary else 0}")
+print(f"feedbackAvoidTermCount={len(feedback_summary.get('avoidTerms', [])) if feedback_summary else 0}")
+print(f"feedbackMirrorExists={'yes' if feedback_mirror.is_file() else 'no'}")
+print(f"feedbackInvalidLines={feedback_invalid}")
+print(f"feedbackReadFailed={'yes' if feedback_read_failed else 'no'}")
 PY
 )"
 
@@ -1098,16 +1249,35 @@ accepted_lexical_injected="$(awk -F= '/^lexicalInjected=/{print $2}' <<<"$accept
 accepted_mirror_exists="$(awk -F= '/^mirrorExists=/{print $2}' <<<"$accepted_learning_summary")"
 accepted_invalid_lines="$(awk -F= '/^invalidLines=/{print $2}' <<<"$accepted_learning_summary")"
 accepted_history_read_failed="$(awk -F= '/^historyReadFailed=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_records="$(awk -F= '/^feedbackRecords=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_hash="$(awk -F= '/^feedbackHash=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_summary_exists="$(awk -F= '/^feedbackSummaryExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_summary_current="$(awk -F= '/^feedbackSummaryCurrent=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_strong_count="$(awk -F= '/^feedbackStrongCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_avoid_terms="$(awk -F= '/^feedbackAvoidTermCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_mirror_exists="$(awk -F= '/^feedbackMirrorExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_invalid_lines="$(awk -F= '/^feedbackInvalidLines=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_read_failed="$(awk -F= '/^feedbackReadFailed=/{print $2}' <<<"$accepted_learning_summary")"
 
 info "accepted AI learning: records=$accepted_records hash=$accepted_history_hash summary=$accepted_summary_exists terms=$accepted_terms commits=$accepted_commits lexicalInjected=$accepted_lexical_injected mirror=$accepted_mirror_exists"
+info "accepted AI feedback: records=$accepted_feedback_records hash=$accepted_feedback_hash summary=$accepted_feedback_summary_exists strong=$accepted_feedback_strong_count avoidTerms=$accepted_feedback_avoid_terms mirror=$accepted_feedback_mirror_exists"
 if [[ "$accepted_summary_current" != "yes" ]]; then
   warn "accepted AI learning summary is stale or missing; run ./scripts/accepted-learning.sh rebuild"
+fi
+if [[ "$accepted_feedback_summary_current" != "yes" ]]; then
+  warn "accepted AI feedback summary is stale or missing; run ./scripts/accepted-learning.sh rebuild"
 fi
 if [[ "${accepted_invalid_lines:-0}" != "0" ]]; then
   warn "accepted AI learning history has $accepted_invalid_lines invalid line(s)"
 fi
 if [[ "$accepted_history_read_failed" == "yes" ]]; then
   warn "accepted AI learning history could not be read"
+fi
+if [[ "${accepted_feedback_invalid_lines:-0}" != "0" ]]; then
+  warn "accepted AI feedback history has $accepted_feedback_invalid_lines invalid line(s)"
+fi
+if [[ "$accepted_feedback_read_failed" == "yes" ]]; then
+  warn "accepted AI feedback history could not be read"
 fi
 
 if (( SHOW_LOGS == 1 )); then

@@ -66,6 +66,7 @@ public struct AIRecommendationRequest: Sendable, Equatable {
     public var locale: KnowTypeLocale
     public var compositionID: Int
     public var lexicalContext: LexicalContextSnapshot?
+    public var feedbackContext: AIAcceptedFeedbackContextSnapshot?
 
     public init(
         rawInput: String,
@@ -76,7 +77,8 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         locale: KnowTypeLocale = .mixed,
         compositionID: Int,
         requestID: UUID = UUID(),
-        lexicalContext: LexicalContextSnapshot? = nil
+        lexicalContext: LexicalContextSnapshot? = nil,
+        feedbackContext: AIAcceptedFeedbackContextSnapshot? = nil
     ) {
         self.requestID = requestID
         self.rawInput = rawInput
@@ -89,6 +91,7 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         self.locale = locale
         self.compositionID = compositionID
         self.lexicalContext = lexicalContext
+        self.feedbackContext = feedbackContext
     }
 
     public init(
@@ -99,7 +102,8 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         locale: KnowTypeLocale = .mixed,
         compositionID: Int,
         requestID: UUID = UUID(),
-        lexicalContext: LexicalContextSnapshot? = nil
+        lexicalContext: LexicalContextSnapshot? = nil,
+        feedbackContext: AIAcceptedFeedbackContextSnapshot? = nil
     ) {
         self.init(
             rawInput: rawInput,
@@ -110,7 +114,8 @@ public struct AIRecommendationRequest: Sendable, Equatable {
             locale: locale,
             compositionID: compositionID,
             requestID: requestID,
-            lexicalContext: lexicalContext
+            lexicalContext: lexicalContext,
+            feedbackContext: feedbackContext
         )
     }
 

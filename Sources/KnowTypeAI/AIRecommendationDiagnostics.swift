@@ -41,6 +41,9 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case acceptedLearningSkippedSecret = "accepted_learning_skipped_secret"
     case acceptedLearningTermsExtracted = "accepted_learning_terms_extracted"
     case acceptedLearningProfileMerged = "accepted_learning_profile_merged"
+    case acceptedFeedbackRecorded = "accepted_feedback_recorded"
+    case acceptedFeedbackSkippedSecret = "accepted_feedback_skipped_secret"
+    case acceptedFeedbackTrackingCancelled = "accepted_feedback_tracking_cancelled"
 }
 
 public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {

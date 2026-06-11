@@ -623,6 +623,72 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertNotEqual(firstLexical.sha256, secondLexical.sha256)
     }
 
+    func testRecommendationIncludesFeedbackContextAndCacheKey() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let candidate = CorrectionCandidate(
+            text: "你好",
+            source: "traditional",
+            confidence: 1,
+            correctionLevel: .contextual
+        )
+        let firstFeedback = AIAcceptedFeedbackContextSnapshot(
+            summary: AIAcceptedFeedbackSummary(
+                historyHash: "feedback-a",
+                feedbackCount: 1,
+                strongCount: 1,
+                avoidTerms: ["冗长表达"],
+                styleAdjustments: ["Prefer shorter AI continuations when context is ambiguous."],
+                replacementPatterns: [],
+                sourceSummary: ["accepted-ai-feedback-summary: records=1 strong=1 history=feedback"]
+            )
+        )
+        let secondFeedback = AIAcceptedFeedbackContextSnapshot(
+            summary: AIAcceptedFeedbackSummary(
+                historyHash: "feedback-b",
+                feedbackCount: 1,
+                strongCount: 1,
+                avoidTerms: ["机械复述"],
+                styleAdjustments: ["Avoid confidently completing with phrases the user tends to delete soon after accepting."],
+                replacementPatterns: [],
+                sourceSummary: ["accepted-ai-feedback-summary: records=1 strong=1 history=feedback"]
+            )
+        )
+
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                feedbackContext: firstFeedback
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                feedbackContext: firstFeedback
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                feedbackContext: secondFeedback
+            )
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests[0].contextDocuments["AI_FEEDBACK.md"]?.contains("冗长表达") == true)
+        XCTAssertTrue(requests[1].contextDocuments["AI_FEEDBACK.md"]?.contains("机械复述") == true)
+        XCTAssertNotEqual(firstFeedback.sha256, secondFeedback.sha256)
+    }
+
     func testLexicalProfileFiltersStandaloneProtectedTechnicalTokens() throws {
         let snapshot = try XCTUnwrap(
             LexicalContextBuilder().snapshot(

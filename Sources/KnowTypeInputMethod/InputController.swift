@@ -17,6 +17,7 @@ enum InputMethodLexicalProfileRuntime {
     static let store = LexicalProfileStore()
     static let refreshGate = LexicalProfileRefreshGate()
     static let acceptedLearningStore = AIAcceptedLearningStore()
+    static let acceptedFeedbackStore = AIAcceptedFeedbackStore()
     static let rimeMaintenanceService = RimeMaintenanceService(
         snapshotProvider: RimeUserDBTextSnapshotProvider()
     )
@@ -56,6 +57,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             aiRecommendationProvider: aiRecommendationRuntime,
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: InputMethodLexicalProfileRuntime.acceptedLearningStore,
+            aiAcceptedFeedback: InputMethodLexicalProfileRuntime.acceptedFeedbackStore,
             lexicalProfileStore: InputMethodLexicalProfileRuntime.store,
             lexicalProfileRefreshGate: InputMethodLexicalProfileRuntime.refreshGate,
             rimeUserDBTextProvider: InputMethodLexicalProfileRuntime.rimeMaintenanceService,

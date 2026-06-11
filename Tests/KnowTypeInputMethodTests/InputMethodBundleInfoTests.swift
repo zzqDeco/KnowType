@@ -576,4 +576,101 @@ final class InputMethodBundleInfoTests: XCTestCase {
         let mode = try XCTUnwrap(modeList[KnowTypeInputSourceIDs.activeMode] as? [String: Any])
         XCTAssertEqual(mode["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.activeMode)
     }
+
+    func testDiagnoseJsonSkipsMalformedAcceptedFeedbackRows() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let testRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-feedback-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: testRoot)
+        }
+
+        let home = testRoot.appendingPathComponent("Home", isDirectory: true)
+        let bundle = testRoot.appendingPathComponent("KnowType.app", isDirectory: true)
+        let aiDirectory = home
+            .appendingPathComponent("Library/Application Support/KnowType/AI", isDirectory: true)
+        try FileManager.default.createDirectory(at: aiDirectory, withIntermediateDirectories: true)
+        try makeMinimalBundle(at: bundle)
+
+        try Data(
+            """
+            ["not", "a feedback record"]
+            {"acceptID":"22222222-2222-2222-2222-222222222222","acceptedTextHash":"abc","deletedRanges":[],"deletedTexts":[],"deletedRatio":"bad","strength":"strong"}
+            {"acceptID":"11111111-1111-1111-1111-111111111111","acceptedTextHash":"abc","deletedRanges":[{"location":1,"length":1}],"deletedTexts":["x"],"deletedVisibleCharacterCount":1,"deletedRatio":0.5,"strength":"strong","reason":"delete_idle"}
+
+            """.utf8
+        ).write(to: aiDirectory.appendingPathComponent("accepted-ai-feedback.jsonl"))
+
+        let output = try runDiagnoseJSON(
+            scriptURL: rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh"),
+            homeURL: home,
+            bundleURL: bundle
+        )
+        let snapshot = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: output) as? [String: Any]
+        )
+        let userData = try XCTUnwrap(snapshot["userData"] as? [String: Any])
+        let acceptedLearning = try XCTUnwrap(userData["acceptedLearning"] as? [String: Any])
+        let feedback = try XCTUnwrap(acceptedLearning["feedback"] as? [String: Any])
+        let feedbackHistory = try XCTUnwrap(feedback["history"] as? [String: Any])
+        let warnings = try XCTUnwrap(acceptedLearning["warnings"] as? [String])
+
+        XCTAssertEqual(feedbackHistory["recordCount"] as? Int, 1)
+        XCTAssertTrue(warnings.contains("invalid_feedback_history_lines:2"))
+    }
+
+    private func makeMinimalBundle(at bundle: URL) throws {
+        let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
+        let executable = contents.appendingPathComponent("MacOS/KnowTypeInputMethodApp", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: executable.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: contents.appendingPathComponent("Frameworks", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: contents.appendingPathComponent("Resources/rime-data", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: executable)
+        try Data().write(to: contents.appendingPathComponent("Frameworks/librime.1.dylib"))
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": "com.knowtype.inputmethod.KnowType",
+            "CFBundleShortVersionString": "0.0.0-test",
+            "CFBundleVersion": "1"
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
+    }
+
+    private func runDiagnoseJSON(
+        scriptURL: URL,
+        homeURL: URL,
+        bundleURL: URL
+    ) throws -> Data {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptURL.path, "--json", "--path", bundleURL.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = homeURL.path
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        process.environment = environment
+        let output = Pipe()
+        let error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        if process.terminationStatus != 0 {
+            let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            XCTFail("diagnose-inputmethod.sh --json failed: \(stderr)")
+        }
+        return data
+    }
 }

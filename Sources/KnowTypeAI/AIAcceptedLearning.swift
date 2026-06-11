@@ -50,6 +50,7 @@ func withAcceptedLearningFileLock<T>(
 public struct AIAcceptedLearningRecord: Codable, Sendable, Equatable {
     public var schemaVersion: Int
     public var acceptedAt: Date
+    public var acceptID: UUID?
     public var schemaID: String
     public var appBundleID: String?
     public var rawInput: String?
@@ -65,6 +66,7 @@ public struct AIAcceptedLearningRecord: Codable, Sendable, Equatable {
     public init(
         schemaVersion: Int = 1,
         acceptedAt: Date = Date(),
+        acceptID: UUID? = nil,
         schemaID: String,
         appBundleID: String? = nil,
         rawInput: String? = nil,
@@ -79,6 +81,7 @@ public struct AIAcceptedLearningRecord: Codable, Sendable, Equatable {
     ) {
         self.schemaVersion = schemaVersion
         self.acceptedAt = acceptedAt
+        self.acceptID = acceptID
         self.schemaID = schemaID
         self.appBundleID = appBundleID
         self.rawInput = rawInput

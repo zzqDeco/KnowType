@@ -83,7 +83,9 @@ struct KnowTypeAcceptedLearningTool {
         let action = status.action.map { "Action: \($0)\n\n" } ?? ""
         let historyHash = status.history.historyHash.map(shortHash(_:)) ?? "none"
         let summaryHash = status.summary.historyHash.map(shortHash(_:)) ?? "none"
+        let feedbackHash = status.feedback.history.historyHash.map(shortHash(_:)) ?? "none"
         let summaryState = status.summary.isCurrentWithHistory ? "current" : "stale"
+        let feedbackSummaryState = status.feedback.summary.isCurrentWithHistory ? "current" : "stale"
         let lexicalState = status.lexicalProfile.containsAcceptedAISummary ? "yes" : "no"
         let warnings = status.warnings.isEmpty
             ? "Warnings: none"
@@ -93,6 +95,7 @@ struct KnowTypeAcceptedLearningTool {
         History: \(status.history.exists ? "exists" : "missing"), records=\(status.history.recordCount), hash=\(historyHash), mtime=\(status.history.mtime ?? "none")
         Summary: \(status.summary.exists ? "exists" : "missing"), state=\(summaryState), accepted=\(status.summary.acceptedCount), terms=\(status.summary.termCount), commits=\(status.summary.recentCommitCount), hash=\(summaryHash), generatedAt=\(status.summary.generatedAt ?? "none")
         Mirror: \(status.mirror.exists ? "exists" : "missing"), mtime=\(status.mirror.mtime ?? "none")
+        Feedback: history=\(status.feedback.history.exists ? "exists" : "missing"), records=\(status.feedback.history.recordCount), hash=\(feedbackHash), summary=\(feedbackSummaryState), strong=\(status.feedback.summary.strongCount), avoidTerms=\(status.feedback.summary.avoidTermCount), mirror=\(status.feedback.mirror.exists ? "exists" : "missing")
         LEXICAL_PROFILE.md accepted-ai-summary: \(lexicalState), mtime=\(status.lexicalProfile.mtime ?? "none")
         \(warnings)
         Commands:
@@ -113,8 +116,9 @@ struct KnowTypeAcceptedLearningTool {
           knowtype-accepted-learning-tool rebuild [--json]
           knowtype-accepted-learning-tool clear --yes [--json]
 
-        Maintains KnowType accepted AI learning history, summary, and readable mirror.
-        The clear command deletes accepted-learning files and scrubs accepted-AI
+        Maintains KnowType accepted AI learning and verified feedback history,
+        summaries, and readable mirrors.
+        The clear command deletes accepted-learning/feedback files and scrubs accepted-AI
         lexical-profile context. It never deletes Rime, provider, Keychain,
         ENV.md, or CORRECTION.md data.
         """

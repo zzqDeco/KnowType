@@ -6,6 +6,7 @@ public struct AIAcceptedLearningMaintenanceStatus: Codable, Equatable, Sendable 
     public var history: AIAcceptedLearningHistoryStatus
     public var summary: AIAcceptedLearningSummaryStatus
     public var mirror: AIAcceptedLearningMirrorStatus
+    public var feedback: AIAcceptedFeedbackMaintenanceStatus
     public var lexicalProfile: AIAcceptedLearningLexicalProfileStatus
     public var warnings: [String]
 }
@@ -45,6 +46,32 @@ public struct AIAcceptedLearningLexicalProfileStatus: Codable, Equatable, Sendab
     public var mtime: String?
 }
 
+public struct AIAcceptedFeedbackMaintenanceStatus: Codable, Equatable, Sendable {
+    public var history: AIAcceptedFeedbackHistoryStatus
+    public var summary: AIAcceptedFeedbackSummaryStatus
+    public var mirror: AIAcceptedLearningMirrorStatus
+}
+
+public struct AIAcceptedFeedbackHistoryStatus: Codable, Equatable, Sendable {
+    public var path: String
+    public var exists: Bool
+    public var recordCount: Int
+    public var historyHash: String?
+    public var mtime: String?
+}
+
+public struct AIAcceptedFeedbackSummaryStatus: Codable, Equatable, Sendable {
+    public var path: String
+    public var exists: Bool
+    public var feedbackCount: Int
+    public var strongCount: Int
+    public var avoidTermCount: Int
+    public var generatedAt: String?
+    public var historyHash: String?
+    public var mtime: String?
+    public var isCurrentWithHistory: Bool
+}
+
 public struct AIAcceptedLearningMaintenance {
     public enum Error: LocalizedError, Equatable {
         case clearRequiresConfirmation
@@ -60,9 +87,13 @@ public struct AIAcceptedLearningMaintenance {
     public var historyURL: URL
     public var summaryURL: URL
     public var mirrorURL: URL
+    public var feedbackHistoryURL: URL
+    public var feedbackSummaryURL: URL
+    public var feedbackMirrorURL: URL
     public var lexicalJSONURL: URL
     public var lexicalMarkdownURL: URL
     public var clearMarkerURL: URL
+    public var feedbackClearMarkerURL: URL
     public var lockURL: URL
     public var fileManager: FileManager
 
@@ -70,6 +101,9 @@ public struct AIAcceptedLearningMaintenance {
         historyURL: URL = AIAcceptedLearningStore.defaultHistoryURL(),
         summaryURL: URL = AIAcceptedLearningStore.defaultSummaryURL(),
         mirrorURL: URL = AIUserDirectory.defaultDirectory().acceptedLearningMirrorURL,
+        feedbackHistoryURL: URL = AIAcceptedFeedbackStore.defaultHistoryURL(),
+        feedbackSummaryURL: URL = AIAcceptedFeedbackStore.defaultSummaryURL(),
+        feedbackMirrorURL: URL = AIUserDirectory.defaultDirectory().acceptedFeedbackMirrorURL,
         lexicalJSONURL: URL = LexicalProfileStore.defaultJSONURL(),
         lexicalMarkdownURL: URL = AIUserDirectory.defaultDirectory().lexicalProfileURL,
         fileManager: FileManager = .default
@@ -77,10 +111,15 @@ public struct AIAcceptedLearningMaintenance {
         self.historyURL = historyURL
         self.summaryURL = summaryURL
         self.mirrorURL = mirrorURL
+        self.feedbackHistoryURL = feedbackHistoryURL
+        self.feedbackSummaryURL = feedbackSummaryURL
+        self.feedbackMirrorURL = feedbackMirrorURL
         self.lexicalJSONURL = lexicalJSONURL
         self.lexicalMarkdownURL = lexicalMarkdownURL
         self.clearMarkerURL = acceptedLearningClearMarkerURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+        self.feedbackClearMarkerURL = acceptedFeedbackClearMarkerURL(historyURL: feedbackHistoryURL)
+            ?? feedbackHistoryURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-feedback.clear.json")
         self.lockURL = acceptedLearningLockURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
         self.fileManager = fileManager
@@ -92,6 +131,11 @@ public struct AIAcceptedLearningMaintenance {
         let historyHash = records.isEmpty ? nil : AIAcceptedLearningStore.historyHash(records)
         let loadedSummary = loadSummary()
         let summary = loadedSummary.summary
+        let loadedFeedback = loadFeedbackRecords()
+        let feedbackRecords = loadedFeedback.records
+        let feedbackHistoryHash = feedbackRecords.isEmpty ? nil : AIAcceptedFeedbackStore.historyHash(feedbackRecords)
+        let loadedFeedbackSummary = loadFeedbackSummary()
+        let feedbackSummary = loadedFeedbackSummary.summary
         let summaryIsCurrent: Bool
         if records.isEmpty, !loadedSummary.exists {
             summaryIsCurrent = summary == nil
@@ -100,13 +144,27 @@ public struct AIAcceptedLearningMaintenance {
                 && summary?.historyHash == historyHash
         }
 
-        var warnings = loaded.warnings
+        var warnings = loaded.warnings + loadedFeedback.warnings
         if !records.isEmpty, summary == nil {
             warnings.append("summary_missing")
         } else if loadedSummary.exists, loadedSummary.summary == nil {
             warnings.append("summary_unreadable")
         } else if !summaryIsCurrent {
             warnings.append("summary_stale")
+        }
+        let feedbackSummaryIsCurrent: Bool
+        if feedbackRecords.isEmpty, !loadedFeedbackSummary.exists {
+            feedbackSummaryIsCurrent = feedbackSummary == nil
+        } else {
+            feedbackSummaryIsCurrent = feedbackSummary?.feedbackCount == feedbackRecords.count
+                && feedbackSummary?.historyHash == feedbackHistoryHash
+        }
+        if !feedbackRecords.isEmpty, feedbackSummary == nil {
+            warnings.append("feedback_summary_missing")
+        } else if loadedFeedbackSummary.exists, loadedFeedbackSummary.summary == nil {
+            warnings.append("feedback_summary_unreadable")
+        } else if !feedbackSummaryIsCurrent {
+            warnings.append("feedback_summary_stale")
         }
 
         return AIAcceptedLearningMaintenanceStatus(
@@ -135,6 +193,31 @@ public struct AIAcceptedLearningMaintenance {
                 exists: fileManager.fileExists(atPath: mirrorURL.path),
                 mtime: modificationDateString(mirrorURL)
             ),
+            feedback: AIAcceptedFeedbackMaintenanceStatus(
+                history: AIAcceptedFeedbackHistoryStatus(
+                    path: feedbackHistoryURL.path,
+                    exists: fileManager.fileExists(atPath: feedbackHistoryURL.path),
+                    recordCount: feedbackRecords.count,
+                    historyHash: feedbackHistoryHash,
+                    mtime: modificationDateString(feedbackHistoryURL)
+                ),
+                summary: AIAcceptedFeedbackSummaryStatus(
+                    path: feedbackSummaryURL.path,
+                    exists: fileManager.fileExists(atPath: feedbackSummaryURL.path),
+                    feedbackCount: feedbackSummary?.feedbackCount ?? 0,
+                    strongCount: feedbackSummary?.strongCount ?? 0,
+                    avoidTermCount: feedbackSummary?.avoidTerms.count ?? 0,
+                    generatedAt: feedbackSummary.map { dateString($0.generatedAt) },
+                    historyHash: feedbackSummary?.historyHash,
+                    mtime: modificationDateString(feedbackSummaryURL),
+                    isCurrentWithHistory: feedbackSummaryIsCurrent
+                ),
+                mirror: AIAcceptedLearningMirrorStatus(
+                    path: feedbackMirrorURL.path,
+                    exists: fileManager.fileExists(atPath: feedbackMirrorURL.path),
+                    mtime: modificationDateString(feedbackMirrorURL)
+                )
+            ),
             lexicalProfile: AIAcceptedLearningLexicalProfileStatus(
                 jsonPath: lexicalJSONURL.path,
                 markdownPath: lexicalMarkdownURL.path,
@@ -159,6 +242,20 @@ public struct AIAcceptedLearningMaintenance {
                 try removeIfExists(summaryURL)
                 try removeIfExists(mirrorURL)
             }
+            try withAcceptedFeedbackFileLock(
+                lockURL: acceptedFeedbackLockURL(historyURL: feedbackHistoryURL),
+                fileManager: fileManager
+            ) {
+                let feedbackRecords = loadFeedbackRecords().records
+                let feedbackSummary = AIAcceptedFeedbackStore.buildSummary(records: feedbackRecords, generatedAt: Date())
+                if let feedbackSummary {
+                    try atomicWrite(encode(feedbackSummary), to: feedbackSummaryURL)
+                    try atomicWrite(Data(AIAcceptedFeedbackStore.renderMarkdown(feedbackSummary).utf8), to: feedbackMirrorURL)
+                } else {
+                    try removeIfExists(feedbackSummaryURL)
+                    try removeIfExists(feedbackMirrorURL)
+                }
+            }
         }
         return status(action: "rebuilt")
     }
@@ -173,6 +270,15 @@ public struct AIAcceptedLearningMaintenance {
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
+            try withAcceptedFeedbackFileLock(
+                lockURL: acceptedFeedbackLockURL(historyURL: feedbackHistoryURL),
+                fileManager: fileManager
+            ) {
+                try removeIfExists(feedbackHistoryURL)
+                try removeIfExists(feedbackSummaryURL)
+                try removeIfExists(feedbackMirrorURL)
+                try atomicWrite(clearMarkerPayload(), to: feedbackClearMarkerURL)
+            }
             try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
             try scrubAcceptedAIFromLexicalProfile(acceptedCommitTexts: acceptedCommitTexts)
         }
@@ -209,6 +315,38 @@ public struct AIAcceptedLearningMaintenance {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return (exists, try? decoder.decode(AIAcceptedLanguageSummary.self, from: data))
+    }
+
+    private func loadFeedbackRecords() -> (records: [AIAcceptedFeedbackRecord], warnings: [String]) {
+        guard let content = try? String(contentsOf: feedbackHistoryURL, encoding: .utf8) else {
+            return ([], [])
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var records: [AIAcceptedFeedbackRecord] = []
+        var invalidLineCount = 0
+        for line in content.split(whereSeparator: \.isNewline) {
+            guard let data = String(line).data(using: .utf8),
+                  let record = try? decoder.decode(AIAcceptedFeedbackRecord.self, from: data) else {
+                invalidLineCount += 1
+                continue
+            }
+            records.append(record)
+        }
+
+        let warnings = invalidLineCount > 0 ? ["invalid_feedback_history_lines:\(invalidLineCount)"] : []
+        return (records, warnings)
+    }
+
+    private func loadFeedbackSummary() -> (exists: Bool, summary: AIAcceptedFeedbackSummary?) {
+        let exists = fileManager.fileExists(atPath: feedbackSummaryURL.path)
+        guard let data = try? Data(contentsOf: feedbackSummaryURL) else {
+            return (exists, nil)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (exists, try? decoder.decode(AIAcceptedFeedbackSummary.self, from: data))
     }
 
     private func markdownContainsAcceptedAISummary() -> Bool {

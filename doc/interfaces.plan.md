@@ -428,6 +428,19 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - runtime snapshot reads observe the clear marker before returning accepted-AI
   summaries so active input-method processes stop injecting cleared learning
   without requiring a restart or another accepted record
+
+`AIAcceptedFeedbackStore`:
+
+- appends only verified post-accept edit signals to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-feedback.jsonl`
+- writes bounded feedback summary JSON to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-feedback-summary.json`
+- mirrors summary diagnostics to `~/.knowtype/ACCEPTED_AI_FEEDBACK.md`
+- feeds request-time `AI_FEEDBACK.md` only as a soft style signal; it is not a
+  hard block, does not rewrite locked prefixes, and does not touch Rime userdb
+- skips feedback containing secret-like deleted or replacement text
+- treats unknown, stale, moved, or unverified cursor ranges as no signal rather
+  than negative feedback
 - `LexicalProfileRuntime` reloads the persisted lexical profile when its
   in-memory cache still contains accepted-AI source data after accepted learning
   has been cleared, and it filters any remaining accepted-AI terms/source lines
