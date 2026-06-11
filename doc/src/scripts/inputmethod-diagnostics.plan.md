@@ -1,6 +1,6 @@
 # Input Method Diagnostic Scripts
 
-`scripts/diagnose-inputmethod.sh` is the read-only smoke diagnostic for a locally installed KnowType input-method bundle. `scripts/select-inputmethod.sh` requests KnowType as the current Text Input Source through the installed app before a manual typing run. `scripts/repair-inputmethod-selection.sh` is the mutating local repair script for stale development registration state. Diagnostics resolve and run the dedicated SwiftPM executable `knowtype-inputsource-tool` instead of embedding `swift -` snippets; install, repair, and selection activation are attributed to the installed `KnowTypeInputMethodApp`.
+`scripts/diagnose-inputmethod.sh` is the read-only smoke diagnostic for a locally installed KnowType input-method bundle. `scripts/select-inputmethod.sh` requests KnowType as the current Text Input Source before a manual typing run. `scripts/repair-inputmethod-selection.sh` is the mutating local repair script for stale development registration state. Diagnostics resolve and run the dedicated SwiftPM executable `knowtype-inputsource-tool` instead of embedding `swift -` snippets; install and rollback registration use that helper without launching the input-method host.
 
 It intentionally sits after `scripts/install-inputmethod.sh` in the developer loop:
 
@@ -54,9 +54,9 @@ remove/add.
 
 When Gatekeeper rejects an Apple Development build on macOS 15+, the diagnostic points to `scripts/create-local-system-policy-profile.sh --open`. That helper reads the installed bundle's designated code requirement and writes a device `com.apple.systempolicy.rule` configuration profile for manual System Settings installation. It does not install the profile itself because modern macOS no longer permits configuration-profile installation through the `profiles` CLI. After the profile is installed, `spctl --assess --type execute` should accept the bundle before a typing result is treated as KnowType acceptance.
 
-`scripts/select-inputmethod.sh` calls the installed `KnowTypeInputMethodApp --knowtype-select-input-source` path, so macOS attributes any input-method authorization prompt to the real input method app instead of `knowtype-inputsource-tool`. Passing `--require-selected` gates on the installed app's `select.current` result; the follow-up read-only diagnostic intentionally does not require its own process context to be selected.
+`scripts/select-inputmethod.sh` is the explicit selection step before manual typing. Passing `--require-selected` gates on the active process's current source result; the follow-up read-only diagnostic intentionally does not require its own process context to be selected.
 
-The helper reports `AppleSelectedInputSources` and `AppleEnabledInputSources` from `com.apple.HIToolbox`, plus the third-party input source preference from `com.apple.inputsources`. This makes the local acceptance distinction explicit: diagnostics can verify registration and persisted state, but manual typing must use the active app's selected input source. Missing HIToolbox mode rows, missing third-party mode rows, missing third-party parent anchor, remaining legacy `.Mode` rows, or a KnowType history index beyond 1 are failures under `--strict` because the macOS input menu and `Ctrl+Space` switcher can skip the input method when the protected enabled list or history points at stale sources first. The installed app activation path follows mature IMK behavior by using TIS registration, enablement, and selection from the installed app context; the helper's explicit repair command only rewrites scoped KnowType rows to match the System Settings add result.
+The helper reports `AppleSelectedInputSources` and `AppleEnabledInputSources` from `com.apple.HIToolbox`, plus the third-party input source preference from `com.apple.inputsources`. This makes the local acceptance distinction explicit: diagnostics can verify registration and persisted state, but manual typing must use the active app's selected input source. Missing HIToolbox mode rows, missing third-party mode rows, missing third-party parent anchor, remaining legacy `.Mode` rows, or a KnowType history index beyond 1 are failures under `--strict` because the macOS input menu and `Ctrl+Space` switcher can skip the input method when the protected enabled list or history points at stale sources first. The helper registration path follows mature IMK boundaries by preparing TIS records without starting the host; explicit repair only rewrites scoped KnowType rows to match the System Settings add result.
 
 On first local installation, macOS can show a System Settings authorization
 prompt asking whether to allow `知键` to enable `KnowType`. Until the user
@@ -68,9 +68,9 @@ When `TISSelectInputSource` returns success in the app context and `AppleSelecte
 
 `knowtype-inputsource-tool dump` prints every TIS record for the KnowType bundle. Use it when the input menu shows `知键` but the item is disabled or selection falls back to another source; duplicated parent or legacy mode records usually point to stale Text Input Source registration.
 
-`scripts/repair-inputmethod-selection.sh` runs the installed app with `--knowtype-purge-legacy`, uses the helper's explicit `repair-preferences` command to remove legacy KnowType rows and restore the third-party parent anchor plus `.Hans`, restarts `cfprefsd`, `TextInputMenuAgent`, `TextInputSwitcher`, and `KnowTypeInputMethodApp`, then executes the installed app with `--knowtype-install-activate`. Selection still goes through the installed app. Use it after repeated local installs when stale `.Mode` rows or missing third-party anchors make the menu bounce back to Apple Pinyin or ABC. Add KnowType in System Settings if the third-party enabled list remains missing.
+`scripts/repair-inputmethod-selection.sh` uses helper `purge-legacy`, `repair-preferences`, and `bootstrap --select` to remove legacy KnowType rows and restore the third-party parent anchor plus `.Hans`, then restarts `cfprefsd`, `TextInputMenuAgent`, and `TextInputSwitcher`. It does not start the installed input-method host. Use it after repeated local installs when stale `.Mode` rows or missing third-party anchors make the menu bounce back to Apple Pinyin or ABC. Add KnowType in System Settings if the third-party enabled list remains missing.
 
-`knowtype-inputsource-tool disable` remains available for manual cleanup, but the local install script no longer switches, purges, enables, or selects through the command-line helper. It copies the new bundle, then launches `KnowType.app --knowtype-purge-legacy` and `KnowType.app --knowtype-install-activate` so cleanup, registration, enabling, and the best-effort selection request run from the installed app context.
+`knowtype-inputsource-tool disable` remains available for manual cleanup. The local install script copies the new bundle, refreshes LaunchServices, then uses helper `purge-legacy`, `repair-preferences`, and `bootstrap` without `--select` so cleanup, registration, and enablement do not launch `KnowTypeInputMethodApp`.
 
 The default install script does not install `KnowType.prefPane`. That
 PreferencePane remains a compatibility fallback requested with `--with-prefpane`;
@@ -82,13 +82,13 @@ entry. Diagnostics validate installed pane metadata, binary shape, and signing
 without loading the pane bundle. Re-run the install or uninstall script to remove
 those cache files and reopen System Settings.
 
-`KnowTypeInputMethodApp` handles `--knowtype-install-activate`,
+`KnowTypeInputMethodApp` still handles compatibility/debug flags such as `--knowtype-install-activate`,
 `--knowtype-switch-away`, `--knowtype-purge-legacy`,
 `--knowtype-disable-input-source`,
 `--knowtype-register-input-source`, `--knowtype-enable-input-source`, and
 `--knowtype-select-input-source` before starting `IMKServer`, matching mature IMK
 installers that perform TIS registration/enablement in a short command-line
-mode. Normal app launch still starts the server and enables the active input source
+mode. Default install/rollback/repair paths do not execute those flags. Normal app launch still starts the server and enables the active input source
 from the signed app bundle context. The disable command mirrors the
 TIS disable path used by mature installers for cleanup before a System Settings
 re-add; it does not write preference files. Stale `.Hans`/`.Mode` records are counted

@@ -101,9 +101,11 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 ```
 
 本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Mode`
-开发状态，补齐系统设置需要的第三方 parent anchor 和可见 `.Hans` mode，并启动已安装的
-app，让注册和 best-effort 选择从 macOS 输入法切换使用的 app 上下文中执行。KnowType 采用
-Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode 形态：parent id 是
+开发状态，并通过专用 input-source helper 补齐系统设置需要的第三方 parent anchor 和可见
+`.Hans` mode。默认安装不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
+Rime 用户数据。如果已有 `KnowTypeInputMethodApp` 进程正在运行，安装脚本会先中止，而不是强杀它，
+因为 host 退出可能会把 Rime 用户数据刷盘。KnowType 采用 Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode
+形态：parent id 是
 `com.knowtype.inputmethod.KnowType`，系统可见输入源是
 `com.knowtype.inputmethod.KnowType.Hans`。
 
@@ -114,8 +116,9 @@ raw 输入可用并报告 degraded conversion state，而不是回退到已经�
 覆盖安装会先在 `~/Library/Application Support/KnowType/Backups/` 创建 app 级回滚备份，
 并把当前安装来源、版本、build、commit/tag 和备份 id 写入
 `~/Library/Application Support/KnowType/install-state.json`。备份只包含安装产物：
-`KnowType.app` 和可选 `KnowType.prefPane`；不会复制或回滚 Rime userdb、provider 配置、
-Keychain secret、AI 上下文文档或本地词库。
+`KnowType.app` 和可选 `KnowType.prefPane`；不会复制、回滚或改写 Rime userdb、provider 配置、
+Keychain secret、AI 上下文文档、`~/.knowtype` 或本地词库。用户手动选择 KnowType 并开始真实输入后，
+Rime 初始化属于正常使用行为，不属于安装阶段副作用。
 
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
 macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。它会打开
@@ -132,7 +135,7 @@ macOS 原生 sidebar 和 grouped settings 页面；中文 macOS locale 下使用
 Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流程使用 TIS 注册和启用，
 受保护的第三方输入源授权行由系统设置写入。
 
-需要时，在当前目标 app 上选择 KnowType：
+安装后先激活目标 app，再从 macOS 输入法菜单选择 KnowType；也可以在目标 app 激活时运行：
 
 ```bash
 ./scripts/select-inputmethod.sh --require-selected
@@ -164,9 +167,9 @@ shasum -a 256 -c KnowType-v0.2.1-macos-dev-preview.dmg.sha256
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
 或到“系统设置 > 隐私与安全性”点击“仍要打开”。安装命令会在诊断中记录
-`source=dmg-dev-preview`、release commit/tag 和 manifest digest。只有需要兼容
-System Settings pane 时才额外传 `--with-prefpane`。除非已安装匹配版本的 pane，
-否则不要使用系统设置侧边栏里残留的 KnowType 入口。
+`source=dmg-dev-preview`、release commit/tag 和 manifest digest，但不会启动输入法 host
+或做真实打字探测。只有需要兼容 System Settings pane 时才额外传 `--with-prefpane`。
+除非已安装匹配版本的 pane，否则不要使用系统设置侧边栏里残留的 KnowType 入口。
 
 旧的本地 MVP zip 仍可用于开发者调试：
 

@@ -38,21 +38,27 @@ Installs the locally built KnowType input method bundle into
 - The script switches away from any current KnowType source, replaces
   `~/Library/Input Methods/KnowType.app`, clears quarantine, and refreshes the
   installed path with `lsregister -f`.
-- It terminates any running `KnowTypeInputMethodApp`, replaces the bundle, then
-  asks the newly installed app to disable stale `.Mode` TIS modes and unregister
-  older KnowType LaunchServices paths.
+- It switches away, disables stale `.Mode` TIS modes, registers/enables the new
+  app, and repairs scoped preference rows through `knowtype-inputsource-tool`.
+  These default install steps do not start the installed input-method host and
+  do not select KnowType.
+- The switch-away helper also removes KnowType from HIToolbox
+  `AppleSelectedInputSources`; otherwise macOS can relaunch the host from stale
+  selected preferences even when the live current source is ABC.
+- If `KnowTypeInputMethodApp` is already running, the installer aborts before the
+  build/replace phase instead of killing it, because process shutdown can flush
+  Rime user data and would violate the install/user-data boundary.
 - Local installs inject a timestamp `CFBundleVersion` by default so
   LaunchServices and TIS do not keep reusing stale metadata from a previous
   development build with the same source-controlled version.
-- It executes the installed app with
-  `--knowtype-install-activate` so registration, enabling, and best-effort
-  selection happen from the signed app context before `IMKServer` starts.
-- It uses `knowtype-inputsource-tool repair-preferences --add-active` before
-  and after app activation to keep local development caches aligned with the
-  System Settings add result: `.Hans` in HIToolbox/history and parent anchor
-  plus `.Hans` in `com.apple.inputsources`.
-- After activation, it opens the installed app as a background agent so the
-  `IMKServer` connection is available to Text Input clients.
+- It uses `knowtype-inputsource-tool repair-preferences --add-active` around the
+  helper bootstrap to keep local development caches aligned with the System
+  Settings add result: `.Hans` in HIToolbox/history and parent anchor plus
+  `.Hans` in `com.apple.inputsources`.
+- The install step must not initialize Rime user data, AI learning/profile
+  files, provider profiles, `ENV.md`, `CORRECTION.md`, or `~/.knowtype`. Real
+  typing after the user manually selects KnowType may initialize Rime as normal
+  product use.
 - The primary settings entry is the input-method menu's
   `KnowType Settings...`; the script does not install a standalone settings app.
 - Default installs remove any previously installed compatibility
@@ -67,8 +73,9 @@ Installs the locally built KnowType input method bundle into
   `comXknowtypeXpreferencepane` are not treated as stale pane metadata. This
   prevents a default install from leaving an unloadable `KnowType` sidebar item
   after the optional pane has been removed.
-- TIS registration, enablement, and selection remain attributed to
-  `KnowType.app`; the SwiftPM helper is used only for scoped preference repair.
+- TIS registration and enablement are performed by the dedicated SwiftPM helper;
+  explicit selection belongs to `scripts/select-inputmethod.sh` or
+  `scripts/repair-inputmethod-selection.sh`, not the default installer.
 - macOS 15 local policy issues may still require the SystemPolicyRule profile
   flow before selection works reliably.
 

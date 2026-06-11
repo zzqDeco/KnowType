@@ -191,8 +191,10 @@ Install:
 2. Double-click "Install KnowType.command".
 3. If macOS blocks it, Control-click the command and choose Open, or open
    System Settings > Privacy & Security and choose Open Anyway.
-4. After install, enable KnowType in System Settings > Keyboard > Input Sources
-   if macOS asks for approval.
+4. The install command registers/enables KnowType but does not launch the input
+   method host or run a typing probe. After install, enable or select KnowType in
+   System Settings > Keyboard > Input Sources if macOS asks for approval, then
+   test in your target app.
 
 Uninstall:
 Double-click "Uninstall KnowType.command". User data, provider profiles, Rime

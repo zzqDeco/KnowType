@@ -17,7 +17,8 @@ development input method bundle.
   through `knowtype-inputsource-tool repair-preferences`: HIToolbox/history keep
   `.Hans`, `com.apple.inputsources` keeps the System Settings-compatible parent
   anchor plus `.Hans`, and unrelated sources are preserved. It also unregisters
-  stale bundle records, restarts menu agents, and relaunches the installed app.
+  stale bundle records, restarts menu agents, and uses helper `purge-legacy` plus
+  `bootstrap --select`; it does not launch the installed input-method host.
 - It is used after diagnostics indicate stale local state, before falling back
   to logout.
 

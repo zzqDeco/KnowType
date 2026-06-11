@@ -141,6 +141,35 @@ while IFS= read -r script_path; do
   bash -n "$script_path"
 done < <(find "$ROOT_DIR/scripts" -type f -name '*.sh' | sort)
 
+install_script_contents="$(cat "$ROOT_DIR/scripts/install-inputmethod.sh")"
+rollback_script_contents="$(cat "$ROOT_DIR/scripts/rollback-inputmethod.sh")"
+repair_script_contents="$(cat "$ROOT_DIR/scripts/repair-inputmethod-selection.sh")"
+
+assert_contains "$install_script_contents" "purge_legacy_best_effort" "install script"
+assert_contains "$install_script_contents" "bootstrap_input_source_best_effort" "install script"
+assert_contains "$install_script_contents" '"$tool" purge-legacy' "install script"
+assert_contains "$install_script_contents" '"$tool" bootstrap' "install script"
+assert_contains "$install_script_contents" "launching the input method host" "install script"
+assert_contains "$install_script_contents" "process shutdown can flush Rime user data" "install script"
+assert_not_contains "$install_script_contents" '"$INSTALLED_EXECUTABLE" --knowtype-install-activate' "install script"
+assert_not_contains "$install_script_contents" '"$INSTALLED_EXECUTABLE" --knowtype-purge-legacy' "install script"
+assert_not_contains "$install_script_contents" "killall KnowTypeInputMethodApp" "install script"
+assert_not_contains "$install_script_contents" 'open -g "$TARGET_PATH"' "install script"
+
+assert_contains "$rollback_script_contents" '"$inputsource_tool" purge-legacy' "rollback script"
+assert_contains "$rollback_script_contents" '"$inputsource_tool" bootstrap' "rollback script"
+assert_contains "$rollback_script_contents" "process shutdown can flush Rime user data" "rollback script"
+assert_not_contains "$rollback_script_contents" 'KnowTypeInputMethodApp" --knowtype-purge-legacy' "rollback script"
+assert_not_contains "$rollback_script_contents" "killall KnowTypeInputMethodApp" "rollback script"
+assert_not_contains "$rollback_script_contents" 'open -g "$target_path"' "rollback script"
+
+assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" purge-legacy' "repair script"
+assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" bootstrap' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-install-activate' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-purge-legacy' "repair script"
+assert_not_contains "$repair_script_contents" "killall KnowTypeInputMethodApp" "repair script"
+assert_not_contains "$repair_script_contents" 'open -g "$BUNDLE_PATH"' "repair script"
+
 help_scripts=(
   "$ROOT_DIR/scripts/accept-inputmethod-local.sh"
   "$ROOT_DIR/scripts/build-inputmethod-bundle.sh"

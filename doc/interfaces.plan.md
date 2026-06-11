@@ -133,6 +133,13 @@ contains the install time, source (`local-build`, `dmg-dev-preview`,
 installed app and prefPane paths, release manifest digest, and the previous
 backup id. It describes install artifacts only; it does not snapshot Rime
 userdb, provider profiles, Keychain secrets, or AI context files.
+Default install and rollback paths do not launch `KnowTypeInputMethodApp`, do
+not select the input method, and do not initialize Rime user data; first real
+typing after the user selects KnowType is normal product use rather than an
+install side effect.
+If the host process is already running, install/rollback must fail before
+replacement instead of killing it, since forced shutdown can flush Rime userdb
+files and would count as a user-data mutation.
 
 Install backups live under `Backups/<backup-id>/`. Each backup manifest records
 schema version, backup id, creation time, app version/build, bundle identifier,
@@ -496,20 +503,27 @@ The tool delegates download, SHA256 verification, conversion, atomic writes,
 and metadata generation to `ManagedLexiconPackInstaller`. It must not commit
 third-party dictionary data to the repository.
 
-`knowtype-inputsource-tool` is the local helper for direct macOS TIS diagnostics
-and cleanup in KnowType scripts:
+`knowtype-inputsource-tool` is the local helper for direct macOS TIS diagnostics,
+registration, and cleanup in KnowType scripts:
 
 - `status` emits read-only registration, enabled, selected, and HIToolbox
   preference status.
-- `switch-away` is a debug fallback; install scripts use the installed app's
-  command-line path to move away from KnowType before bundle replacement.
+- `switch-away` moves away from KnowType before bundle replacement without
+  starting the installed input-method host. It also removes KnowType rows from
+  HIToolbox `AppleSelectedInputSources` so stale selected preferences do not
+  relaunch the host while install tooling refreshes registration state.
 - `inspect-preferences` and compatibility `dedupe-preferences` report
   duplicate KnowType rows without mutating protected system preference domains.
 - `repair-preferences` rewrites only KnowType rows in protected input-source
   preference arrays as an explicit local development fallback for stale `.Mode`
   cache state or a missing third-party parent anchor.
-- `register --path ... [--select]` manually registers and optionally selects the
-  installed bundle through TIS APIs only for debug use.
+- `purge-legacy --path ...` disables visible legacy `.Mode` rows and refreshes
+  LaunchServices without starting `KnowTypeInputMethodApp`.
+- `bootstrap --path ... [--select]` registers and enables the installed bundle
+  through TIS APIs. Install and rollback use it without `--select`; explicit
+  repair/selection tooling owns user-visible selection.
+- `register --path ... [--select]` remains a lower-level manual register path
+  for debug use.
 - `select [--require-selected]` remains a debug-only helper-local selection path.
 
 Script contracts:
@@ -517,8 +531,9 @@ Script contracts:
 - `scripts/build-inputmethod-bundle.sh` creates `dist/KnowType.app` and must
   package SwiftPM resource bundles required by the local engine.
 - `scripts/install-inputmethod.sh` copies the local development bundle to
-  `~/Library/Input Methods/KnowType.app` and runs app-local purge plus
-  activation commands.
+  `~/Library/Input Methods/KnowType.app`, refreshes LaunchServices, and uses
+  `knowtype-inputsource-tool purge-legacy` plus `bootstrap` without launching the
+  input-method host or selecting KnowType.
 - `scripts/diagnose-inputmethod.sh` is the read-only install status and recent
   log diagnostic path.
 - `scripts/select-inputmethod.sh` requests selection through the installed app,

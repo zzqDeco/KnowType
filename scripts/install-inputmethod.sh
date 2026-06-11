@@ -23,9 +23,10 @@ usage() {
   cat <<'EOF'
 Usage: scripts/install-inputmethod.sh [options]
 
-Builds and installs KnowType.app into ~/Library/Input Methods, then asks the
-installed app to register and enable the input source. KnowType-specific
-settings are opened from the input-method menu's KnowType Settings item.
+Builds and installs KnowType.app into ~/Library/Input Methods, then uses the
+dedicated input-source helper to register and enable the input source without
+launching the input method host. KnowType-specific settings are opened from the
+input-method menu's KnowType Settings item.
 
 Options:
   --configuration debug|release  SwiftPM build configuration. Defaults to CONFIGURATION or release.
@@ -157,7 +158,6 @@ SOURCE_GIT_TAG=""
 SOURCE_RELEASE_MANIFEST=""
 SOURCE_RELEASE_MANIFEST_DIGEST=""
 SOURCE_TEMP_DIR=""
-INSTALLED_EXECUTABLE="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
 INPUTSOURCE_TOOL=""
 INSTALL_SUCCEEDED=0
 BACKUP_ID=""
@@ -238,38 +238,64 @@ inputsource_tool_path() {
   printf '%s\n' "$INPUTSOURCE_TOOL"
 }
 
-switch_away_before_replace() {
-  local switched=1
-  if [[ -x "$INSTALLED_EXECUTABLE" ]]; then
-    "$INSTALLED_EXECUTABLE" --knowtype-switch-away >/dev/null 2>&1 &
-    local switch_pid=$!
-    for _ in {1..20}; do
-      if ! kill -0 "$switch_pid" >/dev/null 2>&1; then
-        wait "$switch_pid" || true
-        switched=0
-        break
-      fi
-      sleep 0.1
-    done
-    if [[ "$switched" -ne 0 ]]; then
-      kill "$switch_pid" >/dev/null 2>&1 || true
-      wait "$switch_pid" 2>/dev/null || true
-      echo "warning: installed app did not finish switch-away request; falling back to helper" >&2
-    fi
+require_input_method_host_stopped() {
+  if pgrep -x KnowTypeInputMethodApp >/dev/null 2>&1; then
+    echo "error: KnowTypeInputMethodApp is running." >&2
+    echo "Switch to another input source and quit the running KnowType host, then rerun install." >&2
+    echo "The default installer will not kill the host because process shutdown can flush Rime user data." >&2
+    exit 1
   fi
-  if [[ "$switched" -ne 0 ]]; then
-    local tool
-    tool="$(inputsource_tool_path)" || return 0
-    "$tool" switch-away \
-      --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-      --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID" >/dev/null 2>&1 || true
+}
+
+switch_away_before_replace() {
+  local tool
+  tool="$(inputsource_tool_path)" || return 0
+  local args=(
+    switch-away
+    --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID"
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+  )
+  local legacy_id
+  for legacy_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
+    args+=(--legacy-mode-id "$legacy_id")
+  done
+  "$tool" "${args[@]}" >/dev/null 2>&1 || true
+}
+
+purge_legacy_best_effort() {
+  local tool
+  if ! tool="$(inputsource_tool_path)"; then
+    echo "warning: input-source helper is unavailable; continuing without legacy input-source cleanup" >&2
+    return 0
+  fi
+  if ! "$tool" purge-legacy \
+    --path "$TARGET_PATH" \
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"; then
+    echo "warning: input-source legacy cleanup failed; continuing so diagnostics can report the persisted state" >&2
+  fi
+}
+
+bootstrap_input_source_best_effort() {
+  local tool
+  if ! tool="$(inputsource_tool_path)"; then
+    echo "warning: input-source helper is unavailable; continuing without input-source bootstrap" >&2
+    return 0
+  fi
+  if ! "$tool" bootstrap \
+    --path "$TARGET_PATH" \
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"; then
+    echo "warning: input-source bootstrap failed; continuing so diagnostics can report the persisted state" >&2
   fi
 }
 
 repair_preferences_best_effort() {
   local tool
   if ! tool="$(inputsource_tool_path)"; then
-    echo "warning: input-source helper is unavailable; continuing so installed app activation and diagnostics can run" >&2
+    echo "warning: input-source helper is unavailable; continuing so diagnostics can run" >&2
     return 0
   fi
   if ! "$tool" repair-preferences \
@@ -277,7 +303,7 @@ repair_preferences_best_effort() {
     --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
     --include-history \
     --add-active; then
-    echo "warning: input-source preference repair failed; continuing so installed app activation and diagnostics can run" >&2
+    echo "warning: input-source preference repair failed; continuing so diagnostics can run" >&2
   fi
 }
 
@@ -551,6 +577,10 @@ if (( DRY_RUN == 1 )); then
   exit 0
 fi
 
+if (( DRY_RUN == 0 )); then
+  require_input_method_host_stopped
+fi
+
 prepare_source_artifacts
 
 mkdir -p "$TARGET_DIR"
@@ -560,14 +590,7 @@ fi
 
 switch_away_before_replace
 sleep 0.2
-
-killall KnowTypeInputMethodApp 2>/dev/null || true
-for _ in {1..30}; do
-  if ! pgrep -x KnowTypeInputMethodApp >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.1
-done
+require_input_method_host_stopped
 
 if (( BACKUP_ENABLED == 1 )); then
   knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 0 "$KEEP_BACKUPS"
@@ -609,22 +632,15 @@ fi
 knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0
 knowtype_register_launchservices_path "$TARGET_PATH" 0
 
-"$INSTALLED_EXECUTABLE" --knowtype-purge-legacy
-
+purge_legacy_best_effort
 repair_preferences_best_effort
-
-if ! "$INSTALLED_EXECUTABLE" --knowtype-install-activate; then
-  echo "warning: installed app could not select KnowType in this process context; continuing so diagnostics can report the persisted state" >&2
-fi
-
+bootstrap_input_source_best_effort
 repair_preferences_best_effort
 
 sleep 0.75
 killall cfprefsd 2>/dev/null || true
 killall TextInputMenuAgent 2>/dev/null || true
 killall TextInputSwitcher 2>/dev/null || true
-sleep 0.5
-open -g "$TARGET_PATH" >/dev/null 2>&1 || true
 sleep 0.5
 
 knowtype_write_install_state \
@@ -679,11 +695,11 @@ else
   fi
 fi
 
-echo "Requested input source activation from installed app: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+echo "Registered and enabled input source via helper: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 echo "Run ./scripts/diagnose-inputmethod.sh --strict for the read-only install status check."
 if [[ -n "$BACKUP_ID" ]]; then
   echo "Rollback command: ./scripts/rollback-inputmethod.sh --to $BACKUP_ID"
 fi
-echo "Activate the target text app, run ./scripts/select-inputmethod.sh --require-selected, then type a real probe before manual acceptance."
+echo "Activate the target text app, select KnowType or run ./scripts/select-inputmethod.sh --require-selected, then type a real probe before manual acceptance."
 echo "If System Settings asks to allow 知键/KnowType as an input method, click Allow before testing selection."
 echo "If diagnostics show HIToolbox selected preference is still another source, choose KnowType from the active app's input menu/System Settings."
