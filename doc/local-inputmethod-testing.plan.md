@@ -91,12 +91,12 @@ the local repair script before falling back to logout:
 ./scripts/repair-inputmethod-selection.sh
 ```
 
-The script asks the installed app to disable visible legacy `.Mode` TIS
+The script uses the input-source helper to disable visible legacy `.Mode` TIS
 rows and unregister stale LaunchServices records for older KnowType build paths,
 rewrites only KnowType rows in protected input-source preferences so HIToolbox
 points at `.Hans` and `com.apple.inputsources` contains the parent anchor plus
-`.Hans`, restarts Text Input menu agents, relaunches the installed input method
-app, and requests `.Hans` selection through TIS. If diagnostics still show stale
+`.Hans`, restarts Text Input menu agents, and requests `.Hans` selection through
+TIS without launching the input-method host. If diagnostics still show stale
 `.Mode` rows or a missing third-party parent anchor, remove and re-add KnowType in
 System Settings. If selection still falls back after repair, log out and back in to clear
 session-level Text Input Source state before repeating the install and

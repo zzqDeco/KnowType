@@ -110,11 +110,15 @@ Build and install the local development bundle:
 ```
 
 The local installer refreshes the traditional InputMethodKit app registration,
-purges stale `.Mode` development state, restores the System Settings
-third-party parent anchor plus the visible `.Hans` mode, and launches the
-installed app so registration and best-effort selection run from the app
-context macOS uses for input switching. KnowType follows the mature component
-mode shape used by Squirrel, McBopomofo, and macSKK: the parent id is
+purges stale `.Mode` development state, and restores the System Settings
+third-party parent anchor plus the visible `.Hans` mode through the dedicated
+input-source helper. It does not launch the installed input-method host, does
+not auto-select KnowType, and does not initialize Rime user data during install.
+If an existing `KnowTypeInputMethodApp` process is running, the installer stops
+before replacing files instead of killing it, because host shutdown can flush
+Rime user data.
+KnowType follows the mature component mode shape used by Squirrel, McBopomofo,
+and macSKK: the parent id is
 `com.knowtype.inputmethod.KnowType`, and the visible input source is
 `com.knowtype.inputmethod.KnowType.Hans`.
 
@@ -128,8 +132,10 @@ Overwrite installs create an app-level rollback backup under
 `~/Library/Application Support/KnowType/Backups/` and record the active install
 in `~/Library/Application Support/KnowType/install-state.json`. The backup
 contains install artifacts only: `KnowType.app` and optional `KnowType.prefPane`.
-It does not copy or restore Rime userdb, provider profiles, Keychain secrets, AI
-context documents, or local lexicons.
+It does not copy, restore, or mutate Rime userdb, provider profiles, Keychain
+secrets, AI context documents, `~/.knowtype`, or local lexicons. First real
+typing after manually selecting KnowType may initialize Rime as normal product
+use; that is intentionally outside the install step.
 
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
@@ -153,7 +159,8 @@ used by mature IMK input methods: installation uses TIS registration and
 enablement, while System Settings writes the protected third-party input-source
 approval rows.
 
-Select KnowType in the active target app when needed:
+After install, activate the target app, select KnowType from the macOS input
+menu, or run the selection helper while that target app is active:
 
 ```bash
 ./scripts/select-inputmethod.sh --require-selected
@@ -188,9 +195,10 @@ shasum -a 256 -c KnowType-v0.2.1-macos-dev-preview.dmg.sha256
 Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
 Control-click > Open, or open System Settings > Privacy & Security and choose
 Open Anyway. The command records `source=dmg-dev-preview`, release commit/tag,
-and manifest digest in diagnostics. Pass `--with-prefpane` only when the
-optional compatibility System Settings pane is needed. Do not use a stale
-System Settings sidebar entry unless the matching pane is installed.
+and manifest digest in diagnostics, but it does not launch the input method host
+or perform a typing probe. Pass `--with-prefpane` only when the optional
+compatibility System Settings pane is needed. Do not use a stale System Settings
+sidebar entry unless the matching pane is installed.
 
 The older local MVP zip can still be installed for developer debugging:
 

@@ -24,17 +24,16 @@ private func usage() -> Never {
           knowtype-inputsource-tool inspect-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool dedupe-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--add-active]
-          knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID]
+          knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID] [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool register --path PATH [--parent-id ID] [--mode-id ID] [--select]
           knowtype-inputsource-tool bootstrap --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID] [--select]
           knowtype-inputsource-tool purge-legacy --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool select [--parent-id ID] [--mode-id ID] [--require-selected]
 
         This helper performs KnowType Text Input Source diagnostics and legacy
-        cleanup through TIS APIs. Prefer the installed KnowTypeInputMethodApp
-        command-line flags for user-facing selection so macOS authorization
-        prompts name the real input method app. Preference inspection is
-        read-only; repair-preferences is an explicit local development cleanup
+        cleanup through TIS APIs. switch-away can clear stale KnowType selected
+        preferences before install so macOS does not relaunch the host.
+        Preference inspection is read-only; repair-preferences is an explicit local development cleanup
         for stale parent or .Mode rows in protected input-source preferences.
         Use --add-active only for local cache repair; it writes the visible
         .Hans mode row and the third-party parent anchor expected by System
@@ -665,14 +664,75 @@ private func printDump(bundleID: String) {
     }
 }
 
-private func switchAway(prefix: String, fallbackID: String) {
-    let currentID = currentInputSourceID()
-    guard currentID?.hasPrefix(prefix) == true else {
-        return
+private func repairSelectedPreferenceAwayFromKnowType(
+    bundleID: String,
+    modeID: String,
+    legacyModeIDs: [String]
+) -> PreferenceRepairResult {
+    let domain = "com.apple.HIToolbox"
+    let key = "AppleSelectedInputSources"
+    var dictionary = directUserPreferenceDictionary(domain: domain)
+    let current = dictionary[key] as? [[String: Any]] ?? []
+    let modeIDs = Set([modeID] + legacyModeIDs)
+    var removed = 0
+    let repaired = current.filter { entry in
+        let shouldRemove = isKnowTypePreferenceEntry(entry, bundleID: bundleID, modeIDs: modeIDs)
+        if shouldRemove {
+            removed += 1
+        }
+        return !shouldRemove
     }
-    if let fallback = inputSource(id: fallbackID) {
-        TISSelectInputSource(fallback)
+
+    let changed = !plistEntriesAreEqual(current, repaired)
+    if changed {
+        dictionary[key] = repaired
+        do {
+            try writeUserPreferenceDictionary(dictionary, domain: domain)
+            CFPreferencesAppSynchronize(domain as CFString)
+        } catch {
+            fputs("Failed to repair \(domain) \(key): \(error)\n", stderr)
+            exit(ExitCode.failure.rawValue)
+        }
     }
+
+    return PreferenceRepairResult(
+        domain: domain,
+        key: key,
+        removed: removed,
+        added: 0,
+        changed: changed
+    )
+}
+
+private func switchAway(
+    prefix: String,
+    fallbackID: String,
+    bundleID: String,
+    modeID: String,
+    legacyModeIDs: [String]
+) {
+    let beforeID = currentInputSourceID() ?? ""
+    var selectStatus: OSStatus?
+    if beforeID.hasPrefix(prefix), let fallback = inputSource(id: fallbackID) {
+        selectStatus = TISSelectInputSource(fallback)
+    }
+    let repair = repairSelectedPreferenceAwayFromKnowType(
+        bundleID: bundleID,
+        modeID: modeID,
+        legacyModeIDs: legacyModeIDs
+    )
+    if selectStatus == noErr || repair.changed {
+        postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
+    }
+    print("switch-away.current.before=\(beforeID)")
+    if let selectStatus {
+        print("switch-away.select.status=\(selectStatus)")
+    } else {
+        print("switch-away.select.status=skipped")
+    }
+    print("switch-away.preference.selected.changed=\(repair.changed)")
+    print("switch-away.preference.selected.removed=\(repair.removed)")
+    print("switch-away.current.after=\(currentInputSourceID() ?? "")")
 }
 
 private func waitForInputSource(id: String, timeout: TimeInterval) -> TISInputSource? {
@@ -938,8 +998,17 @@ case "repair-preferences":
 case "switch-away":
     let prefix = arguments.option("--prefix", default: defaultParentID) ?? defaultParentID
     let fallbackID = arguments.option("--fallback-id", default: defaultFallbackID) ?? defaultFallbackID
+    let parentID = arguments.option("--parent-id", default: defaultParentID) ?? defaultParentID
+    let modeID = arguments.option("--mode-id", default: defaultModeID) ?? defaultModeID
+    let legacyModeIDs = legacyModeIDs(from: &arguments)
     arguments.ensureConsumed()
-    switchAway(prefix: prefix, fallbackID: fallbackID)
+    switchAway(
+        prefix: prefix,
+        fallbackID: fallbackID,
+        bundleID: parentID,
+        modeID: modeID,
+        legacyModeIDs: legacyModeIDs
+    )
 case "register":
     guard let path = arguments.option("--path") else {
         usage()

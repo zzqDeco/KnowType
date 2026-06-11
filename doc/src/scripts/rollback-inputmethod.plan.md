@@ -22,10 +22,14 @@ uninstall scripts.
   files or input-source state.
 - Rollback preflights the backed-up app with the same required runtime checks
   as install source validation before it replaces the current bundle.
-- A real rollback switches away from KnowType, stops `KnowTypeInputMethodApp`,
-  restores the backup app, refreshes LaunchServices, clears stale prefPane
-  caches, repairs scoped input-source preferences, and writes
-  `install-state.json`.
+- A real rollback first requires `KnowTypeInputMethodApp` to be stopped, then
+  switches away from KnowType, restores the backup app, refreshes
+  LaunchServices, clears stale prefPane caches, repairs scoped input-source
+  preferences, runs helper bootstrap without `--select`, and writes
+  `install-state.json`. The running-host check matches the full process command
+  basename rather than a truncated process name.
+- Rollback does not start the restored input-method host or initialize Rime user
+  data; the user still verifies real typing after selecting KnowType manually.
 
 ## Tests
 

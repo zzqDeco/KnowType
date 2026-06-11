@@ -144,8 +144,14 @@ Tooling is intentionally separate from product behavior. Scripts may prepare,
 diagnose, or repair a local development installation, but manual acceptance in
 real host apps remains the evidence for IMK behavior.
 Install and rollback scripts swap only app/prefPane artifacts and preserve user
-data in place. `install-state.json` and backup manifests provide traceability
-for local upgrade testing without becoming product runtime dependencies.
+data in place. They use `knowtype-inputsource-tool` for registration and scoped
+legacy cleanup without launching the input-method host, selecting KnowType, or
+initializing Rime user data during installation. `install-state.json` and backup
+manifests provide traceability for local upgrade testing without becoming
+product runtime dependencies.
+If the previous input-method host is still running, install/rollback stop before
+replacement instead of killing the process, because shutdown can flush live Rime
+LevelDB state.
 
 ## Input Method Layer
 

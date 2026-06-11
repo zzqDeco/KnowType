@@ -78,6 +78,27 @@ cleanup_restore_staging() {
 
 trap cleanup_restore_staging EXIT
 
+require_input_method_host_stopped() {
+  if knowtype_input_method_host_is_running; then
+    echo "error: KnowTypeInputMethodApp is running." >&2
+    echo "Switch to another input source and quit the running KnowType host, then rerun rollback." >&2
+    echo "Rollback will not kill the host because process shutdown can flush Rime user data." >&2
+    exit 1
+  fi
+}
+
+knowtype_input_method_host_is_running() {
+  local command
+  while IFS= read -r command; do
+    case "$command" in
+      KnowTypeInputMethodApp|KnowTypeInputMethodApp\ *|*/KnowTypeInputMethodApp|*/KnowTypeInputMethodApp\ *)
+        return 0
+        ;;
+    esac
+  done < <(ps -axo command= 2>/dev/null)
+  return 1
+}
+
 list_backups() {
   if [[ ! -d "$backup_root" ]]; then
     echo "No KnowType install backups were found."
@@ -150,27 +171,30 @@ if (( DRY_RUN == 1 )); then
   else
     echo "Target PreferencePane: <remove if installed>"
   fi
-  echo "[dry-run] Would switch away from KnowType, stop KnowTypeInputMethodApp, restore app, refresh LaunchServices, repair preferences, and write install-state.json."
+  echo "[dry-run] Would require KnowTypeInputMethodApp to be stopped, switch away from KnowType, restore app, refresh LaunchServices through helpers, repair preferences, and write install-state.json."
   exit 0
 fi
 
+require_input_method_host_stopped
+
 inputsource_tool=""
 if inputsource_tool="$(knowtype_inputsource_tool "$ROOT_DIR" 2>/dev/null)"; then
-  "$inputsource_tool" switch-away \
-    --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-    --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID" >/dev/null 2>&1 || true
+  switch_args=(
+    switch-away
+    --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID"
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+  )
+  for legacy_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
+    switch_args+=(--legacy-mode-id "$legacy_id")
+  done
+  "$inputsource_tool" "${switch_args[@]}" >/dev/null 2>&1 || true
 else
   echo "warning: input-source helper is unavailable; rollback will restore bundles and skip preference repair" >&2
   inputsource_tool=""
 fi
-
-killall KnowTypeInputMethodApp 2>/dev/null || true
-for _ in {1..30}; do
-  if ! pgrep -x KnowTypeInputMethodApp >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.1
-done
+require_input_method_host_stopped
 
 mkdir -p "$target_dir"
 restore_app_staging_dir="$(mktemp -d "$target_dir/.KnowType.rollback.app.XXXXXX")"
@@ -212,20 +236,25 @@ fi
 knowtype_unregister_launchservices_records_except "$target_path" 0
 knowtype_register_launchservices_path "$target_path" 0
 
-"$target_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-purge-legacy || true
-
 if [[ -n "$inputsource_tool" ]]; then
+  "$inputsource_tool" purge-legacy \
+    --path "$target_path" \
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" >/dev/null 2>&1 || true
   "$inputsource_tool" repair-preferences \
     --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
     --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
     --include-history \
     --add-active >/dev/null 2>&1 || true
+  "$inputsource_tool" bootstrap \
+    --path "$target_path" \
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" >/dev/null 2>&1 || true
 fi
 
 killall cfprefsd 2>/dev/null || true
 killall TextInputMenuAgent 2>/dev/null || true
 killall TextInputSwitcher 2>/dev/null || true
-open -g "$target_path" >/dev/null 2>&1 || true
 
 knowtype_write_install_state \
   "bundle" \
