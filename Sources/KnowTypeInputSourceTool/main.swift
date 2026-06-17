@@ -305,10 +305,14 @@ private func inputModePreferenceCount(
     }.count
 }
 
-private func visibleUserModeCount(modeSources: [TISInputSource]) -> Int {
-    modeSources.filter { source in
-        boolProperty(source, kTISPropertyInputSourceIsSelectCapable)
-    }.count
+private func visibleUserModeCount(sources: [TISInputSource]) -> Int {
+    var visibleIDs = Set<String>()
+    for source in sources where boolProperty(source, kTISPropertyInputSourceIsSelectCapable) {
+        if let id = stringProperty(source, kTISPropertyInputSourceID) {
+            visibleIDs.insert(id)
+        }
+    }
+    return visibleIDs.count
 }
 
 private func preferencesContainInputMode(bundleID: String, modeID: String, domain: String, key: String) -> Bool {
@@ -599,8 +603,11 @@ private func printStatus(parentID: String, modeID: String, legacyModeIDs: [Strin
     let parent = parentSources.first
     let mode = modeSources.first
     let activeModeCount = modeSources.count
-    let userVisibleModeCount = visibleUserModeCount(modeSources: modeSources)
-    let legacyCounts = legacyModeIDs.map { ($0, deduplicatedInputSources(inputSources(id: $0)).count) }
+    let legacySourcesByID = legacyModeIDs.map { ($0, deduplicatedInputSources(inputSources(id: $0))) }
+    let userVisibleModeCount = visibleUserModeCount(
+        sources: parentSources + modeSources + legacySourcesByID.flatMap(\.1)
+    )
+    let legacyCounts = legacySourcesByID.map { ($0, $1.count) }
     let legacyTotal = legacyCounts.reduce(0) { $0 + $1.1 }
 
     print("current.id=\(currentID)")

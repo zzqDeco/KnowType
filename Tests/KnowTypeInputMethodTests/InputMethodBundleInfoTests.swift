@@ -377,6 +377,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("AppleEnabledThirdPartyInputSources"))
         XCTAssertTrue(helperSource.contains("mode.selectCapable"))
         XCTAssertTrue(helperSource.contains("user.visible.mode.count"))
+        XCTAssertTrue(helperSource.contains("parentSources + modeSources + legacySourcesByID.flatMap"))
+        XCTAssertTrue(helperSource.contains("kTISPropertyInputSourceIsSelectCapable"))
         XCTAssertTrue(helperSource.contains("active.mode.count"))
         XCTAssertTrue(helperSource.contains("legacy.mode.count"))
         XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.knowtype"))
@@ -401,6 +403,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         )
         let installScript = try String(
             contentsOf: rootURL.appendingPathComponent("scripts/install-inputmethod.sh"),
+            encoding: .utf8
+        )
+        let diagnosticScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh"),
             encoding: .utf8
         )
         let rollbackScript = try String(
@@ -479,6 +485,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("Removed stale KnowType compatibility PreferencePane"))
         XCTAssertTrue(installScript.contains("--add-active"))
         XCTAssertFalse(installScript.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(diagnosticScript.contains("ALLOW_LEGACY_PARENT_ANCHOR=0"))
+        XCTAssertTrue(diagnosticScript.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(diagnosticScript.contains("explicit legacy compatibility state"))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" register --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" disable"#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" select"#))

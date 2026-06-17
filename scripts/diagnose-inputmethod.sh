@@ -12,6 +12,7 @@ STRICT=0
 REQUIRE_SELECTED=0
 SHOW_LOGS=0
 JSON_OUTPUT=0
+ALLOW_LEGACY_PARENT_ANCHOR=0
 LOG_LOOKBACK="${KNOWTYPE_LOG_LOOKBACK:-30m}"
 
 usage() {
@@ -28,6 +29,8 @@ Options:
   --log-lookback      Time window for --logs, such as 10m, 1h, or 2h. Defaults to 30m.
   --path              Inspect a specific KnowType.app bundle path.
   --json              Print a stable machine-readable install snapshot and exit.
+  --legacy-parent-anchor
+                      Treat a third-party parent preference row as explicit compatibility state.
   -h, --help          Show this help.
 EOF
 }
@@ -48,6 +51,10 @@ while (($# > 0)); do
       ;;
     --json)
       JSON_OUTPUT=1
+      shift
+      ;;
+    --legacy-parent-anchor)
+      ALLOW_LEGACY_PARENT_ANCHOR=1
       shift
       ;;
     --log-lookback)
@@ -982,7 +989,9 @@ else
         ;;
       preference.thirdparty.enabled.parent.knowtype)
         if [[ "$value" == "true" ]]; then
-          if (( STRICT == 1 )); then
+          if (( ALLOW_LEGACY_PARENT_ANCHOR == 1 )); then
+            ok "Third-party input source preferences include the non-selectable KnowType parent row as explicit legacy compatibility state"
+          elif (( STRICT == 1 )); then
             fail "Third-party input source preferences still include the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
           else
             warn "Third-party input source preferences still include the non-selectable KnowType parent row"
