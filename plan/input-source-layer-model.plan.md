@@ -23,7 +23,7 @@ This plan only covers input-source registration, preferences, diagnostics, scrip
 - The parent record uses a container-style localized name when surfaced by diagnostics: `KnowType Input Method` / `知键输入法容器`.
 - `knowtype-inputsource-tool repair-preferences --add-active` removes stale parent and legacy `.Mode` rows from user preference arrays and adds only `.Hans`.
 - `--legacy-parent-anchor` is the explicit compatibility escape hatch for macOS builds that prove they still require a parent preference row.
-- `status` reports the count of unique select-capable KnowType IDs across the parent, `.Hans`, and legacy cleanup modes; healthy default state is exactly one.
+- `status` reports the count of unique enabled and select-capable KnowType IDs across the parent, `.Hans`, and legacy cleanup modes; healthy default state is exactly one. Disabled stale TIS cache records remain visible through `legacy.mode.count` warnings, not the strict visible-mode gate.
 - `diagnose-inputmethod.sh --legacy-parent-anchor` is the explicit strict-diagnostic companion for the helper's legacy parent-anchor compatibility fallback.
 
 ## Validation

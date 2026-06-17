@@ -4,7 +4,7 @@
 
 The helper owns explicit debug TIS calls for:
 
-- `status`: emit read-only key/value TIS status and persisted HIToolbox selected/enabled preference status for diagnostics.
+- `status`: emit read-only key/value TIS status and persisted HIToolbox selected/enabled preference status for diagnostics. `user.visible.mode.count` counts unique KnowType records that are both enabled and select-capable; disabled legacy session-cache rows remain separate warnings.
 - `switch-away`: moves the active input source away from KnowType before app
   bundle replacement without starting the installed host. It also removes
   KnowType rows from HIToolbox `AppleSelectedInputSources` so stale selected

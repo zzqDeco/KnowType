@@ -378,6 +378,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("mode.selectCapable"))
         XCTAssertTrue(helperSource.contains("user.visible.mode.count"))
         XCTAssertTrue(helperSource.contains("parentSources + modeSources + legacySourcesByID.flatMap"))
+        XCTAssertTrue(helperSource.contains("boolProperty(source, kTISPropertyInputSourceIsEnabled) &&"))
         XCTAssertTrue(helperSource.contains("kTISPropertyInputSourceIsSelectCapable"))
         XCTAssertTrue(helperSource.contains("active.mode.count"))
         XCTAssertTrue(helperSource.contains("legacy.mode.count"))

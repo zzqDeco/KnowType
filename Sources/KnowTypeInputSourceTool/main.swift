@@ -307,7 +307,10 @@ private func inputModePreferenceCount(
 
 private func visibleUserModeCount(sources: [TISInputSource]) -> Int {
     var visibleIDs = Set<String>()
-    for source in sources where boolProperty(source, kTISPropertyInputSourceIsSelectCapable) {
+    for source in sources where
+        boolProperty(source, kTISPropertyInputSourceIsEnabled) &&
+        boolProperty(source, kTISPropertyInputSourceIsSelectCapable)
+    {
         if let id = stringProperty(source, kTISPropertyInputSourceID) {
             visibleIDs.insert(id)
         }
