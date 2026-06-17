@@ -186,6 +186,6 @@
 "settings.diagnostics.step.enable.title" = "Enable Input Source";
 "settings.diagnostics.step.enable.detail" = "If macOS asks whether to allow KnowType as an input method, click Allow. Then open System Settings > Keyboard > Text Input > Input Sources; if it does not switch automatically, manually enable or select KnowType.";
 "settings.diagnostics.step.refresh.title" = "Refresh Registration";
-"settings.diagnostics.step.refresh.detail" = "If macOS keeps old registration state, run the repair script. It removes stale LaunchServices records through the installed app, disables legacy .Mode registration, restores the third-party parent anchor and .Hans mode, and retests switching.";
+"settings.diagnostics.step.refresh.detail" = "If macOS keeps old registration state, run the repair script. It removes stale LaunchServices records, disables legacy .Mode registration, removes non-selectable parent rows, restores the single .Hans mode, and retests switching.";
 "settings.diagnostics.step.logs.title" = "View Logs";
 "settings.diagnostics.step.logs.detail" = "During local smoke tests, use diagnostics log mode, Console.app, or the log command to inspect KnowTypeInputMethodApp, Gatekeeper, and input-source sandbox messages.";

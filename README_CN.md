@@ -101,13 +101,14 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 ```
 
 本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Mode`
-开发状态，并通过专用 input-source helper 补齐系统设置需要的第三方 parent anchor 和可见
+开发状态和不可选择的 parent preference 行，并通过专用 input-source helper 恢复可见
 `.Hans` mode。默认安装不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
 Rime 用户数据。如果已有 `KnowTypeInputMethodApp` 进程正在运行，安装脚本会先中止，而不是强杀它，
 因为 host 退出可能会把 Rime 用户数据刷盘。KnowType 采用 Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode
 形态：parent id 是
-`com.knowtype.inputmethod.KnowType`，系统可见输入源是
-`com.knowtype.inputmethod.KnowType.Hans`。
+`com.knowtype.inputmethod.KnowType`，唯一应出现在用户菜单里的可选择输入源是
+`com.knowtype.inputmethod.KnowType.Hans`。macOS 的 TIS 诊断中仍可能看到 parent record，
+但它不应成为第二个用户可选的 `知键`。
 
 `scripts/install-inputmethod.sh` 默认使用 release 构建，方便本地打字测试覆盖优化后的热路径。
 Rime runtime 文件会打包在 `KnowType.app` 中；如果文件缺失或加载失败，KnowType 会保留

@@ -23,7 +23,7 @@ The script does not mutate macOS input-source state. It reports:
   count;
 - persisted HIToolbox and third-party enabled preference rows for active
   KnowType, plus strict failures when those rows still point at legacy `.Mode`
-  or when the third-party parent anchor required by System Settings is missing;
+  or contain the non-selectable parent record as a user preference target;
 - KnowType's `AppleInputSourceHistory` position, because `Ctrl+Space` normally
   toggles the current and previous input sources and can skip KnowType if it is
   buried behind ABC or Apple Pinyin in history;
@@ -56,7 +56,7 @@ When Gatekeeper rejects an Apple Development build on macOS 15+, the diagnostic 
 
 `scripts/select-inputmethod.sh` is the explicit selection step before manual typing. Passing `--require-selected` gates on the active process's current source result; the follow-up read-only diagnostic intentionally does not require its own process context to be selected.
 
-The helper reports `AppleSelectedInputSources` and `AppleEnabledInputSources` from `com.apple.HIToolbox`, plus the third-party input source preference from `com.apple.inputsources`. This makes the local acceptance distinction explicit: diagnostics can verify registration and persisted state, but manual typing must use the active app's selected input source. Missing HIToolbox mode rows, missing third-party mode rows, missing third-party parent anchor, remaining legacy `.Mode` rows, or a KnowType history index beyond 1 are failures under `--strict` because the macOS input menu and `Ctrl+Space` switcher can skip the input method when the protected enabled list or history points at stale sources first. The helper registration path follows mature IMK boundaries by preparing TIS records without starting the host; explicit repair only rewrites scoped KnowType rows to match the System Settings add result.
+The helper reports `AppleSelectedInputSources` and `AppleEnabledInputSources` from `com.apple.HIToolbox`, plus the third-party input source preference from `com.apple.inputsources`. This makes the local acceptance distinction explicit: diagnostics can verify registration and persisted state, but manual typing must use the active app's selected input source. Missing HIToolbox mode rows, missing third-party mode rows, non-selectable parent rows in user preferences, remaining legacy `.Mode` rows, a KnowType visible mode count other than 1, or a KnowType history index beyond 1 are failures under `--strict` because the macOS input menu and `Ctrl+Space` switcher can skip the input method when the protected enabled list or history points at stale sources first. The helper registration path follows mature IMK boundaries by preparing TIS records without starting the host; explicit repair only rewrites scoped KnowType rows to the single visible `.Hans` mode.
 
 On first local installation, macOS can show a System Settings authorization
 prompt asking whether to allow `知键` to enable `KnowType`. Until the user
@@ -68,7 +68,7 @@ When `TISSelectInputSource` returns success in the app context and `AppleSelecte
 
 `knowtype-inputsource-tool dump` prints every TIS record for the KnowType bundle. Use it when the input menu shows `知键` but the item is disabled or selection falls back to another source; duplicated parent or legacy mode records usually point to stale Text Input Source registration.
 
-`scripts/repair-inputmethod-selection.sh` uses helper `purge-legacy`, `repair-preferences`, and `bootstrap --select` to remove legacy KnowType rows and restore the third-party parent anchor plus `.Hans`, then restarts `cfprefsd`, `TextInputMenuAgent`, and `TextInputSwitcher`. It does not start the installed input-method host. Use it after repeated local installs when stale `.Mode` rows or missing third-party anchors make the menu bounce back to Apple Pinyin or ABC. Add KnowType in System Settings if the third-party enabled list remains missing.
+`scripts/repair-inputmethod-selection.sh` uses helper `purge-legacy`, `repair-preferences`, and `bootstrap --select` to remove legacy KnowType rows and non-selectable parent preference rows, restore the single visible `.Hans` mode, then restart `cfprefsd`, `TextInputMenuAgent`, and `TextInputSwitcher`. It does not start the installed input-method host. Use it after repeated local installs when stale `.Mode` or parent rows make the menu bounce back to Apple Pinyin or ABC. Add KnowType in System Settings if the third-party enabled list remains missing.
 
 `knowtype-inputsource-tool disable` remains available for manual cleanup. The local install script copies the new bundle, refreshes LaunchServices, then uses helper `purge-legacy`, `repair-preferences`, and `bootstrap` without `--select` so cleanup, registration, and enablement do not launch `KnowTypeInputMethodApp`.
 

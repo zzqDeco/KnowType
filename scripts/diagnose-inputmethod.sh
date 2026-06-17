@@ -8,9 +8,6 @@ PREFPANE_PATH="${KNOWTYPE_PREFPANE_PATH:-$DEFAULT_PREFPANE_PATH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR"
-source "$SCRIPTS_DIR/lib/inputsource-ids.sh"
-source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
-source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
 STRICT=0
 REQUIRE_SELECTED=0
 SHOW_LOGS=0
@@ -80,6 +77,10 @@ while (($# > 0)); do
       ;;
   esac
 done
+
+source "$SCRIPTS_DIR/lib/inputsource-ids.sh"
+source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
+source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
 
 failures=0
 warnings=0
@@ -824,13 +825,13 @@ else
         fi
         ;;
       parent.found)
-        [[ "$value" == "true" ]] && ok "KnowType parent input source is registered" || fail "KnowType parent input source is not registered"
+        [[ "$value" == "true" ]] && ok "KnowType non-selectable parent record is registered" || fail "KnowType non-selectable parent record is not registered"
         ;;
       parent.enabled)
         if [[ "$value" == "true" ]]; then
-          ok "KnowType parent input source is enabled"
+          info "KnowType non-selectable parent record is enabled by TIS; user selection still targets the visible mode"
         else
-          info "KnowType parent input source is not enabled; the visible component mode is the selection target"
+          info "KnowType non-selectable parent record is not enabled; the visible component mode is the selection target"
         fi
         ;;
       parent.selectCapable)
@@ -880,6 +881,13 @@ else
       mode.count)
         if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
           warn "TIS reports $value KnowType input mode registrations; log out or reboot if the input menu shows stale duplicates"
+        fi
+        ;;
+      user.visible.mode.count)
+        if [[ "$value" == "1" ]]; then
+          ok "TIS reports exactly one user-selectable KnowType mode"
+        else
+          fail "TIS reports $value user-selectable KnowType modes; run ./scripts/repair-inputmethod-selection.sh and clear stale LaunchServices records"
         fi
         ;;
       active.mode.count)
@@ -974,11 +982,13 @@ else
         ;;
       preference.thirdparty.enabled.parent.knowtype)
         if [[ "$value" == "true" ]]; then
-          ok "Third-party input source preferences include the KnowType parent anchor"
-        elif (( STRICT == 1 )); then
-          fail "Third-party input source preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
+          if (( STRICT == 1 )); then
+            fail "Third-party input source preferences still include the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "Third-party input source preferences still include the non-selectable KnowType parent row"
+          fi
         else
-          warn "Third-party input source preferences are missing the KnowType parent anchor; System Settings may hide KnowType"
+          ok "Third-party input source preferences do not include the non-selectable KnowType parent row"
         fi
         ;;
       preference.history.knowtype)

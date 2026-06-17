@@ -37,7 +37,7 @@ The Diagnostics tab documents the local developer loop through `DebugInstallGuid
 - request selection of `com.knowtype.inputmethod.KnowType.Hans` with `scripts/select-inputmethod.sh` only as a retry/preflight after activating the target text app, while directing developers to `scripts/diagnose-inputmethod.sh` for the independent system status check;
 - remind developers that the selection script is only a preflight and final acceptance still requires typing a real probe in the target app;
 - run `scripts/diagnose-inputmethod.sh` to verify bundle metadata, signing, packaged resources, Text Input Source registration, and local data paths without changing system state;
-- run `scripts/repair-inputmethod-selection.sh` when stale LaunchServices records, visible legacy `.Mode` TIS rows, or a missing third-party parent anchor make selection bounce back to another source;
+- run `scripts/repair-inputmethod-selection.sh` when stale LaunchServices records, visible legacy `.Mode` TIS rows, or non-selectable parent preference rows make selection bounce back to another source;
 - use `scripts/select-inputmethod.sh --require-selected` as the installed-app selection preflight before typing in the active text app;
 - log out and back in only after the repair script still leaves macOS on stale session state;
 - approve the macOS System Settings prompt that asks whether to allow `知键` to enable `KnowType`, then enable KnowType in System Settings;

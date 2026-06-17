@@ -54,9 +54,10 @@ Installs the locally built KnowType input method bundle into
   LaunchServices and TIS do not keep reusing stale metadata from a previous
   development build with the same source-controlled version.
 - It uses `knowtype-inputsource-tool repair-preferences --add-active` around the
-  helper bootstrap to keep local development caches aligned with the System
-  Settings add result: `.Hans` in HIToolbox/history and parent anchor plus
-  `.Hans` in `com.apple.inputsources`.
+  helper bootstrap to keep local development caches aligned with the current
+  input-source model: `.Hans` is the only user-selectable KnowType row in
+  HIToolbox/history and `com.apple.inputsources`; the parent record is
+  diagnostic/container state and is not restored as an enabled user preference.
 - The install step must not initialize Rime user data, AI learning/profile
   files, provider profiles, `ENV.md`, `CORRECTION.md`, or `~/.knowtype`. Real
   typing after the user manually selects KnowType may initialize Rime as normal
