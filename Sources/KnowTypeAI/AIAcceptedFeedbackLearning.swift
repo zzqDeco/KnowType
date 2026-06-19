@@ -191,23 +191,6 @@ public final class AIAcceptedFeedbackStore:
             acceptedFeedbackClearMarkerURL(historyURL: historyURL),
             fileManager: fileManager
         )
-        if !summaryMatches {
-            do {
-                try withAcceptedFeedbackFileLock(
-                    lockURL: acceptedFeedbackLockURL(historyURL: historyURL),
-                    fileManager: fileManager
-                ) {
-                    try persistSummary(rebuiltSummary)
-                }
-            } catch {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .lexicalProfileFallback,
-                        reason: "accepted_feedback_summary_repair_failed:\(String(describing: type(of: error)))"
-                    )
-                )
-            }
-        }
     }
 
     public static func inMemory(
@@ -372,6 +355,10 @@ public final class AIAcceptedFeedbackStore:
     }
 
     private func syncRecordsAfterExternalClear() {
+        guard let markerURL = acceptedFeedbackClearMarkerURL(historyURL: historyURL),
+              fileManager.fileExists(atPath: markerURL.path) else {
+            return
+        }
         do {
             try withAcceptedFeedbackFileLock(
                 lockURL: acceptedFeedbackLockURL(historyURL: historyURL),
@@ -754,7 +741,7 @@ public final class AIAcceptedFeedbackStore:
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: false
         )) ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         return root
             .appendingPathComponent("KnowType", isDirectory: true)

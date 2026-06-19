@@ -1,0 +1,61 @@
+# KnowType IMK Host Cold Start No User Data Write
+
+## Summary
+
+- Status: Active.
+- Branch: `fix/imk-host-cold-start-no-userdata-write`.
+- Goal: macOS may prelaunch `KnowTypeInputMethodApp` during TIS or
+  LaunchServices work, but that cold start must not initialize Rime, provider
+  profiles, AI learning files, lexical profiles, `ENV.md`, or `CORRECTION.md`.
+- The fix aligns KnowType with mature IMK apps: install/register and host
+  startup are separate from the first real input session.
+
+## Scope
+
+- Make `RimeConversionEngine` hold configuration on init and create the native
+  Rime session only on the first real conversion `process(_:)` call.
+- Make provider-backed AI recommendation and context memory runtime lazy from
+  `KnowTypeInputController` startup.
+- Keep accepted AI learning, feedback learning, and lexical profile stores
+  read-only on construction; explicit record/rebuild/refresh paths still write.
+- Change install postflight to use the JSON install snapshot rather than full
+  `--strict` TIS diagnostics.
+
+## Implementation
+
+- `RimeConversionEngine.snapshot`, `activeSchemaID`, `isNativeActive`, and
+  `reset()` are cold-start read-only operations and must not create Rime
+  user/log directories.
+- `NativeRimeSession` creation remains unchanged once reached; only the timing
+  moves from engine init to first ASCII/native conversion operation.
+- `ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)`
+  opens the default provider path without creating `Application Support/KnowType`
+  when no provider profile exists.
+- `LazyDefaultAIRecommendationRuntime` and `LazyDefaultAIContextMemoryRuntime`
+  defer provider loading and AI document-store construction until a real
+  recommendation or typing event is processed.
+- `KNOWTYPE_STARTUP_DEBUG=1` logs lazy cold-start state without user text.
+
+## Test Plan
+
+- `RimeConversionEngine()` init/read/reset do not create configured Rime
+  user/log directories; first `process(.text("n"))` does.
+- Provider profile no-create loading returns an empty profile file without
+  creating the `KnowType` directory.
+- Accepted learning, feedback learning, and lexical profile stores do not create
+  missing directories on init/snapshot.
+- `install-inputmethod.sh` postflight calls `diagnose-inputmethod.sh --json`
+  instead of full `--strict`.
+- Regression: `swift test --quiet`,
+  `./scripts/smoke-inputmethod-install.sh`,
+  `./scripts/smoke-inputmethod-install.sh --with-prefpane`,
+  `./scripts/perf-input-hotpath.sh`, and `git diff --check`.
+
+## Assumptions
+
+- First real user input may initialize Rime and learning data as normal product
+  behavior.
+- This slice does not change input source IDs, `.Hans` mode semantics,
+  candidate UI, provider prompts, Rime dictionaries, or release packaging.
+- `TISSelectInputSource(mode) == -50` remains a separate helper-selection
+  follow-up if it still appears after this fix.

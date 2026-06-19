@@ -89,7 +89,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
         self.provider = provider
-        self.hasProvider = provider != nil
+        self.hasProvider = provider != nil || aiRecommendationProvider != nil
         if let conversionEngine {
             self.conversionEngine = conversionEngine
         } else if let conversionEngineFactory {

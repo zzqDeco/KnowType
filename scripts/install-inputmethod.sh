@@ -674,7 +674,7 @@ fi
 installed_version="$(knowtype_bundle_short_version "$TARGET_PATH")"
 installed_build="$(knowtype_bundle_build_version "$TARGET_PATH")"
 postflight_result="ok"
-if ! "$SCRIPTS_DIR/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH" >/dev/null 2>&1; then
+if ! "$SCRIPTS_DIR/diagnose-inputmethod.sh" --json --path "$TARGET_PATH" >/dev/null 2>&1; then
   postflight_result="warning"
 fi
 
@@ -708,7 +708,7 @@ else
 fi
 
 echo "Registered and enabled input source via helper: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
-echo "Run ./scripts/diagnose-inputmethod.sh --strict for the read-only install status check."
+echo "Postflight uses the JSON install snapshot only; run ./scripts/diagnose-inputmethod.sh --strict for full TIS diagnostics."
 if [[ -n "$BACKUP_ID" ]]; then
   echo "Rollback command: ./scripts/rollback-inputmethod.sh --to $BACKUP_ID"
 fi

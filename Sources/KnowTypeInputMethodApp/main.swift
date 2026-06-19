@@ -514,7 +514,9 @@ private enum TextInputSourceActivation {
 
 private enum RimeRuntimeSmoke {
     static func run() -> Int32 {
-        guard var configuration = NativeRimeConfiguration.defaultConfiguration() else {
+        var environment = ProcessInfo.processInfo.environment
+        environment["KNOWTYPE_RIME_ENABLED"] = "1"
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
             fputs("rime.smoke=unavailable\n", stderr)
             return 1
         }
@@ -527,13 +529,15 @@ private enum RimeRuntimeSmoke {
         }
 
         var engine = RimeConversionEngine(configuration: configuration)
+        guard engine.process(.text("w")).handled else {
+            fputs("rime.smoke=session-unavailable\n", stderr)
+            return 1
+        }
         guard engine.isNativeActive else {
             fputs("rime.smoke=session-unavailable\n", stderr)
             return 1
         }
-        for character in "wo" {
-            _ = engine.process(.text(String(character)))
-        }
+        _ = engine.process(.text("o"))
         guard !engine.snapshot.candidates.isEmpty else {
             fputs("rime.smoke=no-candidates\n", stderr)
             return 1

@@ -19,12 +19,17 @@ It emits ready events only for schemas whose accepted history changed since the
 previous rebuild, so schema-specific lexical profile refreshes are not retriggered
 by unchanged cached summaries.
 
+Runtime store construction is read-only. Missing history, summary, mirror, and
+clear-marker files do not create the AI directory, lock file, or markdown
+mirror. If a persisted summary is stale, startup may rebuild the in-memory
+snapshot, but persistent repair is left to explicit record/rebuild paths.
+
 `AIAcceptedLearningMaintenance` is the non-runtime control surface for this
 data. It powers `knowtype-accepted-learning-tool` and the
 `scripts/accepted-learning.sh` wrapper with read-only status, explicit rebuild,
 and guarded clear operations. Rebuild reuses the same summary builder used by
-runtime learning. Runtime startup repair and maintenance writes share an
-interprocess lock file. Clear removes accepted-learning history, summary, and
+runtime learning. Maintenance writes share an interprocess lock file. Clear
+removes accepted-learning history, summary, and
 mirror files, writes a clear marker so a running store drops stale in-memory
 records before the next snapshot, append, or rebuild, and scrubs accepted-AI
 terms/source lines plus matching accepted recent commits from the persistent
@@ -50,4 +55,5 @@ by the input-method tracker, builds a bounded feedback summary, and renders
 `AI_FEEDBACK.md` for provider requests. The summary is a soft style signal that
 can lower the chance of repeated deleted phrases or overly long continuations;
 it never turns ordinary Backspace events into feedback, never exposes full edit
-history to providers, and never writes Rime userdb.
+history to providers, never writes Rime userdb, and does not create feedback
+files during cold-start snapshot reads when no feedback history exists.

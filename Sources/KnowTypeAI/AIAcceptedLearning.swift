@@ -344,20 +344,15 @@ public final class AIAcceptedLearningStore:
         let startupState: StartupState
         let startupRepairErrorReason: String?
         do {
-            startupState = try withAcceptedLearningFileLock(
-                lockURL: acceptedLearningLockURL(historyURL: historyURL),
-                fileManager: fileManager
-            ) {
-                try Self.loadStartupState(
-                    historyURL: historyURL,
-                    summaryURL: summaryURL,
-                    mirrorURL: mirrorURL,
-                    fileManager: fileManager,
-                    encoder: configuredEncoder,
-                    decoder: configuredDecoder,
-                    repairPersistentSummary: true
-                )
-            }
+            startupState = try Self.loadStartupState(
+                historyURL: historyURL,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager,
+                encoder: configuredEncoder,
+                decoder: configuredDecoder,
+                repairPersistentSummary: false
+            )
             startupRepairErrorReason = nil
         } catch {
             startupState = (try? Self.loadStartupState(
@@ -959,7 +954,7 @@ public final class AIAcceptedLearningStore:
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: false
         )) ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         return root
             .appendingPathComponent("KnowType", isDirectory: true)

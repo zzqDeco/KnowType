@@ -41,9 +41,9 @@ public struct ProviderRuntimeLoader: Sendable {
         }
     }
 
-    public static func loadDefaultProvider() -> (any LLMProvider)? {
+    public static func loadDefaultProvider(createProfileDirectory: Bool = true) -> (any LLMProvider)? {
         do {
-            let profileStore = try FileProviderProfileStore.defaultStore()
+            let profileStore = try FileProviderProfileStore.defaultStore(createDirectory: createProfileDirectory)
             return defaultLoader(profileStore: profileStore).loadDefaultProvider()
         } catch {
             return nil

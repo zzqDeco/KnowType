@@ -1,7 +1,6 @@
 import Foundation
 import KnowTypeAI
 import KnowTypeCore
-import KnowTypeProviders
 import OSLog
 
 #if canImport(InputMethodKit)
@@ -32,11 +31,9 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     @MainActor private var preferencesWindowController: KnowTypePreferencesWindowController?
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
-        let provider = ProviderRuntimeLoader.loadDefaultProvider()
-        let aiRecommendationRuntime = AIRecommendationRuntime(provider: provider)
-        let aiContextEventRecorder: (any AIContextEventRecording)? = provider.map {
-            AIContextMemoryRuntime(provider: $0)
-        }
+        let aiDiagnosticSink = OSLogAIRecommendationDiagnosticSink()
+        let aiRecommendationRuntime = LazyDefaultAIRecommendationRuntime(diagnosticSink: aiDiagnosticSink)
+        let aiContextEventRecorder: any AIContextEventRecording = LazyDefaultAIContextMemoryRuntime()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
@@ -48,7 +45,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         self.hostAdapter = hostAdapter
         self.runtimePreferenceStore = runtimePreferenceStore
         self.coordinator = InputControllerCoordinator(
-            provider: provider,
+            provider: nil,
             inputModePreferenceStore: inputModePreferenceStore,
             runtimePreferenceStore: runtimePreferenceStore,
             initialRuntimePreferences: runtimePreferences,
@@ -58,6 +55,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: InputMethodLexicalProfileRuntime.acceptedLearningStore,
             aiAcceptedFeedback: InputMethodLexicalProfileRuntime.acceptedFeedbackStore,
+            aiDiagnosticSink: aiDiagnosticSink,
             lexicalProfileStore: InputMethodLexicalProfileRuntime.store,
             lexicalProfileRefreshGate: InputMethodLexicalProfileRuntime.refreshGate,
             rimeUserDBTextProvider: InputMethodLexicalProfileRuntime.rimeMaintenanceService,
@@ -70,6 +68,11 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         super.init(server: server, delegate: delegate, client: inputClient)
         hostAdapter.controller = self
         inputControllerLogger.notice("KnowTypeInputController initialized client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)")
+        if ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" {
+            inputControllerLogger.notice(
+                "KnowType cold start lazy runtime rime=deferred provider=deferred learning=read_only client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)"
+            )
+        }
     }
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {

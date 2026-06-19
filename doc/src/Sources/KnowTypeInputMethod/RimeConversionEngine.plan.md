@@ -9,6 +9,9 @@ input.
 
 - `RimeConversionEngine` owns the production base conversion path through a native `librime` session.
 - The engine does not fall back to `TraditionalInputEngine`; when Rime is unavailable it reports a degraded raw-input snapshot without candidates.
+- Engine initialization is cold-start read-only. It stores the native Rime
+  configuration but does not create the `NativeRimeSession`, user data
+  directory, or log directory until the first real `process(_:)` call.
 - Source-tree artifacts under `Vendor/Rime` require explicit `KNOWTYPE_RIME_ENABLED=1`; installed app bundles use bundled Frameworks/Resources automatically.
 - xctest processes use temporary Rime user/log directories to avoid locking the user's live Rime DB.
 - Explicit Rime environment paths expand leading `~` before URL conversion, so
@@ -21,6 +24,9 @@ input.
 
 - The native bridge follows the mature Squirrel pattern: process a key, consume
   commit text, then read context/candidates.
+- `snapshot`, `activeSchemaID`, `isNativeActive`, and `reset()` must not force
+  native session creation. This lets macOS prelaunch the IMK host without
+  initializing Rime user data.
 - Native sessions initially select the configured schema, but
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct

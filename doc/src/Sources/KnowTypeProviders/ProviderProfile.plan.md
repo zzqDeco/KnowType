@@ -17,6 +17,9 @@
 - Validation differs for local and remote OpenAI-compatible profiles: local
   profiles may leave model blank for discovery, remote profiles may not.
 - Saved profiles override seeded defaults.
+- The default file store has an explicit no-create mode for runtime cold start:
+  missing profile files load as an empty profile file without creating the
+  `KnowType` Application Support directory. Saves still create the directory.
 
 ## Tests
 

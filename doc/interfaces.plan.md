@@ -93,7 +93,7 @@ ProviderProfile {
 }
 ```
 
-Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory.
+Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory only on explicit save. Runtime cold-start paths use the no-create loader, so a missing provider profile does not create `Application Support/KnowType` merely because the IMK host was launched.
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys under the `KnowType` service. Tests and non-UI code can use in-memory or read-only dictionary stores.
 
@@ -137,6 +137,11 @@ Default install and rollback paths do not launch `KnowTypeInputMethodApp`, do
 not select the input method, and do not initialize Rime user data; first real
 typing after the user selects KnowType is normal product use rather than an
 install side effect.
+If macOS prelaunches the IMK host while refreshing TIS or LaunchServices state,
+controller cold start remains read-only: Rime native sessions, provider profile
+loading, AI learning/feedback files, lexical profiles, `ENV.md`, and
+`CORRECTION.md` are lazy and are not created until a real input, AI request, or
+explicit maintenance action needs them.
 If the host process is already running, install/rollback must fail before
 replacement instead of killing it, since forced shutdown can flush Rime userdb
 files and would count as a user-data mutation.

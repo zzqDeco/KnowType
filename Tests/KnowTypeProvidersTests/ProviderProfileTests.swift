@@ -97,6 +97,25 @@ final class ProviderProfileTests: XCTestCase {
         XCTAssertEqual(loaded, profiles)
     }
 
+    func testDefaultProfileStoreCanOpenWithoutCreatingDirectory() throws {
+        let fileManager = FileManager.default
+        let applicationSupport = fileManager.temporaryDirectory
+            .appendingPathComponent("provider-profile-no-create-\(UUID().uuidString)", isDirectory: true)
+        let knowTypeDirectory = applicationSupport.appendingPathComponent("KnowType", isDirectory: true)
+        defer {
+            try? fileManager.removeItem(at: applicationSupport)
+        }
+
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport,
+            createDirectory: false
+        )
+        let profiles = try store.loadProfiles()
+
+        XCTAssertEqual(profiles, ProviderProfilesFile())
+        XCTAssertFalse(fileManager.fileExists(atPath: knowTypeDirectory.path))
+    }
+
     func testInMemorySecretStoreSupportsMutation() throws {
         let store = InMemorySecretStore()
 

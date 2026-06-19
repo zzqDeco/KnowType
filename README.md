@@ -114,6 +114,10 @@ purges stale `.Mode` development state, clears stale parent preference rows, and
 restores the visible `.Hans` mode through the dedicated input-source helper. It
 does not launch the installed input-method host, does not auto-select KnowType,
 and does not initialize Rime user data during install.
+If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
+controller cold start still keeps Rime sessions, provider profiles, AI learning
+and profile files, `ENV.md`, and `CORRECTION.md` lazy until real input, an AI
+request, or explicit maintenance.
 If an existing `KnowTypeInputMethodApp` process is running, the installer stops
 before replacing files instead of killing it, because host shutdown can flush
 Rime user data.

@@ -13,6 +13,33 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 350)
     }
 
+    func testLazyDefaultRecommendationRetriesProviderLoadAfterMissingProvider() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案可以继续推进。", confidence: 0.8)
+        ]))
+        let loader = SequencedProviderLoader([nil, provider])
+        let runtime = LazyDefaultAIRecommendationRuntime(
+            providerLoader: { loader.load() },
+            diagnosticSink: NoopAIRecommendationDiagnosticSink()
+        )
+        let request = AIRecommendationRequest(rawInput: "zhegefangan", compositionID: 1)
+
+        let first = await runtime.recommendation(for: request)
+        let second = await runtime.recommendation(for: request)
+
+        guard case .unavailable(let reason) = first else {
+            return XCTFail("expected missing provider on first request")
+        }
+        XCTAssertEqual(reason, "AI 未配置")
+        guard case .ready(let candidate) = second else {
+            return XCTFail("expected provider to be loaded on second request")
+        }
+        XCTAssertEqual(candidate.displayText, "这个方案可以继续推进。")
+        XCTAssertEqual(loader.count, 2)
+        let providerRequestCount = await provider.requests.count
+        XCTAssertEqual(providerRequestCount, 1)
+    }
+
     func testTriggerPolicyAllowsThreeCharacterRawInputWithoutLockedPrefix() {
         let policy = AIRecommendationTriggerPolicy.default
 
@@ -1026,6 +1053,32 @@ private actor RecordingLLMProvider: LLMProvider {
 
     var requests: [LLMRequest] {
         recordedRequests
+    }
+}
+
+private final class SequencedProviderLoader: @unchecked Sendable {
+    private let lock = NSLock()
+    private var providers: [(any LLMProvider)?]
+    private var loadCount = 0
+
+    init(_ providers: [(any LLMProvider)?]) {
+        self.providers = providers
+    }
+
+    func load() -> (any LLMProvider)? {
+        lock.lock()
+        defer { lock.unlock() }
+        loadCount += 1
+        guard !providers.isEmpty else {
+            return nil
+        }
+        return providers.removeFirst()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadCount
     }
 }
 

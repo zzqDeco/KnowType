@@ -58,6 +58,20 @@ final class LexicalProfileStoreTests: XCTestCase {
         XCTAssertTrue(markdown.contains("rime-userdb"))
     }
 
+    func testLexicalProfileStoreInitDoesNotCreateMissingDirectory() {
+        let directory = temporaryDirectory().appendingPathComponent("missing-profile", isDirectory: true)
+        let jsonURL = directory.appendingPathComponent("lexical-profile.json")
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        defer {
+            try? FileManager.default.removeItem(at: directory.deletingLastPathComponent())
+        }
+
+        let store = LexicalProfileStore(jsonURL: jsonURL, markdownURL: markdownURL)
+
+        XCTAssertNil(store.currentProfile())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
     func testLexicalProfileStoreSkipsConditionalSaveWhenGenerationIsStale() throws {
         let directory = temporaryDirectory()
         let jsonURL = directory.appendingPathComponent("lexical-profile.json")

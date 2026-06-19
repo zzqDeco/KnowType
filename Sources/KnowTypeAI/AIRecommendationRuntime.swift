@@ -2,6 +2,38 @@ import Foundation
 import KnowTypeCore
 import KnowTypeProviders
 
+public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
+    private let providerLoader: @Sendable () -> (any LLMProvider)?
+    private let diagnosticSink: any AIRecommendationDiagnosticSink
+    private var runtime: AIRecommendationRuntime?
+
+    public init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)? = {
+            ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)
+        },
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink()
+    ) {
+        self.providerLoader = providerLoader
+        self.diagnosticSink = diagnosticSink
+    }
+
+    public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        if let runtime {
+            return await runtime.recommendation(for: request)
+        }
+        let provider = providerLoader()
+        guard provider != nil else {
+            return await AIRecommendationRuntime(
+                provider: nil,
+                diagnosticSink: diagnosticSink
+            ).recommendation(for: request)
+        }
+        let runtime = AIRecommendationRuntime(provider: provider, diagnosticSink: diagnosticSink)
+        self.runtime = runtime
+        return await runtime.recommendation(for: request)
+    }
+}
+
 public actor AIRecommendationRuntime: AIRecommendationProviding {
     public enum Defaults {
         public static let debounceMilliseconds = 350
