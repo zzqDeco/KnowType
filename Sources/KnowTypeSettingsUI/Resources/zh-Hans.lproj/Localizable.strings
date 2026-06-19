@@ -186,6 +186,6 @@
 "settings.diagnostics.step.enable.title" = "启用输入源";
 "settings.diagnostics.step.enable.detail" = "如果 macOS 弹出是否允许 知键/KnowType 作为输入法，请点击允许。然后打开 System Settings > Keyboard > Text Input > Input Sources；如果没有自动切换，请手动启用或选择 KnowType。";
 "settings.diagnostics.step.refresh.title" = "刷新注册状态";
-"settings.diagnostics.step.refresh.detail" = "如果 macOS 保留旧注册，运行修复脚本。它会通过已安装输入法 app 移除过期 LaunchServices 记录、禁用 legacy .Mode 注册、恢复 third-party parent anchor 与 .Hans mode，并重新测试切换。";
+"settings.diagnostics.step.refresh.detail" = "如果 macOS 保留旧注册，运行修复脚本。它会移除过期 LaunchServices 记录、禁用 legacy .Mode 注册、清理不可选择的 parent 行、恢复唯一可选择的 .Hans mode，并重新测试切换。";
 "settings.diagnostics.step.logs.title" = "查看日志";
 "settings.diagnostics.step.logs.detail" = "本地 smoke test 时，可以使用诊断日志模式、Console.app 或 log 命令查看 KnowTypeInputMethodApp、Gatekeeper 和 input-source sandbox 消息。";

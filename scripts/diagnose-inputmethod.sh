@@ -8,13 +8,11 @@ PREFPANE_PATH="${KNOWTYPE_PREFPANE_PATH:-$DEFAULT_PREFPANE_PATH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR"
-source "$SCRIPTS_DIR/lib/inputsource-ids.sh"
-source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
-source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
 STRICT=0
 REQUIRE_SELECTED=0
 SHOW_LOGS=0
 JSON_OUTPUT=0
+ALLOW_LEGACY_PARENT_ANCHOR=0
 LOG_LOOKBACK="${KNOWTYPE_LOG_LOOKBACK:-30m}"
 
 usage() {
@@ -31,6 +29,8 @@ Options:
   --log-lookback      Time window for --logs, such as 10m, 1h, or 2h. Defaults to 30m.
   --path              Inspect a specific KnowType.app bundle path.
   --json              Print a stable machine-readable install snapshot and exit.
+  --legacy-parent-anchor
+                      Treat a third-party parent preference row as explicit compatibility state.
   -h, --help          Show this help.
 EOF
 }
@@ -51,6 +51,10 @@ while (($# > 0)); do
       ;;
     --json)
       JSON_OUTPUT=1
+      shift
+      ;;
+    --legacy-parent-anchor)
+      ALLOW_LEGACY_PARENT_ANCHOR=1
       shift
       ;;
     --log-lookback)
@@ -80,6 +84,10 @@ while (($# > 0)); do
       ;;
   esac
 done
+
+source "$SCRIPTS_DIR/lib/inputsource-ids.sh"
+source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
+source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
 
 failures=0
 warnings=0
@@ -824,13 +832,13 @@ else
         fi
         ;;
       parent.found)
-        [[ "$value" == "true" ]] && ok "KnowType parent input source is registered" || fail "KnowType parent input source is not registered"
+        [[ "$value" == "true" ]] && ok "KnowType non-selectable parent record is registered" || fail "KnowType non-selectable parent record is not registered"
         ;;
       parent.enabled)
         if [[ "$value" == "true" ]]; then
-          ok "KnowType parent input source is enabled"
+          info "KnowType non-selectable parent record is enabled by TIS; user selection still targets the visible mode"
         else
-          info "KnowType parent input source is not enabled; the visible component mode is the selection target"
+          info "KnowType non-selectable parent record is not enabled; the visible component mode is the selection target"
         fi
         ;;
       parent.selectCapable)
@@ -880,6 +888,13 @@ else
       mode.count)
         if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
           warn "TIS reports $value KnowType input mode registrations; log out or reboot if the input menu shows stale duplicates"
+        fi
+        ;;
+      user.visible.mode.count)
+        if [[ "$value" == "1" ]]; then
+          ok "TIS reports exactly one user-selectable KnowType mode"
+        else
+          fail "TIS reports $value user-selectable KnowType modes; run ./scripts/repair-inputmethod-selection.sh and clear stale LaunchServices records"
         fi
         ;;
       active.mode.count)
@@ -974,11 +989,15 @@ else
         ;;
       preference.thirdparty.enabled.parent.knowtype)
         if [[ "$value" == "true" ]]; then
-          ok "Third-party input source preferences include the KnowType parent anchor"
-        elif (( STRICT == 1 )); then
-          fail "Third-party input source preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
+          if (( ALLOW_LEGACY_PARENT_ANCHOR == 1 )); then
+            ok "Third-party input source preferences include the non-selectable KnowType parent row as explicit legacy compatibility state"
+          elif (( STRICT == 1 )); then
+            fail "Third-party input source preferences still include the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "Third-party input source preferences still include the non-selectable KnowType parent row"
+          fi
         else
-          warn "Third-party input source preferences are missing the KnowType parent anchor; System Settings may hide KnowType"
+          ok "Third-party input source preferences do not include the non-selectable KnowType parent row"
         fi
         ;;
       preference.history.knowtype)

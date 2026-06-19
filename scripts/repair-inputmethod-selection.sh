@@ -25,7 +25,7 @@ it there.
 
 The default install path avoids launching the input method host and uses the
 dedicated TIS helper. This script is the explicit local development fallback for
-poisoned .Mode caches or missing third-party parent anchors; it may require
+poisoned .Mode caches or non-selectable parent rows; it may require
 Full Disk Access for the terminal/Codex process that runs it.
 
 Options:
@@ -119,7 +119,7 @@ sleep 0.75
 echo
 echo "Selection repair finished for: $BUNDLE_PATH"
 echo "Input source activation used the helper path: register, enable, and select through TIS without launching the input method host."
-echo "Local repair removed stale HIToolbox parent/.Mode rows and restored .Hans plus the third-party parent anchor."
+echo "Local repair removed stale parent/.Mode rows and restored the single user-selectable .Hans mode."
 echo "If KnowType is still missing from the input menu, remove and add it once in System Settings > Keyboard > Text Input > Input Sources."
 echo "If the menu still shows an old state, log out/in to clear macOS TIS cache."
 echo

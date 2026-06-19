@@ -376,10 +376,19 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool purge-legacy"#))
         XCTAssertTrue(helperSource.contains("AppleEnabledThirdPartyInputSources"))
         XCTAssertTrue(helperSource.contains("mode.selectCapable"))
+        XCTAssertTrue(helperSource.contains("user.visible.mode.count"))
+        XCTAssertTrue(helperSource.contains("parentSources + modeSources + legacySourcesByID.flatMap"))
+        XCTAssertTrue(helperSource.contains("boolProperty(source, kTISPropertyInputSourceIsEnabled) &&"))
+        XCTAssertTrue(helperSource.contains("kTISPropertyInputSourceIsSelectCapable"))
         XCTAssertTrue(helperSource.contains("active.mode.count"))
         XCTAssertTrue(helperSource.contains("legacy.mode.count"))
         XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.knowtype"))
+        XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.parent.knowtype"))
         XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.legacy.knowtype"))
+        XCTAssertTrue(helperSource.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.add.legacy.parent.anchor"))
+        XCTAssertFalse(helperSource.contains("preferencesContainInputModeOrParent"))
+        XCTAssertFalse(helperSource.contains("addParent: addActive,"))
         XCTAssertTrue(helperSource.contains("TISRegisterInputSource"))
     }
 
@@ -395,6 +404,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         )
         let installScript = try String(
             contentsOf: rootURL.appendingPathComponent("scripts/install-inputmethod.sh"),
+            encoding: .utf8
+        )
+        let diagnosticScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh"),
             encoding: .utf8
         )
         let rollbackScript = try String(
@@ -472,6 +485,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("REMOVED_STALE_PREFPANE=1"))
         XCTAssertTrue(installScript.contains("Removed stale KnowType compatibility PreferencePane"))
         XCTAssertTrue(installScript.contains("--add-active"))
+        XCTAssertFalse(installScript.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(diagnosticScript.contains("ALLOW_LEGACY_PARENT_ANCHOR=0"))
+        XCTAssertTrue(diagnosticScript.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(diagnosticScript.contains("explicit legacy compatibility state"))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" register --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" disable"#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" select"#))
@@ -490,6 +507,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(repairScript.contains(#""$INPUTSOURCE_TOOL" purge-legacy"#))
         XCTAssertTrue(repairScript.contains(#""$INPUTSOURCE_TOOL" bootstrap"#))
         XCTAssertTrue(repairScript.contains(#"--select"#))
+        XCTAssertTrue(repairScript.contains("single user-selectable .Hans mode"))
+        XCTAssertFalse(repairScript.contains("third-party parent anchor"))
+        XCTAssertFalse(repairScript.contains("--legacy-parent-anchor"))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-install-activate"#))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-purge-legacy"#))
         XCTAssertFalse(repairScript.contains("killall KnowTypeInputMethodApp"))
@@ -583,10 +603,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType" = "KnowType";"#))
+        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType" = "KnowType Input Method";"#))
         XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType.Hans" = "KnowType";"#))
         XCTAssertFalse(englishStrings.contains("com.knowtype.inputmethod.KnowType.Mode"))
-        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType" = "知键";"#))
+        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType" = "知键输入法容器";"#))
         XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType.Hans" = "知键";"#))
         XCTAssertFalse(chineseStrings.contains("com.knowtype.inputmethod.KnowType.Mode"))
         XCTAssertTrue(chineseStrings.contains(#""CFBundleDisplayName" = "知键";"#))

@@ -516,7 +516,9 @@ registration, and cleanup in KnowType scripts:
   duplicate KnowType rows without mutating protected system preference domains.
 - `repair-preferences` rewrites only KnowType rows in protected input-source
   preference arrays as an explicit local development fallback for stale `.Mode`
-  cache state or a missing third-party parent anchor.
+  cache state or non-selectable parent rows. The default `--add-active` shape
+  restores only the user-selectable `.Hans` mode; `--legacy-parent-anchor` is an
+  opt-in compatibility fallback.
 - `purge-legacy --path ...` disables visible legacy `.Mode` rows and refreshes
   LaunchServices without starting `KnowTypeInputMethodApp`.
 - `bootstrap --path ... [--select]` registers and enables the installed bundle

@@ -199,7 +199,7 @@ help_scripts=(
 )
 
 for script_path in "${help_scripts[@]}"; do
-  "$script_path" --help >/dev/null
+  bash "$script_path" --help >/dev/null
 done
 
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"

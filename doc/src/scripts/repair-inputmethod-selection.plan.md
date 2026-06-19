@@ -14,11 +14,12 @@ development input method bundle.
 ## Behavior Notes
 
 - The script replaces only scoped KnowType rows in Text Input Source preferences
-  through `knowtype-inputsource-tool repair-preferences`: HIToolbox/history keep
-  `.Hans`, `com.apple.inputsources` keeps the System Settings-compatible parent
-  anchor plus `.Hans`, and unrelated sources are preserved. It also unregisters
-  stale bundle records, restarts menu agents, and uses helper `purge-legacy` plus
-  `bootstrap --select`; it does not launch the installed input-method host.
+  through `knowtype-inputsource-tool repair-preferences`: HIToolbox/history and
+  `com.apple.inputsources` keep only the single user-selectable `.Hans` mode,
+  while non-selectable parent rows and legacy `.Mode` rows are removed from user
+  preference targets. It also unregisters stale bundle records, restarts menu
+  agents, and uses helper `purge-legacy` plus `bootstrap --select`; it does not
+  launch the installed input-method host.
 - It is used after diagnostics indicate stale local state, before falling back
   to logout.
 

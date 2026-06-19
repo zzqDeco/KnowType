@@ -5,7 +5,7 @@ InputMethodKit bundle and local input-source tooling.
 
 Current IDs:
 
-- parent input source: `com.knowtype.inputmethod.KnowType`
+- non-selectable parent / IMK server identity: `com.knowtype.inputmethod.KnowType`
 - active visible input mode: `com.knowtype.inputmethod.KnowType.Hans`
 - legacy development modes kept only for cleanup: `com.knowtype.inputmethod.KnowType.Mode`
 - IMK connection name: `KnowType_Connection`
