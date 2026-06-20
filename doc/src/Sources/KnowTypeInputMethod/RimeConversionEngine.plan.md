@@ -31,6 +31,10 @@ input.
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct
   lexical-profile refresh and merge gates.
+- Raw-bypass state is checked before native session creation. If a composition
+  entered non-ASCII bypass before a native session existed, later ASCII or
+  navigation keys continue through the raw-bypass path until reset and still do
+  not create Rime user/log directories.
 - Numeric selection maps displayed rows to Rime's current-page index before calling `select_candidate_on_current_page`.
 - Current-page highlight changes call Rime's `highlight_candidate_on_current_page` so arrow movement and hover keep the engine context authoritative.
 - `commitComposition` is exposed for IMK lifecycle commits and uses Rime's native composition commit when available.

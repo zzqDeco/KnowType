@@ -255,6 +255,10 @@ same `CandidatePanelSelection` values so click commits match keyboard commits.
 `KnowTypeConversionEngine` is the IMK boundary for base conversion. `RimeConversionEngine` is the production implementation:
 
 - `process(.text)`, `.space`, `.commitComposition`, `.selectCandidateOnCurrentPage`, `.highlightCandidateOnCurrentPage`, `.pageUp`, and `.pageDown` call the native Rime session synchronously.
+- Native Rime session creation is lazy. Non-ASCII raw-bypass mode is checked
+  before session creation, so continuing a bypassed composition with ASCII or
+  navigation keys does not initialize Rime user/log directories until reset and
+  a later native conversion actually starts.
 - `ConversionEngineSnapshot.suggestionResponse` maps only the current Rime page into prefix candidates; full candidate-list iteration is not part of the key path.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
 - Marked text mirrors `ConversionEngineSnapshot.preedit` while Rime has composition. If Rime commits part of a long input and keeps composition active, KnowType inserts the commit text and keeps showing the remaining Rime preedit instead of reverting to raw pinyin.

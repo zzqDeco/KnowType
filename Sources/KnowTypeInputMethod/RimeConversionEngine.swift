@@ -164,8 +164,12 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return processRawBypass(key)
         }
 
+        guard !nativeBypassUntilReset else {
+            return processUnavailable(key, engineName: "rime-raw-bypass")
+        }
+
         let nativeSession = ensureNativeSession()
-        guard let nativeSession, !nativeBypassUntilReset else {
+        guard let nativeSession else {
             return processUnavailable(key)
         }
 

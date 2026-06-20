@@ -107,6 +107,33 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertTrue(fileManager.fileExists(atPath: logs.path))
     }
 
+    func testNativeRimeSessionCreationIsSkippedWhileRawBypassIsActive() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-lazy-raw-bypass")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("missing-rime-data", isDirectory: true),
+            userDataURL: userData,
+            logURL: logs
+        )
+        var engine = RimeConversionEngine(configuration: configuration)
+
+        XCTAssertTrue(engine.process(.text("\u{E9}")).handled)
+        XCTAssertTrue(engine.process(.text("n")).handled)
+        XCTAssertFalse(engine.process(.pageDown).handled)
+
+        XCTAssertFalse(fileManager.fileExists(atPath: userData.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: logs.path))
+        XCTAssertFalse(engine.isNativeActive)
+        XCTAssertEqual(engine.snapshot.rawInput, "\u{E9}n")
+        XCTAssertEqual(engine.snapshot.engineName, "rime-raw-bypass")
+    }
+
     func testUserDBSnapshotLocatorPrefersLocalInstallationSnapshot() throws {
         let fileManager = FileManager.default
         let root = temporaryDirectory(name: "rime-userdb-local-snapshot")
