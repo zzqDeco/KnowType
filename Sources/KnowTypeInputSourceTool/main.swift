@@ -410,6 +410,7 @@ private struct PreferenceRepairResult {
 }
 
 private enum ActivePreferencePlacement {
+    case prepend
     case append
     case afterFirstRetained
 }
@@ -463,6 +464,8 @@ private func repairPreferenceEntries(
         added += 1
 
         switch activePlacement {
+        case .prepend:
+            repaired = entriesToAdd + retained
         case .append:
             repaired = retained + entriesToAdd
         case .afterFirstRetained:
@@ -579,7 +582,7 @@ private func repairPreferences(
                 legacyModeIDs: legacyModeIDs,
                 removeParent: true,
                 addParent: false,
-                activePlacement: .afterFirstRetained,
+                activePlacement: .prepend,
                 addActive: addActive
             )
         )

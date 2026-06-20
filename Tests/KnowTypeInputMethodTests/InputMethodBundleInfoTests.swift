@@ -375,6 +375,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("--include-selected"))
         XCTAssertTrue(helperSource.contains("preference.repair.include.selected"))
         XCTAssertTrue(helperSource.contains("removeParent: !addActive"))
+        XCTAssertTrue(helperSource.contains("activePlacement: .prepend"))
+        XCTAssertTrue(helperSource.contains("case .prepend:"))
         XCTAssertTrue(helperSource.contains("if !parentEnabled || !modeEnabled"))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool inspect-preferences"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool dump"#))
