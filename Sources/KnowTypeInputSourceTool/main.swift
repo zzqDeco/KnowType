@@ -347,14 +347,17 @@ private func hitoolboxSelectedModeID() -> String? {
     return nil
 }
 
-private func enableInputSource(_ source: TISInputSource, label: String) {
+@discardableResult
+private func enableInputSource(_ source: TISInputSource, label: String) -> Bool {
     if boolProperty(source, kTISPropertyInputSourceIsEnabled) {
-        return
+        return true
     }
     let status = TISEnableInputSource(source)
     if status != noErr {
         fputs("Warning: TISEnableInputSource(\(label)) returned \(status)\n", stderr)
+        return false
     }
+    return true
 }
 
 private func disableInputSources(bundleID: String) {
@@ -580,6 +583,19 @@ private func repairPreferences(
             )
         )
     }
+    results.append(
+        repairPreferenceArray(
+            domain: "com.apple.HIToolbox",
+            key: "AppleSelectedInputSources",
+            bundleID: bundleID,
+            modeID: modeID,
+            legacyModeIDs: legacyModeIDs,
+            removeParent: true,
+            addParent: false,
+            activePlacement: .afterFirstRetained,
+            addActive: addActive
+        )
+    )
 
     for result in results {
         let prefix = "preference.repair.\(result.domain).\(result.key)"
@@ -782,19 +798,25 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
         exit(ExitCode.failure.rawValue)
     }
 
-    enableInputSource(parent, label: "parent")
-    enableInputSource(mode, label: "mode")
+    let parentEnabled = enableInputSource(parent, label: "parent")
+    let modeEnabled = enableInputSource(mode, label: "mode")
 
     postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
 
+    var selectStatus = noErr
     if select {
-        _ = selectMode(parentID: parentID, modeID: modeID, requireSelected: false, exitOnFailure: false)
+        selectStatus = selectMode(parentID: parentID, modeID: modeID, requireSelected: false, exitOnFailure: false)
     }
 
     print("bootstrap.path=\(path)")
     print("bootstrap.registered=\(needsRegistration)")
     print("bootstrap.preference.writes=skipped")
+    print("bootstrap.parent.enabled=\(parentEnabled)")
+    print("bootstrap.mode.enabled=\(modeEnabled)")
     print("bootstrap.selected=\(select)")
+    if selectStatus != noErr {
+        exit(ExitCode.failure.rawValue)
+    }
 }
 
 @discardableResult
