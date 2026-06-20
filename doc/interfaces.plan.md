@@ -139,9 +139,9 @@ typing after the user selects KnowType is normal product use rather than an
 install side effect.
 If macOS prelaunches the IMK host while refreshing TIS or LaunchServices state,
 controller cold start remains read-only: Rime native sessions, provider profile
-loading, AI learning/feedback files, lexical profiles, `ENV.md`, and
-`CORRECTION.md` are lazy and are not created until a real input, AI request, or
-explicit maintenance action needs them.
+loading, user selection history, AI learning/feedback files, lexical profiles,
+`ENV.md`, and `CORRECTION.md` are lazy and are not created until a real input,
+AI request, or explicit maintenance action needs them.
 If the host process is already running, install/rollback must fail before
 replacement instead of killing it, since forced shutdown can flush Rime userdb
 files and would count as a user-data mutation.

@@ -12,7 +12,8 @@ Current behavior:
 - keeps cold start read-only for user data: provider loading, AI recommendation
   runtime documents, AI context memory, accepted learning/feedback writes, and
   Rime native sessions are lazy until real input, AI scheduling, or explicit
-  maintenance occurs
+  maintenance occurs; selection history opens in no-create mode and only writes
+  after a real candidate selection
 - injects a process-wide lexical profile store, refresh gate, and Rime userdb snapshot provider so multiple IMK controller sessions cannot independently overwrite the global `LEXICAL_PROFILE.md`
 - overrides `showPreferences(_:)` and retains `KnowTypePreferencesWindowController`, so the input-method menu opens the SwiftUI settings window without relying on InputMethodKit's default nib-backed preferences loader
 - builds its input-method menu through `KnowTypeInputMethodMenuBuilder`: `AI Continuation`, log/support/Rime folders, `KnowType Settings...`, and About

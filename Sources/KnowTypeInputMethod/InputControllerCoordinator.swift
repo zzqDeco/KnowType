@@ -7,7 +7,8 @@ import KnowTypeProviders
 final class InputControllerCoordinator: @unchecked Sendable {
     private let provider: (any LLMProvider)?
     private var sessionController: InputSessionController
-    private let hasProvider: Bool
+    private let hasEagerProvider: Bool
+    private let canRequestAIRecommendations: Bool
     private var conversionEngine: any KnowTypeConversionEngine
     private let keyMapper = InputKeyCommandMapper()
     private let symbolTransformer = InputSymbolTransformer()
@@ -89,7 +90,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
         self.provider = provider
-        self.hasProvider = provider != nil || aiRecommendationProvider != nil
+        self.hasEagerProvider = provider != nil
+        self.canRequestAIRecommendations = provider != nil || aiRecommendationProvider != nil
         if let conversionEngine {
             self.conversionEngine = conversionEngine
         } else if let conversionEngineFactory {
@@ -511,12 +513,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func resolvedCompositionFallbackContinuations(
+    func resolvedCompositionFallbackContinuations(
         lockedPrefixText: String,
         rawInput: String,
         client: InputControllerClient?
     ) -> [ContinuationCandidate] {
-        guard !hasProvider,
+        guard !hasEagerProvider,
               runtimePreferences.localContinuationEnabledWhenNoProvider,
               !TextProtection.requiresNoCorrection(lockedPrefixText, appBundleID: appBundleIdentifier(client: client)),
               !TextProtection.requiresNoCorrection(rawInput, appBundleID: appBundleIdentifier(client: client)) else {
@@ -828,7 +830,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        guard hasProvider else {
+        guard canRequestAIRecommendations else {
             recordAIDiagnostic(
                 .skippedNoProvider,
                 requestID: requestID,
@@ -1647,7 +1649,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         recordLexicalCommit(text)
         guard let aiContextEventRecorder,
-              hasProvider,
+              canRequestAIRecommendations,
               runtimePreferences.cloudContinuationEnabled,
               !text.isEmpty else {
             return
@@ -1784,7 +1786,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func recordExternalDelete(client: InputControllerClient?) {
         guard let aiContextEventRecorder,
-              hasProvider,
+              canRequestAIRecommendations,
               runtimePreferences.cloudContinuationEnabled else {
             return
         }

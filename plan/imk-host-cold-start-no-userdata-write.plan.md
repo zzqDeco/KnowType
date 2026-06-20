@@ -6,7 +6,8 @@
 - Branch: `fix/imk-host-cold-start-no-userdata-write`.
 - Goal: macOS may prelaunch `KnowTypeInputMethodApp` during TIS or
   LaunchServices work, but that cold start must not initialize Rime, provider
-  profiles, AI learning files, lexical profiles, `ENV.md`, or `CORRECTION.md`.
+  profiles, selection history, AI learning files, lexical profiles, `ENV.md`,
+  or `CORRECTION.md`.
 - The fix aligns KnowType with mature IMK apps: install/register and host
   startup are separate from the first real input session.
 
@@ -18,6 +19,8 @@
   `KnowTypeInputController` startup.
 - Keep accepted AI learning, feedback learning, and lexical profile stores
   read-only on construction; explicit record/rebuild/refresh paths still write.
+- Open user selection history in no-create mode on controller startup; the first
+  real candidate-selection write may create the store.
 - Change install postflight to use the JSON install snapshot rather than full
   `--strict` TIS diagnostics.
 
@@ -34,6 +37,9 @@
 - `LazyDefaultAIRecommendationRuntime` and `LazyDefaultAIContextMemoryRuntime`
   defer provider loading and AI document-store construction until a real
   recommendation or typing event is processed.
+- The coordinator distinguishes a known eager provider from a lazy AI runtime
+  wrapper. A lazy wrapper can schedule cloud AI, but it does not suppress the
+  no-provider local continuation fallback until a real provider is known.
 - `KNOWTYPE_STARTUP_DEBUG=1` logs lazy cold-start state without user text.
 
 ## Test Plan
@@ -42,6 +48,10 @@
   user/log directories; first `process(.text("n"))` does.
 - Provider profile no-create loading returns an empty profile file without
   creating the `KnowType` directory.
+- User selection history no-create loading returns the expected file path
+  without creating the `KnowType` directory; save still creates it.
+- Lazy AI recommendation runtime presence does not suppress local fallback
+  continuations when no eager provider is configured.
 - Accepted learning, feedback learning, and lexical profile stores do not create
   missing directories on init/snapshot.
 - `install-inputmethod.sh` postflight calls `diagnose-inputmethod.sh --json`

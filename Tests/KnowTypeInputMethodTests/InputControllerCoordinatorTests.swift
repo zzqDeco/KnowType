@@ -934,6 +934,42 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(hasFallbackContinuation)
     }
 
+    func testLazyAIRecommendationRuntimeDoesNotSuppressNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let aiProvider = UnavailableAIRecommendationProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.contains { $0.text == "还有进一步优化空间" })
+    }
+
+    func testEagerProviderSuppressesNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
+    }
+
     @MainActor
     func testTabCommitsVisibleNoProviderFallbackContinuation() async throws {
         let client = FakeInputControllerClient()
@@ -4500,6 +4536,12 @@ private actor PendingAIRecommendationProvider: AIRecommendationProviding {
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private actor UnavailableAIRecommendationProvider: AIRecommendationProviding {
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        .unavailable(reason: "AI 未配置")
     }
 }
 

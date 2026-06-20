@@ -37,7 +37,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
-        let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
+        let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore(createDirectory: false))
             .map(UserSelectionHistoryPersistence.init(store:))
         let hostAdapter = IMKInputControllerHostAdapter()
         let initialClient = Self.inputControllerClient(from: inputClient)
