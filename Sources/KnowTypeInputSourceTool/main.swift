@@ -598,7 +598,7 @@ private func repairPreferences(
                 legacyModeIDs: legacyModeIDs,
                 removeParent: true,
                 addParent: false,
-                activePlacement: .afterFirstRetained,
+                activePlacement: .prepend,
                 addActive: addActive
             )
         )
@@ -619,6 +619,9 @@ private func repairPreferences(
     print("preference.repair.add.legacy.parent.anchor=false")
     print("preference.repair.legacy.parent.anchor.option=\(addLegacyParentAnchor)")
     postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
+    if includeSelected {
+        postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
+    }
 }
 
 private func currentInputSourceID() -> String? {

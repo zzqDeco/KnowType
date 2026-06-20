@@ -377,6 +377,14 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("removeParent: !addActive"))
         XCTAssertTrue(helperSource.contains("activePlacement: .prepend"))
         XCTAssertTrue(helperSource.contains("case .prepend:"))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleSelectedInputSources"[\s\S]*?activePlacement:\s*\.prepend"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"if\s+includeSelected\s*\{[\s\S]*?postTISNotification\(kTISNotifySelectedKeyboardInputSourceChanged\)"#,
+            options: .regularExpression
+        ))
         XCTAssertTrue(helperSource.contains("if !parentEnabled || !modeEnabled"))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool inspect-preferences"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool dump"#))
