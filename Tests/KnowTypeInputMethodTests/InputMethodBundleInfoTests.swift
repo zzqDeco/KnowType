@@ -483,6 +483,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("KnowType settings are available from the input-method menu"))
         XCTAssertTrue(installScript.contains(#""$SCRIPTS_DIR/diagnose-inputmethod.sh" --json --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$SCRIPTS_DIR/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH""#))
+        XCTAssertTrue(installScript.contains(#"data.get("failures")"#))
         XCTAssertTrue(installScript.contains("Postflight uses the JSON install snapshot only"))
         XCTAssertTrue(installScript.contains("Stale compatibility PreferencePane that would be removed"))
         XCTAssertTrue(installScript.contains("REMOVED_STALE_PREFPANE=1"))

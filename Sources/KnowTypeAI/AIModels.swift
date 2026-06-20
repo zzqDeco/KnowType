@@ -165,6 +165,40 @@ public protocol AIRecommendationProviding: Sendable {
     func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState
 }
 
+public enum AIRecommendationProviderAvailability: Sendable, Equatable {
+    case unknown
+    case available
+    case unavailable
+}
+
+public protocol AIRecommendationProviderAvailabilitySnapshotting: Sendable {
+    var providerAvailability: AIRecommendationProviderAvailability { get }
+}
+
+public final class AIRecommendationProviderAvailabilityState:
+    AIRecommendationProviderAvailabilitySnapshotting,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var state: AIRecommendationProviderAvailability
+
+    public init(_ state: AIRecommendationProviderAvailability = .unknown) {
+        self.state = state
+    }
+
+    public var providerAvailability: AIRecommendationProviderAvailability {
+        lock.lock()
+        defer { lock.unlock() }
+        return state
+    }
+
+    public func update(_ state: AIRecommendationProviderAvailability) {
+        lock.lock()
+        self.state = state
+        lock.unlock()
+    }
+}
+
 public enum AITypingCommitKind: String, Codable, Sendable, Equatable {
     case traditional
     case ai

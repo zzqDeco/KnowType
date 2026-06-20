@@ -32,7 +32,11 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
         let aiDiagnosticSink = OSLogAIRecommendationDiagnosticSink()
-        let aiRecommendationRuntime = LazyDefaultAIRecommendationRuntime(diagnosticSink: aiDiagnosticSink)
+        let aiProviderAvailability = AIRecommendationProviderAvailabilityState()
+        let aiRecommendationRuntime = LazyDefaultAIRecommendationRuntime(
+            diagnosticSink: aiDiagnosticSink,
+            providerAvailability: aiProviderAvailability
+        )
         let aiContextEventRecorder: any AIContextEventRecording = LazyDefaultAIContextMemoryRuntime()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
@@ -52,6 +56,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             initialAppBundleID: initialClient?.bundleIdentifier,
             userSelectionHistoryPersistence: historyPersistence,
             aiRecommendationProvider: aiRecommendationRuntime,
+            aiRecommendationProviderAvailability: aiProviderAvailability,
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: InputMethodLexicalProfileRuntime.acceptedLearningStore,
             aiAcceptedFeedback: InputMethodLexicalProfileRuntime.acceptedFeedbackStore,

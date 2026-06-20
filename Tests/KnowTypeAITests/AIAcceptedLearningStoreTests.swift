@@ -131,6 +131,7 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
         let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
         let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let lockURL = directory.appendingPathComponent("accepted-ai-learning.lock")
         defer {
             try? FileManager.default.removeItem(at: directory.deletingLastPathComponent())
         }
@@ -145,6 +146,7 @@ final class AIAcceptedLearningStoreTests: XCTestCase {
         XCTAssertTrue(store.allRecords().isEmpty)
         XCTAssertNil(store.snapshot())
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lockURL.path))
     }
 
     func testMaintenanceStatusRebuildAndClearStayScopedToAcceptedLearningFiles() async throws {

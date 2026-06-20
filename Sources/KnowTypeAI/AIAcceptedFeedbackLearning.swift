@@ -355,12 +355,8 @@ public final class AIAcceptedFeedbackStore:
     }
 
     private func syncRecordsAfterExternalClear() {
-        guard let markerURL = acceptedFeedbackClearMarkerURL(historyURL: historyURL),
-              fileManager.fileExists(atPath: markerURL.path) else {
-            return
-        }
         do {
-            try withAcceptedFeedbackFileLock(
+            try withExistingAcceptedFeedbackFileLock(
                 lockURL: acceptedFeedbackLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) {
@@ -777,6 +773,33 @@ func withAcceptedFeedbackFileLock<T>(
     )
     if !fileManager.fileExists(atPath: lockURL.path) {
         fileManager.createFile(atPath: lockURL.path, contents: nil)
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
+    return try body()
+}
+
+func withExistingAcceptedFeedbackFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
+    acceptedFeedbackFileLock.lock()
+    defer {
+        acceptedFeedbackFileLock.unlock()
+    }
+
+    guard let lockURL,
+          fileManager.fileExists(atPath: lockURL.path) else {
+        return try body()
     }
     let handle = try FileHandle(forWritingTo: lockURL)
     defer {

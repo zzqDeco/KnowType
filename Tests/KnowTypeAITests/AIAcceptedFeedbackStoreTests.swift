@@ -264,6 +264,7 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         let historyURL = directory.appendingPathComponent("accepted-ai-feedback.jsonl")
         let summaryURL = directory.appendingPathComponent("accepted-ai-feedback-summary.json")
         let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_FEEDBACK.md")
+        let lockURL = directory.appendingPathComponent("accepted-ai-feedback.lock")
         defer {
             try? FileManager.default.removeItem(at: directory.deletingLastPathComponent())
         }
@@ -277,6 +278,7 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         XCTAssertTrue(store.allRecords().isEmpty)
         XCTAssertNil(store.snapshot())
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lockURL.path))
     }
 
     func testRunningStoreDropsFeedbackAfterExternalClear() async throws {

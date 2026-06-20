@@ -64,7 +64,9 @@ Installs the locally built KnowType input method bundle into
   product use.
 - Postflight uses `diagnose-inputmethod.sh --json` as a static install snapshot
   check. Full `--strict` diagnostics remain explicit because TIS diagnostics may
-  cause macOS to prelaunch the IMK host on some systems.
+  cause macOS to prelaunch the IMK host on some systems. A JSON diagnostic that
+  exits successfully but reports a non-empty top-level `failures` array is still
+  treated as a postflight warning.
 - Runtime cold-start boundaries are the primary protection: if macOS does
   prelaunch the host during TIS or LaunchServices work, the controller and
   Rime/provider/learning stores must remain read-only until real input or an

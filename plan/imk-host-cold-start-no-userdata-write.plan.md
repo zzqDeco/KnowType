@@ -39,7 +39,14 @@
   recommendation or typing event is processed.
 - The coordinator distinguishes a known eager provider from a lazy AI runtime
   wrapper. A lazy wrapper can schedule cloud AI, but it does not suppress the
-  no-provider local continuation fallback until a real provider is known.
+  no-provider local continuation fallback until a real provider is known. The
+  lazy recommendation runtime publishes provider availability only after its
+  loader has actually resolved available/unavailable.
+- Accepted learning and feedback startup reads take the existing maintenance
+  file lock when one is already present, but they do not create lock files or
+  parent directories merely to inspect missing history.
+- Install postflight treats a successful JSON diagnostic process with non-empty
+  `failures` as a warning rather than reporting a clean postflight.
 - `KNOWTYPE_STARTUP_DEBUG=1` logs lazy cold-start state without user text.
 
 ## Test Plan
@@ -51,11 +58,12 @@
 - User selection history no-create loading returns the expected file path
   without creating the `KnowType` directory; save still creates it.
 - Lazy AI recommendation runtime presence does not suppress local fallback
-  continuations when no eager provider is configured.
+  continuations until provider availability is known, and suppresses stale local
+  fallback rows after a lazy provider has loaded.
 - Accepted learning, feedback learning, and lexical profile stores do not create
-  missing directories on init/snapshot.
+  missing directories or lock files on init/snapshot.
 - `install-inputmethod.sh` postflight calls `diagnose-inputmethod.sh --json`
-  instead of full `--strict`.
+  instead of full `--strict` and parses the JSON `failures` array.
 - Regression: `swift test --quiet`,
   `./scripts/smoke-inputmethod-install.sh`,
   `./scripts/smoke-inputmethod-install.sh --with-prefpane`,

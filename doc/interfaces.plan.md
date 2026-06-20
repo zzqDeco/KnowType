@@ -142,6 +142,11 @@ controller cold start remains read-only: Rime native sessions, provider profile
 loading, user selection history, AI learning/feedback files, lexical profiles,
 `ENV.md`, and `CORRECTION.md` are lazy and are not created until a real input,
 AI request, or explicit maintenance action needs them.
+Lazy provider wrappers expose provider availability only after their loader has
+resolved a real provider state, so local no-provider fallback rows are not
+suppressed merely because the wrapper exists. Accepted learning and feedback
+startup reads always join their in-process locks and join existing file locks
+when present, but do not create lock files for missing histories.
 If the host process is already running, install/rollback must fail before
 replacement instead of killing it, since forced shutdown can flush Rime userdb
 files and would count as a user-data mutation.
@@ -157,6 +162,8 @@ diagnostic surface for local tooling. It emits top-level `install`, `bundle`,
 `preferencePane`, `rime`, `ai`, `userData`, `backups`, `warnings`, and
 `failures` objects. The JSON output must not contain API keys, user text,
 candidate text, or complete lexicon/userdb contents.
+Install postflight parses that JSON and treats any non-empty `failures` array as
+a warning even when the diagnostic process exits successfully.
 
 ## Candidate Data
 

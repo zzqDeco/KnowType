@@ -5,16 +5,19 @@ import KnowTypeProviders
 public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     private let providerLoader: @Sendable () -> (any LLMProvider)?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
+    private let providerAvailability: AIRecommendationProviderAvailabilityState
     private var runtime: AIRecommendationRuntime?
 
     public init(
         providerLoader: @escaping @Sendable () -> (any LLMProvider)? = {
             ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)
         },
-        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink()
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState()
     ) {
         self.providerLoader = providerLoader
         self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
@@ -23,11 +26,13 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         }
         let provider = providerLoader()
         guard provider != nil else {
+            providerAvailability.update(.unavailable)
             return await AIRecommendationRuntime(
                 provider: nil,
                 diagnosticSink: diagnosticSink
             ).recommendation(for: request)
         }
+        providerAvailability.update(.available)
         let runtime = AIRecommendationRuntime(provider: provider, diagnosticSink: diagnosticSink)
         self.runtime = runtime
         return await runtime.recommendation(for: request)

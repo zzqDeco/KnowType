@@ -23,6 +23,11 @@ Runtime store construction is read-only. Missing history, summary, mirror, and
 clear-marker files do not create the AI directory, lock file, or markdown
 mirror. If a persisted summary is stale, startup may rebuild the in-memory
 snapshot, but persistent repair is left to explicit record/rebuild paths.
+Startup reads always participate in the in-process accepted-learning lock and
+also join an existing accepted-learning maintenance file lock when another
+process has already created one, so concurrent append/rebuild/clear operations
+are observed consistently without making cold start create a lock file of its
+own.
 
 `AIAcceptedLearningMaintenance` is the non-runtime control surface for this
 data. It powers `knowtype-accepted-learning-tool` and the
@@ -56,4 +61,8 @@ by the input-method tracker, builds a bounded feedback summary, and renders
 can lower the chance of repeated deleted phrases or overly long continuations;
 it never turns ordinary Backspace events into feedback, never exposes full edit
 history to providers, never writes Rime userdb, and does not create feedback
-files during cold-start snapshot reads when no feedback history exists.
+files during cold-start snapshot reads when no feedback history exists. Feedback
+snapshot reads always participate in the in-process feedback lock and also honor
+an already existing feedback maintenance file lock before checking clear
+markers, preventing stale feedback from leaking across an active clear while
+keeping missing-history cold start read-only.

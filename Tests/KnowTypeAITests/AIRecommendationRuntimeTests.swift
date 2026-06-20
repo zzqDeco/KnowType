@@ -18,14 +18,19 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             LLMCandidate(text: "这个方案可以继续推进。", confidence: 0.8)
         ]))
         let loader = SequencedProviderLoader([nil, provider])
+        let providerAvailability = AIRecommendationProviderAvailabilityState()
         let runtime = LazyDefaultAIRecommendationRuntime(
             providerLoader: { loader.load() },
-            diagnosticSink: NoopAIRecommendationDiagnosticSink()
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            providerAvailability: providerAvailability
         )
         let request = AIRecommendationRequest(rawInput: "zhegefangan", compositionID: 1)
 
+        XCTAssertEqual(providerAvailability.providerAvailability, .unknown)
         let first = await runtime.recommendation(for: request)
+        XCTAssertEqual(providerAvailability.providerAvailability, .unavailable)
         let second = await runtime.recommendation(for: request)
+        XCTAssertEqual(providerAvailability.providerAvailability, .available)
 
         guard case .unavailable(let reason) = first else {
             return XCTFail("expected missing provider on first request")

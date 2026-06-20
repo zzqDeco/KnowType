@@ -674,8 +674,13 @@ fi
 installed_version="$(knowtype_bundle_short_version "$TARGET_PATH")"
 installed_build="$(knowtype_bundle_build_version "$TARGET_PATH")"
 postflight_result="ok"
-if ! "$SCRIPTS_DIR/diagnose-inputmethod.sh" --json --path "$TARGET_PATH" >/dev/null 2>&1; then
+postflight_json=""
+if ! postflight_json="$("$SCRIPTS_DIR/diagnose-inputmethod.sh" --json --path "$TARGET_PATH" 2>/dev/null)"; then
   postflight_result="warning"
+elif command -v python3 >/dev/null 2>&1; then
+  if ! python3 -c 'import json,sys; data=json.load(sys.stdin); sys.exit(1 if data.get("failures") else 0)' <<<"$postflight_json"; then
+    postflight_result="warning"
+  fi
 fi
 
 INSTALL_SUCCEEDED=1

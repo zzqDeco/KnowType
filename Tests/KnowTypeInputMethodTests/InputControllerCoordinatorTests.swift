@@ -937,9 +937,11 @@ final class InputControllerCoordinatorTests: XCTestCase {
     func testLazyAIRecommendationRuntimeDoesNotSuppressNoProviderFallbackContinuations() {
         let client = FakeInputControllerClient()
         let aiProvider = UnavailableAIRecommendationProvider()
+        let providerAvailability = AIRecommendationProviderAvailabilityState(.unknown)
         let (coordinator, _, _) = makeCoordinator(
             client: client,
             aiRecommendationProvider: aiProvider,
+            aiRecommendationProviderAvailability: providerAvailability,
             enablesAsyncSuggestionRefresh: true
         )
 
@@ -950,6 +952,26 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
 
         XCTAssertTrue(continuations.contains { $0.text == "还有进一步优化空间" })
+    }
+
+    func testLoadedLazyProviderSuppressesNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let aiProvider = UnavailableAIRecommendationProvider()
+        let providerAvailability = AIRecommendationProviderAvailabilityState(.available)
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiRecommendationProvider: aiProvider,
+            aiRecommendationProviderAvailability: providerAvailability,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
     }
 
     func testEagerProviderSuppressesNoProviderFallbackContinuations() {
@@ -3355,6 +3377,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence(),
         provider: (any LLMProvider)? = nil,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
+        aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
@@ -3391,6 +3414,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             initialAppBundleID: client.bundleIdentifier,
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
+            aiRecommendationProviderAvailability: aiRecommendationProviderAvailability,
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: aiAcceptedLearning,
             aiAcceptedFeedback: aiAcceptedFeedback,

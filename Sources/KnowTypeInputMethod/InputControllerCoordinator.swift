@@ -41,6 +41,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var panelUpdateTask: Task<Void, Never>?
     private var delayedReanchorGeneration = 0
     private let aiRecommendationProvider: (any AIRecommendationProviding)?
+    private let aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)?
     private let aiContextEventRecorder: (any AIContextEventRecording)?
     private let aiAcceptedLearningRecorder: (any AIAcceptedLearningRecording)?
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
@@ -73,6 +74,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         initialAppBundleID: String?,
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
+        aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
@@ -111,6 +113,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.userSelectionHistory = userSelectionHistoryPersistence?
             .loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
         self.aiRecommendationProvider = aiRecommendationProvider
+        self.aiRecommendationProviderAvailability = aiRecommendationProviderAvailability
         self.aiContextEventRecorder = aiContextEventRecorder
         self.aiAcceptedLearningRecorder = aiAcceptedLearning
         self.aiAcceptedFeedbackProvider = aiAcceptedFeedback
@@ -518,7 +521,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         rawInput: String,
         client: InputControllerClient?
     ) -> [ContinuationCandidate] {
-        guard !hasEagerProvider,
+        guard !hasKnownProvider,
               runtimePreferences.localContinuationEnabledWhenNoProvider,
               !TextProtection.requiresNoCorrection(lockedPrefixText, appBundleID: appBundleIdentifier(client: client)),
               !TextProtection.requiresNoCorrection(rawInput, appBundleID: appBundleIdentifier(client: client)) else {
@@ -955,6 +958,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     return
                 }
                 self.aiRecommendationState = patch.state
+                self.clearNoProviderFallbackContinuationsIfProviderIsKnown()
                 if self.activeAIRecommendationRequestID == requestID {
                     self.activeAIRecommendationRequestID = nil
                 }
@@ -974,6 +978,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         aiRecommendationTask = task
         taskSupervisor.replace(.aiRecommendation, with: task)
+    }
+
+    private var hasKnownProvider: Bool {
+        hasEagerProvider || aiRecommendationProviderAvailability?.providerAvailability == .available
+    }
+
+    private func clearNoProviderFallbackContinuationsIfProviderIsKnown() {
+        guard hasKnownProvider,
+              let suggestion = lastSuggestion,
+              suggestion.lockedPrefix?.candidateID == "composition-buffer",
+              !suggestion.continuationCandidates.isEmpty else {
+            return
+        }
+        lastSuggestion = SuggestionResponse(
+            prefixCandidates: suggestion.prefixCandidates,
+            lockedPrefix: suggestion.lockedPrefix,
+            continuationCandidates: [],
+            latencyMs: suggestion.latencyMs
+        )
     }
 
     private func recordAIDiagnostic(

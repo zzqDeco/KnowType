@@ -50,7 +50,9 @@ Current behavior:
   AI context and the first candidate is not treated as locked text
 - treats lazy AI runtime presence as an asynchronous recommendation capability,
   not as proof that a provider is configured; no-provider local continuation
-  fallback remains available until an eager provider is known
+  fallback remains available until an eager provider is known or a lazy provider
+  has actually loaded, and stale local fallback rows are cleared once lazy
+  provider availability becomes known
 - gates real-time cloud AI scheduling only on secret-like raw input or confirmed
   locked prefixes; normal technical tokens, commands, paths, URLs, and app
   context do not directly set `AI 已禁用`
