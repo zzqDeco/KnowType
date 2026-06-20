@@ -14,12 +14,15 @@ development input method bundle.
 ## Behavior Notes
 
 - The script replaces only scoped KnowType rows in Text Input Source preferences
-  through `knowtype-inputsource-tool repair-preferences --include-selected`:
-  enabled preferences keep the non-selectable parent anchor plus the single
-  user-selectable `.Hans` mode, while HIToolbox selected/history preferences
-  keep only `.Hans`; selected repair places `.Hans` first so the repaired
+  through `knowtype-inputsource-tool repair-preferences`: enabled preferences
+  keep the non-selectable parent anchor plus the single user-selectable `.Hans`
+  mode, while HIToolbox history preferences keep `.Hans` behind the current
+  retained source until selection succeeds. After helper-local `bootstrap
+  --select` succeeds, selected repair places `.Hans` first so the repaired
   selected array actually points at KnowType, then posts the selected-source
-  notification so direct helper calls refresh TIS/menu caches.
+  notification so direct helper calls refresh TIS/menu caches. If selection
+  fails, the script skips selected repair instead of claiming KnowType is
+  selected.
   Legacy `.Mode` rows and stale selected/history parent rows are removed from
   user preference targets. It also unregisters stale bundle records, restarts
   menu agents, and uses helper `purge-legacy` plus `bootstrap --select`; it does

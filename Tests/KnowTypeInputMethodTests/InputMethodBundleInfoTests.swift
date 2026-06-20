@@ -374,9 +374,20 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("if selectStatus != noErr"))
         XCTAssertTrue(helperSource.contains("--include-selected"))
         XCTAssertTrue(helperSource.contains("preference.repair.include.selected"))
-        XCTAssertTrue(helperSource.contains("removeParent: !addActive"))
         XCTAssertTrue(helperSource.contains("activePlacement: .prepend"))
         XCTAssertTrue(helperSource.contains("case .prepend:"))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleEnabledInputSources"[\s\S]*?removeParent:\s*false"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleEnabledThirdPartyInputSources"[\s\S]*?removeParent:\s*false"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleInputSourceHistory"[\s\S]*?activePlacement:\s*includeSelected\s*\?\s*\.prepend\s*:\s*\.afterFirstRetained"#,
+            options: .regularExpression
+        ))
         XCTAssertNotNil(helperSource.range(
             of: #"key:\s*"AppleSelectedInputSources"[\s\S]*?activePlacement:\s*\.prepend"#,
             options: .regularExpression
@@ -489,6 +500,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(installScript.contains("--include-selected"))
         XCTAssertFalse(rollbackScript.contains("--include-selected"))
         XCTAssertTrue(repairScript.contains("--include-selected"))
+        XCTAssertTrue(repairScript.contains("repair_args+=(--include-selected)"))
+        XCTAssertTrue(repairScript.contains("if (( bootstrap_select_status == 0 ))"))
+        XCTAssertTrue(repairScript.contains("selected preferences were not rewritten"))
         XCTAssertTrue(installScript.contains("SCRIPT_DIR="))
         XCTAssertTrue(installScript.contains("SCRIPTS_DIR=\"$SCRIPT_DIR\""))
         XCTAssertTrue(installScript.contains(#"source "$SCRIPTS_DIR/lib/inputmethod-installation.sh""#))
@@ -546,7 +560,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(repairScript.contains(#""$INPUTSOURCE_TOOL" bootstrap"#))
         XCTAssertTrue(repairScript.contains(#"--select"#))
         XCTAssertTrue(repairScript.contains("parent enabled anchor plus the single user-selectable .Hans mode"))
-        XCTAssertTrue(repairScript.contains("continuing with preference repair, menu refresh, and diagnostics"))
+        XCTAssertTrue(repairScript.contains("continuing with enabled/history repair, menu refresh, and diagnostics"))
+        XCTAssertTrue(repairScript.contains("selected preferences were not rewritten because helper-local selection failed"))
         XCTAssertFalse(repairScript.contains("--legacy-parent-anchor"))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-install-activate"#))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-purge-legacy"#))

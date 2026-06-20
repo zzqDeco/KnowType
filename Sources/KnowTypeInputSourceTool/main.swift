@@ -37,9 +37,9 @@ private func usage() -> Never {
         for stale selected/history parent rows or .Mode rows in protected input-source preferences.
         Use --add-active only for local cache repair; it writes the required
         non-selectable parent enabled anchor plus the visible .Hans mode to
-        enabled preferences, while selected/history preferences keep only
-        the user-selectable .Hans mode. --legacy-parent-anchor is accepted as
-        a deprecated compatibility no-op because the parent anchor is now the
+        enabled preferences, while history repair keeps .Hans available and
+        selected repair is reserved for explicit successful selection. --legacy-parent-anchor
+        is accepted as a deprecated compatibility no-op because the parent anchor is now the
         default enabled-state shape.
 
         """,
@@ -556,7 +556,7 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: !addActive,
+            removeParent: false,
             addParent: addParentAnchor,
             addActive: addActive
         ),
@@ -566,7 +566,7 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: !addActive,
+            removeParent: false,
             addParent: addParentAnchor,
             addActive: addActive
         )
@@ -582,7 +582,7 @@ private func repairPreferences(
                 legacyModeIDs: legacyModeIDs,
                 removeParent: true,
                 addParent: false,
-                activePlacement: .prepend,
+                activePlacement: includeSelected ? .prepend : .afterFirstRetained,
                 addActive: addActive
             )
         )

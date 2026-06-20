@@ -102,7 +102,7 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 
 本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Mode`
 开发状态，通过专用 input-source helper 恢复必需的不可选择 parent enabled anchor 和可见
-`.Hans` mode，并让 selected/history preference 只指向 `.Hans`。默认安装不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
+`.Hans` mode，并修复 history 但不会把 KnowType 移到当前保留输入源之前；默认安装不改 selected preference，不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
 Rime 用户数据。即使 macOS 在刷新 TIS 或 LaunchServices 状态时预热启动 host，controller 冷启动
 也会把 Rime session、provider profile、AI learning/profile 文件、`ENV.md` 和 `CORRECTION.md`
 延迟到真实输入、AI 请求或显式维护动作时才初始化。如果已有 `KnowTypeInputMethodApp` 进程正在运行，安装脚本会先中止，而不是强杀它，

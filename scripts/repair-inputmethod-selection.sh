@@ -93,7 +93,6 @@ INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
   --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
   --include-history \
-  --include-selected \
   --add-active
 
 killall cfprefsd 2>/dev/null || true
@@ -110,15 +109,20 @@ set +e
 bootstrap_select_status=$?
 set -e
 if (( bootstrap_select_status != 0 )); then
-  echo "warning: helper-local KnowType selection returned $bootstrap_select_status; continuing with preference repair, menu refresh, and diagnostics" >&2
+  echo "warning: helper-local KnowType selection returned $bootstrap_select_status; continuing with enabled/history repair, menu refresh, and diagnostics" >&2
 fi
 
-"$INPUTSOURCE_TOOL" repair-preferences \
-  --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  --include-history \
-  --include-selected \
+repair_args=(
+  repair-preferences
+  --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+  --include-history
   --add-active
+)
+if (( bootstrap_select_status == 0 )); then
+  repair_args+=(--include-selected)
+fi
+"$INPUTSOURCE_TOOL" "${repair_args[@]}"
 
 killall cfprefsd 2>/dev/null || true
 killall TextInputMenuAgent 2>/dev/null || true
@@ -130,7 +134,11 @@ echo "Selection repair finished for: $BUNDLE_PATH"
 echo "Input source activation used the helper path: register, enable, and select through TIS."
 echo "macOS may still prelaunch the input method host; KnowType keeps Rime/user data lazy until real input."
 echo "Local repair restored the parent enabled anchor plus the single user-selectable .Hans mode."
-echo "History and selected preferences are repaired to point at .Hans, not the non-selectable parent."
+if (( bootstrap_select_status == 0 )); then
+  echo "History and selected preferences are repaired to point at .Hans, not the non-selectable parent."
+else
+  echo "History preferences were repaired to keep .Hans available; selected preferences were not rewritten because helper-local selection failed."
+fi
 echo "If KnowType is still missing from the input menu, remove and add it once in System Settings > Keyboard > Text Input > Input Sources."
 echo "If the menu still shows an old state, log out/in to clear macOS TIS cache."
 echo

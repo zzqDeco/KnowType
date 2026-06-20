@@ -112,7 +112,8 @@ Build and install the local development bundle:
 The local installer refreshes the traditional InputMethodKit app registration,
 purges stale `.Mode` development state, restores the required non-selectable
 parent enabled anchor plus the visible `.Hans` mode through the dedicated
-input-source helper, and keeps selected/history preferences pointed at `.Hans`.
+input-source helper, and repairs history without moving KnowType ahead of the
+retained current source. It does not rewrite selected preferences during install.
 It does not launch the installed input-method host, does not auto-select
 KnowType, and does not initialize Rime user data during install.
 If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
