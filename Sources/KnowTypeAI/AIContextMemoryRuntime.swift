@@ -1,5 +1,6 @@
 import Foundation
 import KnowTypeCore
+import KnowTypeProviders
 
 public enum TypingEventStoreError: Error, Equatable {
     case pendingContentChanged
@@ -106,6 +107,37 @@ public actor TypingEventStore {
                 try remainingContent.write(to: eventsFileURL, atomically: true, encoding: .utf8)
             }
         }
+    }
+}
+
+public actor LazyDefaultAIContextMemoryRuntime: AIContextEventRecording {
+    private let providerLoader: @Sendable () -> (any LLMProvider)?
+    private let runtimeFactory: @Sendable (any LLMProvider) -> AIContextMemoryRuntime
+    private var runtime: AIContextMemoryRuntime?
+
+    public init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)? = {
+            ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)
+        },
+        runtimeFactory: @escaping @Sendable (any LLMProvider) -> AIContextMemoryRuntime = {
+            AIContextMemoryRuntime(provider: $0)
+        }
+    ) {
+        self.providerLoader = providerLoader
+        self.runtimeFactory = runtimeFactory
+    }
+
+    public func record(_ event: AITypingEvent) async {
+        if let runtime {
+            await runtime.record(event)
+            return
+        }
+        guard let provider = providerLoader() else {
+            return
+        }
+        let runtime = runtimeFactory(provider)
+        self.runtime = runtime
+        await runtime.record(event)
     }
 }
 

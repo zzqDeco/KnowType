@@ -118,7 +118,8 @@ sleep 0.75
 
 echo
 echo "Selection repair finished for: $BUNDLE_PATH"
-echo "Input source activation used the helper path: register, enable, and select through TIS without launching the input method host."
+echo "Input source activation used the helper path: register, enable, and select through TIS."
+echo "macOS may still prelaunch the input method host; KnowType keeps Rime/user data lazy until real input."
 echo "Local repair removed stale parent/.Mode rows and restored the single user-selectable .Hans mode."
 echo "If KnowType is still missing from the input menu, remove and add it once in System Settings > Keyboard > Text Input > Input Sources."
 echo "If the menu still shows an old state, log out/in to clear macOS TIS cache."

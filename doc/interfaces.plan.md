@@ -93,7 +93,7 @@ ProviderProfile {
 }
 ```
 
-Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory.
+Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory only on explicit save. Runtime cold-start paths use the no-create loader, so a missing provider profile does not create `Application Support/KnowType` merely because the IMK host was launched.
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys under the `KnowType` service. Tests and non-UI code can use in-memory or read-only dictionary stores.
 
@@ -137,6 +137,16 @@ Default install and rollback paths do not launch `KnowTypeInputMethodApp`, do
 not select the input method, and do not initialize Rime user data; first real
 typing after the user selects KnowType is normal product use rather than an
 install side effect.
+If macOS prelaunches the IMK host while refreshing TIS or LaunchServices state,
+controller cold start remains read-only: Rime native sessions, provider profile
+loading, user selection history, AI learning/feedback files, lexical profiles,
+`ENV.md`, and `CORRECTION.md` are lazy and are not created until a real input,
+AI request, or explicit maintenance action needs them.
+Lazy provider wrappers expose provider availability only after their loader has
+resolved a real provider state, so local no-provider fallback rows are not
+suppressed merely because the wrapper exists. Accepted learning and feedback
+startup reads always join their in-process locks and join existing file locks
+when present, but do not create lock files for missing histories.
 If the host process is already running, install/rollback must fail before
 replacement instead of killing it, since forced shutdown can flush Rime userdb
 files and would count as a user-data mutation.
@@ -152,6 +162,8 @@ diagnostic surface for local tooling. It emits top-level `install`, `bundle`,
 `preferencePane`, `rime`, `ai`, `userData`, `backups`, `warnings`, and
 `failures` objects. The JSON output must not contain API keys, user text,
 candidate text, or complete lexicon/userdb contents.
+Install postflight parses that JSON and treats any non-empty `failures` array as
+a warning even when the diagnostic process exits successfully.
 
 ## Candidate Data
 
@@ -243,6 +255,10 @@ same `CandidatePanelSelection` values so click commits match keyboard commits.
 `KnowTypeConversionEngine` is the IMK boundary for base conversion. `RimeConversionEngine` is the production implementation:
 
 - `process(.text)`, `.space`, `.commitComposition`, `.selectCandidateOnCurrentPage`, `.highlightCandidateOnCurrentPage`, `.pageUp`, and `.pageDown` call the native Rime session synchronously.
+- Native Rime session creation is lazy. Non-ASCII raw-bypass mode is checked
+  before session creation, so continuing a bypassed composition with ASCII or
+  navigation keys does not initialize Rime user/log directories until reset and
+  a later native conversion actually starts.
 - `ConversionEngineSnapshot.suggestionResponse` maps only the current Rime page into prefix candidates; full candidate-list iteration is not part of the key path.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
 - Marked text mirrors `ConversionEngineSnapshot.preedit` while Rime has composition. If Rime commits part of a long input and keeps composition active, KnowType inserts the commit text and keeps showing the remaining Rime preedit instead of reverting to raw pinyin.

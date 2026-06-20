@@ -268,7 +268,7 @@ if grep -Fq 'bundle.load()' "$ROOT_DIR/scripts/diagnose-inputmethod.sh"; then
   die "diagnostics must not execute PreferencePane bundle code while inspecting install state"
 fi
 
-bundle_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
+bundle_path="$("$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"
 assert_dir "$bundle_path"
 assert_file "$bundle_path/Contents/Info.plist"

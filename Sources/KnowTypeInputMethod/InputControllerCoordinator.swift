@@ -7,7 +7,8 @@ import KnowTypeProviders
 final class InputControllerCoordinator: @unchecked Sendable {
     private let provider: (any LLMProvider)?
     private var sessionController: InputSessionController
-    private let hasProvider: Bool
+    private let hasEagerProvider: Bool
+    private let canRequestAIRecommendations: Bool
     private var conversionEngine: any KnowTypeConversionEngine
     private let keyMapper = InputKeyCommandMapper()
     private let symbolTransformer = InputSymbolTransformer()
@@ -40,6 +41,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var panelUpdateTask: Task<Void, Never>?
     private var delayedReanchorGeneration = 0
     private let aiRecommendationProvider: (any AIRecommendationProviding)?
+    private let aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)?
     private let aiContextEventRecorder: (any AIContextEventRecording)?
     private let aiAcceptedLearningRecorder: (any AIAcceptedLearningRecording)?
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
@@ -72,6 +74,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         initialAppBundleID: String?,
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
+        aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
@@ -89,7 +92,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
         self.provider = provider
-        self.hasProvider = provider != nil
+        self.hasEagerProvider = provider != nil
+        self.canRequestAIRecommendations = provider != nil || aiRecommendationProvider != nil
         if let conversionEngine {
             self.conversionEngine = conversionEngine
         } else if let conversionEngineFactory {
@@ -109,6 +113,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.userSelectionHistory = userSelectionHistoryPersistence?
             .loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
         self.aiRecommendationProvider = aiRecommendationProvider
+        self.aiRecommendationProviderAvailability = aiRecommendationProviderAvailability
         self.aiContextEventRecorder = aiContextEventRecorder
         self.aiAcceptedLearningRecorder = aiAcceptedLearning
         self.aiAcceptedFeedbackProvider = aiAcceptedFeedback
@@ -511,12 +516,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func resolvedCompositionFallbackContinuations(
+    func resolvedCompositionFallbackContinuations(
         lockedPrefixText: String,
         rawInput: String,
         client: InputControllerClient?
     ) -> [ContinuationCandidate] {
-        guard !hasProvider,
+        guard !hasKnownProvider,
               runtimePreferences.localContinuationEnabledWhenNoProvider,
               !TextProtection.requiresNoCorrection(lockedPrefixText, appBundleID: appBundleIdentifier(client: client)),
               !TextProtection.requiresNoCorrection(rawInput, appBundleID: appBundleIdentifier(client: client)) else {
@@ -828,7 +833,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        guard hasProvider else {
+        guard canRequestAIRecommendations else {
             recordAIDiagnostic(
                 .skippedNoProvider,
                 requestID: requestID,
@@ -953,6 +958,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     return
                 }
                 self.aiRecommendationState = patch.state
+                self.clearNoProviderFallbackContinuationsIfProviderIsKnown()
                 if self.activeAIRecommendationRequestID == requestID {
                     self.activeAIRecommendationRequestID = nil
                 }
@@ -972,6 +978,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         aiRecommendationTask = task
         taskSupervisor.replace(.aiRecommendation, with: task)
+    }
+
+    private var hasKnownProvider: Bool {
+        hasEagerProvider || aiRecommendationProviderAvailability?.providerAvailability == .available
+    }
+
+    private func clearNoProviderFallbackContinuationsIfProviderIsKnown() {
+        guard hasKnownProvider,
+              let suggestion = lastSuggestion,
+              suggestion.lockedPrefix?.candidateID == "composition-buffer",
+              !suggestion.continuationCandidates.isEmpty else {
+            return
+        }
+        lastSuggestion = SuggestionResponse(
+            prefixCandidates: suggestion.prefixCandidates,
+            lockedPrefix: suggestion.lockedPrefix,
+            continuationCandidates: [],
+            latencyMs: suggestion.latencyMs
+        )
     }
 
     private func recordAIDiagnostic(
@@ -1647,7 +1672,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         recordLexicalCommit(text)
         guard let aiContextEventRecorder,
-              hasProvider,
+              canRequestAIRecommendations,
               runtimePreferences.cloudContinuationEnabled,
               !text.isEmpty else {
             return
@@ -1784,7 +1809,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func recordExternalDelete(client: InputControllerClient?) {
         guard let aiContextEventRecorder,
-              hasProvider,
+              canRequestAIRecommendations,
               runtimePreferences.cloudContinuationEnabled else {
             return
         }

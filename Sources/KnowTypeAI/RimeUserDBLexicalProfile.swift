@@ -222,7 +222,7 @@ public final class LexicalProfileStore: @unchecked Sendable {
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: false
         )) ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         return root
             .appendingPathComponent("KnowType", isDirectory: true)

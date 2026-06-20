@@ -224,7 +224,7 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         XCTAssertNil(store.snapshot())
     }
 
-    func testStartupRepairsMissingFeedbackSummaryOnDisk() throws {
+    func testStartupBuildsMissingFeedbackSummaryInMemoryWithoutWritingOnDisk() throws {
         let directory = temporaryDirectory()
         let historyURL = directory.appendingPathComponent("accepted-ai-feedback.jsonl")
         let summaryURL = directory.appendingPathComponent("accepted-ai-feedback-summary.json")
@@ -255,8 +255,30 @@ final class AIAcceptedFeedbackStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(store.snapshot()?.summary.feedbackCount, 1)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: summaryURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: mirrorURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: summaryURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: mirrorURL.path))
+    }
+
+    func testStoreInitDoesNotCreateFeedbackFilesWhenHistoryIsMissing() {
+        let directory = temporaryDirectory().appendingPathComponent("missing-feedback", isDirectory: true)
+        let historyURL = directory.appendingPathComponent("accepted-ai-feedback.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-feedback-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_FEEDBACK.md")
+        let lockURL = directory.appendingPathComponent("accepted-ai-feedback.lock")
+        defer {
+            try? FileManager.default.removeItem(at: directory.deletingLastPathComponent())
+        }
+
+        let store = AIAcceptedFeedbackStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL
+        )
+
+        XCTAssertTrue(store.allRecords().isEmpty)
+        XCTAssertNil(store.snapshot())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lockURL.path))
     }
 
     func testRunningStoreDropsFeedbackAfterExternalClear() async throws {

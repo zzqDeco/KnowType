@@ -61,10 +61,12 @@ final class InputHotPathPerformanceTests: XCTestCase {
         }
 
         var rimeEngine = RimeConversionEngine(configuration: configuration)
+        XCTAssertTrue(rimeEngine.process(.text("w")).handled)
         guard rimeEngine.isNativeActive else {
             throw XCTSkip("librime could not create a native session")
         }
-        _ = runRimeSequence("wo", commit: .space, engine: &rimeEngine)
+        XCTAssertTrue(rimeEngine.process(.text("o")).handled)
+        _ = rimeEngine.process(.space)
 
         try assertP95("rime.wo.space", budgetMilliseconds: 5) {
             rimeEngine.reset()

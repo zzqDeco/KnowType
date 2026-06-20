@@ -934,6 +934,64 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(hasFallbackContinuation)
     }
 
+    func testLazyAIRecommendationRuntimeDoesNotSuppressNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let aiProvider = UnavailableAIRecommendationProvider()
+        let providerAvailability = AIRecommendationProviderAvailabilityState(.unknown)
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiRecommendationProvider: aiProvider,
+            aiRecommendationProviderAvailability: providerAvailability,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.contains { $0.text == "还有进一步优化空间" })
+    }
+
+    func testLoadedLazyProviderSuppressesNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let aiProvider = UnavailableAIRecommendationProvider()
+        let providerAvailability = AIRecommendationProviderAvailabilityState(.available)
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiRecommendationProvider: aiProvider,
+            aiRecommendationProviderAvailability: providerAvailability,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
+    }
+
+    func testEagerProviderSuppressesNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
+    }
+
     @MainActor
     func testTabCommitsVisibleNoProviderFallbackContinuation() async throws {
         let client = FakeInputControllerClient()
@@ -3319,6 +3377,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence(),
         provider: (any LLMProvider)? = nil,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
+        aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
@@ -3355,6 +3414,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             initialAppBundleID: client.bundleIdentifier,
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
+            aiRecommendationProviderAvailability: aiRecommendationProviderAvailability,
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: aiAcceptedLearning,
             aiAcceptedFeedback: aiAcceptedFeedback,
@@ -4500,6 +4560,12 @@ private actor PendingAIRecommendationProvider: AIRecommendationProviding {
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private actor UnavailableAIRecommendationProvider: AIRecommendationProviding {
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        .unavailable(reason: "AI 未配置")
     }
 }
 

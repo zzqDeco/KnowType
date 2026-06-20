@@ -191,23 +191,6 @@ public final class AIAcceptedFeedbackStore:
             acceptedFeedbackClearMarkerURL(historyURL: historyURL),
             fileManager: fileManager
         )
-        if !summaryMatches {
-            do {
-                try withAcceptedFeedbackFileLock(
-                    lockURL: acceptedFeedbackLockURL(historyURL: historyURL),
-                    fileManager: fileManager
-                ) {
-                    try persistSummary(rebuiltSummary)
-                }
-            } catch {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .lexicalProfileFallback,
-                        reason: "accepted_feedback_summary_repair_failed:\(String(describing: type(of: error)))"
-                    )
-                )
-            }
-        }
     }
 
     public static func inMemory(
@@ -373,7 +356,7 @@ public final class AIAcceptedFeedbackStore:
 
     private func syncRecordsAfterExternalClear() {
         do {
-            try withAcceptedFeedbackFileLock(
+            try withExistingAcceptedFeedbackFileLock(
                 lockURL: acceptedFeedbackLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) {
@@ -754,7 +737,7 @@ public final class AIAcceptedFeedbackStore:
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: false
         )) ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         return root
             .appendingPathComponent("KnowType", isDirectory: true)
@@ -790,6 +773,33 @@ func withAcceptedFeedbackFileLock<T>(
     )
     if !fileManager.fileExists(atPath: lockURL.path) {
         fileManager.createFile(atPath: lockURL.path, contents: nil)
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
+    return try body()
+}
+
+func withExistingAcceptedFeedbackFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
+    acceptedFeedbackFileLock.lock()
+    defer {
+        acceptedFeedbackFileLock.unlock()
+    }
+
+    guard let lockURL,
+          fileManager.fileExists(atPath: lockURL.path) else {
+        return try body()
     }
     let handle = try FileHandle(forWritingTo: lockURL)
     defer {

@@ -47,6 +47,33 @@ func withAcceptedLearningFileLock<T>(
     return try body()
 }
 
+func withExistingAcceptedLearningFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
+    acceptedLearningFileLock.lock()
+    defer {
+        acceptedLearningFileLock.unlock()
+    }
+
+    guard let lockURL,
+          fileManager.fileExists(atPath: lockURL.path) else {
+        return try body()
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
+    return try body()
+}
+
 public struct AIAcceptedLearningRecord: Codable, Sendable, Equatable {
     public var schemaVersion: Int
     public var acceptedAt: Date
@@ -344,7 +371,7 @@ public final class AIAcceptedLearningStore:
         let startupState: StartupState
         let startupRepairErrorReason: String?
         do {
-            startupState = try withAcceptedLearningFileLock(
+            startupState = try withExistingAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) {
@@ -355,20 +382,25 @@ public final class AIAcceptedLearningStore:
                     fileManager: fileManager,
                     encoder: configuredEncoder,
                     decoder: configuredDecoder,
-                    repairPersistentSummary: true
+                    repairPersistentSummary: false
                 )
             }
             startupRepairErrorReason = nil
         } catch {
-            startupState = (try? Self.loadStartupState(
-                historyURL: historyURL,
-                summaryURL: summaryURL,
-                mirrorURL: mirrorURL,
-                fileManager: fileManager,
-                encoder: configuredEncoder,
-                decoder: configuredDecoder,
-                repairPersistentSummary: false
-            )) ?? StartupState(
+            startupState = (try? withExistingAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                try Self.loadStartupState(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    encoder: configuredEncoder,
+                    decoder: configuredDecoder,
+                    repairPersistentSummary: false
+                )
+            }) ?? StartupState(
                 records: [],
                 summary: nil,
                 schemaSummaries: [:],
@@ -638,7 +670,21 @@ public final class AIAcceptedLearningStore:
     }
 
     private func syncRecordsAfterExternalClear() {
-        syncRecordsAfterExternalClearLocked()
+        do {
+            try withExistingAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                syncRecordsAfterExternalClearLocked()
+            }
+        } catch {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_clear_sync_failed:\(String(describing: type(of: error)))"
+                )
+            )
+        }
     }
 
     private func notifySummaryReady(_ events: [AIAcceptedLearningSummaryReadyEvent]) {
@@ -959,7 +1005,7 @@ public final class AIAcceptedLearningStore:
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: false
         )) ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         return root
             .appendingPathComponent("KnowType", isDirectory: true)

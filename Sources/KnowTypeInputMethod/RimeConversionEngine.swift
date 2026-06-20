@@ -122,7 +122,9 @@ public extension KnowTypeConversionEngine {
 }
 
 public struct RimeConversionEngine: KnowTypeConversionEngine {
+    private let nativeConfiguration: NativeRimeConfiguration?
     private var nativeSession: NativeRimeSession?
+    private var nativeSessionCreationAttempted = false
     private var currentSnapshot: ConversionEngineSnapshot
     private var nativeBypassUntilReset = false
     private var nativeRawInputMirror = ""
@@ -144,9 +146,10 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         traditionalInputEngine _: TraditionalInputEngine? = nil,
         configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration()
     ) {
+        self.nativeConfiguration = configuration
         self.configuredSchemaID = configuration?.schemaID ?? "pinyin_simp"
-        self.nativeSession = configuration.flatMap { NativeRimeSession(configuration: $0) }
-        self.currentSnapshot = nativeSession?.snapshot() ?? Self.unavailableSnapshot(rawInput: "")
+        self.nativeSession = nil
+        self.currentSnapshot = Self.unavailableSnapshot(rawInput: "")
     }
 
     public mutating func reset() {
@@ -161,7 +164,12 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return processRawBypass(key)
         }
 
-        guard let nativeSession, !nativeBypassUntilReset else {
+        guard !nativeBypassUntilReset else {
+            return processUnavailable(key, engineName: "rime-raw-bypass")
+        }
+
+        let nativeSession = ensureNativeSession()
+        guard let nativeSession else {
             return processUnavailable(key)
         }
 
@@ -178,6 +186,20 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         }
         currentSnapshot = result.snapshot
         return result
+    }
+
+    private mutating func ensureNativeSession() -> NativeRimeSession? {
+        if let nativeSession {
+            return nativeSession
+        }
+        guard !nativeSessionCreationAttempted,
+              let nativeConfiguration else {
+            return nil
+        }
+        nativeSessionCreationAttempted = true
+        nativeSession = NativeRimeSession(configuration: nativeConfiguration)
+        currentSnapshot = nativeSession?.snapshot() ?? currentSnapshot
+        return nativeSession
     }
 
     private mutating func processRawBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
