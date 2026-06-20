@@ -14,9 +14,10 @@ development input method bundle.
 ## Behavior Notes
 
 - The script replaces only scoped KnowType rows in Text Input Source preferences
-  through `knowtype-inputsource-tool repair-preferences`: enabled preferences
-  keep the non-selectable parent anchor plus the single user-selectable `.Hans`
-  mode, while HIToolbox selected/history preferences keep only `.Hans`.
+  through `knowtype-inputsource-tool repair-preferences --include-selected`:
+  enabled preferences keep the non-selectable parent anchor plus the single
+  user-selectable `.Hans` mode, while HIToolbox selected/history preferences
+  keep only `.Hans`.
   Legacy `.Mode` rows and stale selected/history parent rows are removed from
   user preference targets. It also unregisters stale bundle records, restarts
   menu agents, and uses helper `purge-legacy` plus `bootstrap --select`; it does

@@ -23,7 +23,7 @@ private func usage() -> Never {
           knowtype-inputsource-tool disable [--bundle-id ID]
           knowtype-inputsource-tool inspect-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool dedupe-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
-          knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--add-active] [--legacy-parent-anchor]
+          knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--include-selected] [--add-active] [--legacy-parent-anchor]
           knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID] [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool register --path PATH [--parent-id ID] [--mode-id ID] [--select]
           knowtype-inputsource-tool bootstrap --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID] [--select]
@@ -541,6 +541,7 @@ private func repairPreferences(
     modeID: String,
     legacyModeIDs: [String],
     includeHistory: Bool,
+    includeSelected: Bool,
     addActive: Bool,
     addLegacyParentAnchor: Bool
 ) {
@@ -552,7 +553,7 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: false,
+            removeParent: !addActive,
             addParent: addParentAnchor,
             addActive: addActive
         ),
@@ -562,7 +563,7 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: false,
+            removeParent: !addActive,
             addParent: addParentAnchor,
             addActive: addActive
         )
@@ -583,19 +584,22 @@ private func repairPreferences(
             )
         )
     }
-    results.append(
-        repairPreferenceArray(
-            domain: "com.apple.HIToolbox",
-            key: "AppleSelectedInputSources",
-            bundleID: bundleID,
-            modeID: modeID,
-            legacyModeIDs: legacyModeIDs,
-            removeParent: true,
-            addParent: false,
-            activePlacement: .afterFirstRetained,
-            addActive: addActive
+
+    if includeSelected {
+        results.append(
+            repairPreferenceArray(
+                domain: "com.apple.HIToolbox",
+                key: "AppleSelectedInputSources",
+                bundleID: bundleID,
+                modeID: modeID,
+                legacyModeIDs: legacyModeIDs,
+                removeParent: true,
+                addParent: false,
+                activePlacement: .afterFirstRetained,
+                addActive: addActive
+            )
         )
-    )
+    }
 
     for result in results {
         let prefix = "preference.repair.\(result.domain).\(result.key)"
@@ -606,6 +610,7 @@ private func repairPreferences(
     print("preference.repair.active.inputsource.id=\(modeID)")
     print("preference.repair.active.mode.id=\(modeID)")
     print("preference.repair.include.history=\(includeHistory)")
+    print("preference.repair.include.selected=\(includeSelected)")
     print("preference.repair.add.active=\(addActive)")
     print("preference.repair.add.parent.anchor=\(addParentAnchor)")
     print("preference.repair.add.legacy.parent.anchor=false")
@@ -814,6 +819,9 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
     print("bootstrap.parent.enabled=\(parentEnabled)")
     print("bootstrap.mode.enabled=\(modeEnabled)")
     print("bootstrap.selected=\(select)")
+    if !parentEnabled || !modeEnabled {
+        exit(ExitCode.failure.rawValue)
+    }
     if selectStatus != noErr {
         exit(ExitCode.failure.rawValue)
     }
@@ -1046,6 +1054,7 @@ case "repair-preferences":
     let modeID = arguments.option("--mode-id", default: defaultModeID) ?? defaultModeID
     let legacyModeIDs = legacyModeIDs(from: &arguments)
     let includeHistory = arguments.flag("--include-history")
+    let includeSelected = arguments.flag("--include-selected")
     let addActive = arguments.flag("--add-active")
     let addLegacyParentAnchor = arguments.flag("--legacy-parent-anchor")
     arguments.ensureConsumed()
@@ -1054,6 +1063,7 @@ case "repair-preferences":
         modeID: modeID,
         legacyModeIDs: legacyModeIDs,
         includeHistory: includeHistory,
+        includeSelected: includeSelected,
         addActive: addActive,
         addLegacyParentAnchor: addLegacyParentAnchor
     )

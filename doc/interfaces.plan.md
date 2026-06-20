@@ -535,7 +535,9 @@ registration, and cleanup in KnowType scripts:
   cache state, missing parent enabled anchors, or stale selected/history parent
   rows. The default `--add-active` shape restores the required non-selectable
   parent enabled anchor plus the user-selectable `.Hans` mode in enabled
-  preferences, while selected/history preferences keep only `.Hans`.
+  preferences without changing selected preferences. `--include-history`
+  repairs history to `.Hans`; `--include-selected` is reserved for explicit
+  selection repair and rewrites selected preferences to `.Hans`.
   `--legacy-parent-anchor` is accepted as a deprecated compatibility no-op.
 - `purge-legacy --path ...` disables visible legacy `.Mode` rows and refreshes
   LaunchServices without starting `KnowTypeInputMethodApp`.

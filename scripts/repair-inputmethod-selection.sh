@@ -93,6 +93,7 @@ INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
   --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
   --include-history \
+  --include-selected \
   --add-active
 
 killall cfprefsd 2>/dev/null || true
@@ -116,6 +117,7 @@ fi
   --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
   --include-history \
+  --include-selected \
   --add-active
 
 killall cfprefsd 2>/dev/null || true
