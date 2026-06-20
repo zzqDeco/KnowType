@@ -178,7 +178,7 @@
 "settings.diagnostics.step.build.title" = "构建并签名";
 "settings.diagnostics.step.build.detail" = "运行输入法 bundle 构建脚本。脚本会优先选择可用的 Apple Development 签名身份，只有找不到证书时才回退到 ad-hoc 签名。";
 "settings.diagnostics.step.install.title" = "安装 bundle";
-"settings.diagnostics.step.install.detail" = "将 KnowType.app 复制到 ~/Library/Input Methods。安装脚本会清理过期的 .Mode 开发状态，然后从已安装 app 上下文执行注册、启用和选择。设置入口在输入法菜单里的 KnowType Settings...";
+"settings.diagnostics.step.install.detail" = "将 KnowType.app 复制到 ~/Library/Input Methods。安装脚本会清理过期的 .Mode 开发状态，然后通过 helper 注册并启用 parent anchor 和 .Hans mode。设置入口在输入法菜单里的 KnowType Settings...";
 "settings.diagnostics.step.diagnose.title" = "诊断安装";
 "settings.diagnostics.step.diagnose.detail" = "运行只读诊断，检查 bundle metadata、签名、打包资源、Text Input Source 注册、本地数据路径，以及可选的 Gatekeeper 或 sandbox 日志线索。";
 "settings.diagnostics.step.select.title" = "请求切换";
@@ -186,6 +186,6 @@
 "settings.diagnostics.step.enable.title" = "启用输入源";
 "settings.diagnostics.step.enable.detail" = "如果 macOS 弹出是否允许 知键/KnowType 作为输入法，请点击允许。然后打开 System Settings > Keyboard > Text Input > Input Sources；如果没有自动切换，请手动启用或选择 KnowType。";
 "settings.diagnostics.step.refresh.title" = "刷新注册状态";
-"settings.diagnostics.step.refresh.detail" = "如果 macOS 保留旧注册，运行修复脚本。它会移除过期 LaunchServices 记录、禁用 legacy .Mode 注册、清理不可选择的 parent 行、恢复唯一可选择的 .Hans mode，并重新测试切换。";
+"settings.diagnostics.step.refresh.detail" = "如果 macOS 保留旧注册，运行修复脚本。它会移除过期 LaunchServices 记录、禁用 legacy .Mode 注册、恢复 parent enabled anchor 和唯一可选择的 .Hans mode，并让 history 只指向 .Hans 后重新测试切换。";
 "settings.diagnostics.step.logs.title" = "查看日志";
 "settings.diagnostics.step.logs.detail" = "本地 smoke test 时，可以使用诊断日志模式、Console.app 或 log 命令查看 KnowTypeInputMethodApp、Gatekeeper 和 input-source sandbox 消息。";

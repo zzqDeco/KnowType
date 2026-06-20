@@ -118,7 +118,9 @@ private enum TextInputSourceActivation {
         let legacyModeCount = KnowTypeInputSourceIDs.legacyModes.reduce(0) { count, modeID in
             count + inputSources(id: modeID).count
         }
-        let activationSources = deduplicatedSources(inputSources(id: modeInputSourceID))
+        let activationSources = deduplicatedSources(
+            inputSources(id: parentInputSourceID) + inputSources(id: modeInputSourceID)
+        ).sorted(by: enableParentBeforeModes)
         var enabledCount = 0
         var modeCount = 0
         for source in activationSources {

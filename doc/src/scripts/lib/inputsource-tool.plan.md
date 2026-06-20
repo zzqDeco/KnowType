@@ -24,7 +24,8 @@ repair scripts.
   installation uses helper `bootstrap` without `--select`; explicit repair may
   select through the helper, while manual typing acceptance still requires the
   user to select KnowType in the active target app. Scoped preference repair must
-  leave unrelated input sources untouched.
+  leave unrelated input sources untouched. Enabled repairs restore the parent
+  anchor plus `.Hans`; selected and history repairs stay `.Hans`-only.
 - Shell scripts should source `inputsource-ids.sh` instead of hardcoding the
   parent/active input-source id, legacy `.Mode` cleanup ids, connection
   name, or fallback keyboard id.

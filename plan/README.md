@@ -53,6 +53,7 @@ when converting a shipped plan into a short record.
 | [install-user-data-isolation.plan.md](install-user-data-isolation.plan.md) | Keep local install, rollback, and repair from launching the host or mutating user data | Active |
 | [imk-host-cold-start-no-userdata-write.plan.md](imk-host-cold-start-no-userdata-write.plan.md) | Keep IMK host prelaunch from initializing Rime, provider, or AI learning user data | Active |
 | [input-source-layer-model.plan.md](input-source-layer-model.plan.md) | Separate non-selectable TIS parent records from the single visible `.Hans` input mode | Active |
+| [input-source-parent-anchor-registration.plan.md](input-source-parent-anchor-registration.plan.md) | Enable the non-selectable parent anchor while keeping `.Hans` as the only visible user mode | Active |
 | [native-settings-ui-polish.plan.md](native-settings-ui-polish.plan.md) | Chinese macOS-native sidebar settings UI for the IMK preferences window | Active |
 | [segmented-candidate-selection.plan.md](segmented-candidate-selection.plan.md) | Raw-span candidate rows and segmented confirmation behavior | Active |
 | [ai-capability-runtime-layer.plan.md](ai-capability-runtime-layer.plan.md) | Separate AI recommendation, context memory, correction-instruction, and health layers from the IMK key path | Active |

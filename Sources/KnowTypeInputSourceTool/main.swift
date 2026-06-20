@@ -34,11 +34,13 @@ private func usage() -> Never {
         cleanup through TIS APIs. switch-away can clear stale KnowType selected
         preferences before install so macOS does not relaunch the host.
         Preference inspection is read-only; repair-preferences is an explicit local development cleanup
-        for stale parent or .Mode rows in protected input-source preferences.
-        Use --add-active only for local cache repair; it writes the visible
-        .Hans mode row while keeping non-selectable parent records out of
-        user-visible enabled/history preferences. --legacy-parent-anchor is an
-        explicit compatibility fallback for older local caches only.
+        for stale selected/history parent rows or .Mode rows in protected input-source preferences.
+        Use --add-active only for local cache repair; it writes the required
+        non-selectable parent enabled anchor plus the visible .Hans mode to
+        enabled preferences, while selected/history preferences keep only
+        the user-selectable .Hans mode. --legacy-parent-anchor is accepted as
+        a deprecated compatibility no-op because the parent anchor is now the
+        default enabled-state shape.
 
         """,
         stderr
@@ -449,22 +451,22 @@ private func repairPreferenceEntries(
     var added = 0
     if addActive {
         let activeEntry = activePreferenceEntry(bundleID: bundleID, modeID: modeID)
+        var entriesToAdd: [[String: Any]] = []
+        if addParent && modeID != bundleID {
+            entriesToAdd.append(parentPreferenceEntry(bundleID: bundleID) as [String: Any])
+            added += 1
+        }
+        entriesToAdd.append(activeEntry as [String: Any])
+        added += 1
+
         switch activePlacement {
         case .append:
-            repaired = retained + [activeEntry as [String: Any]]
+            repaired = retained + entriesToAdd
         case .afterFirstRetained:
             if let first = retained.first {
-                repaired = [first, activeEntry as [String: Any]] + retained.dropFirst()
+                repaired = [first] + entriesToAdd + retained.dropFirst()
             } else {
-                repaired = [activeEntry as [String: Any]]
-            }
-        }
-        added += 1
-        if addParent && modeID != bundleID {
-            let parentEntry = parentPreferenceEntry(bundleID: bundleID)
-            if !preferencesContainEntry(repaired, target: parentEntry) {
-                repaired.append(parentEntry as [String: Any])
-                added += 1
+                repaired = entriesToAdd
             }
         }
     }
@@ -539,6 +541,7 @@ private func repairPreferences(
     addActive: Bool,
     addLegacyParentAnchor: Bool
 ) {
+    let addParentAnchor = addActive && modeID != bundleID
     var results = [
         repairPreferenceArray(
             domain: "com.apple.HIToolbox",
@@ -546,8 +549,8 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: true,
-            addParent: false,
+            removeParent: false,
+            addParent: addParentAnchor,
             addActive: addActive
         ),
         repairPreferenceArray(
@@ -556,8 +559,8 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: !addLegacyParentAnchor,
-            addParent: addActive && addLegacyParentAnchor,
+            removeParent: false,
+            addParent: addParentAnchor,
             addActive: addActive
         )
     ]
@@ -588,7 +591,9 @@ private func repairPreferences(
     print("preference.repair.active.mode.id=\(modeID)")
     print("preference.repair.include.history=\(includeHistory)")
     print("preference.repair.add.active=\(addActive)")
-    print("preference.repair.add.legacy.parent.anchor=\(addActive && addLegacyParentAnchor)")
+    print("preference.repair.add.parent.anchor=\(addParentAnchor)")
+    print("preference.repair.add.legacy.parent.anchor=false")
+    print("preference.repair.legacy.parent.anchor.option=\(addLegacyParentAnchor)")
     postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
 }
 
@@ -768,7 +773,7 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
         }
     }
 
-    guard waitForInputSource(id: parentID, timeout: 5.0) != nil else {
+    guard let parent = waitForInputSource(id: parentID, timeout: 5.0) else {
         fputs("KnowType non-selectable parent record was not found after bootstrap.\n", stderr)
         exit(ExitCode.failure.rawValue)
     }
@@ -777,12 +782,13 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
         exit(ExitCode.failure.rawValue)
     }
 
+    enableInputSource(parent, label: "parent")
     enableInputSource(mode, label: "mode")
 
     postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
 
     if select {
-        selectMode(parentID: parentID, modeID: modeID, requireSelected: false)
+        _ = selectMode(parentID: parentID, modeID: modeID, requireSelected: false, exitOnFailure: false)
     }
 
     print("bootstrap.path=\(path)")
@@ -929,13 +935,26 @@ private func register(path: String, parentID: String, modeID: String, select: Bo
     bootstrap(path: path, parentID: parentID, modeID: modeID, legacyModeIDs: defaultLegacyModeIDs, select: select)
 }
 
-private func selectMode(parentID: String, modeID: String, requireSelected: Bool) {
+@discardableResult
+private func selectMode(parentID: String, modeID: String, requireSelected: Bool, exitOnFailure: Bool = true) -> OSStatus {
+    guard let parent = inputSource(id: parentID) else {
+        fputs("KnowType parent input method was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
+        if exitOnFailure {
+            exit(ExitCode.failure.rawValue)
+        }
+        return OSStatus(paramErr)
+    }
     guard let mode = inputSource(id: modeID) else {
         fputs("KnowType input mode was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
-        exit(ExitCode.failure.rawValue)
+        if exitOnFailure {
+            exit(ExitCode.failure.rawValue)
+        }
+        return OSStatus(paramErr)
     }
 
+    enableInputSource(parent, label: "parent")
     enableInputSource(mode, label: "mode")
+    postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
 
     let selectStatus = TISSelectInputSource(mode)
     if selectStatus == noErr {
@@ -944,7 +963,11 @@ private func selectMode(parentID: String, modeID: String, requireSelected: Bool)
         postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
     } else {
         fputs("TISSelectInputSource(mode) returned \(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\n", stderr)
-        exit(Int32(selectStatus))
+        print("select.status=\(selectStatus)")
+        if exitOnFailure {
+            exit(Int32(selectStatus))
+        }
+        return selectStatus
     }
 
     let deadline = Date().addingTimeInterval(2.0)
@@ -965,6 +988,8 @@ private func selectMode(parentID: String, modeID: String, requireSelected: Bool)
             exit(ExitCode.failure.rawValue)
         }
     }
+
+    return selectStatus
 }
 
 private var arguments = Arguments(values: Array(CommandLine.arguments.dropFirst()))

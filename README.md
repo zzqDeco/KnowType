@@ -110,10 +110,11 @@ Build and install the local development bundle:
 ```
 
 The local installer refreshes the traditional InputMethodKit app registration,
-purges stale `.Mode` development state, clears stale parent preference rows, and
-restores the visible `.Hans` mode through the dedicated input-source helper. It
-does not launch the installed input-method host, does not auto-select KnowType,
-and does not initialize Rime user data during install.
+purges stale `.Mode` development state, restores the required non-selectable
+parent enabled anchor plus the visible `.Hans` mode through the dedicated
+input-source helper, and keeps selected/history preferences pointed at `.Hans`.
+It does not launch the installed input-method host, does not auto-select
+KnowType, and does not initialize Rime user data during install.
 If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
 controller cold start still keeps Rime sessions, provider profiles, AI learning
 and profile files, `ENV.md`, and `CORRECTION.md` lazy until real input, an AI
@@ -125,8 +126,9 @@ KnowType follows the mature component mode shape used by Squirrel, McBopomofo,
 and macSKK: the parent id is
 `com.knowtype.inputmethod.KnowType`, while the only user-selectable input source
 is `com.knowtype.inputmethod.KnowType.Hans`. macOS may expose the parent record
-in TIS diagnostics, but it should not appear as a second user-selectable
-`KnowType` menu item.
+in TIS diagnostics and enabled preferences; that parent anchor is normal and
+required for mode selection, but it should not appear as a second
+user-selectable `KnowType` menu item.
 
 `scripts/install-inputmethod.sh` defaults to a release build so local typing
 tests exercise the optimized hot path. Rime runtime files are packaged inside

@@ -25,7 +25,8 @@ it there.
 
 The default install path avoids launching the input method host and uses the
 dedicated TIS helper. This script is the explicit local development fallback for
-poisoned .Mode caches or non-selectable parent rows; it may require
+poisoned .Mode caches, missing parent enabled anchors, or stale selected
+parent rows; it may require
 Full Disk Access for the terminal/Codex process that runs it.
 
 Options:
@@ -99,11 +100,17 @@ killall TextInputMenuAgent 2>/dev/null || true
 killall TextInputSwitcher 2>/dev/null || true
 sleep 1
 
+set +e
 "$INPUTSOURCE_TOOL" bootstrap \
   --path "$BUNDLE_PATH" \
   --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
   --select
+bootstrap_select_status=$?
+set -e
+if (( bootstrap_select_status != 0 )); then
+  echo "warning: helper-local KnowType selection returned $bootstrap_select_status; continuing with preference repair, menu refresh, and diagnostics" >&2
+fi
 
 "$INPUTSOURCE_TOOL" repair-preferences \
   --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
@@ -120,7 +127,8 @@ echo
 echo "Selection repair finished for: $BUNDLE_PATH"
 echo "Input source activation used the helper path: register, enable, and select through TIS."
 echo "macOS may still prelaunch the input method host; KnowType keeps Rime/user data lazy until real input."
-echo "Local repair removed stale parent/.Mode rows and restored the single user-selectable .Hans mode."
+echo "Local repair restored the parent enabled anchor plus the single user-selectable .Hans mode."
+echo "History and selected preferences are repaired to point at .Hans, not the non-selectable parent."
 echo "If KnowType is still missing from the input menu, remove and add it once in System Settings > Keyboard > Text Input > Input Sources."
 echo "If the menu still shows an old state, log out/in to clear macOS TIS cache."
 echo
