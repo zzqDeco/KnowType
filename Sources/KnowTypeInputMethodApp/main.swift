@@ -14,7 +14,7 @@ private let inputMethodLogger = Logger(
 
 private enum TextInputSourceActivation {
     private static let parentInputSourceID = KnowTypeInputSourceIDs.parent
-    private static let modeInputSourceID = KnowTypeInputSourceIDs.activeMode
+    private static let activeInputSourceID = KnowTypeInputSourceIDs.activeMode
     private static let legacyModeInputSourceIDs = KnowTypeInputSourceIDs.legacyModes
     private static let fallbackInputSourceID = KnowTypeInputSourceIDs.fallback
     private static let lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -85,7 +85,7 @@ private enum TextInputSourceActivation {
     }
 
     private static func registerInstalledBundle(_ bundle: Bundle) {
-        if inputSource(id: parentInputSourceID) == nil || inputSource(id: modeInputSourceID) == nil {
+        if inputSource(id: activeInputSourceID) == nil {
             let status = TISRegisterInputSource(bundle.bundleURL as CFURL)
             inputMethodLogger.notice("Registered input source from app context with status \(status, privacy: .public)")
             print("register.status=\(status)")
@@ -118,19 +118,21 @@ private enum TextInputSourceActivation {
         let legacyModeCount = KnowTypeInputSourceIDs.legacyModes.reduce(0) { count, modeID in
             count + inputSources(id: modeID).count
         }
-        let activationSources = deduplicatedSources(
-            inputSources(id: parentInputSourceID) + inputSources(id: modeInputSourceID)
-        ).sorted(by: enableParentBeforeModes)
+        let usesSingleInputSource = activeInputSourceID == parentInputSourceID
+        let activationSources = usesSingleInputSource
+            ? deduplicatedSources(inputSources(id: activeInputSourceID))
+            : deduplicatedSources(inputSources(id: parentInputSourceID) + inputSources(id: activeInputSourceID))
+                .sorted(by: enableParentBeforeModes)
         var enabledCount = 0
         var parentAnchorCount = 0
-        var parentAnchorReady = false
+        var parentAnchorReady = usesSingleInputSource
         var modeCount = 0
         var modeReady = false
         for source in activationSources {
             let id = stringProperty(source, kTISPropertyInputSourceID) ?? "<unknown>"
             let type = stringProperty(source, kTISPropertyInputSourceType) ?? "<unknown>"
-            let isMode = id == modeInputSourceID || inputModeID(source) == modeInputSourceID
-            let isParentAnchor = id == parentInputSourceID && !isMode
+            let isMode = id == activeInputSourceID || inputModeID(source) == activeInputSourceID
+            let isParentAnchor = !usesSingleInputSource && id == parentInputSourceID && !isMode
             if isParentAnchor {
                 parentAnchorCount += 1
             }
@@ -168,6 +170,7 @@ private enum TextInputSourceActivation {
         )
         print("enable.sources=\(sources.count)")
         print("enable.uniqueSources=\(activationSources.count)")
+        print("enable.singleSource=\(usesSingleInputSource)")
         print("enable.parentAnchors=\(parentAnchorCount)")
         print("enable.parent.ready=\(parentAnchorReady)")
         print("enable.activeModes=\(modeCount)")
@@ -311,24 +314,24 @@ private enum TextInputSourceActivation {
 
     @discardableResult
     private static func selectVisibleMode() -> Bool {
-        guard let mode = bestSelectionTarget(inputSources(id: modeInputSourceID)) else {
-            inputMethodLogger.warning("Cannot select KnowType because mode source is missing")
-            fputs("select.error=mode-missing\n", stderr)
+        guard let source = bestSelectionTarget(inputSources(id: activeInputSourceID)) else {
+            inputMethodLogger.warning("Cannot select KnowType because input source is missing")
+            fputs("select.error=input-source-missing\n", stderr)
             return false
         }
-        guard boolProperty(mode, kTISPropertyInputSourceIsEnabled),
-              boolProperty(mode, kTISPropertyInputSourceIsSelectCapable) else {
-            inputMethodLogger.warning("Cannot select KnowType because mode is not enabled/select-capable")
-            fputs("select.error=mode-not-selectable\n", stderr)
+        guard boolProperty(source, kTISPropertyInputSourceIsEnabled),
+              boolProperty(source, kTISPropertyInputSourceIsSelectCapable) else {
+            inputMethodLogger.warning("Cannot select KnowType because input source is not enabled/select-capable")
+            fputs("select.error=input-source-not-selectable\n", stderr)
             return false
         }
 
-        let status = TISSelectInputSource(mode)
+        let status = TISSelectInputSource(source)
         if status == noErr {
             postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
         }
-        let currentID = waitForCurrentInputSourceID(modeInputSourceID, timeout: 2.0) ?? "<unknown>"
-        inputMethodLogger.notice("Selected KnowType mode from app context status=\(status, privacy: .public) current=\(currentID, privacy: .public)")
+        let currentID = waitForCurrentInputSourceID(activeInputSourceID, timeout: 2.0) ?? "<unknown>"
+        inputMethodLogger.notice("Selected KnowType input source from app context status=\(status, privacy: .public) current=\(currentID, privacy: .public)")
         print("select.status=\(status)")
         print("select.current=\(currentID)")
         return status == noErr
@@ -528,8 +531,8 @@ private enum TextInputSourceActivation {
         let unregistered = unregisterStaleLaunchServices(installedBundlePath: installedBundlePath)
         print("purge.legacy.disabled=\(disabled)")
         print("purge.legacy.preference.writes=skipped")
-        print("purge.active.inputsource.id=\(modeInputSourceID)")
-        print("purge.active.mode.id=\(modeInputSourceID)")
+        print("purge.active.inputsource.id=\(activeInputSourceID)")
+        print("purge.active.mode.id=\(activeInputSourceID)")
         print("purge.launchservices.unregistered=\(unregistered)")
     }
 }

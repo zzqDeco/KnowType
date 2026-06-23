@@ -36,12 +36,12 @@ private func usage() -> Never {
         Preference inspection is read-only; repair-preferences is an explicit local development cleanup
         for stale selected/history parent rows or .Mode rows in protected input-source preferences.
         Use --add-active only for local cache repair; it writes the required
-        non-selectable parent enabled anchor plus the visible .Hans mode to
-        enabled preferences, while history repair keeps .Hans available and
-        selected repair is reserved for explicit verified selection. --remove-parent-anchor
-        is an explicit uninstall cleanup mode for removing enabled parent anchors after the
-        bundle is gone. --legacy-parent-anchor is accepted as a deprecated compatibility no-op
-        because the parent anchor is now the default enabled-state shape.
+        active single input source to enabled preferences, while history repair
+        keeps KnowType available and selected repair is reserved for explicit
+        verified selection. .Hans and .Mode are treated as legacy cleanup
+        input modes. --remove-parent-anchor is an explicit uninstall cleanup
+        mode for removing enabled single-source rows after the bundle is gone.
+        --legacy-parent-anchor is accepted as a deprecated compatibility no-op.
 
         """,
         stderr
@@ -262,7 +262,6 @@ private func isStalePreferenceEntry(
     removeParent: Bool
 ) -> Bool {
     if removeParent,
-       modeID != bundleID,
        entry["Bundle ID"] as? String == bundleID,
        entry["InputSourceKind"] as? String == "Keyboard Input Method" {
         return true
@@ -635,10 +634,11 @@ private func currentInputSourceID() -> String? {
 private func printStatus(parentID: String, modeID: String, legacyModeIDs: [String]) {
     let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
     let currentID = stringProperty(current, kTISPropertyInputSourceID) ?? ""
+    let usesSingleInputSource = modeID == parentID
     let rawParentSources = inputSources(id: parentID)
-    let rawModeSources = inputSources(id: modeID)
+    let rawModeSources = usesSingleInputSource ? rawParentSources : inputSources(id: modeID)
     let parentSources = deduplicatedInputSources(rawParentSources)
-    let modeSources = deduplicatedInputSources(rawModeSources)
+    let modeSources = usesSingleInputSource ? parentSources : deduplicatedInputSources(rawModeSources)
     let parent = parentSources.first
     let mode = modeSources.first
     let activeModeCount = modeSources.count
@@ -650,6 +650,16 @@ private func printStatus(parentID: String, modeID: String, legacyModeIDs: [Strin
     let legacyTotal = legacyCounts.reduce(0) { $0 + $1.1 }
 
     print("current.id=\(currentID)")
+    print("inputSource.found=\(mode != nil)")
+    print("inputSource.enabled=\(boolProperty(mode, kTISPropertyInputSourceIsEnabled))")
+    print("inputSource.selectCapable=\(boolProperty(mode, kTISPropertyInputSourceIsSelectCapable))")
+    print("inputSource.selected=\(currentID == modeID)")
+    print("inputSource.type=\(stringProperty(mode, kTISPropertyInputSourceType) ?? "")")
+    print("inputSource.name=\(stringProperty(mode, kTISPropertyLocalizedName) ?? "")")
+    print("inputSource.id=\(modeID)")
+    print("inputSource.raw.count=\(rawModeSources.count)")
+    print("inputSource.count=\(activeModeCount)")
+    print("inputSource.singleSource=\(usesSingleInputSource)")
     print("parent.found=\(parent != nil)")
     print("parent.enabled=\(boolProperty(parent, kTISPropertyInputSourceIsEnabled))")
     print("parent.selectCapable=\(boolProperty(parent, kTISPropertyInputSourceIsSelectCapable))")
@@ -805,11 +815,11 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
     }
 
     guard let parent = waitForInputSource(id: parentID, timeout: 5.0) else {
-        fputs("KnowType non-selectable parent record was not found after bootstrap.\n", stderr)
+        fputs("KnowType input source was not found after bootstrap.\n", stderr)
         exit(ExitCode.failure.rawValue)
     }
     guard let mode = waitForInputSource(id: modeID, timeout: 5.0) else {
-        fputs("KnowType active input mode was not found after bootstrap.\n", stderr)
+        fputs("KnowType active input source was not found after bootstrap.\n", stderr)
         exit(ExitCode.failure.rawValue)
     }
 
@@ -826,6 +836,7 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
     print("bootstrap.path=\(path)")
     print("bootstrap.registered=\(needsRegistration)")
     print("bootstrap.preference.writes=skipped")
+    print("bootstrap.singleSource=\(modeID == parentID)")
     print("bootstrap.parent.enabled=\(parentEnabled)")
     print("bootstrap.mode.enabled=\(modeEnabled)")
     print("bootstrap.selected=\(select)")
@@ -978,14 +989,14 @@ private func register(path: String, parentID: String, modeID: String, select: Bo
 @discardableResult
 private func selectMode(parentID: String, modeID: String, requireSelected: Bool, exitOnFailure: Bool = true) -> OSStatus {
     guard let parent = inputSource(id: parentID) else {
-        fputs("KnowType parent input method was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
+        fputs("KnowType input source was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
         if exitOnFailure {
             exit(ExitCode.failure.rawValue)
         }
         return OSStatus(paramErr)
     }
     guard let mode = inputSource(id: modeID) else {
-        fputs("KnowType input mode was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
+        fputs("KnowType active input source was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
         if exitOnFailure {
             exit(ExitCode.failure.rawValue)
         }
@@ -1002,7 +1013,7 @@ private func selectMode(parentID: String, modeID: String, requireSelected: Bool,
         print("preference.writes=skipped")
         postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
     } else {
-        fputs("TISSelectInputSource(mode) returned \(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\n", stderr)
+        fputs("TISSelectInputSource returned \(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\n", stderr)
         print("select.status=\(selectStatus)")
         if exitOnFailure {
             exit(Int32(selectStatus))
