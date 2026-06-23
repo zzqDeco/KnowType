@@ -13,7 +13,9 @@ The helper uses the current shared input-source IDs from
 Install preflight must also reject bundles that only declare the parent input
 method and no menu-visible input mode, so `--from-bundle`, `--from-release-zip`,
 and DMG payload installs cannot replace the current app with a non-switchable
-parent-only build.
+parent-only build. The visible mode must also match the current `.Hans` input
+mode id; older component-mode bundles that declare another visible mode are
+rejected before install/repair writes `.Hans` preferences.
 
 The safe-removal helper is intentionally strict: if a path resolves outside the
 local Input Methods directory, or does not look like a KnowType input-method

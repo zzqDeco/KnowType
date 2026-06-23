@@ -552,6 +552,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(installScript.contains(#""$SCRIPTS_DIR/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH""#))
         XCTAssertTrue(installHelper.contains("knowtype_bundle_visible_input_mode_id"))
         XCTAssertTrue(installHelper.contains("input-method bundle does not declare a menu-visible input mode"))
+        XCTAssertTrue(installHelper.contains(#"[[ "$visible_mode_id" != "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" ]]"#))
+        XCTAssertTrue(installHelper.contains("input-method bundle declares unsupported menu-visible input mode"))
         XCTAssertTrue(installScript.contains(#"data.get("failures")"#))
         XCTAssertTrue(installScript.contains("Postflight uses the JSON install snapshot only"))
         XCTAssertTrue(installScript.contains("Stale compatibility PreferencePane that would be removed"))

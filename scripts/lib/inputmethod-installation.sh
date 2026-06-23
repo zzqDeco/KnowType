@@ -574,6 +574,10 @@ knowtype_validate_inputmethod_bundle_for_install() {
     echo "error: input-method bundle does not declare a menu-visible input mode: $bundle_path" >&2
     return 1
   fi
+  if [[ "$visible_mode_id" != "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" ]]; then
+    echo "error: input-method bundle declares unsupported menu-visible input mode '$visible_mode_id' (expected '$KNOWTYPE_ACTIVE_INPUT_MODE_ID'): $bundle_path" >&2
+    return 1
+  fi
   if [[ ! -x "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" ]]; then
     echo "error: input-method executable is missing or not executable in: $bundle_path" >&2
     return 1
