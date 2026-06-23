@@ -73,7 +73,8 @@
 
 - First real user input may initialize Rime and learning data as normal product
   behavior.
-- This slice does not change input source IDs, `.Hans` mode semantics,
-  candidate UI, provider prompts, Rime dictionaries, or release packaging.
-- `TISSelectInputSource(mode) == -50` remains a separate helper-selection
-  follow-up if it still appears after this fix.
+- This slice did not change candidate UI, provider prompts, Rime dictionaries,
+  or release packaging. Later input-source work may change the registration
+  model without changing the cold-start user-data boundary.
+- Helper-selection failures remain a separate follow-up if they still appear
+  after input-source registration fixes.

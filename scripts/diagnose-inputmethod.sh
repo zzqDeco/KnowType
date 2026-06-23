@@ -30,7 +30,7 @@ Options:
   --path              Inspect a specific KnowType.app bundle path.
   --json              Print a stable machine-readable install snapshot and exit.
   --legacy-parent-anchor
-                      Deprecated compatibility flag. Parent enabled anchors are normal.
+                      Deprecated compatibility flag. The active input source is now single-source.
   -h, --help          Show this help.
 EOF
 }
@@ -571,6 +571,10 @@ SETTINGS_UI_RESOURCE_BUNDLE="$BUNDLE_PATH/Contents/Resources/KnowType_KnowTypeSe
 ICON_RESOURCE="$BUNDLE_PATH/Contents/Resources/KnowTypeInputMethodIcon.tiff"
 PARENT_ID="$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
 MODE_ID="$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+SINGLE_INPUT_SOURCE=0
+if [[ "$MODE_ID" == "$PARENT_ID" ]]; then
+  SINGLE_INPUT_SOURCE=1
+fi
 
 if [[ -f "$INFO_PLIST" ]]; then
   ok "Info.plist exists"
@@ -586,13 +590,17 @@ if [[ -f "$INFO_PLIST" ]]; then
   if [[ -n "$(plist_value "TISIconIsTemplate" "$INFO_PLIST")" ]]; then
     warn "Info.plist contains private/undocumented TISIconIsTemplate; rebuild from current sources"
   fi
-  if [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
-    ok "Info.plist declares the single visible component input mode"
+  if (( SINGLE_INPUT_SOURCE == 1 )); then
+    if [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
+      fail "Info.plist still declares ComponentInputModeDict; rebuild with the single input source model"
+    else
+      ok "Info.plist uses the single non-mode-enabled KnowType input source"
+    fi
+  elif [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
+    ok "Info.plist declares the visible component input mode"
     expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:TISInputSourceID" "$MODE_ID" "$INFO_PLIST"
     expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:TISIntendedLanguage" "zh-Hans" "$INFO_PLIST"
     expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeIsVisibleKey" "true" "$INFO_PLIST"
-    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeKeyEquivalentKey" "K" "$INFO_PLIST"
-    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeKeyEquivalentModifiersKey" "4608" "$INFO_PLIST"
     expect_plist_buddy_value ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$MODE_ID" "$INFO_PLIST"
   else
     fail "Info.plist is missing ComponentInputModeDict; this macOS System Settings build does not expose parent-only third-party IMK apps as addable input sources"
@@ -831,44 +839,109 @@ else
           warn "current input source id is unavailable"
         fi
         ;;
+      inputSource.found)
+        [[ "$value" == "true" ]] && ok "KnowType input source is registered" || fail "KnowType input source is not registered"
+        ;;
+      inputSource.enabled)
+        [[ "$value" == "true" ]] && ok "KnowType input source is enabled" || fail "KnowType input source is not enabled"
+        ;;
+      inputSource.selectCapable)
+        [[ "$value" == "true" ]] && ok "KnowType input source is select-capable" || fail "KnowType input source is not select-capable"
+        ;;
+      inputSource.selected)
+        if [[ "$value" == "true" ]]; then
+          ok "KnowType input source is selected in this diagnostic context"
+        elif (( REQUIRE_SELECTED == 1 )); then
+          fail "KnowType input source is not selected in this diagnostic context; select KnowType from the target app's input menu and type a real probe"
+        else
+          warn "KnowType input source is not selected in this diagnostic context"
+        fi
+        ;;
+      inputSource.type)
+        [[ -n "$value" ]] && info "KnowType input source TIS type: $value"
+        ;;
+      inputSource.name)
+        mode_name="$value"
+        if [[ -z "$value" ]]; then
+          warn "KnowType input source localized name is unavailable"
+        elif [[ "$value" == "$MODE_ID" ]]; then
+          warn "KnowType input source localized name is unresolved; reinstall after packaging InfoPlist.strings"
+        else
+          ok "KnowType input source localized name = $value"
+        fi
+        ;;
+      inputSource.raw.count)
+        if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
+          warn "TIS raw list reports $value KnowType input source records before de-duplication; logout/reboot may still clear stale session cache"
+        else
+          ok "TIS raw list reports one KnowType input source record"
+        fi
+        ;;
+      inputSource.count)
+        if [[ "$value" == "1" ]]; then
+          ok "TIS reports exactly one active KnowType input source registration"
+        else
+          fail "TIS reports $value active KnowType input source registrations; run ./scripts/repair-inputmethod-selection.sh"
+        fi
+        ;;
+      inputSource.singleSource)
+        [[ "$value" == "true" ]] && info "KnowType is using the single input source model"
+        ;;
       parent.found)
-        [[ "$value" == "true" ]] && ok "KnowType non-selectable parent record is registered" || fail "KnowType non-selectable parent record is not registered"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType non-selectable parent record is registered" || fail "KnowType non-selectable parent record is not registered"
+        fi
         ;;
       parent.enabled)
-        if [[ "$value" == "true" ]]; then
-          ok "KnowType non-selectable parent anchor is enabled by TIS"
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          :
+        elif [[ "$value" == "true" ]]; then
+          ok "KnowType component-mode parent is enabled by TIS"
         elif (( STRICT == 1 )); then
-          fail "KnowType non-selectable parent anchor is not enabled; TIS may reject selecting the visible mode with paramErr/-50"
+          fail "KnowType component-mode parent is not enabled; TIS may reject selecting the visible mode with paramErr/-50"
         else
-          warn "KnowType non-selectable parent anchor is not enabled; run ./scripts/repair-inputmethod-selection.sh if KnowType is missing from the input menu"
+          warn "KnowType component-mode parent is not enabled; run ./scripts/repair-inputmethod-selection.sh if KnowType is missing from the input menu"
         fi
         ;;
       parent.selectCapable)
         parent_select_capable="$value"
-        if [[ "$value" != "true" ]]; then
+        if (( SINGLE_INPUT_SOURCE == 0 )) && [[ "$value" != "true" ]]; then
           info "KnowType parent record is not directly selectable; macOS should select the visible input mode instead"
         fi
         ;;
       parent.type)
-        [[ -n "$value" ]] && info "KnowType parent TIS type: $value"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ -n "$value" ]] && info "KnowType parent TIS type: $value"
+        fi
         ;;
       parent.name)
         parent_name="$value"
-        [[ -n "$value" ]] && info "KnowType parent localized name = $value"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ -n "$value" ]] && info "KnowType parent localized name = $value"
+        fi
         ;;
       mode.found)
-        [[ "$value" == "true" ]] && ok "KnowType input mode is registered" || fail "KnowType input mode is not registered"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType input mode is registered" || fail "KnowType input mode is not registered"
+        fi
         ;;
       mode.enabled)
-        [[ "$value" == "true" ]] && ok "KnowType input mode is enabled" || fail "KnowType input mode is not enabled"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType input mode is enabled" || fail "KnowType input mode is not enabled"
+        fi
         ;;
       mode.selectCapable)
-        [[ "$value" == "true" ]] && ok "KnowType input mode is select-capable" || fail "KnowType input mode is not select-capable"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType input mode is select-capable" || fail "KnowType input mode is not select-capable"
+        fi
         ;;
       mode.type)
         [[ -n "$value" ]] && info "KnowType mode TIS type: $value"
         ;;
       mode.selected)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
         if [[ "$value" == "true" ]]; then
           ok "KnowType input mode is selected in this diagnostic context"
         elif (( REQUIRE_SELECTED == 1 )); then
@@ -878,6 +951,9 @@ else
         fi
         ;;
       mode.name)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
         mode_name="$value"
         if [[ -z "$value" ]]; then
           warn "KnowType input mode localized name is unavailable"
@@ -941,7 +1017,7 @@ else
         if [[ "$value" == "true" ]]; then
           ok "HIToolbox enabled preferences include KnowType"
         elif (( STRICT == 1 )); then
-          fail "HIToolbox enabled preferences do not include active KnowType mode; run ./scripts/repair-inputmethod-selection.sh"
+          fail "HIToolbox enabled preferences do not include active KnowType input source; run ./scripts/repair-inputmethod-selection.sh"
         else
           warn "HIToolbox enabled preferences do not include KnowType; relying on TIS enabled state and third-party input-source preferences"
         fi
@@ -958,19 +1034,21 @@ else
         fi
         ;;
       preference.enabled.parent.knowtype)
-        if [[ "$value" == "true" ]]; then
-          ok "HIToolbox enabled preferences include the required KnowType parent anchor"
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          :
+        elif [[ "$value" == "true" ]]; then
+          ok "HIToolbox enabled preferences include the component-mode KnowType parent"
         elif (( STRICT == 1 )); then
-          fail "HIToolbox enabled preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
+          fail "HIToolbox enabled preferences are missing the component-mode KnowType parent; run ./scripts/repair-inputmethod-selection.sh"
         else
-          warn "HIToolbox enabled preferences are missing the KnowType parent anchor"
+          warn "HIToolbox enabled preferences are missing the component-mode KnowType parent"
         fi
         ;;
       preference.thirdparty.enabled.knowtype)
         if [[ "$value" == "true" ]]; then
           ok "Third-party input source preferences include KnowType"
         elif (( STRICT == 1 )); then
-          fail "Third-party input source preferences do not include active KnowType mode; enable KnowType in System Settings > Keyboard > Input Sources"
+          fail "Third-party input source preferences do not include active KnowType input source; enable KnowType in System Settings > Keyboard > Input Sources"
         else
           warn "Third-party input source preferences do not include KnowType; enable KnowType in System Settings > Keyboard > Input Sources"
         fi
@@ -988,12 +1066,14 @@ else
         fi
         ;;
       preference.thirdparty.enabled.parent.knowtype)
-        if [[ "$value" == "true" ]]; then
-          ok "Third-party input source preferences include the required KnowType parent anchor"
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          :
+        elif [[ "$value" == "true" ]]; then
+          ok "Third-party input source preferences include the component-mode KnowType parent"
         elif (( STRICT == 1 )); then
-          fail "Third-party input source preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
+          fail "Third-party input source preferences are missing the component-mode KnowType parent; run ./scripts/repair-inputmethod-selection.sh"
         else
-          warn "Third-party input source preferences are missing the KnowType parent anchor"
+          warn "Third-party input source preferences are missing the component-mode KnowType parent"
         fi
         ;;
       preference.history.knowtype)
@@ -1004,6 +1084,9 @@ else
         fi
         ;;
       preference.history.parent.knowtype)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
         if [[ "$value" == "true" ]]; then
           if (( STRICT == 1 )); then
             fail "HIToolbox input-source history still contains the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"

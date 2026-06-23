@@ -110,10 +110,10 @@ Build and install the local development bundle:
 ```
 
 The local installer refreshes the traditional InputMethodKit app registration,
-purges stale `.Mode` development state, restores the required non-selectable
-parent enabled anchor plus the visible `.Hans` mode through the dedicated
-input-source helper, and repairs history without moving KnowType ahead of the
-retained current source. It does not rewrite selected preferences during install.
+purges stale `.Hans` / `.Mode` development state, registers and enables the
+single `KnowType` input source through the dedicated input-source helper, and
+repairs history without moving KnowType ahead of the retained current source. It
+does not rewrite selected preferences during install.
 It does not launch the installed input-method host, does not auto-select
 KnowType, and does not initialize Rime user data during install.
 If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
@@ -123,13 +123,12 @@ request, or explicit maintenance.
 If an existing `KnowTypeInputMethodApp` process is running, the installer stops
 before replacing files instead of killing it, because host shutdown can flush
 Rime user data.
-KnowType follows the mature component mode shape used by Squirrel, McBopomofo,
-and macSKK: the parent id is
-`com.knowtype.inputmethod.KnowType`, while the only user-selectable input source
-is `com.knowtype.inputmethod.KnowType.Hans`. macOS may expose the parent record
-in TIS diagnostics and enabled preferences; that parent anchor is normal and
-required for mode selection, but it should not appear as a second
-user-selectable `KnowType` menu item.
+KnowType uses a single non-mode-enabled input source because it currently has
+only one real user mode. The only user-selectable source id is
+`com.knowtype.inputmethod.KnowType`; old
+`com.knowtype.inputmethod.KnowType.Hans` and `.Mode` records are treated as
+legacy cache entries and cleaned by the repair scripts. System Settings and the
+menu bar should show exactly one user-selectable `KnowType` item.
 
 `scripts/install-inputmethod.sh` defaults to a release build so local typing
 tests exercise the optimized hot path. Rime runtime files are packaged inside

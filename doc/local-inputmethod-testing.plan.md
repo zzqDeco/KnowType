@@ -91,17 +91,16 @@ the local repair script before falling back to logout:
 ./scripts/repair-inputmethod-selection.sh
 ```
 
-The script uses the input-source helper to disable visible legacy `.Mode` TIS
+The script uses the input-source helper to disable legacy `.Hans` / `.Mode` TIS
 rows and unregister stale LaunchServices records for older KnowType build paths,
-rewrites only KnowType rows in protected input-source preferences so enabled
-lists contain the parent anchor plus `.Hans`, history keeps `.Hans` available,
-and selected preferences are rewritten to `.Hans` only after helper-local
-selection succeeds. It restarts Text Input menu agents and requests `.Hans`
-selection through TIS without launching the input-method host. If
-diagnostics still show stale `.Mode` rows, non-selectable parent rows in
-selected/history, or missing parent/`.Hans` enabled rows, remove and re-add
-KnowType in System Settings. If selection still falls back after repair, log out
-and back in to clear
+rewrites only KnowType rows in protected input-source preferences so enabled and
+history lists contain the single active `com.knowtype.inputmethod.KnowType`
+source, and selected preferences are rewritten only after helper-local selection
+succeeds. It restarts Text Input menu agents and requests KnowType selection
+through TIS without launching the input-method host. If diagnostics still show
+legacy `.Hans` / `.Mode` rows or missing active-source enabled rows, remove and
+re-add KnowType in System Settings. If selection still falls back after repair,
+log out and back in to clear
 session-level Text Input Source state before repeating the install and
 selection checks.
 
