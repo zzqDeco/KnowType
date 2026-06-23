@@ -18,7 +18,7 @@ This plan covers input-source declaration, TIS registration/enable/selection too
 - `InfoPlist.strings` gives the parent a container name and gives `.Hans` the user-visible `KnowType` / `知键` name.
 - `KnowTypeInputSourceIDs.activeMode` is `.Hans`; `.Mode` is the legacy cleanup id. Parent-only selected/history rows from the single-source model are stale and must be migrated to `.Hans`.
 - Default install registers and enables parent plus `.Hans` from the installed app CLI context, then uses helper preference repair without rewriting selected preferences.
-- Install preflight rejects parent-only bundles and older component-mode bundles whose menu-visible input mode is missing or is not the current `.Hans` id, including `--from-bundle`, `--from-release-zip`, and DMG payload sources.
+- Install preflight rejects parent-only bundles and older component-mode bundles whose menu-visible input mode list is missing, has more than one entry, or is not exactly the current `.Hans` id, including `--from-bundle`, `--from-release-zip`, and DMG payload sources.
 - Explicit repair cleans stale LaunchServices records, disables `.Mode`, restores enabled parent plus `.Hans`, refreshes menu agents, and rewrites selected preferences only after installed app selection reports `.Hans` as the current source, not merely after a zero select status.
 - Rollback derives the active mode from the restored bundle before helper preference repair. Parent-only backups from the single-source experiment are rejected instead of being repaired with the current `.Hans` id.
 

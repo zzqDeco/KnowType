@@ -17,6 +17,9 @@ read-only diagnostic.
 - Use after activating the target app when selection should apply there.
 - `--require-selected` makes the follow-up diagnostic's selected-source check a
   hard gate.
+- Without `--require-selected`, the installed app selection request is
+  best-effort: a `TISSelectInputSource` success continues to diagnostics even
+  when that helper-local context still reports another current source.
 - A successful selection preflight still requires a manual typing probe.
 
 ## Tests

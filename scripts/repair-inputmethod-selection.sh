@@ -89,7 +89,19 @@ INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
   --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 if ! "$BUNDLE_EXECUTABLE" --knowtype-register-input-source --knowtype-enable-input-source; then
-  echo "warning: installed app input-source register/enable failed; continuing with helper repair and diagnostics" >&2
+  echo "warning: installed app input-source register/enable failed; falling back to helper bootstrap" >&2
+  bootstrap_args=(
+    bootstrap
+    --path "$BUNDLE_PATH"
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+  )
+  for legacy_mode_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
+    bootstrap_args+=(--legacy-mode-id "$legacy_mode_id")
+  done
+  if ! "$INPUTSOURCE_TOOL" "${bootstrap_args[@]}"; then
+    echo "warning: input-source helper bootstrap failed; continuing with preference repair and diagnostics" >&2
+  fi
 fi
 "$INPUTSOURCE_TOOL" repair-preferences \
   --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \

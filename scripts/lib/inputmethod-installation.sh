@@ -568,10 +568,20 @@ knowtype_validate_inputmethod_bundle_for_install() {
     echo "error: bundle does not match KnowType input-method identity: $bundle_path" >&2
     return 1
   fi
+  local visible_mode_ids
+  if ! visible_mode_ids="$(knowtype_bundle_visible_input_mode_ids "$bundle_path")"; then
+    visible_mode_ids=""
+  fi
+  local visible_mode_count
+  visible_mode_count="$(printf '%s\n' "$visible_mode_ids" | awk 'NF { count++ } END { print count + 0 }')"
   local visible_mode_id
-  visible_mode_id="$(knowtype_bundle_visible_input_mode_id "$bundle_path" || true)"
+  visible_mode_id="$(printf '%s\n' "$visible_mode_ids" | sed -n '1p')"
   if [[ -z "$visible_mode_id" || "$visible_mode_id" == "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
     echo "error: input-method bundle does not declare a menu-visible input mode: $bundle_path" >&2
+    return 1
+  fi
+  if [[ "$visible_mode_count" != "1" ]]; then
+    echo "error: input-method bundle declares $visible_mode_count menu-visible input modes (expected exactly one '$KNOWTYPE_ACTIVE_INPUT_MODE_ID'): $bundle_path" >&2
     return 1
   fi
   if [[ "$visible_mode_id" != "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" ]]; then
@@ -605,20 +615,32 @@ knowtype_plistbuddy_value() {
   fi
 }
 
-knowtype_bundle_visible_input_mode_id() {
+knowtype_bundle_visible_input_mode_ids() {
   local bundle_path="$1"
   local info_plist="$bundle_path/Contents/Info.plist"
   [[ -f "$info_plist" ]] || return 1
 
+  local index=0
+  local found=0
   local mode_id
-  mode_id="$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$info_plist")"
-  if [[ -z "$mode_id" ]]; then
-    return 1
-  fi
-  if [[ "$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsInputModeListKey:$mode_id:TISInputSourceID" "$info_plist")" != "$mode_id" ]]; then
-    return 1
-  fi
-  printf '%s' "$mode_id"
+  while :; do
+    mode_id="$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:$index" "$info_plist")"
+    if [[ -z "$mode_id" ]]; then
+      break
+    fi
+    if [[ "$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsInputModeListKey:$mode_id:TISInputSourceID" "$info_plist")" != "$mode_id" ]]; then
+      return 1
+    fi
+    printf '%s\n' "$mode_id"
+    found=1
+    index=$((index + 1))
+  done
+  [[ "$found" == "1" ]]
+}
+
+knowtype_bundle_visible_input_mode_id() {
+  local bundle_path="$1"
+  knowtype_bundle_visible_input_mode_ids "$bundle_path" | sed -n '1p'
 }
 
 knowtype_bundle_matches_inputmethod_identity() {
