@@ -23,7 +23,7 @@ private func usage() -> Never {
           knowtype-inputsource-tool disable [--bundle-id ID]
           knowtype-inputsource-tool inspect-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool dedupe-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
-          knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--include-selected] [--add-active] [--legacy-parent-anchor]
+          knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--include-selected] [--add-active] [--remove-parent-anchor] [--legacy-parent-anchor]
           knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID] [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool register --path PATH [--parent-id ID] [--mode-id ID] [--select]
           knowtype-inputsource-tool bootstrap --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID] [--select]
@@ -38,9 +38,10 @@ private func usage() -> Never {
         Use --add-active only for local cache repair; it writes the required
         non-selectable parent enabled anchor plus the visible .Hans mode to
         enabled preferences, while history repair keeps .Hans available and
-        selected repair is reserved for explicit successful selection. --legacy-parent-anchor
-        is accepted as a deprecated compatibility no-op because the parent anchor is now the
-        default enabled-state shape.
+        selected repair is reserved for explicit verified selection. --remove-parent-anchor
+        is an explicit uninstall cleanup mode for removing enabled parent anchors after the
+        bundle is gone. --legacy-parent-anchor is accepted as a deprecated compatibility no-op
+        because the parent anchor is now the default enabled-state shape.
 
         """,
         stderr
@@ -546,9 +547,11 @@ private func repairPreferences(
     includeHistory: Bool,
     includeSelected: Bool,
     addActive: Bool,
+    removeParentAnchor: Bool,
     addLegacyParentAnchor: Bool
 ) {
     let addParentAnchor = addActive && modeID != bundleID
+    let removeEnabledParentAnchor = removeParentAnchor && !addActive
     var results = [
         repairPreferenceArray(
             domain: "com.apple.HIToolbox",
@@ -556,7 +559,7 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: false,
+            removeParent: removeEnabledParentAnchor,
             addParent: addParentAnchor,
             addActive: addActive
         ),
@@ -566,7 +569,7 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: false,
+            removeParent: removeEnabledParentAnchor,
             addParent: addParentAnchor,
             addActive: addActive
         )
@@ -616,6 +619,7 @@ private func repairPreferences(
     print("preference.repair.include.selected=\(includeSelected)")
     print("preference.repair.add.active=\(addActive)")
     print("preference.repair.add.parent.anchor=\(addParentAnchor)")
+    print("preference.repair.remove.parent.anchor=\(removeEnabledParentAnchor)")
     print("preference.repair.add.legacy.parent.anchor=false")
     print("preference.repair.legacy.parent.anchor.option=\(addLegacyParentAnchor)")
     postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
@@ -816,7 +820,7 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
 
     var selectStatus = noErr
     if select {
-        selectStatus = selectMode(parentID: parentID, modeID: modeID, requireSelected: false, exitOnFailure: false)
+        selectStatus = selectMode(parentID: parentID, modeID: modeID, requireSelected: true, exitOnFailure: false)
     }
 
     print("bootstrap.path=\(path)")
@@ -1021,7 +1025,10 @@ private func selectMode(parentID: String, modeID: String, requireSelected: Bool,
         let observed = currentID ?? "<unavailable>"
         fputs("Warning: this preflight TIS context is \(observed), not \(modeID). Activate the target text app, rerun this helper, then type a real probe in that app.\n", stderr)
         if requireSelected {
-            exit(ExitCode.failure.rawValue)
+            if exitOnFailure {
+                exit(ExitCode.failure.rawValue)
+            }
+            return OSStatus(paramErr)
         }
     }
 
@@ -1062,6 +1069,7 @@ case "repair-preferences":
     let includeHistory = arguments.flag("--include-history")
     let includeSelected = arguments.flag("--include-selected")
     let addActive = arguments.flag("--add-active")
+    let removeParentAnchor = arguments.flag("--remove-parent-anchor")
     let addLegacyParentAnchor = arguments.flag("--legacy-parent-anchor")
     arguments.ensureConsumed()
     repairPreferences(
@@ -1071,6 +1079,7 @@ case "repair-preferences":
         includeHistory: includeHistory,
         includeSelected: includeSelected,
         addActive: addActive,
+        removeParentAnchor: removeParentAnchor,
         addLegacyParentAnchor: addLegacyParentAnchor
     )
 case "switch-away":

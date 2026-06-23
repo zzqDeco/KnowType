@@ -17,12 +17,12 @@ development input method bundle.
   through `knowtype-inputsource-tool repair-preferences`: enabled preferences
   keep the non-selectable parent anchor plus the single user-selectable `.Hans`
   mode, while HIToolbox history preferences keep `.Hans` behind the current
-  retained source until selection succeeds. After helper-local `bootstrap
-  --select` succeeds, selected repair places `.Hans` first so the repaired
-  selected array actually points at KnowType, then posts the selected-source
-  notification so direct helper calls refresh TIS/menu caches. If selection
-  fails, the script skips selected repair instead of claiming KnowType is
-  selected.
+  retained source until selection is verified. After helper-local `bootstrap
+  --select` verifies the current source changed to `.Hans`, selected repair
+  places `.Hans` first so the repaired selected array actually points at
+  KnowType, then posts the selected-source notification so direct helper calls
+  refresh TIS/menu caches. If selection fails or cannot be verified, the script
+  skips selected repair instead of claiming KnowType is selected.
   Legacy `.Mode` rows and stale selected/history parent rows are removed from
   user preference targets. It also unregisters stale bundle records, restarts
   menu agents, and uses helper `purge-legacy` plus `bootstrap --select`; it does

@@ -23,8 +23,8 @@ This plan covers registration, enablement, preference repair, diagnostics, scrip
 - Parent localized names stay container-like: `KnowType Input Method` / `知键输入法容器`.
 - `knowtype-inputsource-tool bootstrap` registers the installed bundle when needed, waits for parent and `.Hans`, then enables both through TIS.
 - `knowtype-inputsource-tool select` enables parent and `.Hans` before calling `TISSelectInputSource(.Hans)`.
-- `repair-preferences --add-active` writes parent plus `.Hans` to enabled lists, writes only `.Hans` to history when `--include-history` is present, and removes legacy `.Mode`. `--include-selected` is only used by explicit selection repair so default install/rollback do not rewrite selected preferences.
-- `scripts/repair-inputmethod-selection.sh` continues refresh and diagnostics even when helper-local selection returns `paramErr/-50`.
+- `repair-preferences --add-active` writes parent plus `.Hans` to enabled lists, writes only `.Hans` to history when `--include-history` is present, and removes legacy `.Mode`. `--include-selected` is only used by explicit selection repair so default install/rollback do not rewrite selected preferences; uninstall cleanup can pass `--remove-parent-anchor` after bundle removal to clear stale enabled parent anchors.
+- `scripts/repair-inputmethod-selection.sh` continues refresh and diagnostics even when helper-local selection returns `paramErr/-50` or cannot verify that `.Hans` became current.
 - Diagnostics are healthy when parent is enabled and non-selectable, `.Hans` is enabled and select-capable, and the visible KnowType mode count is one.
 - Parent in enabled preferences is normal; parent in selected/history remains stale.
 
