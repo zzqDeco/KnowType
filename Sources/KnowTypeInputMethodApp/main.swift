@@ -331,7 +331,7 @@ private enum TextInputSourceActivation {
         inputMethodLogger.notice("Selected KnowType input source from app context status=\(status, privacy: .public) current=\(currentID, privacy: .public)")
         print("select.status=\(status)")
         print("select.current=\(currentID)")
-        return status == noErr
+        return status == noErr && currentID == activeInputSourceID
     }
 
     private static func bestSelectionTarget(_ sources: [TISInputSource]) -> TISInputSource? {

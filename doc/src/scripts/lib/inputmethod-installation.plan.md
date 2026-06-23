@@ -30,6 +30,12 @@ manifests, and a restorable `KnowType.app` as rollback candidates. Unrelated
 folders under the backup root are ignored by `--latest`, retention pruning, and
 diagnostic backup summaries.
 
+Rollback derives the active input mode from the restored bundle's
+`ComponentInputModeDict` before repairing TIS preferences. Backups that only
+declare the parent input method and no menu-visible input mode are rejected
+before restore/repair, because they cannot satisfy the current menu-switchable
+IMK model.
+
 Related scripts:
 
 - `scripts/install-inputmethod.sh`

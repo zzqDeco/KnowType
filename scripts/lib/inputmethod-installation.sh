@@ -595,6 +595,22 @@ knowtype_plistbuddy_value() {
   fi
 }
 
+knowtype_bundle_visible_input_mode_id() {
+  local bundle_path="$1"
+  local info_plist="$bundle_path/Contents/Info.plist"
+  [[ -f "$info_plist" ]] || return 1
+
+  local mode_id
+  mode_id="$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$info_plist")"
+  if [[ -z "$mode_id" ]]; then
+    return 1
+  fi
+  if [[ "$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsInputModeListKey:$mode_id:TISInputSourceID" "$info_plist")" != "$mode_id" ]]; then
+    return 1
+  fi
+  printf '%s' "$mode_id"
+}
+
 knowtype_bundle_matches_inputmethod_identity() {
   local bundle_path="$1"
   local info_plist="$bundle_path/Contents/Info.plist"

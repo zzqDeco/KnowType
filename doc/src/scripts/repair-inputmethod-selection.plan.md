@@ -15,7 +15,7 @@ Repairs common local Text Input Source and LaunchServices state problems for the
 - The script replaces only scoped KnowType rows in Text Input Source preferences through `knowtype-inputsource-tool repair-preferences`.
 - The current target is the visible user-selectable `com.knowtype.inputmethod.KnowType.Hans` input mode.
 - Legacy `.Mode` rows and parent-only selected/history rows are removed from preference targets.
-- Installed app CLI selection is used as the selection preflight. If it verifies the current source changed to `.Hans`, selected repair places `.Hans` first and posts the selected-source notification.
+- Installed app CLI selection is used as the selection preflight. The script must verify `select.current == com.knowtype.inputmethod.KnowType.Hans`; a zero `TISSelectInputSource` status alone is not enough to rewrite selected preferences.
 - If selection fails or cannot be verified, the script skips selected repair instead of claiming KnowType is selected.
 - The script unregisters stale LaunchServices records, restarts menu agents, and continues refresh/diagnostics if installed app selection fails.
 
