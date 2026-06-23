@@ -93,13 +93,15 @@ the local repair script before falling back to logout:
 
 The script uses the input-source helper to disable visible legacy `.Mode` TIS
 rows and unregister stale LaunchServices records for older KnowType build paths,
-rewrites only KnowType rows in protected input-source preferences so HIToolbox
-and `com.apple.inputsources` point at the single visible `.Hans` mode, restarts
-Text Input menu agents, and requests `.Hans` selection through TIS without
-launching the input-method host. If diagnostics still show stale `.Mode` rows,
-non-selectable parent preference rows, or missing `.Hans` rows, remove and
-re-add KnowType in System Settings. If selection still falls back after repair,
-log out and back in to clear
+rewrites only KnowType rows in protected input-source preferences so enabled
+lists contain the parent anchor plus `.Hans`, history keeps `.Hans` available,
+and selected preferences are rewritten to `.Hans` only after helper-local
+selection succeeds. It restarts Text Input menu agents and requests `.Hans`
+selection through TIS without launching the input-method host. If
+diagnostics still show stale `.Mode` rows, non-selectable parent rows in
+selected/history, or missing parent/`.Hans` enabled rows, remove and re-add
+KnowType in System Settings. If selection still falls back after repair, log out
+and back in to clear
 session-level Text Input Source state before repeating the install and
 selection checks.
 

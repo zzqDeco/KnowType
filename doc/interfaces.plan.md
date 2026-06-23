@@ -532,14 +532,26 @@ registration, and cleanup in KnowType scripts:
   duplicate KnowType rows without mutating protected system preference domains.
 - `repair-preferences` rewrites only KnowType rows in protected input-source
   preference arrays as an explicit local development fallback for stale `.Mode`
-  cache state or non-selectable parent rows. The default `--add-active` shape
-  restores only the user-selectable `.Hans` mode; `--legacy-parent-anchor` is an
-  opt-in compatibility fallback.
+  cache state, missing parent enabled anchors, or stale selected/history parent
+  rows. The default `--add-active` shape restores the required non-selectable
+  parent enabled anchor plus the user-selectable `.Hans` mode in enabled
+  preferences without changing selected preferences. `--include-history`
+  repairs history to `.Hans` without moving it ahead of the retained current
+  source unless selected repair is also requested. `--include-selected` is
+  reserved for explicit selection repair after helper-local selection is verified
+  and rewrites selected preferences to `.Hans`.
+  `--remove-parent-anchor` is reserved for uninstall cleanup after the bundle is
+  gone, removing enabled parent anchors that would otherwise point at stale
+  input-source state.
+  `--legacy-parent-anchor` is accepted as a deprecated compatibility no-op.
 - `purge-legacy --path ...` disables visible legacy `.Mode` rows and refreshes
   LaunchServices without starting `KnowTypeInputMethodApp`.
-- `bootstrap --path ... [--select]` registers and enables the installed bundle
-  through TIS APIs. Install and rollback use it without `--select`; explicit
-  repair/selection tooling owns user-visible selection.
+- `bootstrap --path ... [--select]` registers the installed bundle, enables the
+  parent anchor plus active mode through TIS APIs, and optionally requests
+  helper-local selection. When `--select` is present, the helper returns failure
+  unless it verifies the current source changed to `.Hans`. Install and rollback
+  use it without `--select`; explicit repair/selection tooling owns
+  user-visible selection.
 - `register --path ... [--select]` remains a lower-level manual register path
   for debug use.
 - `select [--require-selected]` remains a debug-only helper-local selection path.

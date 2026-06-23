@@ -30,7 +30,7 @@ Options:
   --path              Inspect a specific KnowType.app bundle path.
   --json              Print a stable machine-readable install snapshot and exit.
   --legacy-parent-anchor
-                      Treat a third-party parent preference row as explicit compatibility state.
+                      Deprecated compatibility flag. Parent enabled anchors are normal.
   -h, --help          Show this help.
 EOF
 }
@@ -836,9 +836,11 @@ else
         ;;
       parent.enabled)
         if [[ "$value" == "true" ]]; then
-          info "KnowType non-selectable parent record is enabled by TIS; user selection still targets the visible mode"
+          ok "KnowType non-selectable parent anchor is enabled by TIS"
+        elif (( STRICT == 1 )); then
+          fail "KnowType non-selectable parent anchor is not enabled; TIS may reject selecting the visible mode with paramErr/-50"
         else
-          info "KnowType non-selectable parent record is not enabled; the visible component mode is the selection target"
+          warn "KnowType non-selectable parent anchor is not enabled; run ./scripts/repair-inputmethod-selection.sh if KnowType is missing from the input menu"
         fi
         ;;
       parent.selectCapable)
@@ -957,13 +959,11 @@ else
         ;;
       preference.enabled.parent.knowtype)
         if [[ "$value" == "true" ]]; then
-          if (( STRICT == 1 )); then
-            fail "HIToolbox enabled preferences still include the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
-          else
-            warn "HIToolbox enabled preferences still include the non-selectable KnowType parent row"
-          fi
+          ok "HIToolbox enabled preferences include the required KnowType parent anchor"
+        elif (( STRICT == 1 )); then
+          fail "HIToolbox enabled preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
         else
-          ok "HIToolbox enabled preferences do not include the non-selectable KnowType parent row"
+          warn "HIToolbox enabled preferences are missing the KnowType parent anchor"
         fi
         ;;
       preference.thirdparty.enabled.knowtype)
@@ -989,15 +989,11 @@ else
         ;;
       preference.thirdparty.enabled.parent.knowtype)
         if [[ "$value" == "true" ]]; then
-          if (( ALLOW_LEGACY_PARENT_ANCHOR == 1 )); then
-            ok "Third-party input source preferences include the non-selectable KnowType parent row as explicit legacy compatibility state"
-          elif (( STRICT == 1 )); then
-            fail "Third-party input source preferences still include the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
-          else
-            warn "Third-party input source preferences still include the non-selectable KnowType parent row"
-          fi
+          ok "Third-party input source preferences include the required KnowType parent anchor"
+        elif (( STRICT == 1 )); then
+          fail "Third-party input source preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
         else
-          ok "Third-party input source preferences do not include the non-selectable KnowType parent row"
+          warn "Third-party input source preferences are missing the KnowType parent anchor"
         fi
         ;;
       preference.history.knowtype)
@@ -1009,7 +1005,11 @@ else
         ;;
       preference.history.parent.knowtype)
         if [[ "$value" == "true" ]]; then
-          warn "HIToolbox input-source history still contains the non-selectable KnowType parent row"
+          if (( STRICT == 1 )); then
+            fail "HIToolbox input-source history still contains the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "HIToolbox input-source history still contains the non-selectable KnowType parent row"
+          fi
         fi
         ;;
       preference.history.index.knowtype)

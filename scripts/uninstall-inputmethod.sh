@@ -117,7 +117,8 @@ if (( DRY_RUN == 0 )); then
   "$INPUTSOURCE_TOOL" repair-preferences \
     --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
     --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-    --include-history >/dev/null 2>&1 || true
+    --include-history \
+    --remove-parent-anchor >/dev/null 2>&1 || true
 fi
 
 if (( bundle_count == 0 )); then

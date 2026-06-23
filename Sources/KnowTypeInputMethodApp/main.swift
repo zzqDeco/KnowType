@@ -118,13 +118,22 @@ private enum TextInputSourceActivation {
         let legacyModeCount = KnowTypeInputSourceIDs.legacyModes.reduce(0) { count, modeID in
             count + inputSources(id: modeID).count
         }
-        let activationSources = deduplicatedSources(inputSources(id: modeInputSourceID))
+        let activationSources = deduplicatedSources(
+            inputSources(id: parentInputSourceID) + inputSources(id: modeInputSourceID)
+        ).sorted(by: enableParentBeforeModes)
         var enabledCount = 0
+        var parentAnchorCount = 0
+        var parentAnchorReady = false
         var modeCount = 0
+        var modeReady = false
         for source in activationSources {
             let id = stringProperty(source, kTISPropertyInputSourceID) ?? "<unknown>"
             let type = stringProperty(source, kTISPropertyInputSourceType) ?? "<unknown>"
             let isMode = id == modeInputSourceID || inputModeID(source) == modeInputSourceID
+            let isParentAnchor = id == parentInputSourceID && !isMode
+            if isParentAnchor {
+                parentAnchorCount += 1
+            }
             if isMode {
                 modeCount += 1
             }
@@ -132,31 +141,44 @@ private enum TextInputSourceActivation {
                 inputMethodLogger.notice("Input source is not enable-capable id=\(id, privacy: .public) type=\(type, privacy: .public)")
                 continue
             }
-            if boolProperty(source, kTISPropertyInputSourceIsEnabled) {
+            var isEnabled = boolProperty(source, kTISPropertyInputSourceIsEnabled)
+            if isEnabled {
                 inputMethodLogger.notice("Input source is already enabled id=\(id, privacy: .public) type=\(type, privacy: .public)")
-                continue
-            }
-            let status = TISEnableInputSource(source)
-            if status == noErr {
-                enabledCount += 1
             } else {
-                inputMethodLogger.warning("TISEnableInputSource failed id=\(id, privacy: .public) type=\(type, privacy: .public) status=\(status, privacy: .public)")
+                let status = TISEnableInputSource(source)
+                if status == noErr {
+                    enabledCount += 1
+                    isEnabled = true
+                } else {
+                    inputMethodLogger.warning("TISEnableInputSource failed id=\(id, privacy: .public) type=\(type, privacy: .public) status=\(status, privacy: .public)")
+                }
+            }
+            if isParentAnchor, isEnabled {
+                parentAnchorReady = true
+            }
+            if isMode,
+               isEnabled,
+               boolProperty(source, kTISPropertyInputSourceIsSelectCapable) {
+                modeReady = true
             }
         }
 
         inputMethodLogger.notice(
-            "Input source activation complete sources=\(sources.count, privacy: .public) uniqueSources=\(activationSources.count, privacy: .public) activeModes=\(modeCount, privacy: .public) legacyModes=\(legacyModeCount, privacy: .public) enabledRequests=\(enabledCount, privacy: .public)"
+            "Input source activation complete sources=\(sources.count, privacy: .public) uniqueSources=\(activationSources.count, privacy: .public) parentAnchors=\(parentAnchorCount, privacy: .public) parentReady=\(parentAnchorReady, privacy: .public) activeModes=\(modeCount, privacy: .public) modeReady=\(modeReady, privacy: .public) legacyModes=\(legacyModeCount, privacy: .public) enabledRequests=\(enabledCount, privacy: .public)"
         )
         print("enable.sources=\(sources.count)")
         print("enable.uniqueSources=\(activationSources.count)")
+        print("enable.parentAnchors=\(parentAnchorCount)")
+        print("enable.parent.ready=\(parentAnchorReady)")
         print("enable.activeModes=\(modeCount)")
+        print("enable.mode.ready=\(modeReady)")
         print("enable.legacyModes=\(legacyModeCount)")
         print("enable.requests=\(enabledCount)")
         print("enable.preference.writes=skipped")
         if enabledCount > 0 {
             postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
         }
-        return modeCount >= 1
+        return parentAnchorReady && modeReady
     }
 
     private static func disableInstalledInputSource() {

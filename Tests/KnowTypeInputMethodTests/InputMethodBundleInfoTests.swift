@@ -368,6 +368,38 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("switch-away.preference.selected.changed"))
         XCTAssertTrue(helperSource.contains("kTISNotifySelectedKeyboardInputSourceChanged"))
         XCTAssertTrue(helperSource.contains("preference.repair.active.mode.id"))
+        XCTAssertTrue(helperSource.contains(#"key: "AppleSelectedInputSources""#))
+        XCTAssertTrue(helperSource.contains("bootstrap.parent.enabled"))
+        XCTAssertTrue(helperSource.contains("bootstrap.mode.enabled"))
+        XCTAssertTrue(helperSource.contains("if selectStatus != noErr"))
+        XCTAssertTrue(helperSource.contains("--include-selected"))
+        XCTAssertTrue(helperSource.contains("--remove-parent-anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.include.selected"))
+        XCTAssertTrue(helperSource.contains("preference.repair.remove.parent.anchor"))
+        XCTAssertTrue(helperSource.contains("activePlacement: .prepend"))
+        XCTAssertTrue(helperSource.contains("case .prepend:"))
+        XCTAssertTrue(helperSource.contains("removeEnabledParentAnchor = removeParentAnchor && !addActive"))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleEnabledInputSources"[\s\S]*?removeParent:\s*removeEnabledParentAnchor"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleEnabledThirdPartyInputSources"[\s\S]*?removeParent:\s*removeEnabledParentAnchor"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleInputSourceHistory"[\s\S]*?activePlacement:\s*includeSelected\s*\?\s*\.prepend\s*:\s*\.afterFirstRetained"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleSelectedInputSources"[\s\S]*?activePlacement:\s*\.prepend"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"if\s+includeSelected\s*\{[\s\S]*?postTISNotification\(kTISNotifySelectedKeyboardInputSourceChanged\)"#,
+            options: .regularExpression
+        ))
+        XCTAssertTrue(helperSource.contains("if !parentEnabled || !modeEnabled"))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool inspect-preferences"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool dump"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool disable"#))
@@ -386,9 +418,17 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.parent.knowtype"))
         XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.legacy.knowtype"))
         XCTAssertTrue(helperSource.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.add.parent.anchor"))
         XCTAssertTrue(helperSource.contains("preference.repair.add.legacy.parent.anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.legacy.parent.anchor.option"))
+        XCTAssertTrue(helperSource.contains("enableInputSource(parent, label: \"parent\")"))
+        XCTAssertTrue(helperSource.contains("enableInputSource(mode, label: \"mode\")"))
+        XCTAssertTrue(helperSource.contains("exitOnFailure: false"))
+        XCTAssertTrue(helperSource.contains("requireSelected: true"))
+        XCTAssertTrue(helperSource.contains("return OSStatus(paramErr)"))
         XCTAssertFalse(helperSource.contains("preferencesContainInputModeOrParent"))
-        XCTAssertFalse(helperSource.contains("addParent: addActive,"))
+        XCTAssertFalse(helperSource.contains("removeParent: !addLegacyParentAnchor"))
+        XCTAssertFalse(helperSource.contains("addParent: addActive && addLegacyParentAnchor"))
         XCTAssertTrue(helperSource.contains("TISRegisterInputSource"))
     }
 
@@ -438,7 +478,12 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("bestSelectionTarget(inputSources(id: modeInputSourceID))"))
         XCTAssertTrue(appMain.contains("waitForCurrentInputSourceID(modeInputSourceID, timeout: 2.0)"))
         XCTAssertTrue(appMain.contains("inputSources(id: modeInputSourceID)"))
+        XCTAssertTrue(appMain.contains("inputSources(id: parentInputSourceID) + inputSources(id: modeInputSourceID)"))
         XCTAssertTrue(appMain.contains("disableModesBeforeParent"))
+        XCTAssertTrue(appMain.contains(".sorted(by: enableParentBeforeModes)"))
+        XCTAssertTrue(appMain.contains("parentAnchorReady && modeReady"))
+        XCTAssertTrue(appMain.contains("enable.parent.ready"))
+        XCTAssertTrue(appMain.contains("enable.mode.ready"))
         XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsEnableCapable"))
         XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsSelectCapable"))
         XCTAssertTrue(appMain.contains("enable.preference.writes=skipped"))
@@ -457,6 +502,14 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains(#"--path "$TARGET_PATH""#))
         XCTAssertTrue(installScript.contains("launching the input method host"))
         XCTAssertTrue(installScript.contains("continuing so diagnostics can run"))
+        XCTAssertFalse(installScript.contains("--include-selected"))
+        XCTAssertFalse(installScript.contains("--remove-parent-anchor"))
+        XCTAssertFalse(rollbackScript.contains("--include-selected"))
+        XCTAssertFalse(rollbackScript.contains("--remove-parent-anchor"))
+        XCTAssertTrue(repairScript.contains("--include-selected"))
+        XCTAssertTrue(repairScript.contains("repair_args+=(--include-selected)"))
+        XCTAssertTrue(repairScript.contains("if (( bootstrap_select_status == 0 ))"))
+        XCTAssertTrue(repairScript.contains("selected preferences were not rewritten"))
         XCTAssertTrue(installScript.contains("SCRIPT_DIR="))
         XCTAssertTrue(installScript.contains("SCRIPTS_DIR=\"$SCRIPT_DIR\""))
         XCTAssertTrue(installScript.contains(#"source "$SCRIPTS_DIR/lib/inputmethod-installation.sh""#))
@@ -492,7 +545,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(installScript.contains("--legacy-parent-anchor"))
         XCTAssertTrue(diagnosticScript.contains("ALLOW_LEGACY_PARENT_ANCHOR=0"))
         XCTAssertTrue(diagnosticScript.contains("--legacy-parent-anchor"))
-        XCTAssertTrue(diagnosticScript.contains("explicit legacy compatibility state"))
+        XCTAssertTrue(diagnosticScript.contains("Parent enabled anchors are normal"))
+        XCTAssertTrue(diagnosticScript.contains("required KnowType parent anchor"))
+        XCTAssertTrue(diagnosticScript.contains("paramErr/-50"))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" register --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" disable"#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" select"#))
@@ -511,8 +566,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(repairScript.contains(#""$INPUTSOURCE_TOOL" purge-legacy"#))
         XCTAssertTrue(repairScript.contains(#""$INPUTSOURCE_TOOL" bootstrap"#))
         XCTAssertTrue(repairScript.contains(#"--select"#))
-        XCTAssertTrue(repairScript.contains("single user-selectable .Hans mode"))
-        XCTAssertFalse(repairScript.contains("third-party parent anchor"))
+        XCTAssertTrue(repairScript.contains("parent enabled anchor plus the single user-selectable .Hans mode"))
+        XCTAssertTrue(repairScript.contains("continuing with enabled/history repair, menu refresh, and diagnostics"))
+        XCTAssertTrue(repairScript.contains("selected preferences were not rewritten because helper-local selection failed"))
         XCTAssertFalse(repairScript.contains("--legacy-parent-anchor"))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-install-activate"#))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-purge-legacy"#))
@@ -542,6 +598,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("refusing to remove or replace"))
         XCTAssertTrue(helperSource.contains("return 1"))
         XCTAssertTrue(uninstallScript.contains("optional compatibility KnowType PreferencePane"))
+        XCTAssertTrue(uninstallScript.contains("--remove-parent-anchor"))
         XCTAssertTrue(uninstallScript.contains(#"elif (( DRY_RUN == 1 )); then"#))
         XCTAssertTrue(uninstallScript.contains("Would remove $bundle_count local KnowType input method bundle(s)."))
         XCTAssertTrue(uninstallScript.contains("Removed $bundle_count local KnowType input method bundle(s)."))

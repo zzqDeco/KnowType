@@ -25,8 +25,10 @@ machine.
   to quit if needed, so an already removed compatibility pane does not remain as
   an unloadable sidebar item. Plain unrelated `KnowType` cache text is left
   untouched.
-- Stale Text Input Source state can still require diagnostics or repair helpers
-  after removal.
+- After real removal, it runs scoped input-source preference cleanup with
+  `--remove-parent-anchor` so enabled preferences do not retain KnowType parent
+  anchors pointing at an uninstalled bundle. It still leaves unrelated input
+  sources and KnowType user data untouched.
 
 ## Tests
 

@@ -55,9 +55,10 @@ Installs the locally built KnowType input method bundle into
   development build with the same source-controlled version.
 - It uses `knowtype-inputsource-tool repair-preferences --add-active` around the
   helper bootstrap to keep local development caches aligned with the current
-  input-source model: `.Hans` is the only user-selectable KnowType row in
-  HIToolbox/history and `com.apple.inputsources`; the parent record is
-  diagnostic/container state and is not restored as an enabled user preference.
+  input-source model: enabled preferences contain the non-selectable parent
+  anchor plus `.Hans`; history repair keeps `.Hans` available without moving it
+  ahead of the retained current source. The install path does not pass
+  `--include-selected`, so it does not rewrite the user's selected input source.
 - The install step must not initialize Rime user data, AI learning/profile
   files, provider profiles, `ENV.md`, `CORRECTION.md`, or `~/.knowtype`. Real
   typing after the user manually selects KnowType may initialize Rime as normal
