@@ -461,6 +461,14 @@ final class InputMethodBundleInfoTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("scripts/repair-inputmethod-selection.sh"),
             encoding: .utf8
         )
+        let smokeScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/smoke-inputmethod-install.sh"),
+            encoding: .utf8
+        )
+        let installHelper = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/lib/inputmethod-installation.sh"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(appMain.contains("TextInputSourceActivation"))
         XCTAssertTrue(appMain.contains("TISRegisterInputSource"))
@@ -542,6 +550,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("KnowType settings are available from the input-method menu"))
         XCTAssertTrue(installScript.contains(#""$SCRIPTS_DIR/diagnose-inputmethod.sh" --json --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$SCRIPTS_DIR/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH""#))
+        XCTAssertTrue(installHelper.contains("knowtype_bundle_visible_input_mode_id"))
+        XCTAssertTrue(installHelper.contains("input-method bundle does not declare a menu-visible input mode"))
         XCTAssertTrue(installScript.contains(#"data.get("failures")"#))
         XCTAssertTrue(installScript.contains("Postflight uses the JSON install snapshot only"))
         XCTAssertTrue(installScript.contains("Stale compatibility PreferencePane that would be removed"))
@@ -585,6 +595,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(repairScript.contains("continuing with enabled/history repair, menu refresh, and diagnostics"))
         XCTAssertTrue(repairScript.contains("selected preferences will not be rewritten"))
         XCTAssertTrue(repairScript.contains("selected preferences were not rewritten because installed app selection was not verified"))
+        XCTAssertTrue(smokeScript.contains(#"cd "$ROOT_DIR""#))
+        XCTAssertTrue(smokeScript.contains(#"swift run --package-path "$ROOT_DIR" --quiet KnowTypeInputMethodApp --knowtype-rime-smoke"#))
         XCTAssertFalse(repairScript.contains("--legacy-parent-anchor"))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-install-activate"#))
         XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-purge-legacy"#))

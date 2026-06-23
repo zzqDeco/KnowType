@@ -306,10 +306,13 @@ assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
 assert_equals "KnowTypeInputMethodApp" \
   "$(plist_read ":CFBundleExecutable" "$bundle_path/Contents/Info.plist")" \
   "CFBundleExecutable"
-# Run the Rime runtime check from the SwiftPM executable, not the packaged
-# app bundle. macOS may SIGKILL a second IMK app process with the same bundle
-# id while the installed input-method host is already running.
-swift run --quiet KnowTypeInputMethodApp --knowtype-rime-smoke >/dev/null ||
+# Run the Rime runtime check from the repository SwiftPM executable, not the
+# packaged app bundle. macOS may SIGKILL a second IMK app process with the same
+# bundle id while the installed input-method host is already running.
+(
+  cd "$ROOT_DIR"
+  swift run --package-path "$ROOT_DIR" --quiet KnowTypeInputMethodApp --knowtype-rime-smoke
+) >/dev/null ||
   die "Rime runtime smoke failed"
 
 install_state_tmp="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-install-state-smoke.XXXXXX")"

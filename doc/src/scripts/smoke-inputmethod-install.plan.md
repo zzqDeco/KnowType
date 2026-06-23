@@ -13,6 +13,10 @@ Runs CI-safe smoke checks for local input-method scripts and bundle packaging.
 
 - It checks shell syntax, help paths, bundle packaging resources, ad-hoc signing
   smoke, and local SystemPolicyRule profile payload shape.
+- Its SwiftPM Rime runtime check uses `--package-path` with the repository root
+  and runs from that root as the working directory, so the smoke can be invoked
+  from outside the repo working directory while still resolving source-tree Rime
+  resources.
 - It uses temporary install/support directories to cover install dry-run,
   install-state backup manifest creation, rollback list/dry-run, uninstall
   backup preservation, and diagnostics JSON without touching real Text Input

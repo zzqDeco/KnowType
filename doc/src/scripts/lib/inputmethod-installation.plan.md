@@ -10,6 +10,10 @@ backup paths, backup manifest writes, and install bundle preflight validation.
 The helper uses the current shared input-source IDs from
 `scripts/lib/inputsource-ids.sh`, including the parent input method, visible
 `.Hans` input mode, and legacy `.Mode` cleanup list.
+Install preflight must also reject bundles that only declare the parent input
+method and no menu-visible input mode, so `--from-bundle`, `--from-release-zip`,
+and DMG payload installs cannot replace the current app with a non-switchable
+parent-only build.
 
 The safe-removal helper is intentionally strict: if a path resolves outside the
 local Input Methods directory, or does not look like a KnowType input-method
