@@ -8,8 +8,8 @@ It owns path discovery for `~/Library/Input Methods/KnowType.app` and
 cleanup, duplicate local KnowType bundle detection, install-state paths, app
 backup paths, backup manifest writes, and install bundle preflight validation.
 The helper uses the current shared input-source IDs from
-`scripts/lib/inputsource-ids.sh`, including the single active input source and
-legacy `.Hans` / `.Mode` cleanup list.
+`scripts/lib/inputsource-ids.sh`, including the parent input method, visible
+`.Hans` input mode, and legacy `.Mode` cleanup list.
 
 The safe-removal helper is intentionally strict: if a path resolves outside the
 local Input Methods directory, or does not look like a KnowType input-method

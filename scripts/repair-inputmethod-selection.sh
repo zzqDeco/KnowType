@@ -88,6 +88,9 @@ INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
   --path "$BUNDLE_PATH" \
   --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+if ! "$BUNDLE_EXECUTABLE" --knowtype-register-input-source --knowtype-enable-input-source; then
+  echo "warning: installed app input-source register/enable failed; continuing with helper repair and diagnostics" >&2
+fi
 "$INPUTSOURCE_TOOL" repair-preferences \
   --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
@@ -100,15 +103,12 @@ killall TextInputSwitcher 2>/dev/null || true
 sleep 1
 
 set +e
-"$INPUTSOURCE_TOOL" bootstrap \
-  --path "$BUNDLE_PATH" \
-  --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  --select
+selection_output="$("$BUNDLE_EXECUTABLE" --knowtype-select-input-source 2>&1)"
 bootstrap_select_status=$?
 set -e
+printf '%s\n' "$selection_output"
 if (( bootstrap_select_status != 0 )); then
-  echo "warning: helper-local KnowType selection returned $bootstrap_select_status; continuing with enabled/history repair, menu refresh, and diagnostics" >&2
+  echo "warning: installed app KnowType selection returned $bootstrap_select_status; continuing with enabled/history repair, menu refresh, and diagnostics" >&2
 fi
 
 repair_args=(
@@ -130,13 +130,13 @@ sleep 0.75
 
 echo
 echo "Selection repair finished for: $BUNDLE_PATH"
-echo "Input source activation used the helper path: register, enable, and select through TIS."
+echo "Input source activation used the installed app context: register, enable, and select through TIS."
 echo "macOS may still prelaunch the input method host; KnowType keeps Rime/user data lazy until real input."
-echo "Local repair restored the single user-selectable KnowType input source."
+echo "Local repair restored the visible KnowType input mode."
 if (( bootstrap_select_status == 0 )); then
-  echo "History and selected preferences are repaired to point at KnowType's single input source."
+  echo "History and selected preferences are repaired to point at KnowType's visible .Hans input mode."
 else
-  echo "History preferences were repaired to keep KnowType available; selected preferences were not rewritten because helper-local selection failed."
+  echo "History preferences were repaired to keep KnowType available; selected preferences were not rewritten because installed app selection failed."
 fi
 echo "If KnowType is still missing from the input menu, remove and add it once in System Settings > Keyboard > Text Input > Input Sources."
 echo "If the menu still shows an old state, log out/in to clear macOS TIS cache."

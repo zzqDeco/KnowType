@@ -38,10 +38,11 @@ Installs the locally built KnowType input method bundle into
 - The script switches away from any current KnowType source, replaces
   `~/Library/Input Methods/KnowType.app`, clears quarantine, and refreshes the
   installed path with `lsregister -f`.
-- It switches away, disables stale `.Mode` TIS modes, registers/enables the new
-  app, and repairs scoped preference rows through `knowtype-inputsource-tool`.
-  These default install steps do not start the installed input-method host and
-  do not select KnowType.
+- It switches away, disables stale `.Mode` TIS modes, registers/enables the
+  parent anchor and visible `.Hans` mode from the installed app CLI context, and
+  repairs scoped preference rows through `knowtype-inputsource-tool`.
+  These default install steps return before the app run loop starts and do not
+  select KnowType.
 - The switch-away helper also removes KnowType from HIToolbox
   `AppleSelectedInputSources`; otherwise macOS can relaunch the host from stale
   selected preferences even when the live current source is ABC.
@@ -54,12 +55,11 @@ Installs the locally built KnowType input method bundle into
   LaunchServices and TIS do not keep reusing stale metadata from a previous
   development build with the same source-controlled version.
 - It uses `knowtype-inputsource-tool repair-preferences --add-active` around the
-  helper bootstrap to keep local development caches aligned with the current
-  single input-source model: enabled preferences contain
-  `com.knowtype.inputmethod.KnowType`; history repair keeps that source
-  available without moving it ahead of the retained current source. The install
-  path does not pass `--include-selected`, so it does not rewrite the user's
-  selected input source.
+  installed app registration to keep local development caches aligned with the
+  current parent-plus-mode model: enabled preferences contain the parent anchor
+  and `.Hans`; history repair keeps `.Hans` available without moving it ahead of
+  the retained current source. The install path does not pass
+  `--include-selected`, so it does not rewrite the user's selected input source.
 - The install step must not initialize Rime user data, AI learning/profile
   files, provider profiles, `ENV.md`, `CORRECTION.md`, or `~/.knowtype`. Real
   typing after the user manually selects KnowType may initialize Rime as normal

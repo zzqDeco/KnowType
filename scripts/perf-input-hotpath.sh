@@ -51,14 +51,7 @@ swift build \
 bin_path="$(swift build --package-path "$ROOT_DIR" --configuration release --show-bin-path 2>/dev/null)"
 xctest_bundle="$bin_path/KnowTypePackageTests.xctest"
 if [[ -d "$xctest_bundle" ]] && command -v codesign >/dev/null 2>&1; then
-  sign_identity="${CODESIGN_IDENTITY:-}"
-  if [[ -z "$sign_identity" ]]; then
-    sign_identity="$(
-      security find-identity -v -p codesigning 2>/dev/null |
-        awk -F '"' '/Apple Development/ { print $2; exit }'
-    )"
-  fi
-  sign_identity="${sign_identity:--}"
+  sign_identity="${CODESIGN_IDENTITY:--}"
   codesign --force --deep --sign "$sign_identity" "$xctest_bundle" >/dev/null
 fi
 

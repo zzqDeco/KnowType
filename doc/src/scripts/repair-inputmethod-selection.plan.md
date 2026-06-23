@@ -13,11 +13,11 @@ Repairs common local Text Input Source and LaunchServices state problems for the
 ## Behavior Notes
 
 - The script replaces only scoped KnowType rows in Text Input Source preferences through `knowtype-inputsource-tool repair-preferences`.
-- The current target is the single user-selectable `com.knowtype.inputmethod.KnowType` input source.
-- Legacy `.Hans` and `.Mode` rows are removed from enabled, selected, history, and third-party preference targets.
-- Helper-local `bootstrap --select` is used only as a selection preflight. If it verifies the current source changed to KnowType, selected repair places the single KnowType input source first and posts the selected-source notification.
+- The current target is the visible user-selectable `com.knowtype.inputmethod.KnowType.Hans` input mode.
+- Legacy `.Mode` rows and parent-only selected/history rows are removed from preference targets.
+- Installed app CLI selection is used as the selection preflight. If it verifies the current source changed to `.Hans`, selected repair places `.Hans` first and posts the selected-source notification.
 - If selection fails or cannot be verified, the script skips selected repair instead of claiming KnowType is selected.
-- The script unregisters stale LaunchServices records, restarts menu agents, and continues refresh/diagnostics if helper-local selection fails.
+- The script unregisters stale LaunchServices records, restarts menu agents, and continues refresh/diagnostics if installed app selection fails.
 
 ## Tests
 

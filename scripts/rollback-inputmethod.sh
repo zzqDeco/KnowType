@@ -236,6 +236,11 @@ fi
 knowtype_unregister_launchservices_records_except "$target_path" 0
 knowtype_register_launchservices_path "$target_path" 0
 
+restored_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
+if [[ -x "$restored_executable" ]]; then
+  "$restored_executable" --knowtype-register-input-source --knowtype-enable-input-source >/dev/null 2>&1 || true
+fi
+
 if [[ -n "$inputsource_tool" ]]; then
   "$inputsource_tool" purge-legacy \
     --path "$target_path" \

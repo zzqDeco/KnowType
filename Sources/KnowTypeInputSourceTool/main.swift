@@ -36,11 +36,11 @@ private func usage() -> Never {
         Preference inspection is read-only; repair-preferences is an explicit local development cleanup
         for stale selected/history parent rows or .Mode rows in protected input-source preferences.
         Use --add-active only for local cache repair; it writes the required
-        active single input source to enabled preferences, while history repair
-        keeps KnowType available and selected repair is reserved for explicit
-        verified selection. .Hans and .Mode are treated as legacy cleanup
-        input modes. --remove-parent-anchor is an explicit uninstall cleanup
-        mode for removing enabled single-source rows after the bundle is gone.
+        parent anchor plus visible .Hans input mode to enabled preferences, while
+        history repair keeps KnowType available and selected repair is reserved
+        for explicit verified selection. .Mode is treated as legacy cleanup.
+        --remove-parent-anchor is an explicit uninstall cleanup mode for removing
+        enabled KnowType rows after the bundle is gone.
         --legacy-parent-anchor is accepted as a deprecated compatibility no-op.
 
         """,
@@ -261,10 +261,12 @@ private func isStalePreferenceEntry(
     legacyModeIDs: Set<String>,
     removeParent: Bool
 ) -> Bool {
-    if removeParent,
-       entry["Bundle ID"] as? String == bundleID,
-       entry["InputSourceKind"] as? String == "Keyboard Input Method" {
-        return true
+    if removeParent {
+        return isKnowTypePreferenceEntry(
+            entry,
+            bundleID: bundleID,
+            modeIDs: Set([modeID] + Array(legacyModeIDs))
+        )
     }
     return isLegacyModePreferenceEntry(entry, bundleID: bundleID, legacyModeIDs: legacyModeIDs)
 }
@@ -683,6 +685,7 @@ private func printStatus(parentID: String, modeID: String, legacyModeIDs: [Strin
     }
     print("preference.selected.mode=\(hitoolboxSelectedModeID() ?? "")")
     print("preference.selected.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.HIToolbox", key: "AppleSelectedInputSources"))")
+    print("preference.selected.parent.knowtype=\(modeID != parentID && preferencesContainEntry(preferenceArray("AppleSelectedInputSources", domain: "com.apple.HIToolbox"), target: parentPreferenceEntry(bundleID: parentID)))")
     print("preference.enabled.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.HIToolbox", key: "AppleEnabledInputSources"))")
     print("preference.enabled.parent.knowtype=\(modeID != parentID && preferencesContainEntry(preferenceArray("AppleEnabledInputSources", domain: "com.apple.HIToolbox"), target: parentPreferenceEntry(bundleID: parentID)))")
     print("preference.enabled.legacy.knowtype=\(preferencesContainAnyInputMode(bundleID: parentID, modeIDs: legacyModeIDs, domain: "com.apple.HIToolbox", key: "AppleEnabledInputSources"))")
@@ -806,12 +809,9 @@ private func waitForInputSource(id: String, timeout: TimeInterval) -> TISInputSo
 }
 
 private func bootstrap(path: String, parentID: String, modeID: String, legacyModeIDs: [String], select: Bool) {
-    let needsRegistration = inputSource(id: parentID) == nil || inputSource(id: modeID) == nil
-    if needsRegistration {
-        let status = TISRegisterInputSource(URL(fileURLWithPath: path) as CFURL)
-        if status != noErr {
-            fputs("Warning: TISRegisterInputSource returned \(status)\n", stderr)
-        }
+    let registrationStatus = TISRegisterInputSource(URL(fileURLWithPath: path) as CFURL)
+    if registrationStatus != noErr {
+        fputs("Warning: TISRegisterInputSource returned \(registrationStatus)\n", stderr)
     }
 
     guard let parent = waitForInputSource(id: parentID, timeout: 5.0) else {
@@ -834,7 +834,7 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
     }
 
     print("bootstrap.path=\(path)")
-    print("bootstrap.registered=\(needsRegistration)")
+    print("bootstrap.register.status=\(registrationStatus)")
     print("bootstrap.preference.writes=skipped")
     print("bootstrap.singleSource=\(modeID == parentID)")
     print("bootstrap.parent.enabled=\(parentEnabled)")
