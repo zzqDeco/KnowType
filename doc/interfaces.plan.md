@@ -531,28 +531,24 @@ registration, and cleanup in KnowType scripts:
 - `inspect-preferences` and compatibility `dedupe-preferences` report
   duplicate KnowType rows without mutating protected system preference domains.
 - `repair-preferences` rewrites only KnowType rows in protected input-source
-  preference arrays as an explicit local development fallback for stale `.Hans`
-  / `.Mode` cache state or stale selected/history rows. The default
-  `--add-active` shape restores the single user-selectable
-  `com.knowtype.inputmethod.KnowType` input source in enabled preferences
-  without changing selected preferences. `--include-history` repairs history to
-  that same single input source without moving it ahead of the retained current
-  source unless selected repair is also requested. `--include-selected` is
-  reserved for explicit selection repair after helper-local selection is verified
-  and rewrites selected preferences to the single input source.
-  `--remove-parent-anchor` is reserved for uninstall cleanup after the bundle is
-  gone, removing enabled single-source rows that would otherwise point at stale
-  input-source state.
+  preference arrays as an explicit local development fallback for stale `.Mode`
+  cache state, parent-only selected/history rows, or stale selected/history rows.
+  The default `--add-active` shape restores the enabled parent anchor plus the
+  user-selectable `com.knowtype.inputmethod.KnowType.Hans` input mode without
+  changing selected preferences. `--include-history` repairs history to `.Hans`
+  without moving it ahead of the retained current source unless selected repair
+  is also requested. `--include-selected` is reserved for explicit selection
+  repair after installed app selection is verified and rewrites selected
+  preferences to `.Hans`. `--remove-parent-anchor` is reserved for uninstall
+  cleanup after the bundle is gone.
   `--legacy-parent-anchor` is accepted as a deprecated compatibility no-op.
-- `purge-legacy --path ...` disables legacy `.Hans` / `.Mode` rows and
+- `purge-legacy --path ...` disables legacy `.Mode` rows and
   refreshes LaunchServices without starting `KnowTypeInputMethodApp`.
 - `bootstrap --path ... [--select]` registers the installed bundle, enables the
-  single active input source through TIS APIs, and optionally requests
-  helper-local selection. When `--select` is present, the helper returns failure
-  unless it verifies the current source changed to
-  `com.knowtype.inputmethod.KnowType`. Install and rollback use it without
-  `--select`; explicit repair/selection tooling owns
-  user-visible selection.
+  parent anchor and visible `.Hans` input mode through TIS APIs, and optionally
+  requests helper-local selection of `.Hans`. Default install/repair registration
+  uses the installed app CLI context before helper preference repair; explicit
+  repair/selection tooling owns user-visible selection.
 - `register --path ... [--select]` remains a lower-level manual register path
   for debug use.
 - `select [--require-selected]` remains a debug-only helper-local selection path.

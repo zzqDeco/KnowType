@@ -52,9 +52,10 @@ when converting a shipped plan into a short record.
 | [install-upgrade-rollback-experience.plan.md](install-upgrade-rollback-experience.plan.md) | Traceable local installs, app backups, rollback, and dynamic diagnostics status | Active |
 | [install-user-data-isolation.plan.md](install-user-data-isolation.plan.md) | Keep local install, rollback, and repair from launching the host or mutating user data | Active |
 | [imk-host-cold-start-no-userdata-write.plan.md](imk-host-cold-start-no-userdata-write.plan.md) | Keep IMK host prelaunch from initializing Rime, provider, or AI learning user data | Active |
-| [input-source-layer-model.plan.md](input-source-layer-model.plan.md) | Earlier parent/mode separation plan, absorbed by the single-source model | Absorbed |
-| [input-source-parent-anchor-registration.plan.md](input-source-parent-anchor-registration.plan.md) | Earlier parent-anchor enablement plan, absorbed by the single-source model | Absorbed |
-| [input-source-single-source-model.plan.md](input-source-single-source-model.plan.md) | Collapse KnowType to one user-selectable Text Input Source and clean legacy `.Hans` / `.Mode` rows | Active |
+| [input-source-layer-model.plan.md](input-source-layer-model.plan.md) | Earlier parent/mode separation plan, superseded by menu-visible mode registration | Absorbed |
+| [input-source-parent-anchor-registration.plan.md](input-source-parent-anchor-registration.plan.md) | Earlier parent-anchor enablement plan, superseded by menu-visible mode registration | Absorbed |
+| [input-source-single-source-model.plan.md](input-source-single-source-model.plan.md) | Parent-only single-source attempt, absorbed after menu-bar switching failed | Absorbed |
+| [input-source-menu-visible-mode-registration.plan.md](input-source-menu-visible-mode-registration.plan.md) | Restore parent plus one visible `.Hans` input mode so KnowType appears in the menu bar | Active |
 | [native-settings-ui-polish.plan.md](native-settings-ui-polish.plan.md) | Chinese macOS-native sidebar settings UI for the IMK preferences window | Active |
 | [segmented-candidate-selection.plan.md](segmented-candidate-selection.plan.md) | Raw-span candidate rows and segmented confirmation behavior | Active |
 | [ai-capability-runtime-layer.plan.md](ai-capability-runtime-layer.plan.md) | Separate AI recommendation, context memory, correction-instruction, and health layers from the IMK key path | Active |

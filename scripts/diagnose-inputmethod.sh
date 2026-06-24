@@ -14,6 +14,10 @@ SHOW_LOGS=0
 JSON_OUTPUT=0
 ALLOW_LEGACY_PARENT_ANCHOR=0
 LOG_LOOKBACK="${KNOWTYPE_LOG_LOOKBACK:-30m}"
+KNOWTYPE_PYTHON3="${KNOWTYPE_PYTHON3:-/usr/bin/python3}"
+if [[ ! -x "$KNOWTYPE_PYTHON3" ]]; then
+  KNOWTYPE_PYTHON3="$(command -v python3 2>/dev/null || true)"
+fi
 
 usage() {
   cat <<'EOF'
@@ -30,7 +34,7 @@ Options:
   --path              Inspect a specific KnowType.app bundle path.
   --json              Print a stable machine-readable install snapshot and exit.
   --legacy-parent-anchor
-                      Deprecated compatibility flag. The active input source is now single-source.
+                      Deprecated compatibility flag. The parent anchor is enabled automatically for the visible input mode.
   -h, --help          Show this help.
 EOF
 }
@@ -124,7 +128,7 @@ print_json_snapshot() {
   KNOWTYPE_DIAG_BACKUP_ROOT="$(knowtype_backup_root_dir)" \
   KNOWTYPE_DIAG_APP_SUPPORT="$(knowtype_app_support_dir)" \
   KNOWTYPE_DIAG_RIME_USER_DATA="${KNOWTYPE_RIME_USER_DATA_DIR:-$(knowtype_app_support_dir)/Rime}" \
-  python3 - <<'PY'
+  "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import hashlib
 import os
@@ -591,11 +595,7 @@ if [[ -f "$INFO_PLIST" ]]; then
     warn "Info.plist contains private/undocumented TISIconIsTemplate; rebuild from current sources"
   fi
   if (( SINGLE_INPUT_SOURCE == 1 )); then
-    if [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
-      fail "Info.plist still declares ComponentInputModeDict; rebuild with the single input source model"
-    else
-      ok "Info.plist uses the single non-mode-enabled KnowType input source"
-    fi
+    fail "KnowType is configured as a parent-only input source; rebuild with the visible .Hans input mode model"
   elif [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
     ok "Info.plist declares the visible component input mode"
     expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:TISInputSourceID" "$MODE_ID" "$INFO_PLIST"
@@ -885,7 +885,7 @@ else
         fi
         ;;
       inputSource.singleSource)
-        [[ "$value" == "true" ]] && info "KnowType is using the single input source model"
+        [[ "$value" == "true" ]] && fail "KnowType is using the parent-only input source model; rebuild with the visible .Hans mode model"
         ;;
       parent.found)
         if (( SINGLE_INPUT_SOURCE == 0 )); then
@@ -1010,6 +1010,18 @@ else
         else
           warn "HIToolbox selected preference is not KnowType; choose KnowType from the input menu/System Settings before typing"
           info "If macOS shows an authorization prompt to allow 知键/KnowType as an input method, click Allow; until it is allowed, the menu can list KnowType while normal switching still falls back to another source"
+        fi
+        ;;
+      preference.selected.parent.knowtype)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
+        if [[ "$value" == "true" ]]; then
+          if (( STRICT == 1 )); then
+            fail "HIToolbox selected preferences still contain the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "HIToolbox selected preferences still contain the non-selectable KnowType parent row"
+          fi
         fi
         ;;
       preference.enabled.knowtype)
@@ -1190,7 +1202,7 @@ fi
 
 if [[ -f "$PROVIDER_JSON" ]]; then
   default_provider_summary="$(
-    KNOWTYPE_PROVIDER_JSON="$PROVIDER_JSON" python3 - <<'PY'
+    KNOWTYPE_PROVIDER_JSON="$PROVIDER_JSON" "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
 try:
@@ -1226,7 +1238,7 @@ accepted_learning_summary="$(
   KNOWTYPE_ACCEPTED_FEEDBACK_SUMMARY="$ACCEPTED_FEEDBACK_SUMMARY_JSON" \
   KNOWTYPE_ACCEPTED_FEEDBACK_MIRROR="$ACCEPTED_FEEDBACK_MIRROR_MD" \
   KNOWTYPE_LEXICAL_PROFILE="$LEXICAL_PROFILE_MD" \
-  python3 - <<'PY'
+  "$KNOWTYPE_PYTHON3" - <<'PY'
 import hashlib
 import json
 import os

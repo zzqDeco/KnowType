@@ -6,9 +6,9 @@ Make the local input-method install script stop implying KnowType is globally se
 
 ## Behavior
 
-- `scripts/install-inputmethod.sh` copies the signed bundle into `~/Library/Input Methods`, runs `lsregister -f`, then uses `knowtype-inputsource-tool purge-legacy`, `repair-preferences`, and `bootstrap` so registration and enablement happen without launching the installed input-method host.
-- The helper registers and enables the single active `com.knowtype.inputmethod.KnowType` input source.
-- The repair path keeps enabled/history/selected rows on that single active source and removes legacy `.Hans` / `.Mode` rows. Diagnostics still read the protected lists so stale legacy rows remain visible.
+- `scripts/install-inputmethod.sh` copies the signed bundle into `~/Library/Input Methods`, runs `lsregister -f`, then uses installed app CLI registration plus helper `purge-legacy` and `repair-preferences` so registration and enablement happen without launching the input-method host run loop.
+- Registration enables the parent `com.knowtype.inputmethod.KnowType` input method and visible `com.knowtype.inputmethod.KnowType.Hans` input mode.
+- The repair path keeps enabled rows on parent plus `.Hans`, selected/history rows on `.Hans`, and removes legacy `.Mode` rows. Diagnostics still read the protected lists so stale legacy rows remain visible.
 - The command-line helper remains available for status, dump, compatibility bootstrap, debug legacy purge, and scoped preference repair. Host CLI flags remain compatibility/debug entry points, not the default install path.
 - If app-local `TISSelectInputSource` returns `noErr`, that still proves only the app context; diagnostics remain the source of truth for persisted system selected input source.
 - Diagnostics report both helper-local TIS state and persisted HIToolbox preferences; `AppleSelectedInputSources` can still point at another input source even when TIS reports KnowType as enabled.

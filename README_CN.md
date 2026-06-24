@@ -100,15 +100,15 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 ./scripts/diagnose-inputmethod.sh
 ```
 
-本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Hans` / `.Mode`
-开发状态，通过专用 input-source helper 注册并启用单一 `KnowType` 输入源，并修复 history 但不会把 KnowType 移到当前保留输入源之前；默认安装不改 selected preference，不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
+本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Mode`
+开发状态，从已安装 app 上下文注册并启用 KnowType parent input method 与可见 `.Hans` 输入模式，并修复 history 但不会把 KnowType 移到当前保留输入源之前；默认安装不改 selected preference，不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
 Rime 用户数据。即使 macOS 在刷新 TIS 或 LaunchServices 状态时预热启动 host，controller 冷启动
 也会把 Rime session、provider profile、AI learning/profile 文件、`ENV.md` 和 `CORRECTION.md`
 延迟到真实输入、AI 请求或显式维护动作时才初始化。如果已有 `KnowTypeInputMethodApp` 进程正在运行，安装脚本会先中止，而不是强杀它，
-因为 host 退出可能会把 Rime 用户数据刷盘。KnowType 现在使用单一 non-mode-enabled 输入源，
-因为当前只有一个真实用户模式。唯一应出现在用户菜单里的可选择输入源 id 是
-`com.knowtype.inputmethod.KnowType`；旧
-`com.knowtype.inputmethod.KnowType.Hans` 和 `.Mode` 只作为历史缓存清理对象。System Settings
+因为 host 退出可能会把 Rime 用户数据刷盘。KnowType 使用成熟 macOS IMK 形态：
+`com.knowtype.inputmethod.KnowType` 是不可直接选择的 parent input method，
+`com.knowtype.inputmethod.KnowType.Hans` 是唯一用户可选的可见输入模式；旧 `.Mode`
+记录以及 parent-only selected/history 行只作为历史缓存清理对象。System Settings
 和右上角输入法菜单里应只显示一个用户可选的 `知键`。
 
 `scripts/install-inputmethod.sh` 默认使用 release 构建，方便本地打字测试覆盖优化后的热路径。

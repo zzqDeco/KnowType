@@ -158,6 +158,35 @@ fi
 if ! knowtype_validate_inputmethod_bundle_for_install "$backup_dir/KnowType.app" 0; then
   exit 1
 fi
+restored_active_mode_id="$(knowtype_bundle_visible_input_mode_id "$backup_dir/KnowType.app" || true)"
+if [[ -z "$restored_active_mode_id" || "$restored_active_mode_id" == "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
+  echo "error: backup KnowType.app does not declare a menu-visible input mode." >&2
+  echo "Rollback refuses to repair preferences for parent-only backups because they cannot satisfy the current menu-switchable IMK model." >&2
+  exit 1
+fi
+
+restored_legacy_mode_ids=()
+append_restored_legacy_mode_id() {
+  local candidate="$1"
+  local existing
+  [[ -n "$candidate" && "$candidate" != "$restored_active_mode_id" ]] || return 0
+  if ((${#restored_legacy_mode_ids[@]} > 0)); then
+    for existing in "${restored_legacy_mode_ids[@]}"; do
+      [[ "$existing" == "$candidate" ]] && return 0
+    done
+  fi
+  restored_legacy_mode_ids+=("$candidate")
+}
+append_restored_legacy_mode_id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+for legacy_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
+  append_restored_legacy_mode_id "$legacy_id"
+done
+restored_legacy_args=()
+if ((${#restored_legacy_mode_ids[@]} > 0)); then
+  for legacy_id in "${restored_legacy_mode_ids[@]}"; do
+    restored_legacy_args+=(--legacy-mode-id "$legacy_id")
+  done
+fi
 
 backup_id="$(basename "$backup_dir")"
 
@@ -165,6 +194,7 @@ if (( DRY_RUN == 1 )); then
   echo "KnowType rollback dry run"
   echo "Backup: $backup_id"
   echo "Backup path: $backup_dir"
+  echo "Restored active input mode: $restored_active_mode_id"
   echo "Target app: $target_path"
   if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
     echo "Target PreferencePane: $prefpane_path"
@@ -184,11 +214,13 @@ if inputsource_tool="$(knowtype_inputsource_tool "$ROOT_DIR" 2>/dev/null)"; then
     --prefix "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
     --fallback-id "$KNOWTYPE_FALLBACK_INPUT_SOURCE_ID"
     --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
-    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+    --mode-id "$restored_active_mode_id"
   )
-  for legacy_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
-    switch_args+=(--legacy-mode-id "$legacy_id")
-  done
+  if ((${#restored_legacy_mode_ids[@]} > 0)); then
+    for legacy_id in "${restored_legacy_mode_ids[@]}"; do
+      switch_args+=(--legacy-mode-id "$legacy_id")
+    done
+  fi
   "$inputsource_tool" "${switch_args[@]}" >/dev/null 2>&1 || true
 else
   echo "warning: input-source helper is unavailable; rollback will restore bundles and skip preference repair" >&2
@@ -236,20 +268,41 @@ fi
 knowtype_unregister_launchservices_records_except "$target_path" 0
 knowtype_register_launchservices_path "$target_path" 0
 
+restored_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
+if [[ -x "$restored_executable" ]]; then
+  "$restored_executable" --knowtype-register-input-source --knowtype-enable-input-source >/dev/null 2>&1 || true
+fi
+
 if [[ -n "$inputsource_tool" ]]; then
-  "$inputsource_tool" purge-legacy \
-    --path "$target_path" \
-    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" >/dev/null 2>&1 || true
-  "$inputsource_tool" repair-preferences \
-    --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-    --include-history \
-    --add-active >/dev/null 2>&1 || true
-  "$inputsource_tool" bootstrap \
-    --path "$target_path" \
-    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" >/dev/null 2>&1 || true
+  purge_args=(
+    purge-legacy
+    --path "$target_path"
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --mode-id "$restored_active_mode_id"
+  )
+  repair_args=(
+    repair-preferences
+    --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --mode-id "$restored_active_mode_id"
+  )
+  bootstrap_args=(
+    bootstrap
+    --path "$target_path"
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --mode-id "$restored_active_mode_id"
+  )
+  if ((${#restored_legacy_args[@]} > 0)); then
+    purge_args+=("${restored_legacy_args[@]}")
+    repair_args+=("${restored_legacy_args[@]}")
+    bootstrap_args+=("${restored_legacy_args[@]}")
+  fi
+  repair_args+=(
+    --include-history
+    --add-active
+  )
+  "$inputsource_tool" "${purge_args[@]}" >/dev/null 2>&1 || true
+  "$inputsource_tool" "${repair_args[@]}" >/dev/null 2>&1 || true
+  "$inputsource_tool" "${bootstrap_args[@]}" >/dev/null 2>&1 || true
 fi
 
 killall cfprefsd 2>/dev/null || true
@@ -270,4 +323,5 @@ build="$(knowtype_bundle_build_version "$target_path")"
 echo "Restored KnowType backup: $backup_id"
 echo "Version: ${version:-<unknown>}"
 echo "Build: ${build:-<unknown>}"
+echo "Active input mode: $restored_active_mode_id"
 echo "Run ./scripts/diagnose-inputmethod.sh --strict to verify the restored install."

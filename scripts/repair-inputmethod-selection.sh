@@ -88,6 +88,21 @@ INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
   --path "$BUNDLE_PATH" \
   --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+if ! "$BUNDLE_EXECUTABLE" --knowtype-register-input-source --knowtype-enable-input-source; then
+  echo "warning: installed app input-source register/enable failed; falling back to helper bootstrap" >&2
+  bootstrap_args=(
+    bootstrap
+    --path "$BUNDLE_PATH"
+    --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+    --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+  )
+  for legacy_mode_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
+    bootstrap_args+=(--legacy-mode-id "$legacy_mode_id")
+  done
+  if ! "$INPUTSOURCE_TOOL" "${bootstrap_args[@]}"; then
+    echo "warning: input-source helper bootstrap failed; continuing with preference repair and diagnostics" >&2
+  fi
+fi
 "$INPUTSOURCE_TOOL" repair-preferences \
   --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
@@ -100,15 +115,19 @@ killall TextInputSwitcher 2>/dev/null || true
 sleep 1
 
 set +e
-"$INPUTSOURCE_TOOL" bootstrap \
-  --path "$BUNDLE_PATH" \
-  --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
-  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-  --select
+selection_output="$("$BUNDLE_EXECUTABLE" --knowtype-select-input-source 2>&1)"
 bootstrap_select_status=$?
 set -e
+printf '%s\n' "$selection_output"
+selected_current_id="$(awk -F= '/^select.current=/ { value=$2 } END { print value }' <<<"$selection_output")"
+verified_selected=0
+if (( bootstrap_select_status == 0 )) && [[ "$selected_current_id" == "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" ]]; then
+  verified_selected=1
+fi
 if (( bootstrap_select_status != 0 )); then
-  echo "warning: helper-local KnowType selection returned $bootstrap_select_status; continuing with enabled/history repair, menu refresh, and diagnostics" >&2
+  echo "warning: installed app KnowType selection returned $bootstrap_select_status; continuing with enabled/history repair, menu refresh, and diagnostics" >&2
+elif (( verified_selected == 0 )); then
+  echo "warning: installed app selection returned success but current source is ${selected_current_id:-<unknown>}; selected preferences will not be rewritten" >&2
 fi
 
 repair_args=(
@@ -118,7 +137,7 @@ repair_args=(
   --include-history
   --add-active
 )
-if (( bootstrap_select_status == 0 )); then
+if (( verified_selected == 1 )); then
   repair_args+=(--include-selected)
 fi
 "$INPUTSOURCE_TOOL" "${repair_args[@]}"
@@ -130,13 +149,13 @@ sleep 0.75
 
 echo
 echo "Selection repair finished for: $BUNDLE_PATH"
-echo "Input source activation used the helper path: register, enable, and select through TIS."
+echo "Input source activation used the installed app context: register, enable, and select through TIS."
 echo "macOS may still prelaunch the input method host; KnowType keeps Rime/user data lazy until real input."
-echo "Local repair restored the single user-selectable KnowType input source."
-if (( bootstrap_select_status == 0 )); then
-  echo "History and selected preferences are repaired to point at KnowType's single input source."
+echo "Local repair restored the visible KnowType input mode."
+if (( verified_selected == 1 )); then
+  echo "History and selected preferences are repaired to point at KnowType's visible .Hans input mode."
 else
-  echo "History preferences were repaired to keep KnowType available; selected preferences were not rewritten because helper-local selection failed."
+  echo "History preferences were repaired to keep KnowType available; selected preferences were not rewritten because installed app selection was not verified."
 fi
 echo "If KnowType is still missing from the input menu, remove and add it once in System Settings > Keyboard > Text Input > Input Sources."
 echo "If the menu still shows an old state, log out/in to clear macOS TIS cache."

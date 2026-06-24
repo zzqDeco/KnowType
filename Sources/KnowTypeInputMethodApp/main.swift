@@ -85,14 +85,11 @@ private enum TextInputSourceActivation {
     }
 
     private static func registerInstalledBundle(_ bundle: Bundle) {
-        if inputSource(id: activeInputSourceID) == nil {
-            let status = TISRegisterInputSource(bundle.bundleURL as CFURL)
-            inputMethodLogger.notice("Registered input source from app context with status \(status, privacy: .public)")
-            print("register.status=\(status)")
-        } else {
-            inputMethodLogger.notice("Using existing active input source registration")
-            print("register.status=skipped")
-        }
+        let status = TISRegisterInputSource(bundle.bundleURL as CFURL)
+        inputMethodLogger.notice("Registered input source from app context with status \(status, privacy: .public)")
+        print("register.status=\(status)")
+        _ = waitForInputSource(parentInputSourceID, timeout: 5.0)
+        _ = waitForInputSource(activeInputSourceID, timeout: 5.0)
     }
 
     private static func switchAwayFromKnowType() {
@@ -344,6 +341,17 @@ private enum TextInputSourceActivation {
             }
             return sourceIsBetterSelectionTarget(source, than: best) ? source : best
         }
+    }
+
+    private static func waitForInputSource(_ id: String, timeout: TimeInterval) -> TISInputSource? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let source = inputSource(id: id) {
+                return source
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return inputSource(id: id)
     }
 
     private static func waitForCurrentInputSourceID(_ id: String, timeout: TimeInterval) -> String? {

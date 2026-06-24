@@ -65,7 +65,7 @@ if [[ ! -x "$BUNDLE_PATH/Contents/MacOS/KnowTypeInputMethodApp" ]]; then
   exit 1
 fi
 
-if ! SELECT_OUTPUT="$("$BUNDLE_PATH/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-select-input-source 2>&1)"; then
+if ! SELECT_OUTPUT="$("$BUNDLE_PATH/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-register-input-source --knowtype-select-input-source 2>&1)"; then
   printf '%s\n' "$SELECT_OUTPUT"
   exit 1
 fi

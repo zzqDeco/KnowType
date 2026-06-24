@@ -7,10 +7,10 @@ Local Apple Development builds can be registered and enabled while still refusin
 The fix keeps the installed bundle shape closer to mature IMK frontends and adds a repair path for stale local development state:
 
 - `KnowType.app` is an `LSUIElement` agent app instead of a pure `LSBackgroundOnly` app, matching Squirrel and vChewing-style IMK frontends.
-- The single active input source declares Chinese script repertoires with script codes such as `Hans`, `Hant`, `Hani`, `Hanb`, and `Han`, plus a compact menu label.
-- The active input source does not advertise `Latn`; otherwise TIS can classify the third-party Chinese input source as ASCII-capable and skip it in normal input-source cycling.
+- The visible `.Hans` input mode declares Chinese script repertoires with script codes such as `Hans`, `Hant`, `Hani`, `Hanb`, and `Han`, plus a compact menu label.
+- The visible input mode does not advertise `Latn`; otherwise TIS can classify the third-party Chinese input source as ASCII-capable and skip it in normal input-source cycling.
 - The input-method app deduplicates TIS sources before issuing enable requests, so repeated local launches do not amplify duplicated records.
-- `scripts/repair-inputmethod-selection.sh` uses the input-source helper to unregister stale LaunchServices records for old KnowType build paths and disable legacy TIS modes, then removes stale `.Hans` / `.Mode` preference rows, keeps enabled/history/selected repair on the single active `com.knowtype.inputmethod.KnowType` source, and restarts Text Input menu agents.
+- `scripts/repair-inputmethod-selection.sh` uses the input-source helper to unregister stale LaunchServices records for old KnowType build paths and disable legacy TIS modes, then removes stale `.Mode` and parent-only preference rows, keeps enabled repair on parent plus `.Hans`, keeps history/selected repair on `.Hans`, and restarts Text Input menu agents.
 - `scripts/diagnose-inputmethod.sh --strict` fails when LaunchServices still has stale KnowType bundle records outside the installed path.
 - Install and settings guidance now calls out the macOS authorization prompt that asks whether to allow `知键` to enable `KnowType`; until that prompt is approved, macOS can keep falling back to another source even when registration and enablement checks pass.
 

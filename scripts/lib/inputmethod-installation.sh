@@ -6,6 +6,10 @@ source "$KNOWTYPE_INSTALLATION_LIB_DIR/inputsource-ids.sh"
 KNOWTYPE_PREFPANE_BUNDLE_ID="com.knowtype.preferencepane"
 KNOWTYPE_LSREGISTER="${KNOWTYPE_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
 KNOWTYPE_PLIST_BUDDY="${KNOWTYPE_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
+KNOWTYPE_PYTHON3="${KNOWTYPE_PYTHON3:-/usr/bin/python3}"
+if [[ ! -x "$KNOWTYPE_PYTHON3" ]]; then
+  KNOWTYPE_PYTHON3="$(command -v python3 2>/dev/null || true)"
+fi
 KNOWTYPE_SYSTEM_SETTINGS_APP_PATH="/System/Applications/System Settings.app/Contents/MacOS/System Settings"
 KNOWTYPE_SYSTEM_PREFERENCES_APP_PATH="/System/Applications/System Preferences.app/Contents/MacOS/System Preferences"
 KNOWTYPE_DEFAULT_BACKUP_RETENTION=3
@@ -249,7 +253,7 @@ knowtype_path_checksum() {
 
 knowtype_json_escape() {
   local value="$1"
-  KNOWTYPE_JSON_VALUE="$value" python3 - <<'PY'
+  KNOWTYPE_JSON_VALUE="$value" "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
 print(json.dumps(os.environ.get("KNOWTYPE_JSON_VALUE", ""))[1:-1])
@@ -262,7 +266,7 @@ knowtype_write_json_file() {
   local directory
   directory="$(dirname "$output_path")"
   mkdir -p "$directory"
-  KNOWTYPE_OUTPUT_PATH="$output_path" "$@" python3 - <<'PY'
+  KNOWTYPE_OUTPUT_PATH="$output_path" "$@" "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
 
@@ -315,7 +319,7 @@ knowtype_write_install_state() {
     KNOWTYPE_STATE_BUNDLE_ID="$bundle_id" \
     KNOWTYPE_STATE_MODE_ID="$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
     KNOWTYPE_STATE_RELEASE_MANIFEST_DIGEST="$release_manifest_digest" \
-    python3 - <<'PY'
+    "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
 
@@ -348,7 +352,7 @@ knowtype_read_install_state_field() {
   local state_path
   state_path="$(knowtype_install_state_path)"
   [[ -f "$state_path" ]] || return 0
-  KNOWTYPE_INSTALL_STATE_FIELD="$field" KNOWTYPE_INSTALL_STATE_PATH_VALUE="$state_path" python3 - <<'PY'
+  KNOWTYPE_INSTALL_STATE_FIELD="$field" KNOWTYPE_INSTALL_STATE_PATH_VALUE="$state_path" "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
 path = os.environ["KNOWTYPE_INSTALL_STATE_PATH_VALUE"]
@@ -448,7 +452,7 @@ knowtype_create_install_backup() {
     KNOWTYPE_BACKUP_APP_CHECKSUM="$checksum" \
     KNOWTYPE_BACKUP_INCLUDED_PREFPANE="$included_prefpane" \
     KNOWTYPE_BACKUP_RESTORE_COMMAND="./scripts/rollback-inputmethod.sh --to $backup_id" \
-    python3 - <<'PY'
+    "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
 payload = {
@@ -473,7 +477,7 @@ knowtype_backup_manifest_field() {
   local manifest_path="$1"
   local field="$2"
   [[ -f "$manifest_path" ]] || return 0
-  KNOWTYPE_BACKUP_MANIFEST_PATH="$manifest_path" KNOWTYPE_BACKUP_MANIFEST_FIELD="$field" python3 - <<'PY'
+  KNOWTYPE_BACKUP_MANIFEST_PATH="$manifest_path" KNOWTYPE_BACKUP_MANIFEST_FIELD="$field" "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
 try:
@@ -564,6 +568,26 @@ knowtype_validate_inputmethod_bundle_for_install() {
     echo "error: bundle does not match KnowType input-method identity: $bundle_path" >&2
     return 1
   fi
+  local visible_mode_ids
+  if ! visible_mode_ids="$(knowtype_bundle_visible_input_mode_ids "$bundle_path")"; then
+    visible_mode_ids=""
+  fi
+  local visible_mode_count
+  visible_mode_count="$(printf '%s\n' "$visible_mode_ids" | awk 'NF { count++ } END { print count + 0 }')"
+  local visible_mode_id
+  visible_mode_id="$(printf '%s\n' "$visible_mode_ids" | sed -n '1p')"
+  if [[ -z "$visible_mode_id" || "$visible_mode_id" == "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
+    echo "error: input-method bundle does not declare a menu-visible input mode: $bundle_path" >&2
+    return 1
+  fi
+  if [[ "$visible_mode_count" != "1" ]]; then
+    echo "error: input-method bundle declares $visible_mode_count menu-visible input modes (expected exactly one '$KNOWTYPE_ACTIVE_INPUT_MODE_ID'): $bundle_path" >&2
+    return 1
+  fi
+  if [[ "$visible_mode_id" != "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" ]]; then
+    echo "error: input-method bundle declares unsupported menu-visible input mode '$visible_mode_id' (expected '$KNOWTYPE_ACTIVE_INPUT_MODE_ID'): $bundle_path" >&2
+    return 1
+  fi
   if [[ ! -x "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" ]]; then
     echo "error: input-method executable is missing or not executable in: $bundle_path" >&2
     return 1
@@ -589,6 +613,34 @@ knowtype_plistbuddy_value() {
      output="$("$KNOWTYPE_PLIST_BUDDY" -c "Print $key_path" "$plist" 2>/dev/null)"; then
     printf '%s' "$output"
   fi
+}
+
+knowtype_bundle_visible_input_mode_ids() {
+  local bundle_path="$1"
+  local info_plist="$bundle_path/Contents/Info.plist"
+  [[ -f "$info_plist" ]] || return 1
+
+  local index=0
+  local found=0
+  local mode_id
+  while :; do
+    mode_id="$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:$index" "$info_plist")"
+    if [[ -z "$mode_id" ]]; then
+      break
+    fi
+    if [[ "$(knowtype_plistbuddy_value ":ComponentInputModeDict:tsInputModeListKey:$mode_id:TISInputSourceID" "$info_plist")" != "$mode_id" ]]; then
+      return 1
+    fi
+    printf '%s\n' "$mode_id"
+    found=1
+    index=$((index + 1))
+  done
+  [[ "$found" == "1" ]]
+}
+
+knowtype_bundle_visible_input_mode_id() {
+  local bundle_path="$1"
+  knowtype_bundle_visible_input_mode_ids "$bundle_path" | sed -n '1p'
 }
 
 knowtype_bundle_matches_inputmethod_identity() {

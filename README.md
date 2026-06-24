@@ -110,10 +110,10 @@ Build and install the local development bundle:
 ```
 
 The local installer refreshes the traditional InputMethodKit app registration,
-purges stale `.Hans` / `.Mode` development state, registers and enables the
-single `KnowType` input source through the dedicated input-source helper, and
-repairs history without moving KnowType ahead of the retained current source. It
-does not rewrite selected preferences during install.
+purges stale `.Mode` development state, registers and enables the KnowType
+parent input method plus the visible `.Hans` input mode from the installed app
+context, and repairs history without moving KnowType ahead of the retained
+current source. It does not rewrite selected preferences during install.
 It does not launch the installed input-method host, does not auto-select
 KnowType, and does not initialize Rime user data during install.
 If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
@@ -123,10 +123,10 @@ request, or explicit maintenance.
 If an existing `KnowTypeInputMethodApp` process is running, the installer stops
 before replacing files instead of killing it, because host shutdown can flush
 Rime user data.
-KnowType uses a single non-mode-enabled input source because it currently has
-only one real user mode. The only user-selectable source id is
-`com.knowtype.inputmethod.KnowType`; old
-`com.knowtype.inputmethod.KnowType.Hans` and `.Mode` records are treated as
+KnowType uses the mature macOS IMK shape: `com.knowtype.inputmethod.KnowType`
+is the non-selectable parent input method, and
+`com.knowtype.inputmethod.KnowType.Hans` is the only user-selectable visible
+mode. Old `.Mode` records and parent-only selected/history rows are treated as
 legacy cache entries and cleaned by the repair scripts. System Settings and the
 menu bar should show exactly one user-selectable `KnowType` item.
 

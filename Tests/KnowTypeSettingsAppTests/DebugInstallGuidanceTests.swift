@@ -24,8 +24,8 @@ final class DebugInstallGuidanceTests: XCTestCase {
         XCTAssertTrue(DebugInstallGuidance.steps(preferredLanguages: ["zh-Hans-CN"]).contains {
             $0.title == "刷新注册状态"
                 && $0.detail.contains("LaunchServices")
-                && $0.detail.contains("legacy .Hans/.Mode")
-                && $0.detail.contains("单一 KnowType 输入源")
+                && $0.detail.contains("legacy .Mode")
+                && $0.detail.contains("可见 .Hans 输入模式")
         })
     }
 

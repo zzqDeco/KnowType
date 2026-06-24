@@ -6,6 +6,6 @@ Absorbed
 
 ## Summary
 
-This earlier plan restored parent-anchor plus `.Hans` mode registration. It has been absorbed by `input-source-single-source-model.plan.md`.
+This earlier plan restored parent-anchor plus `.Hans` mode registration. It is superseded by `input-source-menu-visible-mode-registration.plan.md`, which keeps that model and tightens menu-bar acceptance.
 
-KnowType now uses the single non-mode-enabled `com.knowtype.inputmethod.KnowType` source as the only user-selectable Text Input Source. `.Hans` and `.Mode` are legacy cleanup records only.
+KnowType now keeps `com.knowtype.inputmethod.KnowType` as the parent input method and `com.knowtype.inputmethod.KnowType.Hans` as the only visible user-selectable input mode. `.Mode` is a legacy cleanup record only.

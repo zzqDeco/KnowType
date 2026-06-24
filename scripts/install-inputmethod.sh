@@ -291,6 +291,16 @@ purge_legacy_best_effort() {
 }
 
 bootstrap_input_source_best_effort() {
+  local executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+  if [[ -x "$executable" ]]; then
+    if "$executable" --knowtype-register-input-source --knowtype-enable-input-source; then
+      return 0
+    fi
+    echo "warning: installed app input-source registration failed; falling back to helper bootstrap" >&2
+  else
+    echo "warning: installed KnowType executable is unavailable for input-source registration: $executable" >&2
+  fi
+
   local tool
   if ! tool="$(inputsource_tool_path)"; then
     echo "warning: input-source helper is unavailable; continuing without input-source bootstrap" >&2
@@ -328,21 +338,65 @@ discover_release_manifest() {
 release_manifest_field() {
   local manifest_path="$1"
   local field_path="$2"
-  KNOWTYPE_RELEASE_MANIFEST="$manifest_path" KNOWTYPE_RELEASE_MANIFEST_FIELD="$field_path" python3 - <<'PY'
-import json
-import os
+  /usr/bin/plutil -extract "$field_path" raw -o - "$manifest_path" 2>/dev/null || true
+}
 
-with open(os.environ["KNOWTYPE_RELEASE_MANIFEST"], encoding="utf-8") as handle:
-    value = json.load(handle)
-for component in os.environ["KNOWTYPE_RELEASE_MANIFEST_FIELD"].split("."):
-    if isinstance(value, dict):
-        value = value.get(component)
-    else:
-        value = None
-        break
-if value is not None:
-    print(value)
-PY
+release_manifest_bundle_count() {
+  local manifest_path="$1"
+  local count
+  count="$(/usr/bin/plutil -extract bundles raw -o - "$manifest_path" 2>/dev/null || true)"
+  if [[ "$count" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$count"
+  else
+    printf '0'
+  fi
+}
+
+release_manifest_bundle_field() {
+  local manifest_path="$1"
+  local index="$2"
+  local key="$3"
+  /usr/bin/plutil -extract "bundles.$index.$key" raw -o - "$manifest_path" 2>/dev/null || true
+}
+
+release_manifest_bundle_index_for_path() {
+  local manifest_path="$1"
+  local expected_path="$2"
+  local count
+  local match_count=0
+  local match_index=""
+  local index
+  local path
+  count="$(release_manifest_bundle_count "$manifest_path")"
+  for ((index = 0; index < count; index++)); do
+    path="$(release_manifest_bundle_field "$manifest_path" "$index" "path")"
+    if [[ "$path" == "$expected_path" ]]; then
+      match_count=$((match_count + 1))
+      match_index="$index"
+    fi
+  done
+  if (( match_count == 1 )); then
+    printf '%s' "$match_index"
+    return 0
+  fi
+  printf '%s' "$match_count"
+  return 1
+}
+
+require_release_manifest_match() {
+  local manifest_path="$1"
+  local index="$2"
+  local key="$3"
+  local expected="$4"
+  local label="$5"
+  local path
+  local actual
+  path="$(release_manifest_bundle_field "$manifest_path" "$index" "path")"
+  actual="$(release_manifest_bundle_field "$manifest_path" "$index" "$key")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "error: release-manifest.json validation failed: $label mismatch for ${path:-<unknown>}: manifest has '${actual:-<missing>}', bundle has '$expected'" >&2
+    exit 1
+  fi
 }
 
 validate_release_manifest_metadata() {
@@ -361,55 +415,32 @@ validate_release_manifest_metadata() {
     prefpane_build="$(knowtype_bundle_build_version "$prefpane_path")"
   fi
 
-  KNOWTYPE_RELEASE_MANIFEST="$manifest_path" \
-    KNOWTYPE_RELEASE_APP_BUNDLE_ID="$app_bundle_id" \
-    KNOWTYPE_RELEASE_APP_VERSION="$app_version" \
-    KNOWTYPE_RELEASE_APP_BUILD="$app_build" \
-    KNOWTYPE_RELEASE_PREFPANE_PATH="$prefpane_path" \
-    KNOWTYPE_RELEASE_PREFPANE_BUNDLE_ID="$prefpane_bundle_id" \
-    KNOWTYPE_RELEASE_PREFPANE_VERSION="$prefpane_version" \
-    KNOWTYPE_RELEASE_PREFPANE_BUILD="$prefpane_build" \
-    python3 - <<'PY'
-import json
-import os
-import sys
+  local bundle_count
+  bundle_count="$(release_manifest_bundle_count "$manifest_path")"
+  if (( bundle_count == 0 )); then
+    echo "error: release-manifest.json validation failed: missing bundles array" >&2
+    exit 1
+  fi
 
-def fail(message: str) -> None:
-    print(f"error: release-manifest.json validation failed: {message}", file=sys.stderr)
-    sys.exit(1)
+  local app_index
+  if ! app_index="$(release_manifest_bundle_index_for_path "$manifest_path" "KnowType.app")"; then
+    echo "error: release-manifest.json validation failed: expected exactly one KnowType.app metadata entry, found $app_index" >&2
+    exit 1
+  fi
+  require_release_manifest_match "$manifest_path" "$app_index" "bundleIdentifier" "$app_bundle_id" "bundleIdentifier"
+  require_release_manifest_match "$manifest_path" "$app_index" "shortVersion" "$app_version" "shortVersion"
+  require_release_manifest_match "$manifest_path" "$app_index" "buildVersion" "$app_build" "buildVersion"
 
-with open(os.environ["KNOWTYPE_RELEASE_MANIFEST"], encoding="utf-8") as handle:
-    manifest = json.load(handle)
-
-bundles = manifest.get("bundles")
-if not isinstance(bundles, list):
-    fail("missing bundles array")
-
-def bundle_entries(path: str):
-    return [entry for entry in bundles if isinstance(entry, dict) and entry.get("path") == path]
-
-def require_match(entry: dict, key: str, expected: str, label: str) -> None:
-    actual = entry.get(key)
-    if actual != expected:
-        fail(f"{label} mismatch for {entry.get('path', '<unknown>')}: manifest has {actual!r}, bundle has {expected!r}")
-
-app_entries = bundle_entries("KnowType.app")
-if len(app_entries) != 1:
-    fail(f"expected exactly one KnowType.app metadata entry, found {len(app_entries)}")
-app = app_entries[0]
-require_match(app, "bundleIdentifier", os.environ["KNOWTYPE_RELEASE_APP_BUNDLE_ID"], "bundleIdentifier")
-require_match(app, "shortVersion", os.environ["KNOWTYPE_RELEASE_APP_VERSION"], "shortVersion")
-require_match(app, "buildVersion", os.environ["KNOWTYPE_RELEASE_APP_BUILD"], "buildVersion")
-
-if os.environ.get("KNOWTYPE_RELEASE_PREFPANE_PATH"):
-    prefpane_entries = bundle_entries("KnowType.prefPane")
-    if len(prefpane_entries) != 1:
-        fail(f"expected exactly one KnowType.prefPane metadata entry, found {len(prefpane_entries)}")
-    pane = prefpane_entries[0]
-    require_match(pane, "bundleIdentifier", os.environ["KNOWTYPE_RELEASE_PREFPANE_BUNDLE_ID"], "prefPane bundleIdentifier")
-    require_match(pane, "shortVersion", os.environ["KNOWTYPE_RELEASE_PREFPANE_VERSION"], "prefPane shortVersion")
-    require_match(pane, "buildVersion", os.environ["KNOWTYPE_RELEASE_PREFPANE_BUILD"], "prefPane buildVersion")
-PY
+  if [[ -n "$prefpane_path" && -d "$prefpane_path" ]]; then
+    local prefpane_index
+    if ! prefpane_index="$(release_manifest_bundle_index_for_path "$manifest_path" "KnowType.prefPane")"; then
+      echo "error: release-manifest.json validation failed: expected exactly one KnowType.prefPane metadata entry, found $prefpane_index" >&2
+      exit 1
+    fi
+    require_release_manifest_match "$manifest_path" "$prefpane_index" "bundleIdentifier" "$prefpane_bundle_id" "prefPane bundleIdentifier"
+    require_release_manifest_match "$manifest_path" "$prefpane_index" "shortVersion" "$prefpane_version" "prefPane shortVersion"
+    require_release_manifest_match "$manifest_path" "$prefpane_index" "buildVersion" "$prefpane_build" "prefPane buildVersion"
+  fi
 }
 
 validate_release_zip_checksum_if_available() {
@@ -677,8 +708,8 @@ postflight_result="ok"
 postflight_json=""
 if ! postflight_json="$("$SCRIPTS_DIR/diagnose-inputmethod.sh" --json --path "$TARGET_PATH" 2>/dev/null)"; then
   postflight_result="warning"
-elif command -v python3 >/dev/null 2>&1; then
-  if ! python3 -c 'import json,sys; data=json.load(sys.stdin); sys.exit(1 if data.get("failures") else 0)' <<<"$postflight_json"; then
+elif command -v "$KNOWTYPE_PYTHON3" >/dev/null 2>&1; then
+  if ! "$KNOWTYPE_PYTHON3" -c 'import json,sys; data=json.load(sys.stdin); sys.exit(1 if data.get("failures") else 0)' <<<"$postflight_json"; then
     postflight_result="warning"
   fi
 fi
@@ -712,7 +743,7 @@ else
   fi
 fi
 
-echo "Registered and enabled input source via helper: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+echo "Registered and enabled input source via installed app context: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 echo "Postflight uses the JSON install snapshot only; run ./scripts/diagnose-inputmethod.sh --strict for full TIS diagnostics."
 if [[ -n "$BACKUP_ID" ]]; then
   echo "Rollback command: ./scripts/rollback-inputmethod.sh --to $BACKUP_ID"
