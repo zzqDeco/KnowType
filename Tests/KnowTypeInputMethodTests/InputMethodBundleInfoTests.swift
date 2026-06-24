@@ -681,6 +681,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(componentInputModeDict["tsVisibleInputModeOrderedArrayKey"] as? [String], [KnowTypeInputSourceIDs.activeMode])
         XCTAssertEqual((plist["TISIconLabels"] as? [String: String])?["Primary"], "知")
         XCTAssertEqual(KnowTypeInputSourceIDs.activeMode, "com.knowtype.inputmethod.KnowType.Hans")
+        XCTAssertEqual(KnowTypeInputSourceIDs.connectionName, "com.knowtype.inputmethod.KnowType_Connection")
         XCTAssertFalse(KnowTypeInputSourceIDs.legacyModes.contains("com.knowtype.inputmethod.KnowType.Hans"))
         XCTAssertTrue(KnowTypeInputSourceIDs.legacyModes.contains("com.knowtype.inputmethod.KnowType.Mode"))
     }

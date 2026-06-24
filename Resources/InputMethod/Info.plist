@@ -25,7 +25,7 @@
   <key>CFBundleVersion</key>
   <string>2</string>
   <key>InputMethodConnectionName</key>
-  <string>KnowType_Connection</string>
+  <string>com.knowtype.inputmethod.KnowType_Connection</string>
   <key>InputMethodServerControllerClass</key>
   <string>KnowTypeInputController</string>
   <key>InputMethodServerDelegateClass</key>
