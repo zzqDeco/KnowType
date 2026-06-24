@@ -116,6 +116,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [imk-server-stable-connection.plan.md](imk-server-stable-connection.plan.md) | Stable IMK server connection name aligned across plist, Swift constants, shell scripts, and installed endpoint verification | Delivered |
 | [imk-session-architecture.plan.md](imk-session-architecture.plan.md) | Thin IMK controller and explicit session separation | Delivered |
 | [inputmethod-native-candidates-fix.plan.md](inputmethod-native-candidates-fix.plan.md) | Native-style candidate panel behavior | Delivered |
 | [native-candidate-panel-style.plan.md](native-candidate-panel-style.plan.md) | Compact macOS candidate panel styling | Delivered |

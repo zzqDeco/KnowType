@@ -4,6 +4,6 @@ public enum KnowTypeInputSourceIDs {
     public static let legacyModes = [
         "com.knowtype.inputmethod.KnowType.Mode"
     ]
-    public static let connectionName = "KnowType_Connection"
+    public static let connectionName = "com.knowtype.inputmethod.KnowType_Connection"
     public static let fallback = "com.apple.keylayout.ABC"
 }
