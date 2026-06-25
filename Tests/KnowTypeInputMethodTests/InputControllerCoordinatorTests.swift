@@ -1322,9 +1322,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testCodeAppDefaultsToAsciiPassthroughWithoutComposition() {
+    func testTerminalAppDefaultsToAsciiPassthroughWithoutComposition() {
         let client = FakeInputControllerClient()
-        client.bundleIdentifier = "com.openai.codex"
+        client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, _, _) = makeCoordinator(client: client)
 
         XCTAssertFalse(coordinator.handleText("a", client: client))
@@ -1337,20 +1337,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testCodeAppChineseTextModeUsesCommitOnlyComposition() {
+    func testCodexDefaultsToChineseCommitOnlyComposition() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"
-        let preferences = InputModePreferences(
-            codeAppState: InputModeState(
-                textMode: .chinese,
-                punctuationMode: .chinese,
-                symbolWidth: .halfWidth
-            )
-        )
-        let (coordinator, host, _) = makeCoordinator(
-            client: client,
-            inputModePreferences: preferences
-        )
+        let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertTrue(coordinator.handleText("i", client: client))
@@ -1364,9 +1354,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testCodeAppOptionSlashEntersChineseCommitOnlyComposition() {
+    func testTerminalOptionSlashEntersChineseCommitOnlyComposition() {
         let client = FakeInputControllerClient()
-        client.bundleIdentifier = "com.openai.codex"
+        client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(
@@ -1389,7 +1379,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
     func testInputModeReloadsImmediatelyWhenFocusedBundleChanges() {
         let codeClient = FakeInputControllerClient()
-        codeClient.bundleIdentifier = "com.openai.codex"
+        codeClient.bundleIdentifier = "com.apple.Terminal"
         let textClient = FakeInputControllerClient()
         textClient.bundleIdentifier = "com.apple.TextEdit"
         let (coordinator, _, _) = makeCoordinator(client: codeClient)

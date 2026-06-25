@@ -47,7 +47,7 @@ when converting a shipped plan into a short record.
 | [rime-only-hotpath-performance.plan.md](rime-only-hotpath-performance.plan.md) | Retire production local conversion fallback and enforce Rime-only hot-path performance budgets | Active |
 | [rime-native-interaction-polish.plan.md](rime-native-interaction-polish.plan.md) | Align marked text, arrows, pages, numbers, symbols, and AI shortcuts with Rime-native IME behavior | Active |
 | [direct-space-digit-passthrough.plan.md](direct-space-digit-passthrough.plan.md) | Pass idle Space and digits through while preserving active Rime candidate shortcuts | Active |
-| [input-client-compatibility-policy.plan.md](input-client-compatibility-policy.plan.md) | Host compatibility write modes and idle ASCII passthrough for apps that mishandle inline IMK composition | Active |
+| [input-client-compatibility-policy.plan.md](input-client-compatibility-policy.plan.md) | Host compatibility write modes, terminal ASCII passthrough, and editor commit-only composition | Active |
 | [native-imk-settings-menu.plan.md](native-imk-settings-menu.plan.md) | Native IMK input-menu settings entry and compatibility prefPane fallback | Active |
 | [system-settings-prefpane-cache-cleanup.plan.md](system-settings-prefpane-cache-cleanup.plan.md) | Remove stale System Settings prefPane cache after default local installs | Active |
 | [install-upgrade-rollback-experience.plan.md](install-upgrade-rollback-experience.plan.md) | Traceable local installs, app backups, rollback, and dynamic diagnostics status | Active |

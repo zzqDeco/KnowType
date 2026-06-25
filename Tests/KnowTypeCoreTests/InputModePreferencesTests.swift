@@ -89,7 +89,7 @@ final class InputModePreferencesTests: XCTestCase {
     func testPreferenceRuntimeDoesNotClobberTextModeToggleWhenPreferencesAreUnchanged() {
         var runtime = InputModePreferenceRuntime(
             preferences: .standard,
-            appBundleID: "com.openai.codex"
+            appBundleID: "com.apple.Terminal"
         )
         XCTAssertEqual(runtime.state.textMode, .ascii)
 
@@ -98,7 +98,7 @@ final class InputModePreferencesTests: XCTestCase {
         XCTAssertFalse(
             runtime.reloadIfChanged(
                 preferences: .standard,
-                appBundleID: "com.openai.codex"
+                appBundleID: "com.apple.Terminal"
             )
         )
         XCTAssertEqual(runtime.state.textMode, .chinese)
@@ -113,7 +113,7 @@ final class InputModePreferencesTests: XCTestCase {
         XCTAssertTrue(
             runtime.reloadIfChanged(
                 preferences: .standard,
-                appBundleID: "com.openai.codex"
+                appBundleID: "com.apple.Terminal"
             )
         )
         XCTAssertEqual(runtime.state, InputModePreferences.standard.codeAppState)

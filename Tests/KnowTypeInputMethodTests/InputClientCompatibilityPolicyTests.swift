@@ -31,11 +31,27 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testCommonCompatibilityClientsUseCodeAppDefaultAsciiPassthrough() {
+    func testTerminalCompatibilityClientsUseAsciiPassthroughByDefault() {
+        let policy = InputClientCompatibilityPolicy(userDefaults: nil)
+        let state = InputModeAppPolicy.defaultState(appBundleID: "com.apple.Terminal")
+
+        XCTAssertEqual(state.textMode, .ascii)
+        XCTAssertEqual(
+            policy.writeMode(
+                bundleIdentifier: "com.apple.Terminal",
+                inputModeState: state,
+                hasActiveComposition: false,
+                hasClient: true
+            ),
+            .asciiPassthrough
+        )
+    }
+
+    func testEditorCompatibilityClientsUseCommitOnlyByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
         let state = InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij")
 
-        XCTAssertEqual(state.textMode, .ascii)
+        XCTAssertEqual(state.textMode, .chinese)
         XCTAssertEqual(
             policy.writeMode(
                 bundleIdentifier: "com.jetbrains.intellij",
@@ -43,7 +59,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
                 hasActiveComposition: false,
                 hasClient: true
             ),
-            .asciiPassthrough
+            .commitOnlyComposition
         )
     }
 

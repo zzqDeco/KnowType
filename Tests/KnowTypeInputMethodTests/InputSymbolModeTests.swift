@@ -66,9 +66,9 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(transformer.text(for: "@", state: state), "＠")
     }
 
-    func testAppPolicyDefaultsCodeContextsToAsciiTextAndChineseHalfWidthPunctuation() {
+    func testAppPolicyDefaultsTerminalsToAsciiAndEditorsToChineseText() {
         XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.apple.dt.Xcode"),
+            InputModeAppPolicy.defaultState(appBundleID: "com.apple.Terminal"),
             InputModeState(
                 textMode: .ascii,
                 punctuationMode: .chinese,
@@ -84,9 +84,17 @@ final class InputSymbolModeTests: XCTestCase {
             )
         )
         XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "com.apple.dt.Xcode"),
+            InputModeState(
+                textMode: .chinese,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex"),
             InputModeState(
-                textMode: .ascii,
+                textMode: .chinese,
                 punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
@@ -94,7 +102,7 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij"),
             InputModeState(
-                textMode: .ascii,
+                textMode: .chinese,
                 punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
@@ -102,7 +110,7 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.todesktop.app.example"),
             InputModeState(
-                textMode: .ascii,
+                textMode: .chinese,
                 punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
@@ -121,9 +129,9 @@ final class InputSymbolModeTests: XCTestCase {
                 symbolWidth: .fullWidth
             ),
             codeAppState: InputModeState(
-                textMode: .chinese,
+                textMode: .ascii,
                 punctuationMode: .chinese,
-                symbolWidth: .fullWidth
+                symbolWidth: .halfWidth
             )
         )
 
@@ -132,12 +140,24 @@ final class InputSymbolModeTests: XCTestCase {
             preferences.defaultState
         )
         XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex", preferences: preferences),
+            InputModeAppPolicy.defaultState(appBundleID: "com.apple.Terminal", preferences: preferences),
             preferences.codeAppState
         )
         XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex", preferences: preferences),
+            InputModeState(
+                textMode: .chinese,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij", preferences: preferences),
-            preferences.codeAppState
+            InputModeState(
+                textMode: .chinese,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
         )
     }
 
