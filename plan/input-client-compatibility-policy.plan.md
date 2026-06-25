@@ -12,11 +12,13 @@
 - Add host compatibility write modes for inline composition, commit-only
   composition, ASCII passthrough, and missing-client disabled handling.
 - Keep standard AppKit hosts on inline composition.
-- Default terminal, code editor, Codex, common Electron, and JetBrains-style
-  hosts to idle ASCII passthrough and Chinese commit-only composition.
+- Default terminal-style hosts to idle ASCII passthrough.
+- Default editor, Codex, common Electron, and JetBrains-style hosts to Chinese
+  commit-only composition so candidates can appear without inline marked text.
 - Persist `InputTextMode` alongside punctuation and symbol-width defaults.
-- Add a session-local `Option + /` text-mode toggle so default code and terminal
-  hosts can enter Chinese composition without a settings UI.
+- Add a session-local `Option + /` text-mode toggle so compatibility hosts can
+  switch between Chinese composition and idle ASCII passthrough without a
+  settings UI.
 - Update input-method tests, README behavior notes, source notes, and current
   architecture/interface docs.
 - Do not change Rime schemas, AI provider behavior, candidate ranking,
@@ -27,8 +29,10 @@
 - `InputClientCompatibilityPolicy` maps bundle id, input mode state, active
   composition, and client availability to `InputClientWriteMode`.
 - `InputModePreferences.standard.codeAppState` defaults to ASCII text mode,
-  Chinese punctuation, and half-width symbols; saved preferences can still
-  override the state.
+  Chinese punctuation, and half-width symbols. App policy applies that text mode
+  only to terminal-style hosts; editor/Codex/Electron compatibility hosts keep
+  the normal text-mode default while still using code-app punctuation and symbol
+  width.
 - Idle printable ASCII returns `false` in passthrough or disabled modes so the
   host app owns normal typing.
 - Once composition is active, `Space`, numeric candidate selection, and commit

@@ -157,7 +157,11 @@ public enum InputModeAppPolicy {
             return preferences.defaultState
         }
         if usesCodeAppState(appBundleID: appBundleID) {
-            return preferences.codeAppState
+            var state = preferences.codeAppState
+            if !usesTerminalAsciiDefault(appBundleID: appBundleID) {
+                state.textMode = preferences.defaultState.textMode
+            }
+            return state
         }
         return preferences.defaultState
     }
@@ -168,6 +172,14 @@ public enum InputModeAppPolicy {
         }
         return codeAppBundleIDs.contains(appBundleID)
             || codeAppBundleIDPrefixes.contains(where: { appBundleID.hasPrefix($0) })
+    }
+
+    public static func usesTerminalAsciiDefault(appBundleID: String?) -> Bool {
+        guard let appBundleID else {
+            return false
+        }
+        return terminalAsciiDefaultBundleIDs.contains(appBundleID)
+            || terminalAsciiDefaultBundleIDPrefixes.contains(where: { appBundleID.hasPrefix($0) })
     }
 
     private static let codeAppBundleIDs: Set<String> = [
@@ -185,6 +197,14 @@ public enum InputModeAppPolicy {
         "com.jetbrains.",
         "com.microsoft.VSCode",
         "com.todesktop."
+    ]
+
+    private static let terminalAsciiDefaultBundleIDs: Set<String> = [
+        "com.apple.Terminal"
+    ]
+
+    private static let terminalAsciiDefaultBundleIDPrefixes = [
+        "com.googlecode.iterm2"
     ]
 }
 

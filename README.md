@@ -295,20 +295,20 @@ text. To inspect them, run
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
 | Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
-| `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in code and terminal hosts, use it before pinyin to enter Chinese commit-only composition. |
+| `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in compatibility hosts, it switches between Chinese commit-only composition and idle ASCII passthrough. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
 Host compatibility is conservative. Standard AppKit text fields keep inline
-composition with marked text. Terminal, iTerm, Xcode, VS Code, Codex, common
-Electron apps, and JetBrains IDEs default to ASCII passthrough while no Chinese
-composition is active, so ordinary letters, digits, spaces, and punctuation are
-left to the focused app instead of being consumed by KnowType. Press `Option + /`
-in those hosts to switch the current session to Chinese text mode before typing
-pinyin. Once Chinese composition starts, KnowType uses commit-only composition:
-the raw buffer and candidate panel update internally, and committed text is
-written with `insertText` without calling `setMarkedText`.
+composition with marked text. Terminal and iTerm default to idle ASCII
+passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
+the shell until the session is switched with `Option + /`. Xcode, VS Code,
+Codex, common Electron apps, and JetBrains IDEs default to Chinese commit-only
+composition: the raw buffer and candidate panel update internally, and committed
+text is written with `insertText` without calling `setMarkedText`. In any
+compatibility host, `Option + /` switches the active session between that
+Chinese commit-only path and idle ASCII passthrough.
 
 The candidate panel shows Rime prefix candidates, a fixed AI recommendation
 state row, and raw input only when no suggestion is available. It is a compact

@@ -70,14 +70,15 @@ InputClientWriteMode =
   disabled
 ```
 
-Unknown and standard text clients use `inlineComposition`. Terminal, iTerm,
-Xcode, VS Code, Codex, common Electron hosts, and JetBrains IDEs use
-`asciiPassthrough` while idle and `commitOnlyComposition` once Chinese
-composition is active or the session text mode is Chinese. `Option + /` toggles
-the session text mode so code and terminal hosts can enter Chinese composition
-without changing saved defaults. Missing clients use `disabled`; printable idle
-input is returned as unhandled so the host can keep normal typing behavior. All
-write modes keep replacement ranges as
+Unknown and standard text clients use `inlineComposition`. Terminal and iTerm
+default to `asciiPassthrough` while idle. Xcode, VS Code, Codex, common Electron
+hosts, and JetBrains IDEs default to `commitOnlyComposition`, so the candidate
+panel can appear without relying on inline marked text. `Option + /` toggles the
+session text mode in compatibility hosts; ASCII mode passes idle printable input
+back to the focused app, while Chinese mode keeps composition internal and
+commits with `insertText`. Missing clients use `disabled`; printable idle input
+is returned as unhandled so the host can keep normal typing behavior. All write
+modes keep replacement ranges as
 `{NSNotFound, NSNotFound}` unless a future reconversion feature introduces an
 explicit owned range.
 
@@ -385,7 +386,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
 - plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
-- `Option + /` toggles Chinese/ASCII text mode for the active controller session; code and terminal hosts can use it to enter Chinese commit-only composition from the default idle ASCII passthrough state.
+- `Option + /` toggles Chinese/ASCII text mode for the active controller session; compatibility hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
