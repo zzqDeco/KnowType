@@ -1364,6 +1364,45 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testCodeAppOptionSlashEntersChineseCommitOnlyComposition() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
+        XCTAssertNotNil(firstCandidate)
+
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testInputModeReloadsImmediatelyWhenFocusedBundleChanges() {
+        let codeClient = FakeInputControllerClient()
+        codeClient.bundleIdentifier = "com.openai.codex"
+        let textClient = FakeInputControllerClient()
+        textClient.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, _, _) = makeCoordinator(client: codeClient)
+
+        XCTAssertFalse(coordinator.handleText("a", client: codeClient))
+        XCTAssertTrue(coordinator.handleText("n", client: textClient))
+
+        XCTAssertEqual(coordinator.composedString() as? String, "n")
+        XCTAssertTrue(codeClient.insertTextWrites.isEmpty)
+        XCTAssertTrue(textClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(textClient.markedTextWrites.last?.text, "n")
+    }
+
     func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"

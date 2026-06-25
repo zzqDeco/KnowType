@@ -3,6 +3,19 @@ import Foundation
 public enum InputTextMode: String, Codable, Sendable, Equatable, CaseIterable {
     case chinese
     case ascii
+
+    public mutating func toggle() {
+        self = toggled
+    }
+
+    public var toggled: InputTextMode {
+        switch self {
+        case .chinese:
+            return .ascii
+        case .ascii:
+            return .chinese
+        }
+    }
 }
 
 public enum InputSymbolMode: String, Codable, Sendable, Equatable, CaseIterable {
@@ -58,6 +71,10 @@ public struct InputModeState: Codable, Sendable, Equatable {
 
     public mutating func togglePunctuationMode() {
         punctuationMode.toggle()
+    }
+
+    public mutating func toggleTextMode() {
+        textMode.toggle()
     }
 
     public mutating func toggleSymbolWidth() {
@@ -120,6 +137,10 @@ public struct InputModePreferenceRuntime: Sendable, Equatable {
 
     public mutating func togglePunctuationMode() {
         state.togglePunctuationMode()
+    }
+
+    public mutating func toggleTextMode() {
+        state.toggleTextMode()
     }
 
     public mutating func toggleSymbolWidth() {

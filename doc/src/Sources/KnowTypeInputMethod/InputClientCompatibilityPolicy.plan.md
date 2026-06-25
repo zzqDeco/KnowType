@@ -23,6 +23,9 @@
 - During active Chinese composition, compatibility hosts use
   `commitOnlyComposition`: KnowType updates its internal buffer and candidate
   panel, then commits with `insertText` without calling `setMarkedText`.
+- `Option + /` is the supported session-local path for switching code and
+  terminal hosts from the default idle ASCII passthrough state into Chinese text
+  mode.
 - Missing clients use `disabled`, allowing printable idle input to return
   unhandled rather than being swallowed.
 - Override keys use `input.client.<bundle id>.writeMode` in the shared

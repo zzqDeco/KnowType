@@ -117,7 +117,8 @@ private struct InputSettingsView: View {
                     Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
                     Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
                 }
-                LabeledContent(settingsString("settings.input.toggleShortcut"), value: "Option + .")
+                LabeledContent(settingsString("settings.input.punctuationShortcut"), value: "Option + .")
+                LabeledContent(settingsString("settings.input.textModeShortcut"), value: "Option + /")
                 Button {
                     inputModeViewModel.resetToDefaults()
                     runtimePreferencesViewModel.resetToDefaults()

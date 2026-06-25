@@ -21,7 +21,7 @@ and the input-method runtime.
   JetBrains-style bundle identifiers. They use ASCII text mode with Chinese
   punctuation and half-width symbols.
 - The Chinese text pipeline remains available when the active session switches
-  to Chinese text mode.
+  to Chinese text mode through the session-local text-mode toggle.
 
 ## Tests
 

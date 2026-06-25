@@ -24,6 +24,11 @@ Current behavior:
 - passes idle printable ASCII back to compatibility hosts when no composition is
   active; native candidate-only snapshots still count as active composition for
   number selection
+- maps Option+/ to a session-local Chinese/ASCII text-mode toggle so code and
+  terminal hosts can enter Chinese commit-only composition from idle ASCII
+  passthrough
+- bypasses the input-mode preference reload throttle when the focused app bundle
+  changes, so quick host switches do not reuse the previous host's text mode
 - keeps AI recommendation explicit: Tab, Option-number, and mouse click can commit a ready AI row, but ordinary digits are reserved for Rime candidates
 - when native Rime is active, hover and arrow selection update Rime's current-page highlight instead of making the custom panel selection authoritative on its own
 - explicit native `PageUp`/`PageDown` are forwarded to the conversion engine while composition is active, independent of custom candidate-panel visibility

@@ -86,6 +86,24 @@ final class InputModePreferencesTests: XCTestCase {
         XCTAssertEqual(runtime.state.punctuationMode, .english)
     }
 
+    func testPreferenceRuntimeDoesNotClobberTextModeToggleWhenPreferencesAreUnchanged() {
+        var runtime = InputModePreferenceRuntime(
+            preferences: .standard,
+            appBundleID: "com.openai.codex"
+        )
+        XCTAssertEqual(runtime.state.textMode, .ascii)
+
+        runtime.toggleTextMode()
+
+        XCTAssertFalse(
+            runtime.reloadIfChanged(
+                preferences: .standard,
+                appBundleID: "com.openai.codex"
+            )
+        )
+        XCTAssertEqual(runtime.state.textMode, .chinese)
+    }
+
     func testPreferenceRuntimeReloadsWhenAppContextChanges() {
         var runtime = InputModePreferenceRuntime(
             preferences: .standard,

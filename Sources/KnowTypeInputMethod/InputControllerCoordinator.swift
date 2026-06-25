@@ -363,6 +363,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 inputModeRuntime.togglePunctuationMode()
                 return true
             }
+            if action == .toggleTextMode {
+                inputModeRuntime.toggleTextMode()
+                return true
+            }
             if action == .space,
                !hasActiveTextComposition() {
                 reloadInputModeDefaultsIfNeeded(client: client)
@@ -1587,7 +1591,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 )
             case .optionR:
                 return .polishRequested(compositionBuffer.commitText)
-            case .optionNumber, .toggleSymbolMode, .commitRaw:
+            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .commitRaw:
                 break
             }
         }
@@ -2021,13 +2025,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func reloadInputModeDefaultsIfNeeded(client: InputControllerClient?) {
         let now = Date()
-        guard now.timeIntervalSince(lastInputModePreferenceReload) >= Self.preferenceReloadInterval else {
+        let appBundleID = appBundleIdentifier(client: client)
+        let appBundleChanged = inputModeRuntime.appBundleID != appBundleID
+        guard appBundleChanged || now.timeIntervalSince(lastInputModePreferenceReload) >= Self.preferenceReloadInterval else {
             return
         }
         lastInputModePreferenceReload = now
         inputModeRuntime.reloadIfChanged(
             preferences: inputModePreferenceStore.loadPreferences(),
-            appBundleID: appBundleIdentifier(client: client)
+            appBundleID: appBundleID
         )
     }
 

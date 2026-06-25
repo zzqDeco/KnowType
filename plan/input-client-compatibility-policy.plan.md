@@ -15,10 +15,12 @@
 - Default terminal, code editor, Codex, common Electron, and JetBrains-style
   hosts to idle ASCII passthrough and Chinese commit-only composition.
 - Persist `InputTextMode` alongside punctuation and symbol-width defaults.
+- Add a session-local `Option + /` text-mode toggle so default code and terminal
+  hosts can enter Chinese composition without a settings UI.
 - Update input-method tests, README behavior notes, source notes, and current
   architecture/interface docs.
 - Do not change Rime schemas, AI provider behavior, candidate ranking,
-  input-source registration, install scripts, or settings UI.
+  input-source registration, install scripts, or per-host policy settings UI.
 
 ## Implementation
 
@@ -31,6 +33,8 @@
   host app owns normal typing.
 - Once composition is active, `Space`, numeric candidate selection, and commit
   actions stay handled by KnowType.
+- Focused bundle changes bypass the normal preference reload throttle, while
+  unchanged preferences and app context keep session-local toggles intact.
 - `InputClientWriteCoordinator` owns `setMarkedText`, `insertText`, the
   `{NSNotFound, NSNotFound}` replacement-range policy, and
   `KNOWTYPE_CLIENT_WRITE_DEBUG=1` diagnostics.

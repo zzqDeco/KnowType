@@ -251,6 +251,7 @@ prefix 太短等原因。查看命令：
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点/在兼容宿主中直通给宿主。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
+| `Option + /` | 切换当前输入会话的中文/ASCII 文本模式；在代码和终端宿主中，先用它进入中文 commit-only composition，再输入拼音。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
@@ -260,7 +261,8 @@ inline marked text。Terminal、iTerm、Xcode、VS Code、Codex、常见
 Electron 应用和 JetBrains IDE 在没有中文 composition 时默认 ASCII 直通，
 普通字母、数字、空格和标点交还给宿主处理。进入中文 composition 后，这些宿主
 使用 commit-only 路径：KnowType 只更新内部 raw buffer 和候选窗，确认时通过
-`insertText` 上屏，不调用 `setMarkedText`。
+`insertText` 上屏，不调用 `setMarkedText`。在这些宿主中需要输入中文时，先按
+`Option + /` 将当前会话切到中文文本模式，再输入拼音。
 
 候选窗显示 Rime 前缀候选、固定 AI 推荐状态行，以及没有建议时的 raw input。它是
 紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click

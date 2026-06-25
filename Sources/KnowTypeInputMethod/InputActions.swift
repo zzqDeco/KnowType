@@ -8,6 +8,7 @@ public enum InputAction: Sendable, Equatable {
     case optionNumber(Int)
     case optionR
     case toggleSymbolMode
+    case toggleTextMode
     case commitRaw
 }
 
@@ -85,6 +86,8 @@ public struct InputCompositionController: Sendable {
         case .optionR:
             return .polishRequested(originalText)
         case .toggleSymbolMode:
+            return .noAction
+        case .toggleTextMode:
             return .noAction
         case .commitRaw:
             return .commit(originalText)

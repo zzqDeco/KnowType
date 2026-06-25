@@ -28,7 +28,9 @@ uses conservative host compatibility modes for terminal, code editor, Electron,
 and JetBrains-style clients. In those hosts, ordinary printable ASCII with no
 active composition is passed back to the focused app, while Chinese composition
 updates KnowType state and commits through `insertText` without relying on
-`setMarkedText`.
+`setMarkedText`. `Option + /` switches the active session between ASCII and
+Chinese text mode, giving code and terminal hosts a supported path into Chinese
+composition while keeping ordinary typing passthrough as the default.
 
 Level 0 protected input remains a correction/local-protection concept: it avoids
 rewriting URLs, paths, commands, code-like text, and protected app contexts.

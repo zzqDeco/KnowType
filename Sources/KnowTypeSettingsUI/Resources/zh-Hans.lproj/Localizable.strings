@@ -29,7 +29,8 @@
 "settings.input.symbol.english" = "英文";
 "settings.input.width.half" = "半角";
 "settings.input.width.full" = "全角";
-"settings.input.toggleShortcut" = "切换快捷键";
+"settings.input.punctuationShortcut" = "标点切换快捷键";
+"settings.input.textModeShortcut" = "中英模式切换快捷键";
 "settings.input.section.prefixLock" = "前缀锁定";
 "settings.input.prefixLock.note" = "续写候选只会追加在已锁定前缀之后。改写前缀只允许通过显式润色操作触发。";
 
