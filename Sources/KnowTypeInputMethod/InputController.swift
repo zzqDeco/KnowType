@@ -87,13 +87,13 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             modifiers: modifierSet(from: flags)
         )
 
-        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
+        let handled = coordinator.handle(stroke: stroke, client: effectiveInputControllerClient(from: sender))
         inputControllerLogger.debug("inputText key=\(keyCode, privacy: .public) handled=\(handled, privacy: .public)")
         return handled
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
-        coordinator.handleText(string, client: Self.inputControllerClient(from: sender))
+        coordinator.handleText(string, client: effectiveInputControllerClient(from: sender))
     }
 
     public override func composedString(_ sender: Any!) -> Any! {
@@ -115,7 +115,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     public override func candidateSelected(_ candidateString: NSAttributedString!) {
         coordinator.candidateSelected(
             candidateString?.string,
-            client: Self.inputControllerClient(from: client())
+            client: effectiveInputControllerClient(from: client())
         )
     }
 
@@ -194,13 +194,13 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue)),
             eventKind: eventKind
         )
-        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
+        let handled = coordinator.handle(stroke: stroke, client: effectiveInputControllerClient(from: sender))
         inputControllerLogger.debug("handle event key=\(event.keyCode, privacy: .public) handled=\(handled, privacy: .public)")
         return handled
     }
 
     public override func commitComposition(_ sender: Any!) {
-        coordinator.commitComposition(client: Self.inputControllerClient(from: sender))
+        coordinator.commitComposition(client: effectiveInputControllerClient(from: sender))
     }
 
     public override func hidePalettes() {
@@ -257,7 +257,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     func candidatePanelDidCommit(_ selection: CandidatePanelSelection) {
         coordinator.commitCandidatePanelSelection(
             selection,
-            client: Self.inputControllerClient(from: client())
+            client: effectiveInputControllerClient(from: client())
         )
     }
 
@@ -270,6 +270,10 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             return nil
         }
         return IMKInputControllerClientAdapter(client: client)
+    }
+
+    private func effectiveInputControllerClient(from sender: Any!) -> InputControllerClient? {
+        Self.inputControllerClient(from: sender) ?? currentInputControllerClient
     }
 
     private func modifierSet(from flags: Int) -> Set<InputModifier> {

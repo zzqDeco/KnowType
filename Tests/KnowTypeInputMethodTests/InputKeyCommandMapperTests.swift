@@ -41,6 +41,13 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
     }
 
+    func testMapsOptionSlashToTextModeToggle() {
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option])),
+            .action(.toggleTextMode)
+        )
+    }
+
     func testPlainTextAppendsToComposition() {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "w", keyCode: 13)), .append("w"))
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "中", keyCode: -1)), .append("中"))

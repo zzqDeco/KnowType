@@ -29,7 +29,8 @@
 "settings.input.symbol.english" = "English";
 "settings.input.width.half" = "Half-width";
 "settings.input.width.full" = "Full-width";
-"settings.input.toggleShortcut" = "Toggle Shortcut";
+"settings.input.punctuationShortcut" = "Punctuation Shortcut";
+"settings.input.textModeShortcut" = "Text Mode Shortcut";
 "settings.input.section.prefixLock" = "Prefix Lock";
 "settings.input.prefixLock.note" = "Continuation candidates only append after the locked prefix. Prefix rewriting is available only through explicit polish actions.";
 

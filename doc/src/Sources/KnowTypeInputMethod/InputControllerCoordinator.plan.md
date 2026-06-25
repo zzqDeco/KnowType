@@ -6,8 +6,14 @@ Current behavior:
 
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
 - owns the composing raw buffer, `CompositionBuffer`, composition id, input mode runtime, Rime snapshots, native candidate selection, and candidate panel state
-- writes marked text through `InputControllerClient.setMarkedText`, using Rime preedit while native composition is active so partial commits can show confirmed Chinese plus remaining input
-- commits through `InputControllerClient.insertText` with a KnowType-owned replacement range; normal composition, commit, and direct passthrough writes use `NSNotFound` and do not trust stale host `markedRange`
+- selects a host compatibility write mode before writing or passing through
+  printable input
+- writes marked text through `InputControllerClient.setMarkedText` only for
+  inline-compatible hosts, using Rime preedit while native composition is active
+  so partial commits can show confirmed Chinese plus remaining input
+- commits through `InputControllerClient.insertText` with a centralized write
+  coordinator; normal composition, commit, and direct passthrough writes use
+  `NSNotFound` and do not trust stale host `markedRange`
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
 - only clears marked text when ending a KnowType-owned active composition; idle Return/Enter returns to the host without clearing stale host marked ranges
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
@@ -15,7 +21,14 @@ Current behavior:
 - cancels any pending retired local-candidate task before synchronous native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
 - coalesces candidate panel refreshes so anchor resolution and AppKit panel layout run after the key event returns
 - keeps `Space` tied to Rime's highlighted/current candidate for the current raw input; while Rime handles composition without commit, the key is consumed and the marked text refreshes
-- passes idle `Space` and idle `0...9` through with explicit `insertText` so ordinary spaces and numbers are not swallowed by stale candidate state; native candidate-only snapshots still count as active composition for number selection
+- passes idle printable ASCII back to compatibility hosts when no composition is
+  active; native candidate-only snapshots still count as active composition for
+  number selection
+- maps Option+/ to a session-local Chinese/ASCII text-mode toggle so code and
+  terminal hosts can enter Chinese commit-only composition from idle ASCII
+  passthrough
+- bypasses the input-mode preference reload throttle when the focused app bundle
+  changes, so quick host switches do not reuse the previous host's text mode
 - keeps AI recommendation explicit: Tab, Option-number, and mouse click can commit a ready AI row, but ordinary digits are reserved for Rime candidates
 - when native Rime is active, hover and arrow selection update Rime's current-page highlight instead of making the custom panel selection authoritative on its own
 - explicit native `PageUp`/`PageDown` are forwarded to the conversion engine while composition is active, independent of custom candidate-panel visibility
@@ -64,7 +77,9 @@ Current behavior:
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
 - emits candidate-panel updates as `CandidatePanelFrame` values consumed by `CandidatePanelPresenter`, with explicit visibility reasons and `KNOWTYPE_PANEL_DEBUG=1` frame logs
-- emits privacy-safe IMK write range diagnostics with `KNOWTYPE_CLIENT_WRITE_DEBUG=1`; logs include ranges and reasons, never user text
+- emits privacy-safe IMK write diagnostics with
+  `KNOWTYPE_CLIENT_WRITE_DEBUG=1`; logs include bundle id, write mode,
+  handled/pass-through state, ranges, write kind, and reasons, never user text
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
 - rejects candidate-panel publication unless the current raw/native preedit composition is active, while preserving a raw/preedit fallback frame for transient empty Rime snapshots with non-empty raw input; stale suggestions, AI results, or delayed reanchors cannot revive a hidden panel
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions

@@ -58,6 +58,29 @@ Provider prompts are task-specific. Continuation requests distinguish confirmed 
 
 When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
+## Input Client Compatibility
+
+Host write behavior is selected before each key write:
+
+```text
+InputClientWriteMode =
+  inlineComposition
+  commitOnlyComposition
+  asciiPassthrough
+  disabled
+```
+
+Unknown and standard text clients use `inlineComposition`. Terminal, iTerm,
+Xcode, VS Code, Codex, common Electron hosts, and JetBrains IDEs use
+`asciiPassthrough` while idle and `commitOnlyComposition` once Chinese
+composition is active or the session text mode is Chinese. `Option + /` toggles
+the session text mode so code and terminal hosts can enter Chinese composition
+without changing saved defaults. Missing clients use `disabled`; printable idle
+input is returned as unhandled so the host can keep normal typing behavior. All
+write modes keep replacement ranges as
+`{NSNotFound, NSNotFound}` unless a future reconversion feature introduces an
+explicit owned range.
+
 ## Provider Kinds
 
 - `openai_chat`
@@ -362,11 +385,12 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
 - plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
+- `Option + /` toggles Chinese/ASCII text mode for the active controller session; code and terminal hosts can use it to enter Chinese commit-only composition from the default idle ASCII passthrough state.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
 
-Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries and preserves session-local toggles while preferences are unchanged.
+Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries, bypasses the normal reload throttle when the focused app bundle changes, and preserves session-local toggles while preferences and app context are unchanged.
 
 Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation preference for legacy paths, continuation length, and continuation count. These preferences use the same shared defaults domain and are read by the input method at startup and new composition boundaries. The Rime-only settings UI no longer exposes the legacy input-scheme picker; production conversion uses the bundled Rime full-pinyin schema. Defaults preserve the current production behavior: six adaptive candidates per page, adaptive horizontal panel layout, cloud continuation enabled, medium continuation length, and six continuation candidates. If an older preference stores nine candidates per page, adaptive layout caps the effective page size at six; vertical-list mode uses the saved page size.
 

@@ -73,6 +73,9 @@ public struct InputKeyCommandMapper: Sendable {
             if stroke.keyCode == Self.periodKeyCode {
                 return .action(.toggleSymbolMode)
             }
+            if stroke.keyCode == Self.slashKeyCode {
+                return .action(.toggleTextMode)
+            }
             if let digit = optionDigit(for: stroke.keyCode) {
                 return .action(.optionNumber(digit))
             }
@@ -139,6 +142,7 @@ public struct InputKeyCommandMapper: Sendable {
     private static let escapeText = "\u{1B}"
     private static let rKeyCode = 15
     private static let periodKeyCode = 47
+    private static let slashKeyCode = 44
     private static let appKitFunctionKeyScalarRange: ClosedRange<UInt32> = 0xF700...0xF8FF
 
     private static let digitKeyCodes: [Int: Int] = [
