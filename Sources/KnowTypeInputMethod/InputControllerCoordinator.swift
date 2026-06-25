@@ -55,6 +55,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var recentLexicalCommits: [String] = []
     private var recentLexicalSelections: [String] = []
     private let lexicalProfileRuntime: LexicalProfileRuntime
+    private let clientCompatibilityPolicy: InputClientCompatibilityPolicy
+    private let inputClientWriter: InputClientWriteCoordinator
     private let taskSupervisor = InputTaskSupervisor()
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
@@ -84,6 +86,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         rimeUserDBTextProvider: (any RimeUserDBTextSnapshotProviding)? = nil,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
+        clientCompatibilityPolicy: InputClientCompatibilityPolicy = InputClientCompatibilityPolicy(),
+        inputClientWriter: InputClientWriteCoordinator = InputClientWriteCoordinator(),
         host: InputControllerHost,
         anchorResolver: CandidateAnchorResolver,
         enablesAsyncSuggestionRefresh: Bool = true,
@@ -129,6 +133,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             diagnosticSink: aiDiagnosticSink,
             refreshGate: lexicalProfileRefreshGate
         )
+        self.clientCompatibilityPolicy = clientCompatibilityPolicy
+        self.inputClientWriter = inputClientWriter
         self.host = host
         self.candidatePanelPresenter = CandidatePanelPresenter(host: host)
         self.anchorResolver = anchorResolver
@@ -156,8 +162,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func handle(stroke: InputKeyStroke, client: InputControllerClient?) -> Bool {
-        latencyTracer.trace("handle-key") {
-            handle(intent: keyMapper.intent(for: stroke), client: client)
+        let effectiveClient = self.effectiveClient(client)
+        return latencyTracer.trace("handle-key") {
+            handle(intent: keyMapper.intent(for: stroke), client: effectiveClient)
         }
     }
 
@@ -241,6 +248,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func commitComposition(client: InputControllerClient?) {
+        let client = effectiveClient(client)
         if conversionEngine.isNativeActive,
            conversionEngine.snapshot.hasComposition {
             let result = conversionEngine.process(.commitComposition)
@@ -294,11 +302,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
+        let client = effectiveClient(client)
         switch intent {
         case .append(let text):
-            if !hasActiveTextComposition(),
-               Self.isDirectPassthroughDigitText(text) {
-                return insertDirectPassthroughText(text, client: client)
+            if !hasActiveTextComposition() {
+                reloadInputModeDefaultsIfNeeded(client: client)
+                if shouldPassThroughIdleText(text, client: client, reason: "idle_append") {
+                    return false
+                }
+                if Self.isDirectPassthroughDigitText(text) {
+                    return insertDirectPassthroughText(text, client: client)
+                }
             }
             return appendComposition(text, client: client)
         case .symbol(let text):
@@ -314,6 +328,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             if rawBuffer.isEmpty {
                 reloadInputModeDefaultsIfNeeded(client: client)
+                if shouldPassThroughIdleText(text, client: client, reason: "idle_symbol") {
+                    return false
+                }
             }
             guard let symbol = symbolTransformer.text(for: text, state: inputModeRuntime.state) else {
                 return appendComposition(text, client: client)
@@ -346,6 +363,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 inputModeRuntime.togglePunctuationMode()
                 return true
             }
+            if action == .space,
+               !hasActiveTextComposition() {
+                reloadInputModeDefaultsIfNeeded(client: client)
+                if shouldPassThroughIdleText(" ", client: client, reason: "idle_space") {
+                    return false
+                }
+            }
             return commit(action: action, client: client)
         case .cancelComposition:
             guard !rawBuffer.isEmpty else {
@@ -356,6 +380,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return true
         case .selectCandidate(let number):
             guard hasActiveTextComposition() else {
+                reloadInputModeDefaultsIfNeeded(client: client)
+                if shouldPassThroughIdleText(String(number), client: client, reason: "idle_digit") {
+                    return false
+                }
                 return insertDirectPassthroughText(String(number), client: client)
             }
             if conversionEngine.isNativeActive,
@@ -668,6 +696,58 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func appBundleIdentifier(client: InputControllerClient?) -> String? {
         client?.bundleIdentifier
+    }
+
+    private func effectiveClient(_ client: InputControllerClient?) -> InputControllerClient? {
+        client ?? host?.currentClient
+    }
+
+    private func writeMode(
+        client: InputControllerClient?,
+        hasActiveComposition: Bool? = nil
+    ) -> InputClientWriteMode {
+        let isActive = hasActiveComposition ?? hasActiveTextComposition()
+        return clientCompatibilityPolicy.writeMode(
+            bundleIdentifier: appBundleIdentifier(client: client),
+            inputModeState: inputModeRuntime.state,
+            hasActiveComposition: isActive,
+            hasClient: client != nil
+        )
+    }
+
+    private func writeContext(
+        client: InputControllerClient?,
+        reason: String,
+        hasActiveComposition: Bool? = nil
+    ) -> InputClientWriteContext {
+        InputClientWriteContext(
+            compositionID: compositionID,
+            rawLength: rawBuffer.count,
+            writeMode: writeMode(client: client, hasActiveComposition: hasActiveComposition),
+            reason: reason
+        )
+    }
+
+    private func shouldPassThroughIdleText(
+        _ text: String,
+        client: InputControllerClient?,
+        reason: String
+    ) -> Bool {
+        guard !hasActiveTextComposition(),
+              InputKeyCommandMapper.isAppendableText(text) else {
+            return false
+        }
+        let mode = writeMode(client: client, hasActiveComposition: false)
+        guard mode == .asciiPassthrough || mode == .disabled else {
+            return false
+        }
+        inputClientWriter.traceDecision(
+            kind: "passThrough",
+            client: client,
+            context: writeContext(client: client, reason: reason, hasActiveComposition: false),
+            handled: false
+        )
+        return true
     }
 
     private func candidatePanelPlacementPreference(
@@ -1608,14 +1688,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func insert(_ text: String, client: InputControllerClient?) {
-        let replacementRange = replacementRangeForCommit()
-        traceClientWrite(
-            kind: "insertText",
+        inputClientWriter.insertText(
+            text,
             client: client,
-            chosenReplacementRange: replacementRange,
-            reason: "commit"
+            context: writeContext(client: client, reason: "commit")
         )
-        client?.insertText(text, replacementRange: replacementRange)
     }
 
     private func insertDirectPassthroughText(_ text: String, client: InputControllerClient?) -> Bool {
@@ -1623,15 +1700,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return false
         }
         aiAcceptedFeedbackTracker.cancel(reason: "idle_passthrough")
-        let replacementRange = replacementRangeForCommit()
-        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
-        traceClientWrite(
-            kind: "insertText",
+        let context = writeContext(
             client: lifecycleClient,
-            chosenReplacementRange: replacementRange,
-            reason: "idle_passthrough"
+            reason: "idle_passthrough",
+            hasActiveComposition: false
         )
-        lifecycleClient.insertText(text, replacementRange: replacementRange)
+        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
+        inputClientWriter.insertText(text, client: lifecycleClient, context: context)
         return true
     }
 
@@ -1897,7 +1972,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             recordTypingCommit(commitText, client: lifecycleClient)
             insert(commitText, client: lifecycleClient)
         } else if shouldClearOwnedMarkedText,
-                  let lifecycleClient {
+                  let lifecycleClient,
+                  writeMode(client: lifecycleClient, hasActiveComposition: true) == .inlineComposition {
             clearMarkedText(lifecycleClient)
         }
 
@@ -2484,8 +2560,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func refreshComposition(client: InputControllerClient?) {
-        guard let client else {
-            host?.updateComposition()
+        let mode = writeMode(client: client, hasActiveComposition: true)
+        guard let client,
+              mode == .inlineComposition else {
+            inputClientWriter.traceDecision(
+                kind: "skipMarkedText",
+                client: client,
+                context: writeContext(client: client, reason: "composition_update", hasActiveComposition: true),
+                handled: false
+            )
             return
         }
 
@@ -2495,17 +2578,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        let replacement = replacementRangeForMarkedText()
-        traceClientWrite(
-            kind: "setMarkedText",
-            client: client,
-            chosenReplacementRange: replacement,
-            reason: "composition_update"
-        )
-        client.setMarkedText(
+        inputClientWriter.setMarkedText(
             markedText,
             selectionRange: NSRange(location: (markedText as NSString).length, length: 0),
-            replacementRange: replacement
+            client: client,
+            context: writeContext(client: client, reason: "composition_update", hasActiveComposition: true)
         )
         scheduleDelayedCandidateReanchor(
             client: client,
@@ -2515,26 +2592,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func clearMarkedText(_ client: InputControllerClient) {
-        let replacementRange = replacementRangeForMarkedText()
-        traceClientWrite(
-            kind: "setMarkedText",
-            client: client,
-            chosenReplacementRange: replacementRange,
-            reason: "clear_marked_text"
-        )
-        client.setMarkedText(
+        inputClientWriter.setMarkedText(
             "",
             selectionRange: NSRange(location: 0, length: 0),
-            replacementRange: replacementRange
+            client: client,
+            context: writeContext(client: client, reason: "clear_marked_text", hasActiveComposition: true)
         )
-    }
-
-    private func replacementRangeForCommit() -> NSRange {
-        Self.noOwnedReplacementRange
-    }
-
-    private func replacementRangeForMarkedText() -> NSRange {
-        Self.noOwnedReplacementRange
     }
 
     private func nativeMarkedText() -> String? {
@@ -2583,40 +2646,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5
     private static let preferenceReloadInterval: TimeInterval = 1
-    private static let noOwnedReplacementRange = NSRange(location: NSNotFound, length: NSNotFound)
 
     private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
         !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
             scalar.value >= 48 && scalar.value <= 57
         }
-    }
-
-    private func traceClientWrite(
-        kind: String,
-        client: InputControllerClient?,
-        chosenReplacementRange: NSRange,
-        reason: String
-    ) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_CLIENT_WRITE_DEBUG"] == "1" else {
-            return
-        }
-        let message = "KnowType client write: kind=\(kind) " +
-            "compositionID=\(compositionID) rawLength=\(rawBuffer.count) " +
-            "selectedRange=\(Self.describeRange(client?.selectedRange)) " +
-            "reportedMarkedRange=\(Self.describeRange(client?.markedRange)) " +
-            "chosenReplacementRange=\(Self.describeRange(chosenReplacementRange)) " +
-            "reason=\(reason)\n"
-        fputs(message, stderr)
-    }
-
-    private static func describeRange(_ range: NSRange?) -> String {
-        guard let range else {
-            return "nil"
-        }
-        if range.location == NSNotFound {
-            return "{NSNotFound,\(range.length)}"
-        }
-        return "{\(range.location),\(range.length)}"
     }
 }
 

@@ -58,6 +58,27 @@ Provider prompts are task-specific. Continuation requests distinguish confirmed 
 
 When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
+## Input Client Compatibility
+
+Host write behavior is selected before each key write:
+
+```text
+InputClientWriteMode =
+  inlineComposition
+  commitOnlyComposition
+  asciiPassthrough
+  disabled
+```
+
+Unknown and standard text clients use `inlineComposition`. Terminal, iTerm,
+Xcode, VS Code, Codex, common Electron hosts, and JetBrains IDEs use
+`asciiPassthrough` while idle and `commitOnlyComposition` once Chinese
+composition is active or the session text mode is Chinese. Missing clients use
+`disabled`; printable idle input is returned as unhandled so the host can keep
+normal typing behavior. All write modes keep replacement ranges as
+`{NSNotFound, NSNotFound}` unless a future reconversion feature introduces an
+explicit owned range.
+
 ## Provider Kinds
 
 - `openai_chat`

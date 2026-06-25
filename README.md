@@ -287,17 +287,26 @@ text. To inspect them, run
 
 | Shortcut | Behavior |
 |---|---|
-| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, insert a normal space. |
-| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, insert ordinary digits. |
+| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, produce a normal space or pass it through in compatibility hosts. |
+| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, produce ordinary digits or pass them through in compatibility hosts. |
 | Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the current Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. Left/up from the first row lands on the previous page's last row. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
-| `0` | Commit the raw composition when correction candidates are visible; with no active composition, insert `0`. |
-| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation or insert punctuation directly when Rime declines. |
+| `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
+| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
+
+Host compatibility is conservative. Standard AppKit text fields keep inline
+composition with marked text. Terminal, iTerm, Xcode, VS Code, Codex, common
+Electron apps, and JetBrains IDEs default to ASCII passthrough while no Chinese
+composition is active, so ordinary letters, digits, spaces, and punctuation are
+left to the focused app instead of being consumed by KnowType. Once Chinese
+composition starts in those hosts, KnowType uses commit-only composition: the
+raw buffer and candidate panel update internally, and committed text is written
+with `insertText` without calling `setMarkedText`.
 
 The candidate panel shows Rime prefix candidates, a fixed AI recommendation
 state row, and raw input only when no suggestion is available. It is a compact

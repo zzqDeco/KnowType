@@ -243,17 +243,24 @@ prefix 太短等原因。查看命令：
 
 | 快捷键 | 行为 |
 |---|---|
-| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时插入普通空格。 |
-| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时插入普通数字。 |
+| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时插入普通空格，或在兼容宿主中直通给宿主。 |
+| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时输入普通数字，或在兼容宿主中直通给宿主。 |
 | 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。第一页首项按左/上会到上一页最后一项。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
-| `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时插入 `0`。 |
-| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点。 |
+| `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
+| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点/在兼容宿主中直通给宿主。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
+
+宿主兼容策略优先保证不吞普通输入。TextEdit 等标准 AppKit 文本框继续使用
+inline marked text。Terminal、iTerm、Xcode、VS Code、Codex、常见
+Electron 应用和 JetBrains IDE 在没有中文 composition 时默认 ASCII 直通，
+普通字母、数字、空格和标点交还给宿主处理。进入中文 composition 后，这些宿主
+使用 commit-only 路径：KnowType 只更新内部 raw buffer 和候选窗，确认时通过
+`insertText` 上屏，不调用 `setMarkedText`。
 
 候选窗显示 Rime 前缀候选、固定 AI 推荐状态行，以及没有建议时的 raw input。它是
 紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click

@@ -17,8 +17,11 @@ and the input-method runtime.
 - Normal-app and code-app defaults are stored in the shared
   `com.knowtype.preferences` defaults domain.
 - Text mode, punctuation language, and symbol width are separate fields.
-- Code-style app defaults still keep the Chinese text pipeline available unless
-  the user explicitly changes behavior through settings.
+- Code-style app defaults include terminal, editor, Codex, Electron, and
+  JetBrains-style bundle identifiers. They use ASCII text mode with Chinese
+  punctuation and half-width symbols.
+- The Chinese text pipeline remains available when the active session switches
+  to Chinese text mode.
 
 ## Tests
 

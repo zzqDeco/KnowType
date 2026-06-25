@@ -11,7 +11,7 @@ final class InputModePreferencesTests: XCTestCase {
         XCTAssertEqual(store.loadPreferences(), .standard)
     }
 
-    func testUserDefaultsStorePersistsPunctuationAndWidthPreferences() throws {
+    func testUserDefaultsStorePersistsTextPunctuationAndWidthPreferences() throws {
         let suiteName = "KnowTypeInputModePreferencesTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -38,7 +38,9 @@ final class InputModePreferencesTests: XCTestCase {
         let suiteName = "KnowTypeInputModePreferencesTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
+        defaults.set("invalid", forKey: "input.default.textMode")
         defaults.set("invalid", forKey: "input.default.punctuationMode")
+        defaults.set("invalid", forKey: "input.codeApp.textMode")
         defaults.set("invalid", forKey: "input.codeApp.symbolWidth")
         let store = UserDefaultsInputModePreferenceStore(defaults: defaults)
 

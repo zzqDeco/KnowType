@@ -1322,14 +1322,46 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testCodeAppDefaultsToChinesePunctuation() {
+    func testCodeAppDefaultsToAsciiPassthroughWithoutComposition() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"
         let (coordinator, _, _) = makeCoordinator(client: client)
 
-        XCTAssertTrue(coordinator.handleText(".", client: client))
+        XCTAssertFalse(coordinator.handleText("a", client: client))
+        XCTAssertFalse(coordinator.handleText("1", client: client))
+        XCTAssertFalse(coordinator.handleText(" ", client: client))
+        XCTAssertFalse(coordinator.handleText(".", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCodeAppChineseTextModeUsesCommitOnlyComposition() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let preferences = InputModePreferences(
+            codeAppState: InputModeState(
+                textMode: .chinese,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            inputModePreferences: preferences
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
+        XCTAssertNotNil(firstCandidate)
+
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
     func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {
@@ -1346,6 +1378,18 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+    }
+
+    func testMissingClientPrintableInputPassesThroughWithoutComposition() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+        host.currentClientValue = nil
+
+        XCTAssertFalse(coordinator.handleText("a", client: nil))
+
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
     func testOptionPeriodTogglesCurrentSessionPunctuationMode() {
@@ -1871,7 +1915,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
             client: client,
             provider: provider,
             aiRecommendationProvider: aiProvider,
-            enablesAsyncSuggestionRefresh: true
+            enablesAsyncSuggestionRefresh: true,
+            inputModePreferences: InputModePreferences(
+                codeAppState: InputModeState(textMode: .chinese)
+            )
         )
 
         for character in "secretphrase" {
@@ -2891,7 +2938,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             client.insertTextWrites.last?.replacementRange,
             NSRange(location: NSNotFound, length: NSNotFound)
         )
-        XCTAssertEqual(persistenceSpy.recordedSelections, [])
+        XCTAssertTrue(persistenceSpy.recordedSelections.isEmpty)
         let recorded = await waitUntilOnMainActor {
             acceptedLearning.allRecords().count == 1
         }
@@ -2958,6 +3005,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiRecommendationProvider: aiProvider,
             aiAcceptedLearning: acceptedLearning,
             enablesAsyncSuggestionRefresh: true,
+            inputModePreferences: InputModePreferences(
+                codeAppState: InputModeState(textMode: .chinese)
+            ),
             conversionEngine: RecordingNativeConversionEngine(
                 candidates: ["这个API"],
                 recorder: NativeSelectionRecorder()
@@ -2997,6 +3047,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiRecommendationProvider: aiProvider,
             aiAcceptedFeedback: acceptedFeedback,
             enablesAsyncSuggestionRefresh: true,
+            inputModePreferences: InputModePreferences(
+                codeAppState: InputModeState(textMode: .chinese)
+            ),
             conversionEngine: RecordingNativeConversionEngine(
                 candidates: ["这个API"],
                 recorder: NativeSelectionRecorder()

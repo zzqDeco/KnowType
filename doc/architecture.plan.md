@@ -17,10 +17,18 @@ The product boundary is strict: correction may refine the prefix, but continuati
 raw input
   -> RimeConversionEngine / librime session
   -> current-page Rime candidates
-  -> IMK marked text / candidate panel
+  -> host compatibility policy
+  -> IMK marked text or commit-only candidate panel
   -> KnowTypeAI recommendation slot
   -> commit
 ```
+
+KnowType keeps standard AppKit hosts on inline marked-text composition, but
+uses conservative host compatibility modes for terminal, code editor, Electron,
+and JetBrains-style clients. In those hosts, ordinary printable ASCII with no
+active composition is passed back to the focused app, while Chinese composition
+updates KnowType state and commits through `insertText` without relying on
+`setMarkedText`.
 
 Level 0 protected input remains a correction/local-protection concept: it avoids
 rewriting URLs, paths, commands, code-like text, and protected app contexts.

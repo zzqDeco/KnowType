@@ -66,11 +66,11 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(transformer.text(for: "@", state: state), "＠")
     }
 
-    func testAppPolicyDefaultsCodeContextsToChineseHalfWidthPunctuation() {
+    func testAppPolicyDefaultsCodeContextsToAsciiTextAndChineseHalfWidthPunctuation() {
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.apple.dt.Xcode"),
             InputModeState(
-                textMode: .chinese,
+                textMode: .ascii,
                 punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
@@ -78,7 +78,7 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.googlecode.iterm2"),
             InputModeState(
-                textMode: .chinese,
+                textMode: .ascii,
                 punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
@@ -86,7 +86,23 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex"),
             InputModeState(
-                textMode: .chinese,
+                textMode: .ascii,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij"),
+            InputModeState(
+                textMode: .ascii,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "com.todesktop.app.example"),
+            InputModeState(
+                textMode: .ascii,
                 punctuationMode: .chinese,
                 symbolWidth: .halfWidth
             )
@@ -117,6 +133,10 @@ final class InputSymbolModeTests: XCTestCase {
         )
         XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex", preferences: preferences),
+            preferences.codeAppState
+        )
+        XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij", preferences: preferences),
             preferences.codeAppState
         )
     }
