@@ -10,8 +10,8 @@
 ## Implementation
 
 - `commitOnlyComposition` keeps its public raw value, but now writes a
-  full-width-space marked-text placeholder during active composition instead of
-  skipping `setMarkedText`.
+  full-width-space attributed marked-text placeholder during active composition
+  instead of skipping `setMarkedText`.
 - KnowType tracks the client that owns its marked text and clears only that
   owned mark before `insertText` commits or composition teardown.
 - Commit-only placeholder writes schedule the same delayed candidate re-anchor
@@ -31,7 +31,8 @@
 
 ## Assumptions
 
-- Placeholder text is U+3000 full-width space, matching the compatibility pattern
-  used by mature macOS IMEs for non-inline preedit.
+- Placeholder text is U+3000 full-width space carried as an `NSAttributedString`
+  with marked attributes, matching the compatibility pattern used by mature
+  macOS IMEs for non-inline preedit.
 - This change does not add settings UI and does not change Rime schemas, AI
   provider behavior, input-source registration, or install scripts.

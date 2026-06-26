@@ -74,8 +74,9 @@ Unknown and standard text clients use `inlineComposition`. Terminal and iTerm
 default to `asciiPassthrough` while idle. Xcode, VS Code, Codex, common Electron
 hosts, and JetBrains IDEs default to `commitOnlyComposition`, so the candidate
 panel can appear without exposing raw inline preedit. Commit-only composition
-uses a full-width-space marked-text placeholder to keep the IMK composition and
-candidate anchor alive, then commits with `insertText`. `Option + /` toggles the
+uses a full-width-space `NSAttributedString` marked-text placeholder with marked
+attributes to keep the IMK composition and candidate anchor alive, then commits
+with `insertText`. `Option + /` toggles the
 session text mode in compatibility hosts; ASCII mode passes idle printable input
 back to the focused app. Missing clients use `disabled`; printable idle input is
 returned as unhandled so the host can keep normal typing behavior. All write
@@ -302,8 +303,9 @@ Current write contract:
 - composing `setMarkedText`, clear-marked `setMarkedText("")`, ordinary
   `insertText` commits, and idle Space/digit passthrough all use
   `NSRange(location: NSNotFound, length: NSNotFound)`
-- commit-only hosts receive a full-width-space placeholder marked text while
-  composition is active; raw pinyin and candidate text are not written inline
+- commit-only hosts receive a full-width-space attributed placeholder marked
+  text while composition is active; raw pinyin and candidate text are not
+  written inline
 - clear-marked writes are only issued for KnowType-owned marked text; idle
   Return/Enter must not clear stale host marked ranges before returning the key
   to the app

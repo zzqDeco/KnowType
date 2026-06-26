@@ -10,7 +10,8 @@ Current behavior:
   printable input
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
   receive Rime preedit, while commit-only hosts receive a full-width-space
-  placeholder that keeps IMK composition ownership without exposing raw pinyin
+  `NSAttributedString` placeholder with marked attributes that keeps IMK
+  composition ownership without exposing raw pinyin
 - commits through `InputControllerClient.insertText` with a centralized write
   coordinator; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`

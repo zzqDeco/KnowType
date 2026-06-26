@@ -27,7 +27,7 @@ struct InputClientWriteCoordinator: Sendable {
     }
 
     func setMarkedText(
-        _ text: String,
+        _ text: InputClientMarkedText,
         selectionRange: NSRange,
         client: InputControllerClient,
         context: InputClientWriteContext,

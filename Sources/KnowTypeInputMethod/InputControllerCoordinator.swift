@@ -2592,19 +2592,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        let markedText = mode == .commitOnlyComposition
+        let markedTextString = mode == .commitOnlyComposition
             ? Self.commitOnlyCompositionPlaceholder
             : nativeMarkedText() ?? compositionBuffer.displayText
-        guard !markedText.isEmpty else {
+        guard !markedTextString.isEmpty else {
             clearOwnedMarkedTextIfNeeded(client: client)
             return
         }
+        let markedText = mode == .commitOnlyComposition
+            ? InputClientMarkedText.placeholder(markedTextString)
+            : InputClientMarkedText.plain(markedTextString)
 
         setOwnedMarkedText(
             markedText,
             selectionRange: mode == .commitOnlyComposition
                 ? NSRange(location: 0, length: 0)
-                : NSRange(location: (markedText as NSString).length, length: 0),
+                : NSRange(location: (markedTextString as NSString).length, length: 0),
             client: client,
             reason: "composition_update",
             kind: mode == .commitOnlyComposition ? "setMarkedTextPlaceholder" : "setMarkedText"
@@ -2618,7 +2621,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func clearMarkedText(_ client: InputControllerClient) {
         inputClientWriter.setMarkedText(
-            "",
+            .emptyAttributed(),
             selectionRange: NSRange(location: 0, length: 0),
             client: client,
             context: writeContext(client: client, reason: "clear_marked_text", hasActiveComposition: true)
@@ -2629,7 +2632,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func setOwnedMarkedText(
-        _ text: String,
+        _ text: InputClientMarkedText,
         selectionRange: NSRange,
         client: InputControllerClient,
         reason: String,

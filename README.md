@@ -305,9 +305,9 @@ composition with marked text. Terminal and iTerm default to idle ASCII
 passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
 the shell until the session is switched with `Option + /`. Xcode, VS Code,
 Codex, common Electron apps, and JetBrains IDEs default to Chinese commit-only
-composition: KnowType uses a full-width-space marked-text placeholder to keep
-the host composition and candidate anchor alive without exposing raw pinyin, then
-writes committed text with `insertText`. In any compatibility host, `Option + /`
+composition: KnowType uses a full-width-space attributed marked-text placeholder
+to keep the host composition and candidate anchor alive without exposing raw
+pinyin, then writes committed text with `insertText`. In any compatibility host, `Option + /`
 switches the active session between that Chinese commit-only path and idle ASCII
 passthrough.
 

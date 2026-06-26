@@ -28,9 +28,10 @@ uses conservative host compatibility modes for terminal, code editor, Electron,
 and JetBrains-style clients. Terminal-style hosts default to idle ASCII
 passthrough. Editor, Codex, Electron, and JetBrains-style hosts default to
 Chinese commit-only composition so candidate rows can appear without relying on
-raw inline preedit. Commit-only composition uses a full-width-space marked-text
-placeholder for IMK composition ownership and candidate anchoring; committed text
-still goes through `insertText`. `Option + /` switches the active compatibility
+raw inline preedit. Commit-only composition uses a full-width-space
+`NSAttributedString` marked-text placeholder with marked attributes for IMK
+composition ownership and candidate anchoring; committed text still goes through
+`insertText`. `Option + /` switches the active compatibility
 session between Chinese text mode and idle ASCII passthrough.
 
 Level 0 protected input remains a correction/local-protection concept: it avoids
@@ -186,7 +187,7 @@ LevelDB state.
   presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
   frame cannot fit the natural height.
 
-The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Standard inline hosts receive Rime preedit marked text, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Commit-only hosts receive only the full-width-space placeholder; commit then clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Standard inline hosts receive Rime preedit marked text, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Commit-only hosts receive only the full-width-space attributed placeholder; commit then clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
 
 User selection history is stored under Application Support as `user-selection-history.json`. This file is local candidate-learning data only; it is not serialized into provider requests.
 

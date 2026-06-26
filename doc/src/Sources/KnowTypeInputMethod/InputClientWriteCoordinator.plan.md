@@ -7,7 +7,8 @@ write diagnostics for `InputControllerCoordinator`.
 
 ## Boundaries
 
-- It performs `insertText`, `setMarkedText`, and write-decision tracing only.
+- It performs `insertText`, typed marked-text `setMarkedText`, and
+  write-decision tracing only.
 - It does not decide key handling, host compatibility mode, candidate content,
   or composition lifecycle.
 - It must never log user text.
@@ -23,6 +24,9 @@ write diagnostics for `InputControllerCoordinator`.
 - Commit-only placeholder writes use a distinct write kind so host compatibility
   diagnostics can distinguish them from raw inline preedit writes without
   logging user text.
+- The coordinator preserves the marked-text carrier supplied by the state
+  machine. Commit-only placeholders are `NSAttributedString` payloads with
+  marked attributes; inline hosts can still receive plain marked text.
 
 ## Tests
 
