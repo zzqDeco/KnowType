@@ -260,9 +260,9 @@ prefix 太短等原因。查看命令：
 inline marked text。Terminal 和 iTerm 默认空闲 ASCII 直通，普通字母、数字、
 空格和标点先交还给 shell，按 `Option + /` 后再进入中文输入。Xcode、VS Code、
 Codex、常见 Electron 应用和 JetBrains IDE 默认中文 commit-only composition：
-KnowType 只更新内部 raw buffer 和候选窗，确认时通过 `insertText` 上屏，不调用
-`setMarkedText`。在任一兼容宿主中，`Option + /` 都用于在中文 commit-only 路径
-和空闲 ASCII 直通之间切换。
+KnowType 使用全角空格 marked-text placeholder 稳住宿主 composition 和候选窗
+anchor，不暴露 raw 拼音；确认时再通过 `insertText` 上屏。在任一兼容宿主中，
+`Option + /` 都用于在中文 commit-only 路径和空闲 ASCII 直通之间切换。
 
 候选窗显示 Rime 前缀候选、固定 AI 推荐状态行，以及没有建议时的 raw input。它是
 紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click

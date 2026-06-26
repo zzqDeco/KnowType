@@ -20,6 +20,9 @@ write diagnostics for `InputControllerCoordinator`.
 - `KNOWTYPE_CLIENT_WRITE_DEBUG=1` logs write kind, composition id, raw length,
   bundle id, write mode, handled/pass-through state, selected range, reported
   marked range, chosen replacement range, and reason.
+- Commit-only placeholder writes use a distinct write kind so host compatibility
+  diagnostics can distinguish them from raw inline preedit writes without
+  logging user text.
 
 ## Tests
 

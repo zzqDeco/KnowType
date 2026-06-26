@@ -30,11 +30,12 @@ struct InputClientWriteCoordinator: Sendable {
         _ text: String,
         selectionRange: NSRange,
         client: InputControllerClient,
-        context: InputClientWriteContext
+        context: InputClientWriteContext,
+        kind: String = "setMarkedText"
     ) {
         let replacementRange = Self.noOwnedReplacementRange
         trace(
-            kind: "setMarkedText",
+            kind: kind,
             client: client,
             chosenReplacementRange: replacementRange,
             context: context,

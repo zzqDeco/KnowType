@@ -1343,13 +1343,22 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        XCTAssertEqual(client.markedTextWrites.last?.selectionRange, NSRange(location: 0, length: 0))
+        XCTAssertEqual(
+            client.markedTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
         XCTAssertTrue(coordinator.handleText("i", client: client))
         let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
-        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertGreaterThan(host.scheduledOperations.count, 0)
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
         XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -1370,9 +1379,12 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
-        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertGreaterThan(host.scheduledOperations.count, 0)
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
         XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -1418,6 +1430,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(client.markedTextWrites.isEmpty)
         XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testIdleMissingSenderDoesNotUseStaleHostClient() {
+        let staleClient = FakeInputControllerClient()
+        staleClient.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: staleClient)
+        host.currentClientValue = staleClient
+
+        XCTAssertFalse(coordinator.handleText("a", client: nil))
+
+        XCTAssertTrue(staleClient.markedTextWrites.isEmpty)
+        XCTAssertTrue(staleClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelClearsOwnedPlaceholderAndHidesPanel() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+
+        let handled = coordinator.handle(
+            stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+            client: client
+        )
+
+        XCTAssertTrue(handled)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
@@ -4757,6 +4802,7 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
     var lineHeightRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
     private(set) var markedTextWrites: [MarkedTextWrite] = []
     private(set) var insertTextWrites: [InsertTextWrite] = []
+    private(set) var writeEventKinds: [String] = []
 
     var selectedRange: NSRange {
         selectedRangeValue
@@ -4779,6 +4825,7 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
         selectionRange: NSRange,
         replacementRange: NSRange
     ) {
+        writeEventKinds.append("markedText")
         markedTextWrites.append(
             MarkedTextWrite(
                 text: text,
@@ -4797,6 +4844,7 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
     }
 
     func insertText(_ text: String, replacementRange: NSRange) {
+        writeEventKinds.append("insertText")
         insertTextWrites.append(
             InsertTextWrite(
                 text: text,

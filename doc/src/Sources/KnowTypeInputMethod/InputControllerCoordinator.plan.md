@@ -8,14 +8,15 @@ Current behavior:
 - owns the composing raw buffer, `CompositionBuffer`, composition id, input mode runtime, Rime snapshots, native candidate selection, and candidate panel state
 - selects a host compatibility write mode before writing or passing through
   printable input
-- writes marked text through `InputControllerClient.setMarkedText` only for
-  inline-compatible hosts, using Rime preedit while native composition is active
-  so partial commits can show confirmed Chinese plus remaining input
+- writes marked text through `InputControllerClient.setMarkedText`; inline hosts
+  receive Rime preedit, while commit-only hosts receive a full-width-space
+  placeholder that keeps IMK composition ownership without exposing raw pinyin
 - commits through `InputControllerClient.insertText` with a centralized write
   coordinator; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
-- only clears marked text when ending a KnowType-owned active composition; idle Return/Enter returns to the host without clearing stale host marked ranges
+- tracks KnowType-owned marked text by client and clears only that owned mark;
+  idle Return/Enter returns to the host without clearing stale host marked ranges
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
 - cancels any pending retired local-candidate task before synchronous native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
@@ -83,8 +84,11 @@ Current behavior:
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
 - rejects candidate-panel publication unless the current raw/native preedit composition is active, while preserving a raw/preedit fallback frame for transient empty Rime snapshots with non-empty raw input; stale suggestions, AI results, or delayed reanchors cannot revive a hidden panel
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions
-- flushes user selection history on deactivate and close; deactivate falls back to the current IMK client before committing active raw composition through the normal insert path, then tears down panel state without calling `setMarkedText("")`
-- clears marked text when native handled/no-commit output ends with no active raw/preedit, because composition ended without inserted text
+- flushes user selection history on deactivate and close; deactivate falls back
+  to the current IMK client before committing active raw composition through the
+  normal clear-owned-marked-text plus insert path
+- clears KnowType-owned marked text when native handled/no-commit output ends
+  with no active raw/preedit, because composition ended without inserted text
 - schedules delayed candidate re-anchor through `InputControllerHost` and applies only the latest same-raw-input, same-composition reanchor
 - keeps provider-backed suggestion publication guarded by `SuggestionPublicationGuard`
 - suppresses AI recommendation while the composition is only partially resolved, so half-pinyin marked text is not sent as a locked prefix
