@@ -431,14 +431,14 @@ private final class PerfInputControllerClient: InputControllerClient, @unchecked
     }
 
     func setMarkedText(
-        _ text: String,
+        _ text: InputClientMarkedText,
         selectionRange: NSRange,
         replacementRange: NSRange
     ) {
-        if text.isEmpty {
+        if text.string.isEmpty {
             markedRange = nil
         } else {
-            markedRange = NSRange(location: selectedRange.location, length: (text as NSString).length)
+            markedRange = NSRange(location: selectedRange.location, length: (text.string as NSString).length)
         }
     }
 

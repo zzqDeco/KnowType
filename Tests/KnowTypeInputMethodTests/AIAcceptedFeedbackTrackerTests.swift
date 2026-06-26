@@ -303,7 +303,7 @@ private final class FeedbackTrackerClient: InputControllerClient, @unchecked Sen
         .zero
     }
 
-    func setMarkedText(_: String, selectionRange _: NSRange, replacementRange _: NSRange) {}
+    func setMarkedText(_: InputClientMarkedText, selectionRange _: NSRange, replacementRange _: NSRange) {}
 
     func insertText(_: String, replacementRange _: NSRange) {}
 }

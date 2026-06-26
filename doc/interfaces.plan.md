@@ -73,11 +73,13 @@ InputClientWriteMode =
 Unknown and standard text clients use `inlineComposition`. Terminal and iTerm
 default to `asciiPassthrough` while idle. Xcode, VS Code, Codex, common Electron
 hosts, and JetBrains IDEs default to `commitOnlyComposition`, so the candidate
-panel can appear without relying on inline marked text. `Option + /` toggles the
+panel can appear without exposing raw inline preedit. Commit-only composition
+uses a full-width-space `NSAttributedString` marked-text placeholder with marked
+attributes to keep the IMK composition and candidate anchor alive, then commits
+with `insertText`. `Option + /` toggles the
 session text mode in compatibility hosts; ASCII mode passes idle printable input
-back to the focused app, while Chinese mode keeps composition internal and
-commits with `insertText`. Missing clients use `disabled`; printable idle input
-is returned as unhandled so the host can keep normal typing behavior. All write
+back to the focused app. Missing clients use `disabled`; printable idle input is
+returned as unhandled so the host can keep normal typing behavior. All write
 modes keep replacement ranges as
 `{NSNotFound, NSNotFound}` unless a future reconversion feature introduces an
 explicit owned range.
@@ -301,9 +303,12 @@ Current write contract:
 - composing `setMarkedText`, clear-marked `setMarkedText("")`, ordinary
   `insertText` commits, and idle Space/digit passthrough all use
   `NSRange(location: NSNotFound, length: NSNotFound)`
-- clear-marked writes are only issued when KnowType had an active composition
-  to end; idle Return/Enter must not clear stale host marked ranges before
-  returning the key to the app
+- commit-only hosts receive a full-width-space attributed placeholder marked
+  text while composition is active; raw pinyin and candidate text are not
+  written inline
+- clear-marked writes are only issued for KnowType-owned marked text; idle
+  Return/Enter must not clear stale host marked ranges before returning the key
+  to the app
 - KnowType has no reconversion or selected-range replacement path today
 - future reconversion must maintain an explicit KnowType-owned replacement
   range, reset it after commit, and must not directly trust `client.markedRange`
@@ -344,10 +349,12 @@ raw input; the presenter keeps a raw/preedit fallback frame until Rime context r
 `KNOWTYPE_PANEL_DEBUG=1`, panel logs include frame or cleanup reasons such as `composition_active`,
 `composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`,
 plus placement preference and the final visual-above/visual-below choice.
-Key event, text, and commit callbacks write through the `IMKTextInput` client supplied by the IMK callback. Deactivation
-uses the current IMK client as a final flush fallback when the callback sender is not an `IMKTextInput`, so pending raw
-text is not dropped during lifecycle teardown. It still avoids `setMarkedText("")`; native handled/no-commit end states
-clear marked text through the normal client path because composition has ended without inserted text.
+Key event and text callbacks pass only the `IMKTextInput` client supplied by the IMK callback, so idle printable input
+with a missing sender can pass through instead of reusing a stale current client. Commit, candidate, deactivation, and
+close-style lifecycle callbacks may use the current IMK client as a final flush fallback when the callback sender is not
+an `IMKTextInput`, so pending raw text is not dropped during lifecycle teardown. Teardown only clears marked text that
+KnowType owns; native handled/no-commit end states clear that owned marked text because composition has ended without
+inserted text.
 
 The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
 that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use

@@ -27,14 +27,15 @@ struct InputClientWriteCoordinator: Sendable {
     }
 
     func setMarkedText(
-        _ text: String,
+        _ text: InputClientMarkedText,
         selectionRange: NSRange,
         client: InputControllerClient,
-        context: InputClientWriteContext
+        context: InputClientWriteContext,
+        kind: String = "setMarkedText"
     ) {
         let replacementRange = Self.noOwnedReplacementRange
         trace(
-            kind: "setMarkedText",
+            kind: kind,
             client: client,
             chosenReplacementRange: replacementRange,
             context: context,

@@ -23,8 +23,9 @@
   Electron, and JetBrains-style hosts start in Chinese mode so composition and
   candidate rows can begin immediately.
 - During active Chinese composition, compatibility hosts use
-  `commitOnlyComposition`: KnowType updates its internal buffer and candidate
-  panel, then commits with `insertText` without calling `setMarkedText`.
+  `commitOnlyComposition`: KnowType writes a full-width-space attributed
+  marked-text placeholder to keep the host composition and candidate anchor
+  alive without exposing raw pinyin, then commits with `insertText`.
 - `Option + /` is the supported session-local path for switching compatibility
   hosts between Chinese commit-only composition and idle ASCII passthrough.
 - Missing clients use `disabled`, allowing printable idle input to return

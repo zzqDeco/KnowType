@@ -1343,13 +1343,32 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(
+            client.markedTextWrites.last?.attributeKeyNames,
+            Set([
+                InputClientMarkedText.tsmUnderlineAttribute.rawValue,
+                InputClientMarkedText.tsmMarkedClauseSegmentAttribute.rawValue
+            ])
+        )
+        XCTAssertEqual(client.markedTextWrites.last?.selectionRange, NSRange(location: 0, length: 0))
+        XCTAssertEqual(
+            client.markedTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
         XCTAssertTrue(coordinator.handleText("i", client: client))
         let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
-        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+        XCTAssertGreaterThan(host.scheduledOperations.count, 0)
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
         XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -1370,9 +1389,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
-        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+        XCTAssertGreaterThan(host.scheduledOperations.count, 0)
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
         XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -1391,6 +1415,17 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(codeClient.insertTextWrites.isEmpty)
         XCTAssertTrue(textClient.insertTextWrites.isEmpty)
         XCTAssertEqual(textClient.markedTextWrites.last?.text, "n")
+    }
+
+    func testTextEditInlineCompositionUsesPlainMarkedTextCarrier() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "n")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, false)
     }
 
     func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {
@@ -1417,6 +1452,87 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.handleText("a", client: nil))
 
         XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testIdleMissingSenderDoesNotUseStaleHostClient() {
+        let staleClient = FakeInputControllerClient()
+        staleClient.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: staleClient)
+        host.currentClientValue = staleClient
+
+        XCTAssertFalse(coordinator.handleText("a", client: nil))
+
+        XCTAssertTrue(staleClient.markedTextWrites.isEmpty)
+        XCTAssertTrue(staleClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelClearsOwnedPlaceholderAndHidesPanel() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+
+        let handled = coordinator.handle(
+            stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+            client: client
+        )
+
+        XCTAssertTrue(handled)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelUsesCallbackClientWhenCurrentHostClientIsMissing() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        host.currentClientValue = nil
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelDoesNotDropOwnedMarkWhenCurrentHostClientIsStale() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let staleClient = FakeInputControllerClient()
+        staleClient.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        host.currentClientValue = staleClient
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertTrue(staleClient.markedTextWrites.isEmpty)
         XCTAssertTrue(client.insertTextWrites.isEmpty)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
@@ -2596,7 +2712,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let adapter = IMKInputControllerClientAdapter(client: imkClient)
 
         adapter.setMarkedText(
-            "你",
+            .placeholder("你"),
             selectionRange: NSRange(location: 1, length: 0),
             replacementRange: NSRange(location: 5, length: 1)
         )
@@ -2612,6 +2728,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(adapter.lineHeightRect(forCharacterIndex: 0), imkClient.lineHeightRectValue)
         XCTAssertEqual(imkClient.markedTextWrites.count, 1)
         XCTAssertEqual(imkClient.markedTextWrites[0].text, "你")
+        XCTAssertEqual(imkClient.markedTextWrites[0].isAttributed, true)
+        XCTAssertEqual(
+            imkClient.markedTextWrites[0].attributeKeyNames,
+            Set([
+                InputClientMarkedText.tsmUnderlineAttribute.rawValue,
+                InputClientMarkedText.tsmMarkedClauseSegmentAttribute.rawValue
+            ])
+        )
         XCTAssertEqual(imkClient.insertTextWrites.count, 1)
         XCTAssertEqual(imkClient.insertTextWrites[0].text, "你")
     }
@@ -3227,7 +3351,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let hasAIRequest = await waitForAIRecommendationRequest(aiProvider)
         XCTAssertTrue(hasAIRequest)
-        let requestCountBeforeHighlight = (await aiProvider.requests).count
+        let requestCountBeforeHighlight = await waitForStableAIRecommendationRequestCount(aiProvider)
 
         XCTAssertTrue(
             coordinator.handle(
@@ -3239,7 +3363,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
         XCTAssertEqual(recorder.highlightedIndices, [1])
-        let requestCountAfterHighlight = (await aiProvider.requests).count
+        let requestCountAfterHighlight = await waitForStableAIRecommendationRequestCount(aiProvider)
         XCTAssertEqual(requestCountAfterHighlight, requestCountBeforeHighlight)
     }
 
@@ -3629,6 +3753,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let requests = await provider.requests
         return !requests.isEmpty
+    }
+
+    @MainActor
+    private func waitForStableAIRecommendationRequestCount(
+        _ provider: RecordingAIRecommendationProvider,
+        timeout: TimeInterval = 3,
+        quietInterval: TimeInterval = 0.15
+    ) async -> Int {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCount = -1
+        var lastChange = Date()
+        while Date() < deadline {
+            let count = (await provider.requests).count
+            if count != lastCount {
+                lastCount = count
+                lastChange = Date()
+            } else if count > 0,
+                      Date().timeIntervalSince(lastChange) >= quietInterval {
+                return count
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return (await provider.requests).count
     }
 }
 
@@ -4741,6 +4888,8 @@ private final class FakeInputControllerHost: InputControllerHost {
 private final class FakeInputControllerClient: InputControllerClient, @unchecked Sendable {
     struct MarkedTextWrite: Equatable {
         var text: String
+        var isAttributed: Bool
+        var attributeKeyNames: Set<String>
         var selectionRange: NSRange
         var replacementRange: NSRange
     }
@@ -4757,6 +4906,7 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
     var lineHeightRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
     private(set) var markedTextWrites: [MarkedTextWrite] = []
     private(set) var insertTextWrites: [InsertTextWrite] = []
+    private(set) var writeEventKinds: [String] = []
 
     var selectedRange: NSRange {
         selectedRangeValue
@@ -4775,28 +4925,32 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
     }
 
     func setMarkedText(
-        _ text: String,
+        _ text: InputClientMarkedText,
         selectionRange: NSRange,
         replacementRange: NSRange
     ) {
+        writeEventKinds.append("markedText")
         markedTextWrites.append(
             MarkedTextWrite(
-                text: text,
+                text: text.string,
+                isAttributed: text.isAttributed,
+                attributeKeyNames: text.attributeKeyNames,
                 selectionRange: selectionRange,
                 replacementRange: replacementRange
             )
         )
-        if text.isEmpty {
+        if text.string.isEmpty {
             markedRangeValue = nil
         } else {
             let location = replacementRange.location == NSNotFound
                 ? selectedRangeValue.location
                 : replacementRange.location
-            markedRangeValue = NSRange(location: location, length: (text as NSString).length)
+            markedRangeValue = NSRange(location: location, length: (text.string as NSString).length)
         }
     }
 
     func insertText(_ text: String, replacementRange: NSRange) {
+        writeEventKinds.append("insertText")
         insertTextWrites.append(
             InsertTextWrite(
                 text: text,
@@ -4875,13 +5029,32 @@ private final class FakeIMKTextInput: NSObject, IMKTextInput {
         selectionRange: NSRange,
         replacementRange: NSRange
     ) {
+        let attributed = string as? NSAttributedString
+        let plain = string as? String
         markedTextWrites.append(
             FakeInputControllerClient.MarkedTextWrite(
-                text: string as? String ?? "",
+                text: attributed?.string ?? plain ?? "",
+                isAttributed: attributed != nil,
+                attributeKeyNames: Self.attributeKeyNames(in: attributed),
                 selectionRange: selectionRange,
                 replacementRange: replacementRange
             )
         )
+    }
+
+    private static func attributeKeyNames(in text: NSAttributedString?) -> Set<String> {
+        guard let text,
+              text.length > 0 else {
+            return []
+        }
+        var names: Set<String> = []
+        text.enumerateAttributes(
+            in: NSRange(location: 0, length: text.length),
+            options: []
+        ) { attributes, _, _ in
+            attributes.keys.forEach { names.insert($0.rawValue) }
+        }
+        return names
     }
 
     func selectedRange() -> NSRange {

@@ -5,9 +5,13 @@
 Current behavior:
 
 - adapts `IMKTextInput` clients into the internal `InputControllerClient` seam
-- falls back to the current IMK client when a callback sender cannot be adapted,
-  so printable input is not consumed merely because a host passed a missing or
-  stale sender
+- forwards key-input callbacks with only the callback sender's adapted client;
+  the coordinator decides whether active composition may use the current IMK
+  client fallback, while idle printable input with a missing sender remains
+  pass-through
+- uses current-client fallback for lifecycle-style callbacks such as explicit
+  commit, candidate selection, deactivate, and close where finishing or
+  clearing an existing composition is safer than dropping state
 - forwards IMK text, key event, candidate, commit, palette, deactivate, and close callbacks into `InputControllerCoordinator`
 - keeps AppKit/InputMethodKit imports guarded by `canImport(InputMethodKit)`
 - owns the production `CandidatePanelWindowController` and exposes it through the host seam

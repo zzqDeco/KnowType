@@ -87,13 +87,13 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             modifiers: modifierSet(from: flags)
         )
 
-        let handled = coordinator.handle(stroke: stroke, client: effectiveInputControllerClient(from: sender))
+        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
         inputControllerLogger.debug("inputText key=\(keyCode, privacy: .public) handled=\(handled, privacy: .public)")
         return handled
     }
 
     public override func inputText(_ string: String!, client sender: Any!) -> Bool {
-        coordinator.handleText(string, client: effectiveInputControllerClient(from: sender))
+        coordinator.handleText(string, client: Self.inputControllerClient(from: sender))
     }
 
     public override func composedString(_ sender: Any!) -> Any! {
@@ -194,7 +194,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             modifiers: modifierSet(from: Int(event.modifierFlags.rawValue)),
             eventKind: eventKind
         )
-        let handled = coordinator.handle(stroke: stroke, client: effectiveInputControllerClient(from: sender))
+        let handled = coordinator.handle(stroke: stroke, client: Self.inputControllerClient(from: sender))
         inputControllerLogger.debug("handle event key=\(event.keyCode, privacy: .public) handled=\(handled, privacy: .public)")
         return handled
     }

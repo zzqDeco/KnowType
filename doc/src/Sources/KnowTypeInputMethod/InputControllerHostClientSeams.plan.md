@@ -4,9 +4,15 @@
 
 Current seams:
 
+- `InputClientMarkedText` preserves the carrier type for IMK marked writes.
+  Inline composition can remain a plain `String`, while compatibility
+  placeholders and clears can be forwarded as `NSAttributedString` values with
+  marked-text attributes.
 - `InputControllerClient` covers the host text client operations used by the input method: bundle id lookup, selected/marked ranges, geometry probes, marked text writes, and commit insertion.
 - `InputControllerHost` covers operations owned by the IMK wrapper or AppKit host: current client lookup, fallback composition updates, candidate panel updates, panel hiding, and delayed main-queue re-anchor scheduling.
 - `InputControllerUserSelectionHistoryPersisting` lets lifecycle tests assert flush behavior without depending on the file-backed persistence queue.
-- `IMKInputControllerClientAdapter` is the production adapter from `IMKTextInput` to `InputControllerClient`.
+- `IMKInputControllerClientAdapter` is the production adapter from
+  `IMKTextInput` to `InputControllerClient`; it forwards attributed marked
+  payloads as attributed objects instead of flattening them to plain strings.
 
 Provider adapters and product logic must not depend on these seams. They are only for the input-method host/client boundary.
