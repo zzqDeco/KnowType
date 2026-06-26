@@ -379,7 +379,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             guard !rawBuffer.isEmpty else {
                 return false
             }
-            resetComposition()
+            resetComposition(client: client)
             refreshComposition(client: client)
             return true
         case .selectCandidate(let number):
@@ -1329,7 +1329,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     self?.aiAcceptedFeedbackTracker.verifyPostInsertCaret(client: client)
                 }
             }
-            resetComposition()
+            resetComposition(client: client)
             return true
         case .requestPolishAndKeepComposition(let text):
             Task { [sessionController] in
@@ -1954,8 +1954,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return nil
     }
 
-    private func resetComposition() {
-        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
+    private func resetComposition(client: InputControllerClient? = nil) {
+        _ = finishCompositionLifecycle(reason: .reset, client: client, commitPolicy: .none)
     }
 
     @discardableResult
@@ -1987,7 +1987,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         deleteCountBeforeCommit = 0
         resetAnchorState()
         invalidateSuggestion()
-        ownedMarkedTextClientID = nil
+        if !shouldClearOwnedMarkedText || ownedMarkedTextClientID == nil {
+            ownedMarkedTextClientID = nil
+        }
         publishRuntimeEvent(
             .compositionEnded(reason: reason.panelVisibilityReason, compositionID: finishedCompositionID)
         )
@@ -2648,12 +2650,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         ownedMarkedTextClientID = client.feedbackTrackingID
     }
 
-    private func clearOwnedMarkedTextIfNeeded(client: InputControllerClient?) {
+    @discardableResult
+    private func clearOwnedMarkedTextIfNeeded(client: InputControllerClient?) -> Bool {
         guard let client,
               ownedMarkedTextClientID == client.feedbackTrackingID else {
-            return
+            return false
         }
         clearMarkedText(client)
+        return true
     }
 
     private func nativeMarkedText() -> String? {

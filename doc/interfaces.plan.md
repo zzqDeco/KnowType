@@ -349,10 +349,12 @@ raw input; the presenter keeps a raw/preedit fallback frame until Rime context r
 `KNOWTYPE_PANEL_DEBUG=1`, panel logs include frame or cleanup reasons such as `composition_active`,
 `composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`,
 plus placement preference and the final visual-above/visual-below choice.
-Key event, text, and commit callbacks write through the `IMKTextInput` client supplied by the IMK callback. Deactivation
-uses the current IMK client as a final flush fallback when the callback sender is not an `IMKTextInput`, so pending raw
-text is not dropped during lifecycle teardown. Teardown only clears marked text that KnowType owns; native
-handled/no-commit end states clear that owned marked text because composition has ended without inserted text.
+Key event and text callbacks pass only the `IMKTextInput` client supplied by the IMK callback, so idle printable input
+with a missing sender can pass through instead of reusing a stale current client. Commit, candidate, deactivation, and
+close-style lifecycle callbacks may use the current IMK client as a final flush fallback when the callback sender is not
+an `IMKTextInput`, so pending raw text is not dropped during lifecycle teardown. Teardown only clears marked text that
+KnowType owns; native handled/no-commit end states clear that owned marked text because composition has ended without
+inserted text.
 
 The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
 that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use

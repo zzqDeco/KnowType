@@ -1491,6 +1491,52 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testCommitOnlyCancelUsesCallbackClientWhenCurrentHostClientIsMissing() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        host.currentClientValue = nil
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelDoesNotDropOwnedMarkWhenCurrentHostClientIsStale() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let staleClient = FakeInputControllerClient()
+        staleClient.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        host.currentClientValue = staleClient
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertTrue(staleClient.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
     func testOptionPeriodTogglesCurrentSessionPunctuationMode() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(client: client)
@@ -3305,7 +3351,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let hasAIRequest = await waitForAIRecommendationRequest(aiProvider)
         XCTAssertTrue(hasAIRequest)
-        let requestCountBeforeHighlight = (await aiProvider.requests).count
+        let requestCountBeforeHighlight = await waitForStableAIRecommendationRequestCount(aiProvider)
 
         XCTAssertTrue(
             coordinator.handle(
@@ -3317,7 +3363,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
         XCTAssertEqual(recorder.highlightedIndices, [1])
-        let requestCountAfterHighlight = (await aiProvider.requests).count
+        let requestCountAfterHighlight = await waitForStableAIRecommendationRequestCount(aiProvider)
         XCTAssertEqual(requestCountAfterHighlight, requestCountBeforeHighlight)
     }
 
@@ -3707,6 +3753,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let requests = await provider.requests
         return !requests.isEmpty
+    }
+
+    @MainActor
+    private func waitForStableAIRecommendationRequestCount(
+        _ provider: RecordingAIRecommendationProvider,
+        timeout: TimeInterval = 3,
+        quietInterval: TimeInterval = 0.15
+    ) async -> Int {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCount = -1
+        var lastChange = Date()
+        while Date() < deadline {
+            let count = (await provider.requests).count
+            if count != lastCount {
+                lastCount = count
+                lastChange = Date()
+            } else if count > 0,
+                      Date().timeIntervalSince(lastChange) >= quietInterval {
+                return count
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return (await provider.requests).count
     }
 }
 
