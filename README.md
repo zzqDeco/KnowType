@@ -301,16 +301,17 @@ text. To inspect them, run
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
 Host compatibility is conservative. Standard AppKit text fields keep inline
-composition with marked text. Terminal and iTerm default to idle ASCII
-passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
-the shell until the session is switched with `Option + /`. Xcode, VS Code,
-Codex, common Electron apps, and JetBrains IDEs default to Chinese commit-only
-composition: KnowType uses a full-width-space attributed marked-text placeholder
-to keep the host composition and candidate anchor alive without exposing raw
-pinyin in the host text field. The real raw/preedit string is shown in
-KnowType's candidate panel above the candidates, then committed with
-`insertText`. In any compatibility host, `Option + /` switches the active
-session between that Chinese commit-only path and idle ASCII passthrough.
+composition with marked text. Terminal, iTerm, MacVim, and Emacs-style hosts
+default to idle ASCII passthrough, so ordinary letters, digits, spaces, and
+punctuation stay owned by the shell or editor until the session is switched with
+`Option + /`. Xcode, VS Code, Codex, common Electron apps, and JetBrains IDEs
+default to Chinese commit-only composition: KnowType uses a full-width-space
+attributed marked-text placeholder to keep the host composition and candidate
+anchor alive without exposing raw pinyin in the host text field. The real
+raw/preedit string is shown in KnowType's candidate panel above the candidates,
+then committed with `insertText`. In any compatibility host, `Option + /`
+switches the active session between that Chinese commit-only path and idle ASCII
+passthrough.
 
 The candidate panel shows Rime prefix candidates, a fixed AI recommendation
 state row, commit-only preedit when the host receives a placeholder carrier, and

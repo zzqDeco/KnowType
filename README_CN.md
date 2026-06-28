@@ -257,13 +257,13 @@ prefix 太短等原因。查看命令：
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
 宿主兼容策略优先保证不吞普通输入。TextEdit 等标准 AppKit 文本框继续使用
-inline marked text。Terminal 和 iTerm 默认空闲 ASCII 直通，普通字母、数字、
-空格和标点先交还给 shell，按 `Option + /` 后再进入中文输入。Xcode、VS Code、
-Codex、常见 Electron 应用和 JetBrains IDE 默认中文 commit-only composition：
-KnowType 使用带 marked attributes 的全角空格 attributed marked-text
-placeholder 稳住宿主 composition 和候选窗 anchor，不在宿主文本区暴露 raw 拼音；
-真实 raw/preedit 会显示在 KnowType 候选窗候选行上方，确认时再通过 `insertText`
-上屏。在任一兼容宿主中，
+inline marked text。Terminal、iTerm、MacVim 和 Emacs 风格宿主默认空闲
+ASCII 直通，普通字母、数字、空格和标点先交还给 shell 或编辑器，按
+`Option + /` 后再进入中文输入。Xcode、VS Code、Codex、常见 Electron 应用和
+JetBrains IDE 默认中文 commit-only composition：KnowType 使用带 marked
+attributes 的全角空格 attributed marked-text placeholder 稳住宿主 composition
+和候选窗 anchor，不在宿主文本区暴露 raw 拼音；真实 raw/preedit 会显示在
+KnowType 候选窗候选行上方，确认时再通过 `insertText` 上屏。在任一兼容宿主中，
 `Option + /` 都用于在中文 commit-only 路径和空闲 ASCII 直通之间切换。
 
 候选窗显示 Rime 前缀候选、固定 AI 推荐状态行、placeholder 宿主中的真实

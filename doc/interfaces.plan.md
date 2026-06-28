@@ -70,19 +70,19 @@ InputClientWriteMode =
   disabled
 ```
 
-Unknown and standard text clients use `inlineComposition`. Terminal and iTerm
-default to `asciiPassthrough` while idle. Xcode, VS Code, Codex, common Electron
-hosts, and JetBrains IDEs default to `commitOnlyComposition`, so the candidate
-panel can appear without exposing raw inline preedit. Commit-only composition
-uses a full-width-space `NSAttributedString` marked-text placeholder with marked
-attributes to keep the IMK composition and candidate anchor alive. The host
-text field sees only that placeholder; the candidate panel receives the real
-raw/preedit display text as a non-selectable preedit row above candidates, then
-commits with `insertText`. `Option + /` toggles the
-session text mode in compatibility hosts; ASCII mode passes idle printable input
-back to the focused app. Missing clients use `disabled`; printable idle input is
-returned as unhandled so the host can keep normal typing behavior. All write
-modes keep replacement ranges as
+Unknown and standard text clients use `inlineComposition`. Terminal, iTerm,
+MacVim, and Emacs-style profiles default to `asciiPassthrough` while idle.
+Xcode, VS Code, Codex, common Electron hosts, and JetBrains IDEs default to
+`commitOnlyComposition`, so the candidate panel can appear without exposing raw
+inline preedit. Commit-only composition uses a full-width-space
+`NSAttributedString` marked-text placeholder with marked attributes to keep the
+IMK composition and candidate anchor alive. The host text field sees only that
+placeholder; the candidate panel receives the real raw/preedit display text as a
+non-selectable preedit row above candidates, then commits with `insertText`.
+`Option + /` toggles the session text mode in compatibility hosts; ASCII mode
+passes idle printable input back to the focused app. Missing clients use
+`disabled`; printable idle input is returned as unhandled so the host can keep
+normal typing behavior. All write modes keep replacement ranges as
 `{NSNotFound, NSNotFound}` unless a future reconversion feature introduces an
 explicit owned range.
 

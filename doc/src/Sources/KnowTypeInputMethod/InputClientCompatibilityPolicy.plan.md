@@ -20,10 +20,11 @@ carrier table.
 
 - Unknown hosts use `inlineComposition` so standard AppKit clients keep marked
   text behavior.
-- Compatibility hosts use `asciiPassthrough` while idle only when the active
-  input mode is ASCII. Terminal-style hosts start in ASCII mode; editor, Codex,
-  Electron, and JetBrains-style hosts start in Chinese mode so composition and
-  candidate rows can begin immediately.
+- Compatibility hosts use `asciiPassthrough` while idle when the active input
+  mode is ASCII. Terminal, iTerm, MacVim, and Emacs-style hosts receive that
+  ASCII idle mode from `InputModeAppPolicy` by default; editor, Codex, Electron,
+  and JetBrains-style hosts start in Chinese mode so composition and candidate
+  rows can begin immediately.
 - During active Chinese composition, compatibility hosts use
   `commitOnlyComposition`: KnowType writes a full-width-space attributed
   marked-text placeholder to keep the host composition and candidate anchor
