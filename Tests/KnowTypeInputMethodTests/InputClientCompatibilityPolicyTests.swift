@@ -17,6 +17,20 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
+    func testBrowserClientUsesInlineCompositionByDefault() {
+        let policy = InputClientCompatibilityPolicy(userDefaults: nil)
+
+        XCTAssertEqual(
+            policy.writeMode(
+                bundleIdentifier: "com.google.Chrome",
+                inputModeState: .init(),
+                hasActiveComposition: false,
+                hasClient: true
+            ),
+            .inlineComposition
+        )
+    }
+
     func testCodeClientUsesAsciiPassthroughWhenIdleInAsciiMode() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
 
@@ -44,6 +58,44 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
                 hasClient: true
             ),
             .asciiPassthrough
+        )
+    }
+
+    func testAsciiDefaultPlaceholderProfileUsesIdlePassthroughByDefault() {
+        let policy = InputClientCompatibilityPolicy(userDefaults: nil)
+        let state = InputModeAppPolicy.defaultState(appBundleID: "org.vim.MacVim")
+
+        XCTAssertEqual(state.textMode, .ascii)
+        XCTAssertEqual(
+            HostCompatibilityProfile.profile(bundleIdentifier: "org.vim.MacVim"),
+            .asciiDefaultPlaceholder
+        )
+        XCTAssertEqual(
+            policy.writeMode(
+                bundleIdentifier: "org.vim.MacVim",
+                inputModeState: state,
+                hasActiveComposition: false,
+                hasClient: true
+            ),
+            .asciiPassthrough
+        )
+        XCTAssertEqual(
+            policy.writeMode(
+                bundleIdentifier: "org.vim.MacVim",
+                inputModeState: state,
+                hasActiveComposition: true,
+                hasClient: true
+            ),
+            .commitOnlyComposition
+        )
+        XCTAssertEqual(
+            policy.writeMode(
+                bundleIdentifier: "org.vim.MacVim",
+                inputModeState: InputModeState(textMode: .chinese),
+                hasActiveComposition: false,
+                hasClient: true
+            ),
+            .commitOnlyComposition
         )
     }
 

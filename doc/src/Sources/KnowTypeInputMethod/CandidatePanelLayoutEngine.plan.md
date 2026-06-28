@@ -16,6 +16,8 @@ used by the AppKit panel.
 
 - Adaptive layout prefers horizontal pages for compact candidates and switches
   to vertical rows for long phrases.
+- A fixed preedit row forces vertical layout so the preedit appears above
+  candidate rows within the current single-orientation AppKit content view.
 - Placement is explicit: automatic and visual-below preferences try the
   below-caret origin first, while Spotlight can request visual-above placement
   to avoid its search results overlay.

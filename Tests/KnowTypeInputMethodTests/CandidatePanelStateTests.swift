@@ -56,6 +56,46 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertFalse(rendered.rows[2].isSelected)
     }
 
+    func testPreeditRowDoesNotBecomeSelectionOrShortcutTarget() {
+        var state = CandidatePanelState()
+
+        state.update(
+            rawInput: "ni",
+            suggestion: suggestion(prefixTexts: ["你", "呢"]),
+            preeditDisplayText: "ni"
+        )
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertTrue(state.windowState.isVisible)
+        XCTAssertEqual(state.windowState.viewModel.preeditDisplayText, "ni")
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+        XCTAssertEqual(rendered.rows.map(\.kind), [.preedit, .prefixCandidate, .prefixCandidate])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), [nil, "1", "2"])
+        XCTAssertEqual(state.selectVisiblePrefixCandidate(shortcutNumber: 1), .prefixCandidate(0))
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+    }
+
+    func testPreeditOnlyStateIsVisibleWithoutSelectableRawFallback() {
+        var state = CandidatePanelState()
+
+        state.update(rawInput: "n", suggestion: nil, preeditDisplayText: "n")
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertTrue(state.windowState.isVisible)
+        XCTAssertNil(state.windowState.selection)
+        XCTAssertEqual(rendered.rows.map(\.kind), [.preedit])
+        XCTAssertFalse(state.moveSelection(.down))
+        XCTAssertNil(state.selectVisiblePrefixCandidate(shortcutNumber: 1))
+    }
+
     func testVisibleShortcutSkipsReadyAIRecommendationForNumberSelection() {
         var state = CandidatePanelState()
         state.update(

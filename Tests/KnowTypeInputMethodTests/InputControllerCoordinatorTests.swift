@@ -1345,6 +1345,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.preeditDisplayText, "n")
         XCTAssertEqual(
             client.markedTextWrites.last?.attributeKeyNames,
             Set([
@@ -1358,7 +1359,21 @@ final class InputControllerCoordinatorTests: XCTestCase {
             NSRange(location: NSNotFound, length: NSNotFound)
         )
         XCTAssertTrue(coordinator.handleText("i", client: client))
-        let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
+        let windowState = host.panelStates.last?.windowState
+        XCTAssertEqual(windowState?.viewModel.preeditDisplayText, "ni")
+        let rendered = windowState.map {
+            CandidatePanelRenderer(locale: .zhCN).render(
+                $0.viewModel,
+                selected: $0.selection,
+                paging: $0.paging
+            )
+        }
+        XCTAssertEqual(rendered?.rows.first?.kind, .preedit)
+        XCTAssertEqual(rendered?.rows.first?.text, "ni")
+        XCTAssertNil(rendered?.rows.first?.selection)
+        XCTAssertNil(rendered?.rows.first?.shortcutLabel)
+        XCTAssertEqual(rendered?.rows.dropFirst().first?.shortcutLabel, "1")
+        let firstCandidate = windowState?.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
         XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
@@ -1386,7 +1401,17 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertTrue(coordinator.handleText("i", client: client))
-        let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
+        let windowState = host.panelStates.last?.windowState
+        XCTAssertEqual(windowState?.viewModel.preeditDisplayText, "ni")
+        let firstRenderedKind = windowState.flatMap {
+            CandidatePanelRenderer(locale: .zhCN).render(
+                $0.viewModel,
+                selected: $0.selection,
+                paging: $0.paging
+            ).rows.first?.kind
+        }
+        XCTAssertEqual(firstRenderedKind, .preedit)
+        let firstCandidate = windowState?.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
         XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
@@ -1420,12 +1445,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
     func testTextEditInlineCompositionUsesPlainMarkedTextCarrier() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.TextEdit"
-        let (coordinator, _, _) = makeCoordinator(client: client)
+        let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
 
         XCTAssertEqual(client.markedTextWrites.last?.text, "n")
         XCTAssertEqual(client.markedTextWrites.last?.isAttributed, false)
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
     }
 
     func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {

@@ -188,7 +188,10 @@ public enum InputModeAppPolicy {
         "com.github.Electron",
         "com.microsoft.VSCode",
         "com.openai.codex",
-        "com.visualstudio.code.oss"
+        "com.visualstudio.code.oss",
+        "org.gnu.Aquamacs",
+        "org.gnu.Emacs",
+        "org.vim.MacVim"
     ]
 
     private static let codeAppBundleIDPrefixes = [
@@ -200,7 +203,10 @@ public enum InputModeAppPolicy {
     ]
 
     private static let terminalAsciiDefaultBundleIDs: Set<String> = [
-        "com.apple.Terminal"
+        "com.apple.Terminal",
+        "org.gnu.Aquamacs",
+        "org.gnu.Emacs",
+        "org.vim.MacVim"
     ]
 
     private static let terminalAsciiDefaultBundleIDPrefixes = [

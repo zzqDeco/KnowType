@@ -84,6 +84,14 @@ final class InputSymbolModeTests: XCTestCase {
             )
         )
         XCTAssertEqual(
+            InputModeAppPolicy.defaultState(appBundleID: "org.vim.MacVim"),
+            InputModeState(
+                textMode: .ascii,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        XCTAssertEqual(
             InputModeAppPolicy.defaultState(appBundleID: "com.apple.dt.Xcode"),
             InputModeState(
                 textMode: .chinese,

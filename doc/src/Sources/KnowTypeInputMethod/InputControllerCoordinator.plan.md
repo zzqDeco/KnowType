@@ -12,6 +12,9 @@ Current behavior:
   receive Rime preedit, while commit-only hosts receive a full-width-space
   `NSAttributedString` placeholder with marked attributes that keeps IMK
   composition ownership without exposing raw pinyin
+- sends the real raw/preedit display text to the candidate-panel view model for
+  commit-only hosts, so placeholder hosts show preedit above candidates without
+  writing it into the host text field
 - commits through `InputControllerClient.insertText` with a centralized write
   coordinator; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
@@ -79,6 +82,9 @@ Current behavior:
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
 - emits candidate-panel updates as `CandidatePanelFrame` values consumed by `CandidatePanelPresenter`, with explicit visibility reasons and `KNOWTYPE_PANEL_DEBUG=1` frame logs
+- emits privacy-safe `KNOWTYPE_STARTUP_DEBUG=1` timing logs for first
+  composition begin and first candidate-panel materialization; logs include
+  timing and state metadata, not user text
 - emits privacy-safe IMK write diagnostics with
   `KNOWTYPE_CLIENT_WRITE_DEBUG=1`; logs include bundle id, write mode,
   handled/pass-through state, ranges, write kind, and reasons, never user text
