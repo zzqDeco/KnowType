@@ -29,5 +29,5 @@ Current behavior:
 
 The controller should stay small. Product input behavior, marked text writes, commit replacement ranges, lifecycle flushing, and delayed re-anchor gating belong in `InputControllerCoordinator` so they can be covered by unit tests without installing a real Text Input Source.
 
-Set `KNOWTYPE_STARTUP_DEBUG=1` to log the cold-start lazy runtime state without
-recording user text.
+Set `KNOWTYPE_STARTUP_DEBUG=1` to log controller init timing and lazy runtime
+state without recording user text.

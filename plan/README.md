@@ -117,6 +117,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [input-client-host-profile-preedit.plan.md](input-client-host-profile-preedit.plan.md) | Host profile carrier table and commit-only candidate-panel preedit row | Delivered |
 | [input-client-placeholder-composition.plan.md](input-client-placeholder-composition.plan.md) | Commit-only host placeholder composition and owned marked-text cleanup | Delivered |
 | [imk-server-stable-connection.plan.md](imk-server-stable-connection.plan.md) | Stable IMK server connection name aligned across plist, Swift constants, shell scripts, and installed endpoint verification | Delivered |
 | [imk-session-architecture.plan.md](imk-session-architecture.plan.md) | Thin IMK controller and explicit session separation | Delivered |

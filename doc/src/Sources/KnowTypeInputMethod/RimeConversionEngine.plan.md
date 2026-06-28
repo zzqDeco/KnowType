@@ -27,6 +27,8 @@ input.
 - `snapshot`, `activeSchemaID`, `isNativeActive`, and `reset()` must not force
   native session creation. This lets macOS prelaunch the IMK host without
   initializing Rime user data.
+- With `KNOWTYPE_STARTUP_DEBUG=1`, first native session creation logs elapsed
+  time, schema id, and success state without logging input text.
 - Native sessions initially select the configured schema, but
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct

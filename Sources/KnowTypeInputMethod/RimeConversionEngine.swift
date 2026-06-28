@@ -197,9 +197,25 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return nil
         }
         nativeSessionCreationAttempted = true
+        let startedAt = Date()
         nativeSession = NativeRimeSession(configuration: nativeConfiguration)
         currentSnapshot = nativeSession?.snapshot() ?? currentSnapshot
+        Self.traceStartupEvent(
+            "first_rime_session_create",
+            elapsed: Date().timeIntervalSince(startedAt),
+            details: "schema=\(configuredSchemaID) success=\(nativeSession != nil)"
+        )
         return nativeSession
+    }
+
+    private static func traceStartupEvent(_ event: String, elapsed: TimeInterval, details: String = "") {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" else {
+            return
+        }
+        let elapsedMs = elapsed * 1_000
+        let formattedElapsed = String(format: "%.1f", elapsedMs)
+        let suffix = details.isEmpty ? "" : " \(details)"
+        fputs("KnowType startup: event=\(event) elapsedMs=\(formattedElapsed)\(suffix)\n", stderr)
     }
 
     private mutating func processRawBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {

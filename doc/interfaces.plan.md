@@ -75,8 +75,10 @@ default to `asciiPassthrough` while idle. Xcode, VS Code, Codex, common Electron
 hosts, and JetBrains IDEs default to `commitOnlyComposition`, so the candidate
 panel can appear without exposing raw inline preedit. Commit-only composition
 uses a full-width-space `NSAttributedString` marked-text placeholder with marked
-attributes to keep the IMK composition and candidate anchor alive, then commits
-with `insertText`. `Option + /` toggles the
+attributes to keep the IMK composition and candidate anchor alive. The host
+text field sees only that placeholder; the candidate panel receives the real
+raw/preedit display text as a non-selectable preedit row above candidates, then
+commits with `insertText`. `Option + /` toggles the
 session text mode in compatibility hosts; ASCII mode passes idle printable input
 back to the focused app. Missing clients use `disabled`; printable idle input is
 returned as unhandled so the host can keep normal typing behavior. All write
@@ -306,6 +308,8 @@ Current write contract:
 - commit-only hosts receive a full-width-space attributed placeholder marked
   text while composition is active; raw pinyin and candidate text are not
   written inline
+- commit-only preedit is a candidate-panel display concern: it is not
+  selectable, does not receive numeric shortcuts, and must not enter commit text
 - clear-marked writes are only issued for KnowType-owned marked text; idle
   Return/Enter must not clear stale host marked ranges before returning the key
   to the app
@@ -326,7 +330,7 @@ Current write contract:
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
 `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when
-possible, switches to vertical layout for long phrases, and returns the final panel size, origin, row frames, and
+possible, switches to vertical layout for long phrases or a fixed preedit row, and returns the final panel size, origin, row frames, and
 per-row text limits used by the AppKit view. The layout plan must keep shortcut/selectable rows in sync with
 rendered rows; constrained vertical layouts compress row height and spacing instead of dropping rows after
 shortcuts are assigned. Shortcut labels are measured instead of using a fixed reserved slot. Horizontal rows use

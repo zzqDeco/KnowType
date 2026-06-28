@@ -261,15 +261,17 @@ inline marked text。Terminal 和 iTerm 默认空闲 ASCII 直通，普通字母
 空格和标点先交还给 shell，按 `Option + /` 后再进入中文输入。Xcode、VS Code、
 Codex、常见 Electron 应用和 JetBrains IDE 默认中文 commit-only composition：
 KnowType 使用带 marked attributes 的全角空格 attributed marked-text
-placeholder 稳住宿主 composition 和候选窗 anchor，不暴露 raw 拼音；确认时再
-通过 `insertText` 上屏。在任一兼容宿主中，
+placeholder 稳住宿主 composition 和候选窗 anchor，不在宿主文本区暴露 raw 拼音；
+真实 raw/preedit 会显示在 KnowType 候选窗候选行上方，确认时再通过 `insertText`
+上屏。在任一兼容宿主中，
 `Option + /` 都用于在中文 commit-only 路径和空闲 ASCII 直通之间切换。
 
-候选窗显示 Rime 前缀候选、固定 AI 推荐状态行，以及没有建议时的 raw input。它是
-紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click
-选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，KnowType 会
-先发布 Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider 失败时，不会
-把固定本地 fallback 文本伪装成 AI 输出。
+候选窗显示 Rime 前缀候选、固定 AI 推荐状态行、placeholder 宿主中的真实
+preedit，以及没有建议时的 raw input。preedit 行没有快捷键、不可选、不能提交。
+它是紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click
+选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，KnowType 会先发布
+Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider 失败时，不会把固定
+本地 fallback 文本伪装成 AI 输出。
 
 候选窗第一项固定为 Rime 转换推荐，第二项固定为 AI 推荐状态。Provider 返回后
 只更新第二项，不重排 Rime 候选列表。Ready AI 使用 Tab 或显式 Option+数字，不占用

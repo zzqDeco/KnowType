@@ -3,6 +3,7 @@ import KnowTypeAI
 import KnowTypeCore
 
 public enum CandidatePanelRowKind: Sendable, Equatable {
+    case preedit
     case rawInput
     case prefixCandidate
     case aiRecommendation
@@ -107,11 +108,12 @@ public struct CandidatePanelRenderer: Sendable {
         selected selection: CandidatePanelSelection? = nil,
         paging explicitPaging: CandidatePanelPagingState? = nil
     ) -> CandidatePanelRenderModel {
-        let allRows = selectableRows(in: viewModel)
+        let fixedRows = fixedRows(in: viewModel)
+        let allRows = pageableRows(in: viewModel)
         let paging = explicitPaging ?? pagingState(containing: selection, in: allRows)
         let visibleRange = paging.visibleRange(totalRows: allRows.count)
         var nextNumberShortcut = 1
-        let rows = allRows[visibleRange].map { item in
+        let rows = fixedRows + allRows[visibleRange].map { item in
             let shortcutLabel: String?
             switch item.selection {
             case nil:
@@ -137,7 +139,8 @@ public struct CandidatePanelRenderer: Sendable {
                 text: item.text,
                 isSelected: item.isEnabled && selection == item.selection,
                 isEnabled: item.isEnabled,
-                visualRole: item.visualRole
+                visualRole: item.visualRole,
+                accessibilityLabel: item.accessibilityLabel
             )
         }
 
@@ -148,13 +151,32 @@ public struct CandidatePanelRenderer: Sendable {
         )
     }
 
-    private func selectableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRenderableRow] {
+    private func fixedRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRenderRow] {
+        guard let preeditDisplayText = viewModel.preeditDisplayText,
+              !preeditDisplayText.isEmpty else {
+            return []
+        }
+        return [
+            CandidatePanelRenderRow(
+                kind: .preedit,
+                selection: nil,
+                shortcutLabel: nil,
+                text: preeditDisplayText,
+                isSelected: false,
+                visualRole: .rawInput,
+                accessibilityLabel: "预编辑，\(preeditDisplayText)"
+            )
+        ]
+    }
+
+    private func pageableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRenderableRow] {
         var rows: [CandidatePanelRenderableRow] = []
         let hasSuggestions = !viewModel.prefixCandidates.isEmpty
             || !viewModel.continuationCandidates.isEmpty
             || viewModel.aiRecommendation.displayText != nil
+        let hasPreeditDisplayText = viewModel.preeditDisplayText?.isEmpty == false
 
-        if !viewModel.rawInput.isEmpty && !hasSuggestions {
+        if !viewModel.rawInput.isEmpty && !hasSuggestions && !hasPreeditDisplayText {
             rows.append(
                 CandidatePanelRenderableRow(
                     selection: .rawInput,
@@ -253,5 +275,6 @@ private struct CandidatePanelRenderableRow: Sendable, Equatable {
     var kind: CandidatePanelRowKind
     var text: String
     var visualRole: CandidatePanelVisualRole
+    var accessibilityLabel: String?
     var isEnabled: Bool = true
 }

@@ -130,6 +130,46 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertNil(rendered.rows[0].shortcutLabel)
     }
 
+    func testRendersPreeditRowBeforeSuggestionsWithoutShortcut() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "ni",
+            preeditDisplayText: "ni",
+            prefixCandidates: prefixCandidates,
+            continuationCandidates: []
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(viewModel)
+
+        XCTAssertEqual(rendered.rows.map(\.kind), [.preedit, .prefixCandidate, .prefixCandidate])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), [nil, "1", "2"])
+        XCTAssertEqual(rendered.rows[0].text, "ni")
+        XCTAssertNil(rendered.rows[0].selection)
+        XCTAssertFalse(rendered.rows[0].isSelected)
+        XCTAssertTrue(rendered.rows[0].isEnabled)
+        XCTAssertEqual(rendered.rows[0].visualRole, .rawInput)
+        XCTAssertEqual(rendered.rows[0].accessibilityLabel, "预编辑，ni")
+    }
+
+    func testPreeditRowDoesNotConsumeCandidatePagingSlots() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "hou xuan",
+            preeditDisplayText: "hou xuan",
+            prefixCandidates: prefixCandidates(count: 12),
+            continuationCandidates: []
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            viewModel,
+            selected: .prefixCandidate(6),
+            paging: CandidatePanelPagingState(currentPage: 1)
+        )
+
+        XCTAssertEqual(rendered.rows.first?.kind, .preedit)
+        XCTAssertEqual(rendered.rows.dropFirst().map(\.text), ["候选7", "候选8", "候选9", "候选10", "候选11", "候选12"])
+        XCTAssertEqual(rendered.rows.dropFirst().map(\.shortcutLabel), ["1", "2", "3", "4", "5", "6"])
+        XCTAssertEqual(rendered.rows.count, 7)
+    }
+
     func testMarksSelectedContinuationRow() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "wo jue de zhege fangan",

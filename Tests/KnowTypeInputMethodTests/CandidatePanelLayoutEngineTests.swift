@@ -211,6 +211,31 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         XCTAssertEqual(plan?.items.first?.textWidthLimit, 32)
     }
 
+    func testPreeditRowForcesVerticalLayoutAboveCandidates() {
+        let engine = engine(defaultTextWidth: 32, defaultShortcutWidth: 8)
+        var model = renderModel(rowCount: 6)
+        model.rows.insert(
+            CandidatePanelRenderRow(
+                kind: .preedit,
+                shortcutLabel: nil,
+                text: "ni",
+                isSelected: false,
+                visualRole: .rawInput
+            ),
+            at: 0
+        )
+
+        let plan = engine.layout(
+            model: model,
+            anchorRect: CGRect(x: 100, y: 400, width: 0, height: 18),
+            screenProvider: screenProvider()
+        )
+
+        XCTAssertEqual(plan?.orientation, .vertical)
+        XCTAssertEqual(plan?.items.first?.rowIndex, 0)
+        XCTAssertEqual(plan?.items.dropFirst().map(\.rowIndex), [1, 2, 3, 4, 5, 6])
+    }
+
     func testVerticalLayoutAlignsOnlyRowsWithShortcutToPageMaxShortcutWidth() {
         let engine = CandidatePanelLayoutEngine(
             configuration: CandidatePanelLayoutConfiguration(layoutMode: .verticalPreferred),

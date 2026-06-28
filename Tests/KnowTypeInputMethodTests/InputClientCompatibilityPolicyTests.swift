@@ -17,6 +17,20 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
+    func testBrowserClientUsesInlineCompositionByDefault() {
+        let policy = InputClientCompatibilityPolicy(userDefaults: nil)
+
+        XCTAssertEqual(
+            policy.writeMode(
+                bundleIdentifier: "com.google.Chrome",
+                inputModeState: .init(),
+                hasActiveComposition: false,
+                hasClient: true
+            ),
+            .inlineComposition
+        )
+    }
+
     func testCodeClientUsesAsciiPassthroughWhenIdleInAsciiMode() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
 

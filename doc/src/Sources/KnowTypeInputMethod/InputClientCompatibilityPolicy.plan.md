@@ -4,11 +4,13 @@
 
 `InputClientCompatibilityPolicy` maps the focused host app, current
 `InputModeState`, composition activity, and client availability to an
-`InputClientWriteMode`.
+`InputClientWriteMode`, using `HostCompatibilityProfile` for the bundle-id
+carrier table.
 
 ## Boundaries
 
-- It decides write mode only. Key mapping, composition state, candidate rows,
+- It decides write mode only. Host profile matching stays in
+  `HostCompatibilityProfile`; key mapping, composition state, candidate rows,
   and host writes stay in `InputControllerCoordinator`.
 - It must not inspect or log user text.
 - Per-host overrides are read from UserDefaults, but no settings UI is owned
@@ -25,7 +27,8 @@
 - During active Chinese composition, compatibility hosts use
   `commitOnlyComposition`: KnowType writes a full-width-space attributed
   marked-text placeholder to keep the host composition and candidate anchor
-  alive without exposing raw pinyin, then commits with `insertText`.
+  alive without exposing raw pinyin in the host text field. The real preedit
+  display is owned by candidate-panel state, not by this policy.
 - `Option + /` is the supported session-local path for switching compatibility
   hosts between Chinese commit-only composition and idle ASCII passthrough.
 - Missing clients use `disabled`, allowing printable idle input to return
@@ -35,6 +38,7 @@
 
 ## Tests
 
+- `HostCompatibilityProfileTests`
 - `InputClientCompatibilityPolicyTests`
 - `InputControllerCoordinatorTests`
 - `InputSymbolModeTests`

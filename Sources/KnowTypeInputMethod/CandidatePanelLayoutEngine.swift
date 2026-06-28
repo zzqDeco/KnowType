@@ -207,6 +207,9 @@ struct CandidatePanelLayoutEngine {
         for rows: [MeasuredRow],
         availableWidth: CGFloat
     ) -> CandidatePanelLayoutOrientation {
+        if rows.contains(where: { $0.row.kind == .preedit }) {
+            return .vertical
+        }
         guard rows.count >= configuration.minimumHorizontalCandidateCount else {
             return .vertical
         }

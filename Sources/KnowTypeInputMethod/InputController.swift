@@ -31,6 +31,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     @MainActor private var preferencesWindowController: KnowTypePreferencesWindowController?
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
+        let startupDebugStartedAt = Date()
         let aiDiagnosticSink = OSLogAIRecommendationDiagnosticSink()
         let aiProviderAvailability = AIRecommendationProviderAvailabilityState()
         let aiRecommendationRuntime = LazyDefaultAIRecommendationRuntime(
@@ -74,8 +75,10 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         hostAdapter.controller = self
         inputControllerLogger.notice("KnowTypeInputController initialized client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)")
         if ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" {
+            let elapsedMs = Date().timeIntervalSince(startupDebugStartedAt) * 1_000
+            let formattedElapsed = String(format: "%.1f", elapsedMs)
             inputControllerLogger.notice(
-                "KnowType cold start lazy runtime rime=deferred provider=deferred learning=read_only client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)"
+                "KnowType cold start lazy runtime event=controller_init elapsedMs=\(formattedElapsed, privacy: .public) rime=deferred provider=deferred learning=read_only client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)"
             )
         }
     }

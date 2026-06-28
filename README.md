@@ -307,17 +307,20 @@ the shell until the session is switched with `Option + /`. Xcode, VS Code,
 Codex, common Electron apps, and JetBrains IDEs default to Chinese commit-only
 composition: KnowType uses a full-width-space attributed marked-text placeholder
 to keep the host composition and candidate anchor alive without exposing raw
-pinyin, then writes committed text with `insertText`. In any compatibility host, `Option + /`
-switches the active session between that Chinese commit-only path and idle ASCII
-passthrough.
+pinyin in the host text field. The real raw/preedit string is shown in
+KnowType's candidate panel above the candidates, then committed with
+`insertText`. In any compatibility host, `Option + /` switches the active
+session between that Chinese commit-only path and idle ASCII passthrough.
 
 The candidate panel shows Rime prefix candidates, a fixed AI recommendation
-state row, and raw input only when no suggestion is available. It is a compact
-AppKit panel using macOS material, system highlight colors, mouse hover/click
-selection, scroll paging, and row accessibility labels. When a provider is
-configured, Rime prefix candidates appear immediately and provider-backed AI
-recommendations update asynchronously. Provider failures do not show fixed
-local fallback text as if it were AI output.
+state row, commit-only preedit when the host receives a placeholder carrier, and
+raw input only when no suggestion is available. The preedit row has no shortcut,
+selection, or commit action. It is a compact AppKit panel using macOS material,
+system highlight colors, mouse hover/click selection, scroll paging, and row
+accessibility labels. When a provider is configured, Rime prefix candidates
+appear immediately and provider-backed AI recommendations update
+asynchronously. Provider failures do not show fixed local fallback text as if it
+were AI output.
 
 The first candidate slot is reserved for Rime conversion. The second slot is
 reserved for AI recommendation state, so async provider results update that slot

@@ -27,7 +27,8 @@ struct InputClientCompatibilityPolicy: Sendable {
         if let override = overrideWriteMode(bundleIdentifier: bundleIdentifier) {
             return override
         }
-        if isCompatibilityBundle(bundleIdentifier) {
+        let profile = HostCompatibilityProfile.profile(bundleIdentifier: bundleIdentifier)
+        if profile.carrier == .placeholderComposition {
             return hasActiveComposition || inputModeState.textMode == .chinese
                 ? .commitOnlyComposition
                 : .asciiPassthrough
@@ -47,9 +48,6 @@ struct InputClientCompatibilityPolicy: Sendable {
         return InputClientWriteMode(rawValue: rawValue)
     }
 
-    private func isCompatibilityBundle(_ bundleIdentifier: String?) -> Bool {
-        InputModeAppPolicy.usesCodeAppState(appBundleID: bundleIdentifier)
-    }
 }
 
 private final class InputClientWriteModeOverrideStore: @unchecked Sendable {

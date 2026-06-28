@@ -357,7 +357,7 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
                 CandidatePanelRowHitTarget(
                     frame: item.frame,
                     selection: row.selection,
-                    isEnabled: row.isEnabled,
+                    isEnabled: row.isEnabled && row.selection != nil,
                     accessibilityLabel: row.accessibilityLabel,
                     isSelected: row.isSelected
                 )

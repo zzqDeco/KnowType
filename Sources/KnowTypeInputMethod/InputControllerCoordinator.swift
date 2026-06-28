@@ -62,6 +62,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var lastInputModePreferenceReload = Date.distantPast
     private var lastRuntimePreferenceReload = Date.distantPast
     private var ownedMarkedTextClientID: ObjectIdentifier?
+    private let startupDebugStartedAt = Date()
+    private var didTraceFirstCompositionBegin = false
+    private var didTraceFirstCandidatePanelMaterialization = false
 
     init(
         provider: (any LLMProvider)?,
@@ -2010,6 +2013,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
         if rawBuffer.isEmpty {
+            if !didTraceFirstCompositionBegin {
+                didTraceFirstCompositionBegin = true
+                traceStartupEvent(
+                    "first_composition_begin",
+                    details: "bundle=\(appBundleIdentifier(client: client) ?? "<unknown>")"
+                )
+            }
             if !aiAcceptedFeedbackTracker.preserveForReplacementComposition(client: client) {
                 aiAcceptedFeedbackTracker.cancel(reason: "new_composition")
             }
@@ -2116,7 +2126,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         updateCandidatePanel(
             suggestion: suggestion,
             anchorResult: candidateAnchorResult(client: client),
-            placementPreference: candidatePanelPlacementPreference(client: client)
+            placementPreference: candidatePanelPlacementPreference(client: client),
+            preeditDisplayText: candidatePanelPreeditDisplayText(client: client)
         )
     }
 
@@ -2129,7 +2140,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             updateCandidatePanel(
                 suggestion: suggestion,
                 anchorResult: candidateAnchorResult(client: client),
-                placementPreference: candidatePanelPlacementPreference(client: client)
+                placementPreference: candidatePanelPlacementPreference(client: client),
+                preeditDisplayText: candidatePanelPreeditDisplayText(client: client)
             )
             return
         }
@@ -2157,7 +2169,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             self.updateCandidatePanel(
                 suggestion: suggestion,
                 anchorResult: self.candidateAnchorResult(client: client),
-                placementPreference: self.candidatePanelPlacementPreference(client: client)
+                placementPreference: self.candidatePanelPlacementPreference(client: client),
+                preeditDisplayText: self.candidatePanelPreeditDisplayText(client: client)
             )
         }
         panelUpdateTask = task
@@ -2167,7 +2180,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func updateCandidatePanel(
         suggestion: SuggestionResponse?,
         anchorResult: CandidateAnchorResult,
-        placementPreference: CandidatePanelPlacementPreference
+        placementPreference: CandidatePanelPlacementPreference,
+        preeditDisplayText: String?
     ) {
         guard canPublishCandidatePanel(suggestion: suggestion) else {
             hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
@@ -2184,6 +2198,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             pageSize: effectivePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode,
             placementPreference: placementPreference,
+            preeditDisplayText: preeditDisplayText,
             aiRecommendation: aiRecommendationState,
             preferredSelection: nativeHighlightedSelection(for: suggestion)
         )
@@ -2197,11 +2212,32 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 in: candidatePanelState.windowState.viewModel
             )
             : nil
+        traceFirstCandidatePanelMaterializationIfNeeded()
         candidatePanelPresenter.apply(
             currentCandidatePanelFrame(
                 reason: candidatePanelState.windowState.isVisible ? .compositionActive : .layoutImpossible
             ),
             locale: locale
+        )
+    }
+
+    private func traceFirstCandidatePanelMaterializationIfNeeded() {
+        guard candidatePanelState.windowState.isVisible,
+              !didTraceFirstCandidatePanelMaterialization else {
+            return
+        }
+        didTraceFirstCandidatePanelMaterialization = true
+        let rowCount = CandidatePanelRenderer(locale: locale)
+            .render(
+                candidatePanelState.windowState.viewModel,
+                selected: candidatePanelState.windowState.selection,
+                paging: candidatePanelState.windowState.paging
+            )
+            .rows
+            .count
+        traceStartupEvent(
+            "first_candidate_panel_materialization",
+            details: "anchorSource=\(candidatePanelState.windowState.anchorSource.rawValue) renderRows=\(rowCount)"
         )
     }
 
@@ -2674,6 +2710,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return snapshot.rawInput.isEmpty ? nil : snapshot.rawInput
     }
 
+    private func candidatePanelPreeditDisplayText(client: InputControllerClient?) -> String? {
+        guard hasActiveTextComposition(),
+              writeMode(client: client, hasActiveComposition: true) == .commitOnlyComposition else {
+            return nil
+        }
+        let displayText = nativeMarkedText() ?? compositionBuffer.displayText
+        return displayText.isEmpty ? nil : displayText
+    }
+
     private func scheduleDelayedCandidateReanchor(
         client: InputControllerClient,
         rawInput: String,
@@ -2696,7 +2741,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             self.updateCandidatePanel(
                 suggestion: self.lastSuggestion,
                 anchorResult: self.candidateAnchorResult(client: client),
-                placementPreference: self.candidatePanelPlacementPreference(client: client)
+                placementPreference: self.candidatePanelPlacementPreference(client: client),
+                preeditDisplayText: self.candidatePanelPreeditDisplayText(client: client)
             )
         }
     }
@@ -2707,6 +2753,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5
     private static let preferenceReloadInterval: TimeInterval = 1
+
+    private func traceStartupEvent(_ event: String, details: String = "") {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" else {
+            return
+        }
+        let elapsedMs = Date().timeIntervalSince(startupDebugStartedAt) * 1_000
+        let formattedElapsed = String(format: "%.1f", elapsedMs)
+        let suffix = details.isEmpty ? "" : " \(details)"
+        fputs("KnowType startup: event=\(event) elapsedMs=\(formattedElapsed)\(suffix)\n", stderr)
+    }
 
     private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
         !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in

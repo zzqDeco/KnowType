@@ -83,19 +83,28 @@ public struct CandidatePanelState: Sendable, Equatable {
         pageSize: Int = CandidatePanelPagingState.defaultPageSize,
         layoutMode: CandidatePanelLayoutMode = .adaptive,
         placementPreference: CandidatePanelPlacementPreference = .automatic,
+        preeditDisplayText: String? = nil,
         aiRecommendation: AIRecommendationState = .idle,
         preferredSelection: CandidatePanelSelection? = nil
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
         let continuationCandidates = suggestion?.continuationCandidates ?? []
+        let normalizedPreeditDisplayText = preeditDisplayText?.isEmpty == false
+            ? preeditDisplayText
+            : nil
         let viewModel = CandidatePanelViewModel(
             rawInput: rawInput,
+            preeditDisplayText: normalizedPreeditDisplayText,
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates,
             aiRecommendation: aiRecommendation
         )
         let hasAIRow = aiRecommendation.displayText != nil
-        let hasRows = !rawInput.isEmpty || !prefixCandidates.isEmpty || !continuationCandidates.isEmpty || hasAIRow
+        let hasRows = normalizedPreeditDisplayText != nil
+            || !rawInput.isEmpty
+            || !prefixCandidates.isEmpty
+            || !continuationCandidates.isEmpty
+            || hasAIRow
         let isVisible = isDisplayable && hasRows
         let selection = isVisible ? selectionAfterUpdate(
             rawInput: rawInput,
@@ -208,6 +217,7 @@ public struct CandidatePanelState: Sendable, Equatable {
 
     private func defaultSelection(
         rawInput: String,
+        preeditDisplayText: String?,
         prefixCandidates: [CorrectionCandidate],
         continuationCandidates: [ContinuationCandidate],
         aiRecommendation: AIRecommendationState
@@ -215,7 +225,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         if let firstPrefix = prefixCandidates.first {
             return prefixSelection(for: firstPrefix, rawInput: rawInput, index: 0)
         }
-        if !rawInput.isEmpty {
+        if !rawInput.isEmpty, preeditDisplayText == nil {
             return .rawInput
         }
         if aiRecommendation.isSelectableRecommendation {
@@ -245,6 +255,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         }
         return defaultSelection(
             rawInput: rawInput,
+            preeditDisplayText: viewModel.preeditDisplayText,
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates,
             aiRecommendation: viewModel.aiRecommendation
@@ -303,9 +314,10 @@ public struct CandidatePanelState: Sendable, Equatable {
         let hasSuggestions = !viewModel.prefixCandidates.isEmpty
             || !viewModel.continuationCandidates.isEmpty
             || viewModel.aiRecommendation.displayText != nil
+        let hasPreeditDisplayText = viewModel.preeditDisplayText?.isEmpty == false
         var rows: [CandidatePanelSelection?] = []
 
-        if !viewModel.rawInput.isEmpty && !hasSuggestions {
+        if !viewModel.rawInput.isEmpty && !hasSuggestions && !hasPreeditDisplayText {
             rows.append(.rawInput)
         }
         let prefixRows = prefixRows(in: viewModel)
