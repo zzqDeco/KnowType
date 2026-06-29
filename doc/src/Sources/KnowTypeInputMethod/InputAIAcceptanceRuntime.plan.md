@@ -25,7 +25,8 @@ insertion.
   display text exactly matches the committed text.
 - Protected app contexts skip accepted learning and accepted-feedback tracking.
 - Secret-like committed text or raw input suppresses typing-context events and
-  the coordinator's lexical-commit effect.
+  the lexical-commit effect that is later consumed by
+  `InputLexicalCommitRuntime`.
 - Accepted-feedback tracking is armed before insertion and verified after the
   delayed post-insert caret check.
 - External Delete events are recorded only when AI context recording is

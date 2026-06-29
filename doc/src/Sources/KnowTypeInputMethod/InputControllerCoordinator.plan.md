@@ -62,9 +62,10 @@ Current behavior:
 - highlight-only updates refresh marked text and the panel without restarting AI recommendation requests
 - preserves an explicitly selected non-Rime row from the IMK/custom candidate window before falling back to native Rime Space
 - native final Space, numeric, and mouse/panel candidate commits record local selection history before composition reset; partial native commits do not
-- delegates selected-text trimming, protected-input filtering, recent selection
-  cache updates, persistence writes, and `candidateSelected` event payload
-  construction to `InputSelectionHistoryRuntime`
+- delegates local lexical selection and commit side effects to
+  `InputLexicalCommitRuntime`, including selection-history recording, bounded
+  recent commit tracking, lexical profile refresh scheduling, and
+  `candidateSelected` / `compositionCommitted` event construction
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - delegates explicit AI accepted-learning records, typing-context events, and
   accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the
@@ -115,7 +116,11 @@ Current behavior:
   intentional leading/trailing whitespace, while using trimmed text only for
   empty-prefix eligibility checks
 - merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; in-memory recent commits and selection history can participate, but current-page Rime candidates do not
-- delegates Rime userdb lexical refreshes to `LexicalProfileRuntime`; commit/selection refresh reads existing snapshots only and does not call `sync_user_data`; profile JSON/Markdown staging, stale-write gates, and userdb parse diagnostics live outside the coordinator
+- requests lexical context and commit/selection refresh through
+  `InputLexicalCommitRuntime`; underlying Rime userdb refresh reads existing
+  snapshots only and does not call `sync_user_data`; profile JSON/Markdown
+  staging, stale-write gates, and userdb parse diagnostics live outside the
+  coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
 - receives candidate-panel publication results from
@@ -139,7 +144,7 @@ Current behavior:
   raw input; stale suggestions, AI results, or delayed reanchors cannot revive a
   hidden panel
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions
-- flushes user selection history through `InputSelectionHistoryRuntime` on
+- flushes user selection history through `InputLexicalCommitRuntime` on
   deactivate and close; deactivate falls back
   to the current IMK client before committing active raw composition through the
   normal clear-owned-marked-text plus insert path

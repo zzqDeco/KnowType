@@ -31,6 +31,11 @@ input, candidate-panel presentation, AI slot patches, and background events.
   effects. It receives commit context after the coordinator has chosen the
   inserted text, but it must not perform host writes, Rime updates, or panel
   publication.
+- `InputLexicalCommitRuntime` owns local lexical selection and commit side
+  effects. It combines protected selection-history recording, bounded recent
+  commit tracking, lexical profile refresh scheduling, and commit/selection
+  event payload construction without touching host writes, Rime navigation, AI
+  providers, or candidate-panel publication.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method
@@ -50,6 +55,9 @@ input, candidate-panel presentation, AI slot patches, and background events.
   authoritative.
 - AI patches must not change Rime selection, marked text, base candidates, or
   panel visibility.
+- Lexical commit and selection events are returned to the coordinator for
+  asynchronous event-bus publication; lexical refresh can use only bounded
+  recent commits and in-process recent selection history.
 - Background consumers may observe events, but they must not call back into the
   active Rime session or AppKit panel.
 
@@ -58,6 +66,7 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `InputControllerCoordinatorTests`
 - `InputCandidatePanelPublicationRuntimeTests`
 - `InputNativeCandidateNavigationRuntimeTests`
+- `InputLexicalCommitRuntimeTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`
