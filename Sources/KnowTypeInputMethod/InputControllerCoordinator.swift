@@ -37,12 +37,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var panelUpdateGeneration = 0
     private var panelUpdateTask: Task<Void, Never>?
     private var delayedReanchorGeneration = 0
-    private let aiContextEventRecorder: (any AIContextEventRecording)?
-    private let aiAcceptedLearningRecorder: (any AIAcceptedLearningRecording)?
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
-    private let aiAcceptedFeedbackTracker: AIAcceptedFeedbackTracker
-    private let aiDiagnosticSink: any AIRecommendationDiagnosticSink
     private let aiRecommendationRuntime: InputAIRecommendationRuntime
+    private let aiAcceptanceRuntime: InputAIAcceptanceRuntime
     private var aiRecommendationState: AIRecommendationState = .idle
     private var deleteCountBeforeCommit = 0
     private var recentLexicalCommits: [String] = []
@@ -109,19 +106,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
             persistence: userSelectionHistoryPersistence,
             maxEntries: Self.maxUserSelectionHistory
         )
-        self.aiContextEventRecorder = aiContextEventRecorder
-        self.aiAcceptedLearningRecorder = aiAcceptedLearning
         self.aiAcceptedFeedbackProvider = aiAcceptedFeedback
-        self.aiAcceptedFeedbackTracker = AIAcceptedFeedbackTracker(
-            recorder: aiAcceptedFeedback,
-            diagnosticSink: aiDiagnosticSink
-        )
-        self.aiDiagnosticSink = aiDiagnosticSink
         self.aiRecommendationRuntime = InputAIRecommendationRuntime(
             provider: aiRecommendationProvider,
             providerAvailability: aiRecommendationProviderAvailability,
             hasEagerProvider: provider != nil,
             diagnosticSink: aiDiagnosticSink
+        )
+        self.aiAcceptanceRuntime = InputAIAcceptanceRuntime(
+            contextEventRecorder: aiContextEventRecorder,
+            acceptedLearningRecorder: aiAcceptedLearning,
+            acceptedFeedbackRecorder: aiAcceptedFeedback,
+            diagnosticSink: aiDiagnosticSink,
+            canRequestAIRecommendations: self.canRequestAIRecommendations,
+            runtimePreferences: runtimePreferences
         )
         self.lexicalProfileRuntime = LexicalProfileRuntime(
             store: lexicalProfileStore,
@@ -268,7 +266,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func deactivateServer(client: InputControllerClient?) {
         flushUserSelectionHistory()
-        aiAcceptedFeedbackTracker.cancel(reason: "deactivate")
+        aiAcceptanceRuntime.cancelFeedback(reason: "deactivate")
         _ = finishCompositionLifecycle(reason: .deactivate, client: client, commitPolicy: .commitRawIfNeeded)
     }
 
@@ -279,7 +277,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawLength: rawBuffer.count,
             reason: "input_controller_will_close"
         )
-        aiAcceptedFeedbackTracker.cancel(reason: "input_controller_will_close")
+        aiAcceptanceRuntime.cancelFeedback(reason: "input_controller_will_close")
         lexicalProfileRuntime.cancelRefresh()
         panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
@@ -333,8 +331,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return commitSymbol(symbol, client: client)
         case .deleteBackward:
             guard !rawBuffer.isEmpty else {
-                _ = aiAcceptedFeedbackTracker.observeDeleteBackward(client: client)
-                recordExternalDelete(client: client)
+                _ = aiAcceptanceRuntime.observeDeleteBackward(client: client)
+                aiAcceptanceRuntime.recordExternalDelete(appBundleID: appBundleIdentifier(client: client))
                 return false
             }
             deleteCountBeforeCommit += 1
@@ -1046,12 +1044,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     ) -> Bool {
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
-            let acceptID = prepareAcceptedFeedbackTracking(
-                text: text,
-                client: client,
-                acceptedAIRecommendation: acceptedAIRecommendation
+            let acceptID = aiAcceptanceRuntime.prepareAcceptedFeedbackTracking(
+                context: InputAIAcceptanceFeedbackContext(
+                    text: text,
+                    schemaID: conversionEngine.activeSchemaID,
+                    appBundleID: appBundleIdentifier(client: client),
+                    acceptedAIRecommendation: acceptedAIRecommendation,
+                    client: client
+                )
             )
-            recordTypingCommit(
+            recordCommitSideEffects(
                 text,
                 client: client,
                 acceptedAIRecommendation: acceptedAIRecommendation,
@@ -1060,7 +1062,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             insert(text, client: client)
             if acceptID != nil {
                 host?.scheduleDelayedReanchor { [weak self, client] in
-                    self?.aiAcceptedFeedbackTracker.verifyPostInsertCaret(client: client)
+                    self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
                 }
             }
             resetComposition(client: client)
@@ -1087,7 +1089,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if let commitText = result.commitText,
            !commitText.isEmpty {
             if result.snapshot.hasComposition {
-                recordTypingCommit(commitText, client: client)
+                recordCommitSideEffects(commitText, client: client)
                 insert(commitText, client: client)
                 syncRawBufferToNativeSnapshot(result.snapshot)
                 publishLocalSuggestion(client: client)
@@ -1408,7 +1410,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard let lifecycleClient = client ?? host?.currentClient else {
             return false
         }
-        aiAcceptedFeedbackTracker.cancel(reason: "idle_passthrough")
+        aiAcceptanceRuntime.cancelFeedback(reason: "idle_passthrough")
         let state = writeState(hasActiveComposition: false)
         _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
         inputClientCompositionWriter.insertText(
@@ -1421,148 +1423,29 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return true
     }
 
-    private func recordTypingCommit(
+    private func recordCommitSideEffects(
         _ text: String,
         client: InputControllerClient?,
         acceptedAIRecommendation: AIRecommendationCandidate? = nil,
         acceptID: UUID? = nil
     ) {
-        let appBundleID = appBundleIdentifier(client: client)
-        let commitKind = acceptedAIRecommendation == nil ? typingCommitKind(for: text) : .ai
-        let candidateSource = acceptedAIRecommendation
-            .map { "ai:\($0.provider)" }
-            ?? typingCandidateSource(for: text)
-        if commitKind == .ai {
-            if TextProtection.requiresNoCorrection("knowtype", appBundleID: appBundleID) {
-                aiDiagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .acceptedLearningSkippedSecret,
-                        reason: "protected_app_context"
-                    )
-                )
-            } else {
-                recordAcceptedAICommit(
-                    text,
-                    appBundleID: appBundleID,
-                    acceptedAIRecommendation: acceptedAIRecommendation,
-                    candidateSource: candidateSource,
-                    acceptID: acceptID
-                )
-            }
-        } else {
-            aiAcceptedFeedbackTracker.observeVerifiedReplacementCommit(text, client: client)
-        }
-        guard !TextProtection.requiresNoCorrection(text, appBundleID: appBundleID),
-              !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
-            return
-        }
-        recordLexicalCommit(text)
-        guard let aiContextEventRecorder,
-              canRequestAIRecommendations,
-              runtimePreferences.cloudContinuationEnabled,
-              !text.isEmpty else {
-            return
-        }
-        let event = AITypingEvent(
-            appBundleID: appBundleIdentifier(client: client),
-            appName: appBundleIdentifier(client: client),
-            rawInput: rawBuffer.isEmpty ? nil : rawBuffer,
-            committedText: text,
-            commitKind: commitKind,
-            candidateSource: candidateSource,
-            deleteCountBeforeCommit: deleteCountBeforeCommit
-        )
-        Task.detached(priority: .utility) { [aiContextEventRecorder] in
-            await aiContextEventRecorder.record(event)
-        }
-    }
-
-    private func recordAcceptedAICommit(
-        _ text: String,
-        appBundleID: String?,
-        acceptedAIRecommendation: AIRecommendationCandidate?,
-        candidateSource: String,
-        acceptID: UUID?
-    ) {
-        guard let aiAcceptedLearningRecorder,
-              let candidate = acceptedAIRecommendation,
-              candidate.displayText == text else {
-            return
-        }
-        let lockedPrefix = candidate.prefixText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let record = AIAcceptedLearningRecord(
-            acceptID: acceptID,
-            schemaID: conversionEngine.activeSchemaID,
-            appBundleID: appBundleID,
-            rawInput: rawBuffer.isEmpty ? nil : rawBuffer,
-            lockedPrefix: lockedPrefix.isEmpty ? nil : lockedPrefix,
-            acceptedText: text,
-            provider: candidate.provider,
-            contextVersion: candidate.contextVersion,
-            candidateSource: candidateSource
-        )
-        Task.detached(priority: .utility) { [aiAcceptedLearningRecorder] in
-            await aiAcceptedLearningRecorder.recordAcceptedAI(record)
-        }
-    }
-
-    private func prepareAcceptedFeedbackTracking(
-        text: String,
-        client: InputControllerClient?,
-        acceptedAIRecommendation: AIRecommendationCandidate?
-    ) -> UUID? {
-        guard let candidate = acceptedAIRecommendation,
-              candidate.displayText == text else {
-            return nil
-        }
-        let appBundleID = appBundleIdentifier(client: client)
-        guard !TextProtection.requiresNoCorrection("knowtype", appBundleID: appBundleID) else {
-            aiDiagnosticSink.record(
-                AIRecommendationDiagnosticEvent(
-                    stage: .acceptedFeedbackTrackingCancelled,
-                    reason: "protected_app_context"
-                )
+        let effects = aiAcceptanceRuntime.recordCommit(
+            context: InputAIAcceptanceCommitContext(
+                text: text,
+                rawInput: rawBuffer,
+                schemaID: conversionEngine.activeSchemaID,
+                appBundleID: appBundleIdentifier(client: client),
+                acceptedAIRecommendation: acceptedAIRecommendation,
+                acceptID: acceptID,
+                selectedNativeCandidateSource: selectedNativeCandidate?.kind.analyticsSource,
+                prefixCandidateSource: lastSuggestion?.prefixCandidates.first?.source,
+                deleteCountBeforeCommit: deleteCountBeforeCommit,
+                client: client
             )
-            return nil
-        }
-        let acceptID = UUID()
-        let trackingTarget = acceptedFeedbackTrackingTarget(
-            text: text,
-            acceptedAIRecommendation: candidate
         )
-        _ = aiAcceptedFeedbackTracker.armAcceptedSpan(
-            acceptID: acceptID,
-            acceptedText: text,
-            trackingText: trackingTarget.text,
-            trackingOffsetUTF16: trackingTarget.offsetUTF16,
-            schemaID: conversionEngine.activeSchemaID,
-            appBundleID: appBundleID,
-            provider: candidate.provider,
-            contextVersion: candidate.contextVersion,
-            client: client
-        )
-        return acceptID
-    }
-
-    private func acceptedFeedbackTrackingTarget(
-        text: String,
-        acceptedAIRecommendation candidate: AIRecommendationCandidate
-    ) -> (text: String, offsetUTF16: Int) {
-        let prefix = candidate.prefixText
-        guard candidate.continuationText != nil,
-              !prefix.isEmpty,
-              text.hasPrefix(prefix) else {
-            return (text, 0)
+        if effects.shouldRecordLexicalCommit {
+            recordLexicalCommit(text)
         }
-        let prefixLength = (prefix as NSString).length
-        guard prefixLength < (text as NSString).length else {
-            return (text, 0)
-        }
-        let generatedText = (text as NSString).substring(from: prefixLength)
-        guard !generatedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return (text, 0)
-        }
-        return (generatedText, prefixLength)
     }
 
     private func recordLexicalCommit(_ text: String) {
@@ -1591,50 +1474,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
             recentCommits: recentLexicalCommits,
             selectionHistory: selectionHistoryRuntime.recentSelectionHistory
         )
-    }
-
-    private func recordExternalDelete(client: InputControllerClient?) {
-        guard let aiContextEventRecorder,
-              canRequestAIRecommendations,
-              runtimePreferences.cloudContinuationEnabled else {
-            return
-        }
-        let appBundleID = appBundleIdentifier(client: client)
-        let event = AITypingEvent(
-            appBundleID: appBundleID,
-            appName: appBundleID,
-            rawInput: nil,
-            committedText: nil,
-            commitKind: .externalDelete,
-            candidateSource: "external-delete",
-            deleteCountBeforeCommit: 1
-        )
-        Task.detached(priority: .utility) { [aiContextEventRecorder] in
-            await aiContextEventRecorder.record(event)
-        }
-    }
-
-    private func typingCommitKind(for text: String) -> AITypingCommitKind {
-        if text == rawBuffer {
-            return .raw
-        }
-        if rawBuffer.isEmpty {
-            return .symbol
-        }
-        return .traditional
-    }
-
-    private func typingCandidateSource(for text: String) -> String {
-        if text == rawBuffer {
-            return "raw"
-        }
-        if let selectedNativeCandidate {
-            return selectedNativeCandidate.kind.analyticsSource
-        }
-        if let source = lastSuggestion?.prefixCandidates.first?.source {
-            return source
-        }
-        return rawBuffer.isEmpty ? "symbol" : "traditional"
     }
 
     private func acceptedAIRecommendationCandidate(
@@ -1680,7 +1519,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let commitText = lifecycleCommitText(for: commitPolicy)
         if let commitText,
            !commitText.isEmpty {
-            recordTypingCommit(commitText, client: lifecycleClient)
+            recordCommitSideEffects(commitText, client: lifecycleClient)
             insert(commitText, client: lifecycleClient)
         } else if shouldClearOwnedMarkedText {
             inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
@@ -1726,8 +1565,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     details: "bundle=\(appBundleIdentifier(client: client) ?? "<unknown>")"
                 )
             }
-            if !aiAcceptedFeedbackTracker.preserveForReplacementComposition(client: client) {
-                aiAcceptedFeedbackTracker.cancel(reason: "new_composition")
+            if !aiAcceptanceRuntime.preserveFeedbackForReplacementComposition(client: client) {
+                aiAcceptanceRuntime.cancelFeedback(reason: "new_composition")
             }
             reloadInputModeDefaultsIfNeeded(client: client)
             reloadRuntimePreferencesIfNeeded()
@@ -1767,6 +1606,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return false
         }
         runtimePreferences = preferences
+        aiAcceptanceRuntime.updateRuntimePreferences(preferences)
         sessionController = Self.polishOnlySessionController()
         invalidateSuggestion()
         return true

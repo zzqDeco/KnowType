@@ -17,6 +17,10 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `AIRecommendationPatch` is slot-only. `InputAIRecommendationRuntime` creates
   and validates patches, and they can be applied only when request id, AI
   generation, composition id, raw revision, and raw input still match.
+- `InputAIAcceptanceRuntime` owns post-commit AI learning and feedback side
+  effects. It receives commit context after the coordinator has chosen the
+  inserted text, but it must not perform host writes, Rime updates, or panel
+  publication.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method

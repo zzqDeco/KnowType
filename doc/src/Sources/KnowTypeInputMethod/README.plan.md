@@ -31,6 +31,9 @@ Current package-level implementation covers:
   asynchronous provider requests are started
 - AI recommendation runtime for IMK-side request construction, cancellation,
   stale-result checks, diagnostics, and AI slot state callbacks
+- AI acceptance runtime for post-commit accepted-learning records, typing
+  context events, accepted-feedback tracking orchestration, and protected or
+  secret gates
 - optional `RimeConversionEngine` boundary with a dynamic `librime` bridge and deterministic `TraditionalInputEngine` fallback
 - lexical profile snapshots for AI recommendation that exclude Level 0/protected app commits and protected-app selection history
 - `InputTaskSupervisor` cancellation for local candidates, runtime lexicon reload, and panel rendering work
@@ -51,6 +54,11 @@ secret-like text, disabled cloud continuation, and missing provider cases.
 `InputAIRecommendationRuntime` owns request construction, task cancellation,
 patch validation, lifecycle diagnostics, and AI slot state callbacks; the
 coordinator applies the returned state to the candidate panel.
+`InputAIAcceptanceRuntime` owns post-commit AI side effects after the
+coordinator has chosen a commit result: accepted-learning writes,
+typing-context events, accepted-feedback tracking, and protected/secret gates.
+The coordinator still owns host insertion, composition lifecycle, and lexical
+profile refresh scheduling.
 
 The IMK controller marks composing text with `IMKTextInput.setMarkedText`. Inline-compatible hosts, including browsers, text editors, IDEs, Electron shells, and JetBrains-style clients by default, receive Rime preedit as attributed marked text. Terminal-style or explicit override commit-only hosts receive a full-width-space attributed placeholder so IMK composition ownership and candidate anchoring stay stable without exposing raw pinyin in the host field. `InputClientCompositionWriter` owns that carrier choice, idle ASCII passthrough decisions, and KnowType-owned marked-text cleanup, while `InputClientWriteCoordinator` owns the low-level `setMarkedText`/`insertText` calls and privacy-safe diagnostics. Their real preedit is shown in the candidate panel instead. Candidate anchor lookup is delegated to `CandidateAnchorResolver`, which prefers fresh IMK text rects, then line-height rects, then Accessibility focused-range bounds if permission is already granted, then a same-composition scoped last usable anchor, and finally a stable safe point inside the screen visible frame. The panel no longer follows the mouse pointer when host text geometry is temporarily unavailable.
 

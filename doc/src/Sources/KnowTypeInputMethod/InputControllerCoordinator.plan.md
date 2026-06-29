@@ -52,10 +52,12 @@ Current behavior:
   cache updates, persistence writes, and `candidateSelected` event payload
   construction to `InputSelectionHistoryRuntime`
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
-- explicit AI commits through Tab or Option+number are recorded into local accepted AI learning history for long-term language-profile summaries; this path is asynchronous, secret-only gated, and does not touch Rime userdb
-- explicit AI commits create a short-lived accepted-text span for feedback
-  tracking; the span activates only after the post-insert caret is verified at
-  the expected end of the inserted AI text
+- delegates explicit AI accepted-learning records, typing-context events, and
+  accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the
+  coordinator still supplies commit context and performs host insertion
+- explicit AI commits create a short-lived accepted-text span through
+  `InputAIAcceptanceRuntime`; the span activates only after the post-insert
+  caret is verified at the expected end of the inserted AI text
 - external Backspace is not negative AI feedback on its own; it is recorded as
   feedback only when the current client and selected range prove the edit falls
   inside the active accepted AI span
@@ -63,7 +65,8 @@ Current behavior:
   expired spans cancel feedback tracking and learn nothing
 - reserves Option+1 for the AI slot; when AI is not ready, Option+1 consumes the key without committing legacy continuation candidates
 - native candidate mapping uses the encoded current-page index when present; ambiguous duplicate text without an index does not fall back to the retired local converter
-- records committed typing events through `AIContextEventRecording` after insert decisions, while external Delete events are logged only when no composition is active
+- routes committed typing events and no-composition external Delete events
+  through `InputAIAcceptanceRuntime`
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
 - uses `InputTaskSupervisor` to replace stale local-candidate and panel-render
   tasks; real-time AI request tasks are owned by `InputAIRecommendationRuntime`
@@ -78,6 +81,10 @@ Current behavior:
   `InputAIRecommendationSchedulePolicy`; request construction, task lifecycle,
   stale-result checks, and patch validation are handled by
   `InputAIRecommendationRuntime`
+- keeps post-commit AI acceptance side effects out of the key write path:
+  accepted-learning writes, feedback tracking, and typing-context events are
+  asynchronous or tracker-local side effects owned by
+  `InputAIAcceptanceRuntime`
 - schedules AI recommendation from raw input and confirmed locked prefixes only;
   while Rime is merely composing, current-page Rime candidates are not sent as
   AI context and the first candidate is not treated as locked text

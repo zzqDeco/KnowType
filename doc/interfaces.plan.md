@@ -226,6 +226,9 @@ Core candidate types:
 - `InputAIRecommendationRuntime`: input-method runtime boundary that owns
   real-time AI request construction, active request ids, generations, task
   cancellation, stale-result diagnostics, and state publication callbacks.
+- `InputAIAcceptanceRuntime`: input-method runtime boundary that owns
+  post-commit AI accepted-learning records, typing-context events, accepted
+  feedback tracking orchestration, and protected/secret gates.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
 - `AIAcceptedLearningRecord`: local-only JSONL record for an AI recommendation the user explicitly accepted.
 - `AIAcceptedLanguageSummary`: bounded accepted-AI term, style, and recent-commit summary used by lexical profile merging.
