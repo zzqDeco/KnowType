@@ -32,8 +32,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
     private var candidatePanelState = CandidatePanelState()
-    private let userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?
-    private var userSelectionHistory: [String]
+    private let selectionHistoryRuntime: InputSelectionHistoryRuntime
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
     private var suggestionGeneration = 0
@@ -53,7 +52,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var aiRecommendationGeneration = 0
     private var deleteCountBeforeCommit = 0
     private var recentLexicalCommits: [String] = []
-    private var recentLexicalSelections: [String] = []
     private let lexicalProfileRuntime: LexicalProfileRuntime
     private let inputClientCompositionWriter: InputClientCompositionWriter
     private let taskSupervisor = InputTaskSupervisor()
@@ -115,9 +113,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             preferences: inputModePreferences,
             appBundleID: initialAppBundleID
         )
-        self.userSelectionHistoryPersistence = userSelectionHistoryPersistence
-        self.userSelectionHistory = userSelectionHistoryPersistence?
-            .loadHistory(maxEntries: Self.maxUserSelectionHistory) ?? []
+        self.selectionHistoryRuntime = InputSelectionHistoryRuntime(
+            persistence: userSelectionHistoryPersistence,
+            maxEntries: Self.maxUserSelectionHistory
+        )
         self.aiRecommendationProvider = aiRecommendationProvider
         self.aiRecommendationProviderAvailability = aiRecommendationProviderAvailability
         self.aiContextEventRecorder = aiContextEventRecorder
@@ -797,7 +796,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         lexicalProfileRuntime.lexicalContextSnapshot(
             schemaID: conversionEngine.activeSchemaID,
             recentCommits: recentLexicalCommits,
-            selectionHistory: recentLexicalSelections
+            selectionHistory: selectionHistoryRuntime.recentSelectionHistory
         )
     }
 
@@ -1437,44 +1436,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func recordUserSelection(_ text: String, client: InputControllerClient?) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        guard let event = selectionHistoryRuntime.recordSelection(
+            text,
+            rawInput: rawBuffer,
+            appBundleID: appBundleIdentifier(client: client),
+            schemaID: conversionEngine.activeSchemaID,
+            compositionID: compositionID
+        ) else {
             return
         }
-        let appBundleID = appBundleIdentifier(client: client)
-        guard !TextProtection.requiresNoCorrection(trimmed, appBundleID: appBundleID),
-              !TextProtection.requiresNoCorrection(rawBuffer, appBundleID: appBundleID) else {
-            return
-        }
-        publishRuntimeEvent(
-            .candidateSelected(
-                text: trimmed,
-                schemaID: conversionEngine.activeSchemaID,
-                compositionID: compositionID
-            )
-        )
-        recordLexicalSelection(trimmed)
+        publishRuntimeEvent(event)
         scheduleLexicalProfileRefresh(reason: "selection")
-        if let userSelectionHistoryPersistence {
-            userSelectionHistory = userSelectionHistoryPersistence.recordSelection(
-                trimmed,
-                currentHistory: userSelectionHistory,
-                maxEntries: Self.maxUserSelectionHistory
-            )
-            return
-        }
-
-        userSelectionHistory.append(trimmed)
-        if userSelectionHistory.count > Self.maxUserSelectionHistory {
-            userSelectionHistory.removeFirst(userSelectionHistory.count - Self.maxUserSelectionHistory)
-        }
-    }
-
-    private func recordLexicalSelection(_ text: String) {
-        recentLexicalSelections.append(text)
-        if recentLexicalSelections.count > Self.maxUserSelectionHistory {
-            recentLexicalSelections.removeFirst(recentLexicalSelections.count - Self.maxUserSelectionHistory)
-        }
     }
 
     private func publishRuntimeEvent(_ event: InputRuntimeEvent) {
@@ -1484,10 +1456,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func flushUserSelectionHistory() {
-        userSelectionHistoryPersistence?.flushHistory(
-            userSelectionHistory,
-            maxEntries: Self.maxUserSelectionHistory
-        )
+        selectionHistoryRuntime.flush()
     }
 
     private func commitResult(for action: InputAction, client: InputControllerClient?) -> InputCommitResult {
@@ -1862,7 +1831,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reason: reason,
             schemaID: conversionEngine.activeSchemaID,
             recentCommits: recentLexicalCommits,
-            selectionHistory: recentLexicalSelections
+            selectionHistory: selectionHistoryRuntime.recentSelectionHistory
         )
     }
 

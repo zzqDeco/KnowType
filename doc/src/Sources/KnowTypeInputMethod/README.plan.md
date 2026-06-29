@@ -25,6 +25,8 @@ Current package-level implementation covers:
 - runtime loading of user-owned JSON/TSV lexicon directories into the local Chinese engine
 - runtime lexicon snapshot refresh at new-composition boundaries so local dictionary file changes can be picked up without reinterpreting active marked text
 - persisted prefix selection history used as a local-only ranking signal
+- input-method selection history runtime for protected-input filtering, recent
+  selection cache, runtime event construction, and persistence flush delegation
 - optional `RimeConversionEngine` boundary with a dynamic `librime` bridge and deterministic `TraditionalInputEngine` fallback
 - lexical profile snapshots for AI recommendation that exclude Level 0/protected app commits and protected-app selection history
 - `InputTaskSupervisor` cancellation for local candidates, AI, runtime lexicon reload, and panel rendering work
@@ -44,6 +46,14 @@ Product commit decisions are shared through the session commit policy and coordi
 
 Candidate paging keeps 6 visible rows per page in adaptive horizontal mode so short candidates do not force a vertical panel. Vertical-list mode can show up to 9 visible rows per page. Arrow keys move one selectable row, PageDown/PageUp preserve the selected row's visible offset on the target page, and short final pages clamp to their last available row. Scroll-wheel paging maps to PageDown/PageUp with a small delta threshold to avoid trackpad jitter. Screenshot baselines under `Tests/KnowTypeInputMethodTests/__Snapshots__/` cover light horizontal, dark vertical, and AI status panel states.
 
-The IMK controller records recently committed prefix candidates in memory, persists them through `UserSelectionHistoryPersistence`, and feeds a top-K lexical snapshot into background AI recommendation context. Persistence appends newly selected prefixes on a shared serial queue and controller shutdown waits for pending writes, so stale snapshots do not overwrite newer selections from another host app. The ranking signal stays local; AI requests receive only summarized lexical context, not the full selection log.
+`InputSelectionHistoryRuntime` records recently committed prefix candidates for
+the active input-method process, skips protected selected text and raw input,
+persists accepted selections through `UserSelectionHistoryPersistence`, and
+feeds only the in-process recent selection cache into lexical profile refresh.
+Persistence appends newly selected prefixes on a shared serial queue and
+controller shutdown waits for pending writes, so stale snapshots do not
+overwrite newer selections from another host app. The ranking signal stays
+local; AI requests receive only summarized lexical context, not the full
+selection log.
 
 MVP manual acceptance still must verify candidate window behavior in host apps because IMK text input behavior varies across AppKit, browser, Electron, and terminal contexts.

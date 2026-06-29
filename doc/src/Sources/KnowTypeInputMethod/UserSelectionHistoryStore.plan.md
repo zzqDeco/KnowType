@@ -17,6 +17,11 @@ The store is intentionally in `KnowTypeInputMethod` instead of `KnowTypeCore`: c
 
 Persistence failure is non-fatal. The IMK controller keeps the in-memory history for the active process and silently degrades when the file cannot be read or written.
 
+`InputSelectionHistoryRuntime` is the adjacent session owner for selection
+filtering, recent-selection cache, event construction, and lifecycle flush
+delegation. This store and persistence layer remain the owners of durable file
+format and merge/write ordering.
+
 The first real selection write may create the storage directory. Opening the
 store or loading a missing history file during controller initialization must
 remain read-only, so system prelaunch does not mutate user data.
