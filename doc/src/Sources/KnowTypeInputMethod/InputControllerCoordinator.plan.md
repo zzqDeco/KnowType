@@ -70,6 +70,10 @@ Current behavior:
 - applies AI publications through `AIRecommendationPatch`, which also checks request id and raw revision and is allowed
   to update only the AI slot
 - records AI scheduling diagnostics for scheduled requests, previous-generation cancellation, stale-result drops, and applied AI states through the shared AI diagnostic sink
+- delegates real-time AI schedule eligibility and skipped-state diagnostics to
+  `InputAIRecommendationSchedulePolicy`; request construction, task lifecycle,
+  stale-result checks, patch application, and panel refresh remain in the
+  coordinator
 - schedules AI recommendation from raw input and confirmed locked prefixes only;
   while Rime is merely composing, current-page Rime candidates are not sent as
   AI context and the first candidate is not treated as locked text
