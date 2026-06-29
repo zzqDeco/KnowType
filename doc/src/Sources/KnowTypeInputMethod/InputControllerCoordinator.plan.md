@@ -7,7 +7,7 @@ Current behavior:
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
 - owns the composing raw buffer, `CompositionBuffer`, composition id, input mode runtime, Rime snapshots, native candidate selection, and candidate panel state
 - selects a host compatibility write mode before writing or passing through
-  printable input
+  printable input through `InputClientCompositionWriter`
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
   receive Rime preedit as attributed marked text, while terminal-style or
   override commit-only hosts receive a full-width-space `NSAttributedString`
@@ -18,11 +18,13 @@ Current behavior:
   without writing it into the host text field while inline hosts avoid duplicate
   preedit rows
 - commits through `InputControllerClient.insertText` with a centralized write
-  coordinator; normal composition, commit, and direct passthrough writes use
+  stack; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
 - tracks KnowType-owned marked text by client and clears only that owned mark;
-  idle Return/Enter returns to the host without clearing stale host marked ranges
+  `InputClientCompositionWriter` owns the tracked client id and clear-before-
+  insert ordering, while idle Return/Enter returns to the host without clearing
+  stale host marked ranges
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
 - cancels any pending retired local-candidate task before synchronous native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
@@ -99,6 +101,11 @@ Current behavior:
 - clears KnowType-owned marked text when native handled/no-commit output ends
   with no active raw/preedit, because composition ended without inserted text
 - schedules delayed candidate re-anchor through `InputControllerHost` and applies only the latest same-raw-input, same-composition reanchor
+- delegates inline marked text, commit-only placeholder marked text, idle ASCII
+  passthrough, and owned marked-text cleanup to
+  `InputClientCompositionWriter`; the coordinator still decides when to refresh
+  composition and when a successful marked-text write should schedule delayed
+  re-anchor
 - keeps provider-backed suggestion publication guarded by `SuggestionPublicationGuard`
 - suppresses AI recommendation while the composition is only partially resolved, so half-pinyin marked text is not sent as a locked prefix
 

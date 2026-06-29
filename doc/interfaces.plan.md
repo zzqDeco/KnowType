@@ -85,6 +85,10 @@ input back to the focused app. Missing clients use `disabled`; printable idle
 input is returned as unhandled so the host can keep normal typing behavior. All
 write modes keep replacement ranges as `{NSNotFound, NSNotFound}` unless a
 future reconversion feature introduces an explicit owned range.
+`InputClientCompositionWriter` is the internal boundary that applies this mode
+to inline marked text, placeholder marked text, idle passthrough, and owned
+marked-text cleanup. `InputClientWriteCoordinator` remains the lower-level
+writer for `setMarkedText`, `insertText`, replacement ranges, and debug logs.
 
 ## Provider Kinds
 

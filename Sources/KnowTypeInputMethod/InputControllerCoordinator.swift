@@ -55,13 +55,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var recentLexicalCommits: [String] = []
     private var recentLexicalSelections: [String] = []
     private let lexicalProfileRuntime: LexicalProfileRuntime
-    private let clientCompatibilityPolicy: InputClientCompatibilityPolicy
-    private let inputClientWriter: InputClientWriteCoordinator
+    private let inputClientCompositionWriter: InputClientCompositionWriter
     private let taskSupervisor = InputTaskSupervisor()
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
     private var lastRuntimePreferenceReload = Date.distantPast
-    private var ownedMarkedTextClientID: ObjectIdentifier?
     private let startupDebugStartedAt = Date()
     private var didTraceFirstCompositionBegin = false
     private var didTraceFirstCandidatePanelMaterialization = false
@@ -137,8 +135,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             diagnosticSink: aiDiagnosticSink,
             refreshGate: lexicalProfileRefreshGate
         )
-        self.clientCompatibilityPolicy = clientCompatibilityPolicy
-        self.inputClientWriter = inputClientWriter
+        self.inputClientCompositionWriter = InputClientCompositionWriter(
+            compatibilityPolicy: clientCompatibilityPolicy,
+            writeCoordinator: inputClientWriter
+        )
         self.host = host
         self.candidatePanelPresenter = CandidatePanelPresenter(host: host)
         self.anchorResolver = anchorResolver
@@ -709,29 +709,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client ?? host?.currentClient
     }
 
-    private func writeMode(
-        client: InputControllerClient?,
-        hasActiveComposition: Bool? = nil
-    ) -> InputClientWriteMode {
-        let isActive = hasActiveComposition ?? hasActiveTextComposition()
-        return clientCompatibilityPolicy.writeMode(
-            bundleIdentifier: appBundleIdentifier(client: client),
-            inputModeState: inputModeRuntime.state,
-            hasActiveComposition: isActive,
-            hasClient: client != nil
-        )
-    }
-
-    private func writeContext(
-        client: InputControllerClient?,
-        reason: String,
-        hasActiveComposition: Bool? = nil
-    ) -> InputClientWriteContext {
-        InputClientWriteContext(
+    private func writeState(hasActiveComposition: Bool? = nil) -> InputClientCompositionWriteState {
+        InputClientCompositionWriteState(
             compositionID: compositionID,
             rawLength: rawBuffer.count,
-            writeMode: writeMode(client: client, hasActiveComposition: hasActiveComposition),
-            reason: reason
+            inputModeState: inputModeRuntime.state,
+            hasActiveComposition: hasActiveComposition ?? hasActiveTextComposition()
         )
     }
 
@@ -740,21 +723,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         reason: String
     ) -> Bool {
-        guard !hasActiveTextComposition(),
-              InputKeyCommandMapper.isAppendableText(text) else {
-            return false
-        }
-        let mode = writeMode(client: client, hasActiveComposition: false)
-        guard mode == .asciiPassthrough || mode == .disabled else {
-            return false
-        }
-        inputClientWriter.traceDecision(
-            kind: "passThrough",
+        inputClientCompositionWriter.shouldPassThroughIdleText(
+            text,
             client: client,
-            context: writeContext(client: client, reason: reason, hasActiveComposition: false),
-            handled: false
+            state: writeState(hasActiveComposition: false),
+            reason: reason
         )
-        return true
     }
 
     private func candidatePanelPlacementPreference(
@@ -1695,11 +1669,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func insert(_ text: String, client: InputControllerClient?) {
-        clearOwnedMarkedTextIfNeeded(client: client)
-        inputClientWriter.insertText(
+        inputClientCompositionWriter.insertText(
             text,
             client: client,
-            context: writeContext(client: client, reason: "commit")
+            state: writeState(),
+            reason: "commit"
         )
     }
 
@@ -1708,13 +1682,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return false
         }
         aiAcceptedFeedbackTracker.cancel(reason: "idle_passthrough")
-        let context = writeContext(
-            client: lifecycleClient,
-            reason: "idle_passthrough",
-            hasActiveComposition: false
-        )
+        let state = writeState(hasActiveComposition: false)
         _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
-        inputClientWriter.insertText(text, client: lifecycleClient, context: context)
+        inputClientCompositionWriter.insertText(
+            text,
+            client: lifecycleClient,
+            state: state,
+            reason: "idle_passthrough",
+            clearsOwnedMarkedText: false
+        )
         return true
     }
 
@@ -1980,7 +1956,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             recordTypingCommit(commitText, client: lifecycleClient)
             insert(commitText, client: lifecycleClient)
         } else if shouldClearOwnedMarkedText {
-            clearOwnedMarkedTextIfNeeded(client: lifecycleClient)
+            inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
+                client: lifecycleClient,
+                state: writeState()
+            )
         }
 
         rawBuffer = ""
@@ -1990,9 +1969,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         deleteCountBeforeCommit = 0
         resetAnchorState()
         invalidateSuggestion()
-        if !shouldClearOwnedMarkedText || ownedMarkedTextClientID == nil {
-            ownedMarkedTextClientID = nil
-        }
+        inputClientCompositionWriter.finishLifecycle(
+            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: shouldClearOwnedMarkedText
+        )
         publishRuntimeEvent(
             .compositionEnded(reason: reason.panelVisibilityReason, compositionID: finishedCompositionID)
         )
@@ -2604,96 +2583,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func refreshComposition(client: InputControllerClient?) {
-        let mode = writeMode(client: client, hasActiveComposition: true)
-        guard let client else {
-            inputClientWriter.traceDecision(
-                kind: "skipMarkedText",
-                client: client,
-                context: writeContext(client: client, reason: "composition_update", hasActiveComposition: true),
-                handled: false
-            )
-            return
-        }
-        guard hasActiveTextComposition() else {
-            clearOwnedMarkedTextIfNeeded(client: client)
-            return
-        }
-
-        guard mode == .inlineComposition || mode == .commitOnlyComposition else {
-            clearOwnedMarkedTextIfNeeded(client: client)
-            inputClientWriter.traceDecision(
-                kind: "skipMarkedText",
-                client: client,
-                context: writeContext(client: client, reason: "composition_update", hasActiveComposition: true),
-                handled: false
-            )
-            return
-        }
-
-        let markedTextString = mode == .commitOnlyComposition
-            ? Self.commitOnlyCompositionPlaceholder
-            : nativeMarkedText() ?? compositionBuffer.displayText
-        guard !markedTextString.isEmpty else {
-            clearOwnedMarkedTextIfNeeded(client: client)
-            return
-        }
-        let markedText = mode == .commitOnlyComposition
-            ? InputClientMarkedText.placeholder(markedTextString)
-            : InputClientMarkedText.composition(markedTextString)
-
-        setOwnedMarkedText(
-            markedText,
-            selectionRange: mode == .commitOnlyComposition
-                ? NSRange(location: 0, length: 0)
-                : NSRange(location: (markedTextString as NSString).length, length: 0),
+        let didWriteMarkedText = inputClientCompositionWriter.refreshComposition(
             client: client,
-            reason: "composition_update",
-            kind: mode == .commitOnlyComposition ? "setMarkedTextPlaceholder" : "setMarkedText"
+            state: writeState(),
+            markedDisplayText: nativeMarkedText() ?? compositionBuffer.displayText
         )
+        guard didWriteMarkedText,
+              let client else {
+            return
+        }
         scheduleDelayedCandidateReanchor(
             client: client,
             rawInput: rawBuffer,
             compositionID: compositionID
         )
-    }
-
-    private func clearMarkedText(_ client: InputControllerClient) {
-        inputClientWriter.setMarkedText(
-            .emptyAttributed(),
-            selectionRange: NSRange(location: 0, length: 0),
-            client: client,
-            context: writeContext(client: client, reason: "clear_marked_text", hasActiveComposition: true)
-        )
-        if ownedMarkedTextClientID == client.feedbackTrackingID {
-            ownedMarkedTextClientID = nil
-        }
-    }
-
-    private func setOwnedMarkedText(
-        _ text: InputClientMarkedText,
-        selectionRange: NSRange,
-        client: InputControllerClient,
-        reason: String,
-        kind: String = "setMarkedText"
-    ) {
-        inputClientWriter.setMarkedText(
-            text,
-            selectionRange: selectionRange,
-            client: client,
-            context: writeContext(client: client, reason: reason, hasActiveComposition: true),
-            kind: kind
-        )
-        ownedMarkedTextClientID = client.feedbackTrackingID
-    }
-
-    @discardableResult
-    private func clearOwnedMarkedTextIfNeeded(client: InputControllerClient?) -> Bool {
-        guard let client,
-              ownedMarkedTextClientID == client.feedbackTrackingID else {
-            return false
-        }
-        clearMarkedText(client)
-        return true
     }
 
     private func nativeMarkedText() -> String? {
@@ -2711,12 +2614,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func candidatePanelPreeditDisplayText(client: InputControllerClient?) -> String? {
-        guard hasActiveTextComposition(),
-              writeMode(client: client, hasActiveComposition: true) == .commitOnlyComposition else {
-            return nil
-        }
-        let displayText = nativeMarkedText() ?? compositionBuffer.displayText
-        return displayText.isEmpty ? nil : displayText
+        inputClientCompositionWriter.candidatePanelPreeditDisplayText(
+            client: client,
+            state: writeState(),
+            markedDisplayText: nativeMarkedText() ?? compositionBuffer.displayText
+        )
     }
 
     private func scheduleDelayedCandidateReanchor(
@@ -2748,7 +2650,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private static let textOnlyKeyCode = -1
-    private static let commitOnlyCompositionPlaceholder = "\u{3000}"
     private static let maxUserSelectionHistory = 64
     private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5

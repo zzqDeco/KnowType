@@ -195,6 +195,10 @@ LevelDB state.
   frame cannot fit the natural height.
 
 The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Inline hosts receive Rime preedit as an attributed marked-text payload, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Terminal-style or override commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real preedit row above candidate rows for those hosts. Commit then clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
+`InputClientCompositionWriter` owns the host carrier write state, idle ASCII
+passthrough decisions, and KnowType-owned marked-text cleanup. The lower-level
+`InputClientWriteCoordinator` still owns the actual `setMarkedText`/`insertText`
+calls, `NSNotFound` replacement ranges, and privacy-safe diagnostics.
 
 User selection history is stored under Application Support as `user-selection-history.json`. This file is local candidate-learning data only; it is not serialized into provider requests.
 

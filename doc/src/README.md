@@ -78,6 +78,7 @@ required for every test file.
 - [InputCandidateListBuilder](Sources/KnowTypeInputMethod/InputCandidateListBuilder.plan.md)
 - [InputCommitResultPolicy](Sources/KnowTypeInputMethod/InputCommitResultPolicy.plan.md)
 - [InputClientCompatibilityPolicy](Sources/KnowTypeInputMethod/InputClientCompatibilityPolicy.plan.md)
+- [InputClientCompositionWriter](Sources/KnowTypeInputMethod/InputClientCompositionWriter.plan.md)
 - [InputClientWriteCoordinator](Sources/KnowTypeInputMethod/InputClientWriteCoordinator.plan.md)
 - [HostCompatibilityProfile](Sources/KnowTypeInputMethod/HostCompatibilityProfile.plan.md)
 - [InputController](Sources/KnowTypeInputMethod/InputController.plan.md)
