@@ -13,7 +13,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let candidateListBuilder = InputCandidateListBuilder()
     private let anchorResolver: CandidateAnchorResolver
     private weak var host: InputControllerHost?
-    private let candidatePanelPresenter: CandidatePanelPresenter
     private let inputEventBus = InputEventBus()
     private var rawBuffer = ""
     private var compositionBuffer = CompositionBuffer()
@@ -29,14 +28,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var suggestionTask: Task<Void, Never>?
     private var displayedNativeCandidates: [InputCandidateSelection] = []
     private var selectedNativeCandidate: InputCandidateSelection?
-    private var candidatePanelState = CandidatePanelState()
     private let selectionHistoryRuntime: InputSelectionHistoryRuntime
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
     private var suggestionGeneration = 0
-    private var panelUpdateGeneration = 0
-    private var panelUpdateTask: Task<Void, Never>?
-    private var delayedReanchorGeneration = 0
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
     private let aiRecommendationRuntime: InputAIRecommendationRuntime
     private let aiAcceptanceRuntime: InputAIAcceptanceRuntime
@@ -46,12 +41,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let lexicalProfileRuntime: LexicalProfileRuntime
     private let inputClientCompositionWriter: InputClientCompositionWriter
     private let taskSupervisor = InputTaskSupervisor()
+    private let candidatePanelPublicationRuntime: InputCandidatePanelPublicationRuntime
     private let latencyTracer = InputLatencyTracer()
     private var lastInputModePreferenceReload = Date.distantPast
     private var lastRuntimePreferenceReload = Date.distantPast
-    private let startupDebugStartedAt = Date()
+    private let startupDebugStartedAt: Date
     private var didTraceFirstCompositionBegin = false
-    private var didTraceFirstCandidatePanelMaterialization = false
 
     init(
         provider: (any LLMProvider)?,
@@ -84,6 +79,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         enablesAsyncSuggestionRefresh: Bool = true,
         asyncSuggestionDelayNanoseconds: UInt64 = 0
     ) {
+        let startupDebugStartedAt = Date()
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
         let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
         self.canRequestAIRecommendations = provider != nil || aiRecommendationProvider != nil
@@ -132,8 +128,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             compatibilityPolicy: clientCompatibilityPolicy,
             writeCoordinator: inputClientWriter
         )
+        self.startupDebugStartedAt = startupDebugStartedAt
         self.host = host
-        self.candidatePanelPresenter = CandidatePanelPresenter(host: host)
+        self.candidatePanelPublicationRuntime = InputCandidatePanelPublicationRuntime(
+            host: host,
+            taskSupervisor: taskSupervisor,
+            traceStartupEvent: { event, details in
+                Self.traceStartupEvent(event: event, details: details, startedAt: startupDebugStartedAt)
+            }
+        )
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
         self.asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
@@ -198,25 +201,31 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func hoverCandidatePanelSelection(_ selection: CandidatePanelSelection) {
-        guard candidatePanelState.selectVisibleRow(selection) else {
+        guard let result = candidatePanelPublicationRuntime.selectVisibleRow(selection) else {
             return
         }
         selectedNativeCandidate = inputCandidateSelection(
-            for: selection,
-            in: candidatePanelState.windowState.viewModel
+            for: result.selection,
+            in: result.state.windowState.viewModel
         )
         if let selectedNativeCandidate,
            highlightNativeSelectionIfNeeded(selectedNativeCandidate, client: host?.currentClient) {
             return
         }
-        candidatePanelPresenter.apply(currentCandidatePanelFrame(reason: .compositionActive), locale: locale)
+        candidatePanelPublicationRuntime.applyCurrentFrame(
+            reason: .compositionActive,
+            compositionID: compositionID,
+            rawRevision: rawRevision,
+            rawLength: rawBuffer.count,
+            locale: locale
+        )
     }
 
     func commitCandidatePanelSelection(_ selection: CandidatePanelSelection, client: InputControllerClient?) {
-        guard candidatePanelState.selectVisibleRow(selection),
+        guard let publicationResult = candidatePanelPublicationRuntime.selectVisibleRow(selection),
               let inputSelection = inputCandidateSelection(
-                  for: selection,
-                  in: candidatePanelState.windowState.viewModel
+                  for: publicationResult.selection,
+                  in: publicationResult.state.windowState.viewModel
               ) else {
             return
         }
@@ -279,7 +288,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
         aiAcceptanceRuntime.cancelFeedback(reason: "input_controller_will_close")
         lexicalProfileRuntime.cancelRefresh()
-        panelUpdateTask?.cancel()
         taskSupervisor.cancelAll()
         _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
     }
@@ -388,7 +396,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                number > 0 {
                 return selectNativeCandidateOnCurrentPage(number - 1, client: client)
             }
-            if candidatePanelState.windowState.isVisible {
+            let panelState = candidatePanelPublicationRuntime.state
+            if panelState.windowState.isVisible {
                 if number == 0,
                    let result = InputSessionCommitPolicy.resultForCandidateNumber(
                        number,
@@ -399,14 +408,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     return applyCommitResult(result, client: client)
                 }
                 if number == 0,
-                   candidatePanelState.windowState.selection == .rawInput,
+                   panelState.windowState.selection == .rawInput,
                    !rawBuffer.isEmpty {
                     return applyCommitResult(.commit(rawBuffer), client: client)
                 }
-                if let visibleSelection = candidatePanelState.selectVisiblePrefixCandidate(shortcutNumber: number),
+                if let selectionResult = candidatePanelPublicationRuntime.selectVisiblePrefixCandidate(shortcutNumber: number),
                    let inputSelection = inputCandidateSelection(
-                       for: visibleSelection,
-                       in: candidatePanelState.windowState.viewModel
+                       for: selectionResult.selection,
+                       in: selectionResult.state.windowState.viewModel
                    ) {
                     selectedNativeCandidate = inputSelection
                     if commitNativeSelectionIfNeeded(inputSelection, client: client) {
@@ -1181,7 +1190,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
         }
 
-        switch candidatePanelState.windowState.selection {
+        switch candidatePanelPublicationRuntime.state.windowState.selection {
         case .prefixCandidate(let index), .fullCandidate(let index):
             return lastSuggestion?.prefixCandidates[inputControllerSafe: index]?.text
         case .segmentCandidate:
@@ -1334,7 +1343,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
         }
         if case .optionNumber = action,
-           !candidatePanelState.windowState.isVisible {
+           !candidatePanelPublicationRuntime.state.windowState.isVisible {
             return .noAction
         }
 
@@ -1638,129 +1647,69 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func updateCandidatePanelImmediately(suggestion: SuggestionResponse?, client: InputControllerClient?) {
-        panelUpdateGeneration += 1
-        panelUpdateTask?.cancel()
-        panelUpdateTask = nil
-        taskSupervisor.cancel(.panelRender)
-        guard canPublishCandidatePanel(suggestion: suggestion) else {
-            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
-            return
-        }
-        updateCandidatePanel(
-            suggestion: suggestion,
-            anchorResult: candidateAnchorResult(client: client),
-            placementPreference: candidatePanelPlacementPreference(client: client),
-            preeditDisplayText: candidatePanelPreeditDisplayText(client: client)
+        let snapshot = candidatePanelPublicationSnapshot(suggestion: suggestion)
+        let result = candidatePanelPublicationRuntime.publishImmediately(
+            snapshot: snapshot,
+            request: { self.candidatePanelPublicationRequest(suggestion: suggestion, client: client) },
+            locale: locale
         )
+        applyCandidatePanelPublicationResult(result)
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, client: InputControllerClient?) {
-        guard canPublishCandidatePanel(suggestion: suggestion) else {
-            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
-            return
-        }
-        guard enablesAsyncSuggestionRefresh else {
-            updateCandidatePanel(
-                suggestion: suggestion,
-                anchorResult: candidateAnchorResult(client: client),
-                placementPreference: candidatePanelPlacementPreference(client: client),
-                preeditDisplayText: candidatePanelPreeditDisplayText(client: client)
-            )
-            return
-        }
-        scheduleCandidatePanelUpdate(suggestion: suggestion, client: client)
-    }
-
-    private func scheduleCandidatePanelUpdate(suggestion: SuggestionResponse?, client: InputControllerClient?) {
-        panelUpdateGeneration += 1
-        let generation = panelUpdateGeneration
-        let rawInput = rawBuffer
-        let currentCompositionID = compositionID
-        let currentRawRevision = rawRevision
-        panelUpdateTask?.cancel()
-        taskSupervisor.cancel(.panelRender)
-        let task = Task { @MainActor [weak self, client, suggestion] in
-            await Task.yield()
-            guard let self,
-                  !Task.isCancelled,
-                  self.panelUpdateGeneration == generation,
-                  self.rawBuffer == rawInput,
-                  self.rawRevision == currentRawRevision,
-                  self.compositionID == currentCompositionID else {
-                return
+        let snapshot = candidatePanelPublicationSnapshot(suggestion: suggestion)
+        if let result = candidatePanelPublicationRuntime.publish(
+            snapshot: snapshot,
+            enablesAsyncRefresh: enablesAsyncSuggestionRefresh,
+            request: { [weak self, client, suggestion] in
+                guard let self else {
+                    return nil
+                }
+                return self.candidatePanelPublicationRequest(suggestion: suggestion, client: client)
+            },
+            currentSnapshot: { [weak self, suggestion] in
+                guard let self else {
+                    return snapshot
+                }
+                return self.candidatePanelPublicationSnapshot(suggestion: suggestion)
+            },
+            locale: locale,
+            onPublication: { [weak self] result in
+                self?.applyCandidatePanelPublicationResult(result)
             }
-            self.updateCandidatePanel(
-                suggestion: suggestion,
-                anchorResult: self.candidateAnchorResult(client: client),
-                placementPreference: self.candidatePanelPlacementPreference(client: client),
-                preeditDisplayText: self.candidatePanelPreeditDisplayText(client: client)
-            )
+        ) {
+            applyCandidatePanelPublicationResult(result)
         }
-        panelUpdateTask = task
-        taskSupervisor.replace(.panelRender, with: task)
     }
 
-    private func updateCandidatePanel(
-        suggestion: SuggestionResponse?,
-        anchorResult: CandidateAnchorResult,
-        placementPreference: CandidatePanelPlacementPreference,
-        preeditDisplayText: String?
-    ) {
-        guard canPublishCandidatePanel(suggestion: suggestion) else {
-            hideCandidatePanel(reason: candidatePanelSuppressionReason(suggestion: suggestion))
-            return
-        }
-        let isDisplayable = anchorResult.source != .none
-        let effectivePageSize = runtimePreferences.effectiveCandidatePageSize
-        candidatePanelState.update(
+    private func candidatePanelPublicationSnapshot(
+        suggestion: SuggestionResponse?
+    ) -> InputCandidatePanelPublicationSnapshot {
+        InputCandidatePanelPublicationSnapshot(
             rawInput: rawBuffer,
+            compositionID: compositionID,
+            rawRevision: rawRevision,
             suggestion: suggestion,
-            anchorRect: anchorResult.rect,
-            anchorSource: anchorResult.source,
-            isDisplayable: isDisplayable,
-            pageSize: effectivePageSize,
-            layoutMode: runtimePreferences.candidateLayoutMode,
-            placementPreference: placementPreference,
-            preeditDisplayText: preeditDisplayText,
-            aiRecommendation: aiRecommendationState,
-            preferredSelection: nativeHighlightedSelection(for: suggestion)
-        )
-        traceCandidatePanelUpdate(
-            savedPageSize: runtimePreferences.candidatePageSize,
-            effectivePageSize: effectivePageSize
-        )
-        selectedNativeCandidate = candidatePanelState.windowState.isVisible
-            ? inputCandidateSelection(
-                for: candidatePanelState.windowState.selection,
-                in: candidatePanelState.windowState.viewModel
-            )
-            : nil
-        traceFirstCandidatePanelMaterializationIfNeeded()
-        candidatePanelPresenter.apply(
-            currentCandidatePanelFrame(
-                reason: candidatePanelState.windowState.isVisible ? .compositionActive : .layoutImpossible
-            ),
-            locale: locale
+            lastSuggestionRawInput: lastSuggestionRawInput,
+            nativeIsActive: conversionEngine.isNativeActive,
+            nativeHasActiveInput: nativeSnapshotHasActiveInput(conversionEngine.snapshot)
         )
     }
 
-    private func traceFirstCandidatePanelMaterializationIfNeeded() {
-        guard candidatePanelState.windowState.isVisible,
-              !didTraceFirstCandidatePanelMaterialization else {
-            return
-        }
-        didTraceFirstCandidatePanelMaterialization = true
-        let rowCount = CandidatePanelRenderer(locale: locale)
-            .render(
-                candidatePanelState.windowState.viewModel,
-                selected: candidatePanelState.windowState.selection,
-                paging: candidatePanelState.windowState.paging
-            )
-            .rows
-            .count
-        traceStartupEvent(
-            "first_candidate_panel_materialization",
-            details: "anchorSource=\(candidatePanelState.windowState.anchorSource.rawValue) renderRows=\(rowCount)"
+    private func candidatePanelPublicationRequest(
+        suggestion: SuggestionResponse?,
+        client: InputControllerClient?
+    ) -> InputCandidatePanelPublicationRequest {
+        InputCandidatePanelPublicationRequest(
+            snapshot: candidatePanelPublicationSnapshot(suggestion: suggestion),
+            anchorResult: candidateAnchorResult(client: client),
+            placementPreference: candidatePanelPlacementPreference(client: client),
+            preeditDisplayText: candidatePanelPreeditDisplayText(client: client),
+            aiRecommendation: aiRecommendationState,
+            savedPageSize: runtimePreferences.candidatePageSize,
+            effectivePageSize: runtimePreferences.effectiveCandidatePageSize,
+            layoutMode: runtimePreferences.candidateLayoutMode,
+            preferredSelection: nativeHighlightedSelection(for: suggestion)
         )
     }
 
@@ -1784,58 +1733,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func hideCandidatePanel(reason: CandidatePanelVisibilityReason) {
-        panelUpdateGeneration += 1
-        delayedReanchorGeneration += 1
-        panelUpdateTask?.cancel()
-        panelUpdateTask = nil
-        taskSupervisor.cancel(.panelRender)
-        candidatePanelState.hide()
-        selectedNativeCandidate = nil
-        anchorResolver.reset()
-        candidatePanelPresenter.hide(
+        let result = candidatePanelPublicationRuntime.hide(
             reason: reason,
             compositionID: compositionID,
             rawRevision: rawRevision,
             rawLength: rawBuffer.count
         )
+        applyCandidatePanelPublicationResult(result)
     }
 
-    private func canPublishCandidatePanel(suggestion: SuggestionResponse?) -> Bool {
-        guard !rawBuffer.isEmpty else {
-            return false
+    private func applyCandidatePanelPublicationResult(_ result: InputCandidatePanelPublicationResult) {
+        selectedNativeCandidate = result.isVisible
+            ? inputCandidateSelection(
+                for: result.selection,
+                in: result.state.windowState.viewModel
+            )
+            : nil
+        if result.didHide {
+            anchorResolver.reset()
         }
-        if suggestion != nil,
-           let lastSuggestionRawInput,
-           lastSuggestionRawInput != rawBuffer {
-            return false
-        }
-        if conversionEngine.isNativeActive {
-            return nativeSnapshotHasActiveInput(conversionEngine.snapshot) || !rawBuffer.isEmpty
-        }
-        return true
-    }
-
-    private func candidatePanelSuppressionReason(suggestion: SuggestionResponse?) -> CandidatePanelVisibilityReason {
-        guard !rawBuffer.isEmpty else {
-            return .rawEmpty
-        }
-        if suggestion != nil,
-           let lastSuggestionRawInput,
-           lastSuggestionRawInput != rawBuffer {
-            return .staleUpdate
-        }
-        return .layoutImpossible
-    }
-
-    private func currentCandidatePanelFrame(reason: CandidatePanelVisibilityReason) -> CandidatePanelFrame {
-        CandidatePanelFrame(
-            compositionID: compositionID,
-            rawRevision: rawRevision,
-            rawLength: rawBuffer.count,
-            panelModel: candidatePanelState,
-            anchorSource: candidatePanelState.windowState.anchorSource,
-            visibilityReason: reason
-        )
     }
 
     private func traceCompositionLifecycleFinish(reason: CompositionLifecycleFinishReason) {
@@ -1846,25 +1762,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if let data = message.data(using: .utf8) {
             FileHandle.standardError.write(data)
         }
-    }
-
-    private func traceCandidatePanelUpdate(savedPageSize: Int, effectivePageSize: Int) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
-            return
-        }
-        let windowState = candidatePanelState.windowState
-        let rowCount = CandidatePanelRenderer(locale: locale)
-            .render(
-                windowState.viewModel,
-                selected: windowState.selection,
-                paging: windowState.paging
-            )
-            .rows
-            .count
-        fputs(
-            "KnowType panel: layoutMode=\(windowState.layoutMode.rawValue) savedPageSize=\(savedPageSize) effectivePageSize=\(effectivePageSize) anchorSource=\(windowState.anchorSource.rawValue) visible=\(windowState.isVisible) renderRows=\(rowCount)\n",
-            stderr
-        )
     }
 
     private func handleNativePagingSymbol(_ text: String, client: InputControllerClient?) -> Bool {
@@ -1936,19 +1833,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
            navigation == .pageDown || navigation == .pageUp {
             return false
         }
-        let previousWindowState = candidatePanelState.windowState
-        if candidatePanelState.moveSelection(navigation) {
+        let previousWindowState = candidatePanelPublicationRuntime.state.windowState
+        if let result = candidatePanelPublicationRuntime.moveLocalSelection(navigation) {
             if conversionEngine.isNativeActive,
-               candidatePanelState.windowState == previousWindowState,
+               result.state.windowState == previousWindowState,
                let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation),
                moveNativeCandidatePage(pageNavigation, client: host?.currentClient) {
                 return true
             }
             selectedNativeCandidate = inputCandidateSelection(
-                for: candidatePanelState.windowState.selection,
-                in: candidatePanelState.windowState.viewModel
+                for: result.selection,
+                in: result.state.windowState.viewModel
             )
-            host?.updateCandidatePanel(state: candidatePanelState, locale: locale)
+            candidatePanelPublicationRuntime.applyCurrentFrame(
+                reason: .compositionActive,
+                compositionID: compositionID,
+                rawRevision: rawRevision,
+                rawLength: rawBuffer.count,
+                locale: locale
+            )
             return true
         }
         guard let pageNavigation = Self.nativeBoundaryPageNavigation(for: navigation) else {
@@ -2170,27 +2073,30 @@ final class InputControllerCoordinator: @unchecked Sendable {
         rawInput: String,
         compositionID: Int
     ) {
-        delayedReanchorGeneration += 1
-        let generation = delayedReanchorGeneration
-        host?.scheduleDelayedReanchor { [weak self, client] in
-            guard let self,
-                  self.delayedReanchorGeneration == generation,
-                  CandidateAnchorRefreshPolicy.shouldApplyDelayedAnchor(
-                      snapshotRawInput: rawInput,
-                      currentRawInput: self.rawBuffer,
-                      snapshotCompositionID: compositionID,
-                      currentCompositionID: self.compositionID,
-                      hasActiveComposition: !self.rawBuffer.isEmpty
-                  ) else {
-                return
+        candidatePanelPublicationRuntime.scheduleDelayedReanchor(
+            rawInput: rawInput,
+            compositionID: compositionID,
+            currentSnapshot: { [weak self] in
+                guard let self else {
+                    return InputCandidatePanelReanchorSnapshot(
+                        rawInput: "",
+                        compositionID: compositionID,
+                        hasActiveComposition: false
+                    )
+                }
+                return InputCandidatePanelReanchorSnapshot(
+                    rawInput: self.rawBuffer,
+                    compositionID: self.compositionID,
+                    hasActiveComposition: !self.rawBuffer.isEmpty
+                )
+            },
+            publish: { [weak self, client] in
+                guard let self else {
+                    return
+                }
+                self.updateCandidatePanel(suggestion: self.lastSuggestion, client: client)
             }
-            self.updateCandidatePanel(
-                suggestion: self.lastSuggestion,
-                anchorResult: self.candidateAnchorResult(client: client),
-                placementPreference: self.candidatePanelPlacementPreference(client: client),
-                preeditDisplayText: self.candidatePanelPreeditDisplayText(client: client)
-            )
-        }
+        )
     }
 
     private static let textOnlyKeyCode = -1
@@ -2200,10 +2106,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static let preferenceReloadInterval: TimeInterval = 1
 
     private func traceStartupEvent(_ event: String, details: String = "") {
+        Self.traceStartupEvent(event: event, details: details, startedAt: startupDebugStartedAt)
+    }
+
+    private static func traceStartupEvent(event: String, details: String, startedAt: Date) {
         guard ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" else {
             return
         }
-        let elapsedMs = Date().timeIntervalSince(startupDebugStartedAt) * 1_000
+        let elapsedMs = Date().timeIntervalSince(startedAt) * 1_000
         let formattedElapsed = String(format: "%.1f", elapsedMs)
         let suffix = details.isEmpty ? "" : " \(details)"
         fputs("KnowType startup: event=\(event) elapsedMs=\(formattedElapsed)\(suffix)\n", stderr)

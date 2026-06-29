@@ -241,6 +241,9 @@ Core candidate types:
 - `LexicalContextSnapshot`: top-K lexical/tone summary rendered as `LEXICAL_PROFILE.md` and hashed into AI cache keys.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 - `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.
+- `InputCandidatePanelPublicationRuntime`: input-method runtime boundary that
+  owns candidate-panel state publication, async stale-snapshot gating,
+  visibility reasons, delayed re-anchor generation, and panel diagnostics.
 - `CandidatePanelFrame`: candidate-panel presentation intent with composition id, raw revision, raw length, anchor source, panel model, and explicit visibility reason.
 - `AIRecommendationPatch`: AI slot-only update guarded by request id, generation, composition id, raw revision, and raw input.
 
@@ -365,11 +368,15 @@ screen-saver level, or shielding levels. The visual style uses compact rows, `hu
 colors, and continuous corners so it stays close to macOS native candidate panels.
 
 Because the panel does not hide automatically on app deactivation, the input-method coordinator explicitly hides it
-on commit, cancel, deactivate, close, reset, and native composition end. Candidate-panel publication is frame-based:
-updates carry `CandidatePanelVisibilityReason`, composition id, raw revision, raw length, and anchor source through
-`CandidatePanelPresenter`. Stale suggestions, delayed reanchors, and AI patches must not make the panel visible
-after composition teardown. A transient empty Rime snapshot does not hide the panel while KnowType still has non-empty
-raw input; the presenter keeps a raw/preedit fallback frame until Rime context recovers or composition ends. With
+on commit, cancel, deactivate, close, reset, and native composition end. Candidate-panel publication is frame-based
+and owned by `InputCandidatePanelPublicationRuntime`: updates carry
+`CandidatePanelVisibilityReason`, composition id, raw revision, raw length, and
+anchor source through `CandidatePanelPresenter`. Stale suggestions, delayed
+reanchors, and AI patches must not make the panel visible after composition
+teardown. Anchor source `.none` remains an undisplayable layout-impossible frame
+rather than an explicit hide path. A transient empty Rime snapshot does not hide
+the panel while KnowType still has non-empty raw input; the presenter keeps a
+raw/preedit fallback frame until Rime context recovers or composition ends. With
 `KNOWTYPE_PANEL_DEBUG=1`, panel logs include frame or cleanup reasons such as `composition_active`,
 `composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`,
 plus placement preference and the final visual-above/visual-below choice.
