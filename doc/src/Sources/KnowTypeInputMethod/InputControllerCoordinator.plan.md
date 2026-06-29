@@ -65,15 +65,19 @@ Current behavior:
 - native candidate mapping uses the encoded current-page index when present; ambiguous duplicate text without an index does not fall back to the retired local converter
 - records committed typing events through `AIContextEventRecording` after insert decisions, while external Delete events are logged only when no composition is active
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
-- uses `InputTaskSupervisor` to replace stale local-candidate cancellation tokens, AI, and panel-render tasks
-- rejects stale AI publications by raw input, composition id, and AI generation
-- applies AI publications through `AIRecommendationPatch`, which also checks request id and raw revision and is allowed
-  to update only the AI slot
-- records AI scheduling diagnostics for scheduled requests, previous-generation cancellation, stale-result drops, and applied AI states through the shared AI diagnostic sink
+- uses `InputTaskSupervisor` to replace stale local-candidate and panel-render
+  tasks; real-time AI request tasks are owned by `InputAIRecommendationRuntime`
+- constructs AI recommendation input context and applies returned AI slot states
+  to the candidate panel, while request lifecycle, active request ids,
+  generation checks, task cancellation, and stale-result diagnostics live in
+  `InputAIRecommendationRuntime`
+- applies AI publications only to the AI slot after
+  `InputAIRecommendationRuntime` validates request id, generation, composition
+  id, raw revision, and raw input through `AIRecommendationPatch`
 - delegates real-time AI schedule eligibility and skipped-state diagnostics to
   `InputAIRecommendationSchedulePolicy`; request construction, task lifecycle,
-  stale-result checks, patch application, and panel refresh remain in the
-  coordinator
+  stale-result checks, and patch validation are handled by
+  `InputAIRecommendationRuntime`
 - schedules AI recommendation from raw input and confirmed locked prefixes only;
   while Rime is merely composing, current-page Rime candidates are not sent as
   AI context and the first candidate is not treated as locked text

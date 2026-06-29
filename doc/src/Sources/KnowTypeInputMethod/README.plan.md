@@ -29,9 +29,11 @@ Current package-level implementation covers:
   selection cache, runtime event construction, and persistence flush delegation
 - AI recommendation schedule policy for pure schedule/skip decisions before
   asynchronous provider requests are started
+- AI recommendation runtime for IMK-side request construction, cancellation,
+  stale-result checks, diagnostics, and AI slot state callbacks
 - optional `RimeConversionEngine` boundary with a dynamic `librime` bridge and deterministic `TraditionalInputEngine` fallback
 - lexical profile snapshots for AI recommendation that exclude Level 0/protected app commits and protected-app selection history
-- `InputTaskSupervisor` cancellation for local candidates, AI, runtime lexicon reload, and panel rendering work
+- `InputTaskSupervisor` cancellation for local candidates, runtime lexicon reload, and panel rendering work
 - testable host/client seams for the IMK controller boundary
 - async suggestion pipeline wiring
 - Level 0 no-provider routing for protected input
@@ -45,9 +47,10 @@ When a provider is configured, the IMK controller publishes raw marked text and 
 `InputAIRecommendationSchedulePolicy` decides whether the current input state is
 eligible to start that asynchronous AI recommendation. It returns the skipped AI
 state and diagnostic reason for unstable composition, short triggers,
-secret-like text, disabled cloud continuation, and missing provider cases; the
-coordinator still owns request construction, task cancellation, patch
-application, and panel refresh.
+secret-like text, disabled cloud continuation, and missing provider cases.
+`InputAIRecommendationRuntime` owns request construction, task cancellation,
+patch validation, lifecycle diagnostics, and AI slot state callbacks; the
+coordinator applies the returned state to the candidate panel.
 
 The IMK controller marks composing text with `IMKTextInput.setMarkedText`. Inline-compatible hosts, including browsers, text editors, IDEs, Electron shells, and JetBrains-style clients by default, receive Rime preedit as attributed marked text. Terminal-style or explicit override commit-only hosts receive a full-width-space attributed placeholder so IMK composition ownership and candidate anchoring stay stable without exposing raw pinyin in the host field. `InputClientCompositionWriter` owns that carrier choice, idle ASCII passthrough decisions, and KnowType-owned marked-text cleanup, while `InputClientWriteCoordinator` owns the low-level `setMarkedText`/`insertText` calls and privacy-safe diagnostics. Their real preedit is shown in the candidate panel instead. Candidate anchor lookup is delegated to `CandidateAnchorResolver`, which prefers fresh IMK text rects, then line-height rects, then Accessibility focused-range bounds if permission is already granted, then a same-composition scoped last usable anchor, and finally a stable safe point inside the screen visible frame. The panel no longer follows the mouse pointer when host text geometry is temporarily unavailable.
 

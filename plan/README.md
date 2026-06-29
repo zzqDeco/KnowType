@@ -46,6 +46,7 @@ when converting a shipped plan into a short record.
 | [rime-userdb-lexical-profile.plan.md](rime-userdb-lexical-profile.plan.md) | Persist AI lexical profile from Rime userdb frequency plus recent KnowType commits/selections | Active |
 | [input-runtime-boundaries.plan.md](input-runtime-boundaries.plan.md) | Separate Rime hot path, candidate panel presentation, AI patches, and Rime maintenance side effects | Active |
 | [input-ai-recommendation-schedule-policy-refactor.plan.md](input-ai-recommendation-schedule-policy-refactor.plan.md) | Extract real-time AI recommendation schedule eligibility from the coordinator | Active |
+| [input-ai-recommendation-runtime-refactor.plan.md](input-ai-recommendation-runtime-refactor.plan.md) | Extract real-time AI recommendation request lifecycle from the coordinator | Active |
 | [input-client-composition-writer-refactor.plan.md](input-client-composition-writer-refactor.plan.md) | Extract host composition write state and owned marked-text cleanup from the coordinator | Active |
 | [input-selection-history-runtime-refactor.plan.md](input-selection-history-runtime-refactor.plan.md) | Extract local prefix-selection history filtering, recent cache, event payload, and persistence delegation from the coordinator | Active |
 | [session-suggestion-pipeline-refactor.plan.md](session-suggestion-pipeline-refactor.plan.md) | Rename the session suggestion pipeline boundary and remove the obsolete InputMethodPipeline name without a compatibility alias | Active |

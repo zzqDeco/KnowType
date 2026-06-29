@@ -18,8 +18,8 @@ reason.
 - It does not read lexical profiles, accepted-feedback snapshots, provider
   profiles, or user data.
 
-Those side effects remain in `InputControllerCoordinator`, `KnowTypeAI`, and the
-existing runtime boundaries.
+Those side effects remain in `InputAIRecommendationRuntime`, `KnowTypeAI`, and
+the coordinator's candidate-panel state application boundary.
 
 ## Behavior Notes
 

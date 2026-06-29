@@ -4,8 +4,9 @@
 
 - Extract real-time AI recommendation schedule eligibility from
   `InputControllerCoordinator` into `InputAIRecommendationSchedulePolicy`.
-- Keep asynchronous request creation, cancellation, patch application, and panel
-  updates in the coordinator for this slice.
+- Keep the policy pure; asynchronous request creation, cancellation, patch
+  validation, and lifecycle diagnostics now live in
+  `InputAIRecommendationRuntime`.
 
 ## Scope
 
@@ -23,9 +24,9 @@
 - `InputAIRecommendationScheduleDecision` returns `.schedule` or `.skip` with
   the exact `AIRecommendationState`, diagnostic stage, and reason the coordinator
   should publish.
-- `InputControllerCoordinator.scheduleAIRecommendation` asks the policy once,
-  handles skipped decisions by recording diagnostics and refreshing the panel,
-  and leaves request construction plus task lifecycle unchanged.
+- `InputAIRecommendationRuntime` asks the policy once before starting provider
+  work, records skipped decisions, and returns the skipped AI state to the
+  coordinator for candidate-panel refresh.
 
 ## Test Plan
 
@@ -38,5 +39,5 @@
 ## Assumptions
 
 - This PR is behavior-preserving.
-- The next AI refactor can consider extracting task lifecycle and patch-apply
-  state after this pure policy boundary is in place.
+- Task lifecycle and patch-apply state have moved to
+  `InputAIRecommendationRuntime`; keep this policy limited to value decisions.
