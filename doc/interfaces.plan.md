@@ -223,6 +223,9 @@ Core candidate types:
 - `InputAIRecommendationSchedulePolicy`: input-method value policy that returns
   either an AI recommendation schedule decision or the skipped AI state plus
   diagnostic stage and reason before provider tasks are started.
+- `InputAIRecommendationRuntime`: input-method runtime boundary that owns
+  real-time AI request construction, active request ids, generations, task
+  cancellation, stale-result diagnostics, and state publication callbacks.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
 - `AIAcceptedLearningRecord`: local-only JSONL record for an AI recommendation the user explicitly accepted.
 - `AIAcceptedLanguageSummary`: bounded accepted-AI term, style, and recent-commit summary used by lexical profile merging.
@@ -339,7 +342,8 @@ Current write contract:
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
 - The hot path emits `InputFrame`/`CandidatePanelFrame`-style state and side-effect events. It must not call AI providers,
-  lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly.
+  lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly. Real-time AI provider calls go through
+  `InputAIRecommendationRuntime`, which publishes only AI slot state after stale-result guards pass.
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
 `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when

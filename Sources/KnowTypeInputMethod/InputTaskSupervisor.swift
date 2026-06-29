@@ -3,7 +3,6 @@ import Foundation
 enum InputTaskKind: Hashable, Sendable {
     case localCandidates
     case panelRender
-    case aiRecommendation
     case runtimeLexiconReload
 }
 

@@ -14,8 +14,9 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `CandidatePanelFrame` is the only shape passed to `CandidatePanelPresenter`.
   It carries composition id, raw revision, raw length, anchor source, panel
   model, and `CandidatePanelVisibilityReason`.
-- `AIRecommendationPatch` is slot-only. It can be applied only when request id,
-  AI generation, composition id, raw revision, and raw input still match.
+- `AIRecommendationPatch` is slot-only. `InputAIRecommendationRuntime` creates
+  and validates patches, and they can be applied only when request id, AI
+  generation, composition id, raw revision, and raw input still match.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method
@@ -35,5 +36,6 @@ input, candidate-panel presentation, AI slot patches, and background events.
 
 - `InputControllerCoordinatorTests`
 - `InputHotPathPerformanceTests`
+- `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`
 - `swift test`
