@@ -279,7 +279,7 @@ final class InputSessionControllerTests: XCTestCase {
 
     func testPipelineLevelZeroSkipsCorrectionButCanAskProviderForContinuation() async {
         let provider = RecordingProvider()
-        let pipeline = InputMethodPipeline(provider: provider)
+        let pipeline = SessionSuggestionPipeline(provider: provider)
 
         let suggestion = await pipeline.suggestions(
             for: InputContext(

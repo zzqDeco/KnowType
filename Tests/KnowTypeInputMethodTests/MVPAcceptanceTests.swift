@@ -4,7 +4,7 @@ import KnowTypeCore
 
 final class MVPAcceptanceTests: XCTestCase {
     func testChineseCorrectionAndTabContinuationFlow() async {
-        let pipeline = InputMethodPipeline()
+        let pipeline = SessionSuggestionPipeline()
         let response = await pipeline.suggestions(
             for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN)
         )
@@ -21,7 +21,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testChineseCorrectionSupportsContinuousPinyinInput() async {
-        let pipeline = InputMethodPipeline()
+        let pipeline = SessionSuggestionPipeline()
         let response = await pipeline.suggestions(
             for: InputContext(rawInput: "wojuedezhegefagnan", locale: .zhCN)
         )
@@ -38,7 +38,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testLocalImmediateSuggestionsCanDeferContinuationsWhenProviderIsConfigured() {
-        let response = InputMethodPipeline.localSuggestions(
+        let response = SessionSuggestionPipeline.localSuggestions(
             for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN),
             includeFallbackContinuations: false
         )
@@ -49,7 +49,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testRuntimePreferencesCanDisableLocalFallbackContinuations() {
-        let response = InputMethodPipeline.localSuggestions(
+        let response = SessionSuggestionPipeline.localSuggestions(
             for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN),
             includeFallbackContinuations: true,
             runtimePreferences: InputMethodRuntimePreferences(localContinuationEnabledWhenNoProvider: false)
@@ -61,7 +61,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testAsyncPipelineKeepsLocalFallbackWhenCloudContinuationIsDisabledWithoutProvider() async {
-        let pipeline = InputMethodPipeline(
+        let pipeline = SessionSuggestionPipeline(
             runtimePreferences: InputMethodRuntimePreferences(
                 cloudContinuationEnabled: false,
                 localContinuationEnabledWhenNoProvider: true
@@ -78,7 +78,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testAsyncPipelineHonorsDisabledLocalFallbackWithoutProvider() async {
-        let pipeline = InputMethodPipeline(
+        let pipeline = SessionSuggestionPipeline(
             runtimePreferences: InputMethodRuntimePreferences(localContinuationEnabledWhenNoProvider: false)
         )
 
@@ -93,7 +93,7 @@ final class MVPAcceptanceTests: XCTestCase {
 
     func testRuntimePreferencesCanDisableCloudContinuations() async {
         let provider = RecordingMVPProvider()
-        let pipeline = InputMethodPipeline(
+        let pipeline = SessionSuggestionPipeline(
             provider: provider,
             runtimePreferences: InputMethodRuntimePreferences(cloudContinuationEnabled: false)
         )
@@ -110,7 +110,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testMixedInputKeepsTechnicalTokensAndCommitsContinuation() async {
-        let pipeline = InputMethodPipeline()
+        let pipeline = SessionSuggestionPipeline()
         let response = await pipeline.suggestions(
             for: InputContext(rawInput: "zhege api latnecy youdian gao", locale: .mixed)
         )
@@ -134,7 +134,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testEnglishCorrectionAndFallbackContinuationFlow() async {
-        let pipeline = InputMethodPipeline()
+        let pipeline = SessionSuggestionPipeline()
         let response = await pipeline.suggestions(
             for: InputContext(rawInput: "I thikn this approch", locale: .enUS)
         )
@@ -152,7 +152,7 @@ final class MVPAcceptanceTests: XCTestCase {
 
     func testLevelZeroPathDoesNotRewriteOrRequireContinuation() async {
         let path = "/Users/zq/project/KnowType"
-        let pipeline = InputMethodPipeline()
+        let pipeline = SessionSuggestionPipeline()
         let response = await pipeline.suggestions(
             for: InputContext(rawInput: path, locale: .mixed)
         )
@@ -169,7 +169,7 @@ final class MVPAcceptanceTests: XCTestCase {
     }
 
     func testPolishIsExplicitOnly() async {
-        let pipeline = InputMethodPipeline()
+        let pipeline = SessionSuggestionPipeline()
         let response = await pipeline.suggestions(
             for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN)
         )

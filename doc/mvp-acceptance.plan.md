@@ -118,6 +118,6 @@ MVP release notes must not claim:
 
 ## Current Automation
 
-`Tests/KnowTypeInputMethodTests/MVPAcceptanceTests.swift` verifies the product-level flow through `InputMethodPipeline` and `InputCompositionController`.
+`Tests/KnowTypeInputMethodTests/MVPAcceptanceTests.swift` verifies the product-level flow through `SessionSuggestionPipeline` and `InputCompositionController`.
 `Tests/KnowTypeInputMethodTests/CandidatePanelRendererTests.swift` verifies candidate window render rows and shortcut labels.
 `Tests/KnowTypeProvidersTests/ProviderProfileTests.swift` verifies profile persistence and secret-store resolution.

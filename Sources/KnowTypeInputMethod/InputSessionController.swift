@@ -147,7 +147,7 @@ public enum InputSessionCommitPolicy {
                 appBundleID: appBundleID,
                 locale: locale
             )
-            let suggestion = InputMethodPipeline.localSuggestions(
+            let suggestion = SessionSuggestionPipeline.localSuggestions(
                 for: context,
                 includeFallbackContinuations: true,
                 traditionalInputEngine: traditionalInputEngine,
@@ -245,12 +245,12 @@ public actor InputSessionController {
         traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
         runtimePreferences: InputMethodRuntimePreferences = .standard
     ) {
-        let pipeline = InputMethodPipeline(
+        let pipeline = SessionSuggestionPipeline(
             provider: provider,
             traditionalInputEngine: traditionalInputEngine,
             runtimePreferences: runtimePreferences
         )
-        let protectedPipeline = InputMethodPipeline(
+        let protectedPipeline = SessionSuggestionPipeline(
             provider: nil,
             traditionalInputEngine: traditionalInputEngine,
             runtimePreferences: runtimePreferences
