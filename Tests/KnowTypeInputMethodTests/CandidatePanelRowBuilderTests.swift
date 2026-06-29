@@ -85,6 +85,31 @@ final class CandidatePanelRowBuilderTests: XCTestCase {
         XCTAssertNil(builder.defaultSelection(in: pendingAI))
     }
 
+    func testReadyAIOnlyRowIsNotDefaultSelection() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "api",
+            prefixCandidates: [],
+            continuationCandidates: [],
+            aiRecommendation: .ready(
+                AIRecommendationCandidate(
+                    prefixText: "",
+                    continuationText: nil,
+                    displayText: "继续推进",
+                    confidence: 0.9,
+                    provider: "test",
+                    contextVersion: "v1"
+                )
+            )
+        )
+
+        let rows = CandidatePanelRowBuilder().buildRows(in: viewModel)
+        let selections: [CandidatePanelSelection?] = rows.pageableRows.map(\.selection)
+
+        XCTAssertEqual(selections, [.aiRecommendation])
+        XCTAssertTrue(rows.pageableRows[0].isEnabled)
+        XCTAssertNil(CandidatePanelRowBuilder().defaultSelection(in: viewModel))
+    }
+
     func testPrefixSelectionUsesRawRangeShape() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "nihao",

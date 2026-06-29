@@ -60,7 +60,13 @@ public struct CandidatePanelRowBuilder: Sendable {
     public func defaultSelection(in viewModel: CandidatePanelViewModel) -> CandidatePanelSelection? {
         buildRows(in: viewModel)
             .pageableRows
-            .first { $0.isEnabled && $0.selection != nil }?
+            .first { row in
+                guard row.isEnabled,
+                      let selection = row.selection else {
+                    return false
+                }
+                return selection != .aiRecommendation
+            }?
             .selection
     }
 

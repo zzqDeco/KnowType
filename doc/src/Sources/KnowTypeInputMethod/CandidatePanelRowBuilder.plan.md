@@ -31,6 +31,10 @@ It converts a `CandidatePanelViewModel` into:
   first pageable row when no prefix rows exist.
 - Disabled AI status rows have no selection identity and are skipped by
   keyboard, mouse, and number-shortcut selection.
+- Ready AI rows are selectable, but they are not default selections. Users must
+  accept them through Tab, Option-number, click, hover, or another explicit
+  selection action rather than ordinary Space accidentally committing an
+  auto-selected AI row.
 - Prefix rows are the only rows marked number-shortcut eligible.
 - Full and segment candidate selection identity is derived from the candidate
   raw range in the builder so state and rendering cannot drift.
