@@ -23,17 +23,20 @@ raw input
   -> commit
 ```
 
-KnowType keeps standard AppKit hosts on inline marked-text composition, but
-uses conservative host compatibility modes for terminal, code editor, Electron,
-and JetBrains-style clients. Terminal-style hosts default to idle ASCII
-passthrough. Editor, Codex, Electron, and JetBrains-style hosts default to
-Chinese commit-only composition so candidate rows can appear without relying on
-raw inline preedit. Commit-only composition uses a full-width-space
-`NSAttributedString` marked-text placeholder with marked attributes for IMK
-composition ownership and candidate anchoring; the real raw/preedit string is
-rendered in KnowType's candidate panel instead of the host text field, and
-committed text still goes through `insertText`. `Option + /` switches the active
-compatibility session between Chinese text mode and idle ASCII passthrough.
+KnowType keeps standard AppKit-style hosts on inline marked-text composition,
+but separates app input defaults from host carrier compatibility.
+`InputModeAppPolicy` owns code/terminal text-mode, punctuation, and symbol-width
+defaults, including code-app entries that are not carrier matches. `HostCompatibilityProfile`
+owns only the marked-text carrier. Standard text clients, browsers, editors,
+IDEs, Electron shells, JetBrains-style clients, and unknown AppKit-style clients
+default to inline attributed preedit so the focused text field shows the raw
+composition. Terminal-style hosts default to idle ASCII passthrough through
+their input-mode default and use a full-width-space `NSAttributedString`
+placeholder during Chinese composition for IMK ownership and candidate anchoring.
+The real raw/preedit string is rendered in KnowType's candidate panel only when
+the host receives a placeholder carrier. A UserDefaults write-mode override can
+force any bundle into `commitOnlyComposition`; committed text still goes through
+`insertText`.
 
 Level 0 protected input remains a correction/local-protection concept: it avoids
 rewriting URLs, paths, commands, code-like text, and protected app contexts.
@@ -188,7 +191,7 @@ LevelDB state.
   presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
   frame cannot fit the natural height.
 
-The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Standard inline hosts receive Rime preedit marked text, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real preedit row above candidate rows. Commit then clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Inline hosts receive Rime preedit as an attributed marked-text payload, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Terminal-style or override commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real preedit row above candidate rows for those hosts. Commit then clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
 
 User selection history is stored under Application Support as `user-selection-history.json`. This file is local candidate-learning data only; it is not serialized into provider requests.
 

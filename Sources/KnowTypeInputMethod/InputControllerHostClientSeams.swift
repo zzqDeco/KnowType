@@ -64,7 +64,15 @@ struct InputClientMarkedText: @unchecked Sendable {
         .attributed(NSAttributedString())
     }
 
+    static func composition(_ text: String) -> InputClientMarkedText {
+        .attributed(markedAttributedString(text))
+    }
+
     static func placeholder(_ text: String) -> InputClientMarkedText {
+        .attributed(markedAttributedString(text))
+    }
+
+    private static func markedAttributedString(_ text: String) -> NSAttributedString {
         let range = NSRange(location: 0, length: (text as NSString).length)
         let attributedText = NSMutableAttributedString(string: text)
         if range.length > 0 {
@@ -76,7 +84,7 @@ struct InputClientMarkedText: @unchecked Sendable {
                 range: range
             )
         }
-        return .attributed(attributedText)
+        return attributedText
     }
 }
 

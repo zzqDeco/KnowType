@@ -70,21 +70,21 @@ InputClientWriteMode =
   disabled
 ```
 
-Unknown and standard text clients use `inlineComposition`. Terminal, iTerm,
-MacVim, and Emacs-style profiles default to `asciiPassthrough` while idle.
-Xcode, VS Code, Codex, common Electron hosts, and JetBrains IDEs default to
-`commitOnlyComposition`, so the candidate panel can appear without exposing raw
-inline preedit. Commit-only composition uses a full-width-space
+Unknown clients, standard text clients, browsers, editors, IDEs, Electron
+shells, and JetBrains-style clients use `inlineComposition` by default, so raw
+preedit appears in the focused text field. Terminal, iTerm, MacVim, and
+Emacs-style profiles use placeholder carrier during Chinese composition, while
+their app-mode default keeps idle printable ASCII in `asciiPassthrough`.
+Commit-only composition uses a full-width-space
 `NSAttributedString` marked-text placeholder with marked attributes to keep the
 IMK composition and candidate anchor alive. The host text field sees only that
 placeholder; the candidate panel receives the real raw/preedit display text as a
 non-selectable preedit row above candidates, then commits with `insertText`.
-`Option + /` toggles the session text mode in compatibility hosts; ASCII mode
-passes idle printable input back to the focused app. Missing clients use
-`disabled`; printable idle input is returned as unhandled so the host can keep
-normal typing behavior. All write modes keep replacement ranges as
-`{NSNotFound, NSNotFound}` unless a future reconversion feature introduces an
-explicit owned range.
+`Option + /` toggles the session text mode; ASCII mode passes idle printable
+input back to the focused app. Missing clients use `disabled`; printable idle
+input is returned as unhandled so the host can keep normal typing behavior. All
+write modes keep replacement ranges as `{NSNotFound, NSNotFound}` unless a
+future reconversion feature introduces an explicit owned range.
 
 ## Provider Kinds
 
@@ -305,9 +305,10 @@ Current write contract:
 - composing `setMarkedText`, clear-marked `setMarkedText("")`, ordinary
   `insertText` commits, and idle Space/digit passthrough all use
   `NSRange(location: NSNotFound, length: NSNotFound)`
-- commit-only hosts receive a full-width-space attributed placeholder marked
-  text while composition is active; raw pinyin and candidate text are not
-  written inline
+- inline hosts receive attributed marked text while composition is active
+- terminal-style or override commit-only hosts receive a full-width-space
+  attributed placeholder marked text while composition is active; raw pinyin and
+  candidate text are not written inline
 - commit-only preedit is a candidate-panel display concern: it is not
   selectable, does not receive numeric shortcuts, and must not enter commit text
 - clear-marked writes are only issued for KnowType-owned marked text; idle
@@ -397,7 +398,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
 - plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
-- `Option + /` toggles Chinese/ASCII text mode for the active controller session; compatibility hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
+- `Option + /` toggles Chinese/ASCII text mode for the active controller session; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.

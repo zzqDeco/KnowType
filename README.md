@@ -295,31 +295,33 @@ text. To inspect them, run
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
 | Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
-| `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in compatibility hosts, it switches between Chinese commit-only composition and idle ASCII passthrough. |
+| `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in terminal-style compatibility hosts, it switches between Chinese placeholder composition and idle ASCII passthrough. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
-Host compatibility is conservative. Standard AppKit text fields keep inline
-composition with marked text. Terminal, iTerm, MacVim, and Emacs-style hosts
-default to idle ASCII passthrough, so ordinary letters, digits, spaces, and
-punctuation stay owned by the shell or editor until the session is switched with
-`Option + /`. Xcode, VS Code, Codex, common Electron apps, and JetBrains IDEs
-default to Chinese commit-only composition: KnowType uses a full-width-space
-attributed marked-text placeholder to keep the host composition and candidate
-anchor alive without exposing raw pinyin in the host text field. The real
-raw/preedit string is shown in KnowType's candidate panel above the candidates,
-then committed with `insertText`. In any compatibility host, `Option + /`
-switches the active session between that Chinese commit-only path and idle ASCII
-passthrough.
+Host compatibility is conservative. Standard AppKit-style text fields, browsers,
+editors, IDEs, Electron shells, and unknown clients use inline composition with
+attributed marked text by default, so raw preedit appears in the focused text
+field. Terminal, iTerm, MacVim, and Emacs-style hosts default to idle ASCII
+passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
+the shell or editor until the session is switched with `Option + /`. In those
+terminal-style hosts, Chinese composition uses a full-width-space attributed
+marked-text placeholder to keep the host composition and candidate anchor alive;
+the real raw/preedit string is shown in KnowType's candidate panel above the
+candidates, then committed with `insertText`. A UserDefaults override can force
+any bundle back to `commitOnlyComposition` when a host proves incompatible with
+inline marked text.
 
 The candidate panel shows Rime prefix candidates, a fixed AI recommendation
-state row, commit-only preedit when the host receives a placeholder carrier, and
-raw input only when no suggestion is available. The preedit row has no shortcut,
-selection, or commit action. It is a compact AppKit panel using macOS material,
-system highlight colors, mouse hover/click selection, scroll paging, and row
-accessibility labels. When a provider is configured, Rime prefix candidates
-appear immediately and provider-backed AI recommendations update
+state row, terminal/override commit-only preedit when the host receives a
+placeholder carrier, and raw input only when no suggestion is available. The
+preedit row has no shortcut, selection, or commit action, and inline hosts do
+not render it because the focused text field already shows preedit. The panel is
+a compact AppKit panel using macOS material, system highlight colors,
+mouse hover/click selection, scroll paging, and row accessibility labels. When a
+provider is configured, Rime prefix candidates appear immediately and
+provider-backed AI recommendations update
 asynchronously. Provider failures do not show fixed local fallback text as if it
 were AI output.
 

@@ -36,5 +36,6 @@
 ## Retirement Criteria
 
 Retire this plan after the host-profile and preedit-row behavior has shipped in
-an installed release and manual host acceptance is recorded for Codex, a
-browser inline host, and at least one terminal-style host.
+an installed release and manual host acceptance is recorded for a browser/editor
+inline host and at least one terminal-style host. Non-terminal default carrier
+and preedit-row handling is superseded by `input-method-decouple-host-carrier`.

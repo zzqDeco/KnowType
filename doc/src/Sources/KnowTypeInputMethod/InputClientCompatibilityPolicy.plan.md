@@ -20,18 +20,19 @@ carrier table.
 
 - Unknown hosts use `inlineComposition` so standard AppKit clients keep marked
   text behavior.
-- Compatibility hosts use `asciiPassthrough` while idle when the active input
-  mode is ASCII. Terminal, iTerm, MacVim, and Emacs-style hosts receive that
-  ASCII idle mode from `InputModeAppPolicy` by default; editor, Codex, Electron,
-  and JetBrains-style hosts start in Chinese mode so composition and candidate
-  rows can begin immediately.
-- During active Chinese composition, compatibility hosts use
-  `commitOnlyComposition`: KnowType writes a full-width-space attributed
-  marked-text placeholder to keep the host composition and candidate anchor
-  alive without exposing raw pinyin in the host text field. The real preedit
-  display is owned by candidate-panel state, not by this policy.
-- `Option + /` is the supported session-local path for switching compatibility
-  hosts between Chinese commit-only composition and idle ASCII passthrough.
+- Browser, editor, IDE, Electron/ToDesktop, JetBrains-style, and unknown hosts
+  default to inline carrier. Code-app preference defaults remain in
+  `InputModeAppPolicy`.
+- Any host uses `asciiPassthrough` while idle when the active input mode is
+  ASCII. Terminal, iTerm, MacVim, and Emacs-style hosts receive that ASCII idle
+  mode from `InputModeAppPolicy` by default.
+- During active Chinese composition, terminal-style or override commit-only
+  hosts use `commitOnlyComposition`: KnowType writes a full-width-space
+  attributed marked-text placeholder to keep the host composition and candidate
+  anchor alive without exposing raw pinyin in the host text field. The real
+  preedit display is owned by candidate-panel state, not by this policy.
+- `Option + /` is the supported session-local path for switching terminal-style
+  hosts between Chinese placeholder composition and idle ASCII passthrough.
 - Missing clients use `disabled`, allowing printable idle input to return
   unhandled rather than being swallowed.
 - Override keys use `input.client.<bundle id>.writeMode` in the shared

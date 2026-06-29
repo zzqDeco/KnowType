@@ -31,12 +31,12 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testCodeClientUsesAsciiPassthroughWhenIdleInAsciiMode() {
+    func testAsciiModeUsesPassthroughForAnyInlineHostWhenIdle() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
 
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.GenericInlineHost",
                 inputModeState: InputModeState(textMode: .ascii),
                 hasActiveComposition: false,
                 hasClient: true
@@ -61,14 +61,14 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testAsciiDefaultPlaceholderProfileUsesIdlePassthroughByDefault() {
+    func testTerminalPlaceholderProfileUsesIdlePassthroughFromInputModeByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
         let state = InputModeAppPolicy.defaultState(appBundleID: "org.vim.MacVim")
 
         XCTAssertEqual(state.textMode, .ascii)
         XCTAssertEqual(
             HostCompatibilityProfile.profile(bundleIdentifier: "org.vim.MacVim"),
-            .asciiDefaultPlaceholder
+            .terminalPlaceholder
         )
         XCTAssertEqual(
             policy.writeMode(
@@ -99,7 +99,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testEditorCompatibilityClientsUseCommitOnlyByDefault() {
+    func testEditorCompatibilityClientsUseInlineByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
         let state = InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij")
 
@@ -111,30 +111,30 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
                 hasActiveComposition: false,
                 hasClient: true
             ),
-            .commitOnlyComposition
+            .inlineComposition
         )
     }
 
-    func testCodeClientUsesCommitOnlyForChineseOrActiveComposition() {
+    func testInlineHostUsesInlineForChineseOrActiveCompositionByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
 
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.GenericInlineHost",
                 inputModeState: InputModeState(textMode: .chinese),
                 hasActiveComposition: false,
                 hasClient: true
             ),
-            .commitOnlyComposition
+            .inlineComposition
         )
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.GenericInlineHost",
                 inputModeState: InputModeState(textMode: .ascii),
                 hasActiveComposition: true,
                 hasClient: true
             ),
-            .commitOnlyComposition
+            .inlineComposition
         )
     }
 
@@ -143,19 +143,19 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
         defaults.set(
-            InputClientWriteMode.inlineComposition.rawValue,
-            forKey: "input.client.com.openai.codex.writeMode"
+            InputClientWriteMode.commitOnlyComposition.rawValue,
+            forKey: "input.client.com.example.OverrideHost.writeMode"
         )
         let policy = InputClientCompatibilityPolicy(userDefaults: defaults)
 
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.OverrideHost",
                 inputModeState: InputModeState(textMode: .ascii),
                 hasActiveComposition: false,
                 hasClient: true
             ),
-            .inlineComposition
+            .commitOnlyComposition
         )
     }
 

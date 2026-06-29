@@ -28,14 +28,12 @@ struct InputClientCompatibilityPolicy: Sendable {
             return override
         }
         let profile = HostCompatibilityProfile.profile(bundleIdentifier: bundleIdentifier)
-        if profile.carrier == .placeholderComposition {
-            return hasActiveComposition || inputModeState.textMode == .chinese
-                ? .commitOnlyComposition
-                : .asciiPassthrough
-        }
         if inputModeState.textMode == .ascii,
            !hasActiveComposition {
             return .asciiPassthrough
+        }
+        if profile.carrier == .placeholderComposition {
+            return .commitOnlyComposition
         }
         return .inlineComposition
     }

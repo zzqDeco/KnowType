@@ -2639,7 +2639,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let markedText = mode == .commitOnlyComposition
             ? InputClientMarkedText.placeholder(markedTextString)
-            : InputClientMarkedText.plain(markedTextString)
+            : InputClientMarkedText.composition(markedTextString)
 
         setOwnedMarkedText(
             markedText,
