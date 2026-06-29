@@ -6,7 +6,7 @@ Current behavior:
 
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
 - owns the composing raw buffer, `CompositionBuffer`, composition id, input
-  mode runtime, Rime snapshots, and native candidate selection
+  mode runtime, Rime snapshots, and native candidate navigation orchestration
 - selects a host compatibility write mode before writing or passing through
   printable input through `InputClientCompositionWriter`
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
@@ -32,6 +32,9 @@ Current behavior:
 - delegates candidate-panel state publication, async refresh coalescing,
   visibility decisions, delayed re-anchor generation, and panel diagnostics to
   `InputCandidatePanelPublicationRuntime`
+- delegates Rime/native candidate selection state, panel-selection mapping,
+  hover highlight, numeric current-page selection, paging, and boundary paging
+  decisions to `InputNativeCandidateNavigationRuntime`
 - supplies candidate-panel publication context: raw input, composition id, raw
   revision, suggestion snapshots, preferred native highlight, AI slot state,
   placement preference, preedit display text, and resolved anchor facts
@@ -45,8 +48,13 @@ Current behavior:
 - bypasses the input-mode preference reload throttle when the focused app bundle
   changes, so quick host switches do not reuse the previous host's text mode
 - keeps AI recommendation explicit: Tab, Option-number, and mouse click can commit a ready AI row, but ordinary digits are reserved for Rime candidates
-- when native Rime is active, hover and arrow selection update Rime's current-page highlight instead of making the custom panel selection authoritative on its own
-- explicit native `PageUp`/`PageDown` are forwarded to the conversion engine while composition is active, independent of custom candidate-panel visibility
+- when native Rime is active, hover and arrow selection go through
+  `InputNativeCandidateNavigationRuntime` so Rime's current-page highlight stays
+  authoritative instead of making the custom panel selection authoritative on
+  its own
+- explicit native `PageUp`/`PageDown` are forwarded through
+  `InputNativeCandidateNavigationRuntime` while composition is active,
+  independent of custom candidate-panel visibility
 - when native Rime is active, arrow navigation moves inside the current page first, then maps right/down at the page edge to Rime `.pageDown` plus row 1 highlight and left/up at the page edge to Rime `.pageUp` plus previous-page last-row highlight
 - if native highlight is unavailable, arrow navigation falls back to local panel selection and Space explicitly selects that Rime current-page index before generic native Space
 - handles Rime's default paging punctuation (`-`/`=`, `,`/`.`) before symbol commit fallback, but falls back to punctuation when the native snapshot does not change so page-boundary punctuation is not swallowed
@@ -111,7 +119,8 @@ Current behavior:
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
 - receives candidate-panel publication results from
-  `InputCandidatePanelPublicationRuntime` and maps visible panel selection back
+  `InputCandidatePanelPublicationRuntime` and asks
+  `InputNativeCandidateNavigationRuntime` to map visible panel selection back
   into native/Rime candidate selection state
 - emits privacy-safe `KNOWTYPE_STARTUP_DEBUG=1` timing logs for first
   composition begin and first candidate-panel materialization; logs include
@@ -120,9 +129,10 @@ Current behavior:
   `KNOWTYPE_CLIENT_WRITE_DEBUG=1`; logs include bundle id, write mode,
   handled/pass-through state, ranges, write kind, and reasons, never user text
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
-- keeps Rime/native candidate navigation authoritative; panel selection helpers
-  live in `InputCandidatePanelPublicationRuntime`, but Rime highlight, page,
-  number selection, and commit decisions remain in the coordinator
+- keeps Rime/native candidate navigation authoritative through
+  `InputNativeCandidateNavigationRuntime`; panel publication helpers live in
+  `InputCandidatePanelPublicationRuntime`, while commit decisions and native
+  conversion side effects remain in the coordinator
 - relies on `InputCandidatePanelPublicationRuntime` to reject publication unless
   the current raw/native preedit composition is active, while preserving a
   raw/preedit fallback frame for transient empty Rime snapshots with non-empty

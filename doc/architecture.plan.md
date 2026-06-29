@@ -199,6 +199,9 @@ LevelDB state.
 - `InputCandidatePanelPublicationRuntime` owns candidate-panel publication
   state, async stale-snapshot gating, explicit hide reasons, delayed re-anchor
   generation, panel diagnostics, and the `CandidatePanelPresenter`.
+- `InputNativeCandidateNavigationRuntime` owns displayed native selection
+  state, panel selection mapping, Rime highlight, current-page select, paging,
+  and boundary paging decisions.
 - `CandidatePanelPresenter` consumes `CandidatePanelFrame` values with
   composition id, raw revision, anchor source, panel model, and explicit
   visibility reason before touching the host's AppKit panel adapter.
@@ -250,7 +253,9 @@ explicit reasons, and delayed re-anchor callbacks can republish only the latest
 same-raw-input, same-composition active panel.
 
 Mouse hover selects enabled visible rows, click commits the same target as keyboard selection, and scroll-wheel
-events page the panel. Arrow keys update Rime's highlighted candidate: right/down at the page end moves to the
+events page the panel. `InputNativeCandidateNavigationRuntime` maps visible
+panel selections to native selection identities and drives Rime navigation
+keys. Arrow keys update Rime's highlighted candidate: right/down at the page end moves to the
 next page's first row, while left/up at the page start moves to the previous page's last row. Explicit
 `PageUp`/`PageDown` keep working while composition is active even if the panel is hidden.
 Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) also drives the native Rime page state before punctuation

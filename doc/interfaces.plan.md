@@ -244,6 +244,10 @@ Core candidate types:
 - `InputCandidatePanelPublicationRuntime`: input-method runtime boundary that
   owns candidate-panel state publication, async stale-snapshot gating,
   visibility reasons, delayed re-anchor generation, and panel diagnostics.
+- `InputNativeCandidateNavigationRuntime`: input-method runtime boundary that
+  owns displayed native selection state, panel-selection mapping, stable native
+  index matching, hover highlight, numeric current-page selection, paging, and
+  boundary paging decisions.
 - `CandidatePanelFrame`: candidate-panel presentation intent with composition id, raw revision, raw length, anchor source, panel model, and explicit visibility reason.
 - `AIRecommendationPatch`: AI slot-only update guarded by request id, generation, composition id, raw revision, and raw input.
 
@@ -313,6 +317,10 @@ same `CandidatePanelSelection` values so click commits match keyboard commits.
 - Marked text mirrors `ConversionEngineSnapshot.preedit` while Rime has composition. If Rime commits part of a long input and keeps composition active, KnowType inserts the commit text and keeps showing the remaining Rime preedit instead of reverting to raw pinyin.
 - Ordinary digits `1...9` select Rime current-page candidates whenever native composition is active, even if the custom panel is hidden or the native snapshot currently has candidates without raw/preedit text. Out-of-range digits are consumed by the active composition and do not commit AI or append a literal digit.
 - With no active text/native composition, ordinary Space and `0...9` are direct passthrough text insertions at the current cursor. They ignore lingering host `markedRange` values and use `NSNotFound`; stale candidate-panel or AI state must not capture those keys.
+- `InputNativeCandidateNavigationRuntime` is the owner of Rime navigation
+  decisions above the engine boundary. It may call highlight, current-page
+  select, PageUp, and PageDown keys, but conversion result side effects, host
+  writes, and candidate-panel publication stay outside the runtime.
 
 ## IMK Client Writes
 

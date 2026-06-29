@@ -18,6 +18,12 @@ input, candidate-panel presentation, AI slot patches, and background events.
   state, frame emission, async stale-snapshot gating, hide reasons, delayed
   re-anchor generation, and panel diagnostics. It must receive Rime/native
   facts from the coordinator instead of reading the conversion engine.
+- `InputNativeCandidateNavigationRuntime` owns Rime/native candidate navigation
+  state, panel-selection mapping, stable native index matching, hover
+  highlight, numeric current-page selection, paging, and boundary paging. It
+  may drive conversion-engine navigation keys, but host writes, commit result
+  side effects, and candidate-panel publication stay in the coordinator and
+  publication runtime.
 - `AIRecommendationPatch` is slot-only. `InputAIRecommendationRuntime` creates
   and validates patches, and they can be applied only when request id, AI
   generation, composition id, raw revision, and raw input still match.
@@ -38,6 +44,10 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - Candidate-panel publication may hide for raw-empty or stale-suggestion
   snapshots, but anchor source `.none` remains an undisplayable published frame
   so layout-impossible behavior stays diagnosable.
+- Native navigation preserves Rime as the source of truth for highlighted and
+  current-page candidates. Duplicate native candidate text must match by
+  encoded native index before selection; otherwise generic Rime Space remains
+  authoritative.
 - AI patches must not change Rime selection, marked text, base candidates, or
   panel visibility.
 - Background consumers may observe events, but they must not call back into the
@@ -47,6 +57,7 @@ input, candidate-panel presentation, AI slot patches, and background events.
 
 - `InputControllerCoordinatorTests`
 - `InputCandidatePanelPublicationRuntimeTests`
+- `InputNativeCandidateNavigationRuntimeTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`
