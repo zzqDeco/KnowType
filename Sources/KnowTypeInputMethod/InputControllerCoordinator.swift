@@ -2094,7 +2094,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 guard let self else {
                     return
                 }
-                self.updateCandidatePanel(suggestion: self.lastSuggestion, client: client)
+                self.updateCandidatePanelImmediately(suggestion: self.lastSuggestion, client: client)
             }
         )
     }
