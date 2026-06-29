@@ -196,7 +196,12 @@ LevelDB state.
   semantic rows so selection, paging, and rendering share one ordering model.
 - `CandidatePanelRenderer` projects those semantic rows into compact
   macOS-style render rows.
-- `CandidatePanelPresenter` is the coordinator-side presentation boundary. It consumes `CandidatePanelFrame` values with composition id, raw revision, anchor source, panel model, and explicit visibility reason before touching the host's AppKit panel adapter.
+- `InputCandidatePanelPublicationRuntime` owns candidate-panel publication
+  state, async stale-snapshot gating, explicit hide reasons, delayed re-anchor
+  generation, panel diagnostics, and the `CandidatePanelPresenter`.
+- `CandidatePanelPresenter` consumes `CandidatePanelFrame` values with
+  composition id, raw revision, anchor source, panel model, and explicit
+  visibility reason before touching the host's AppKit panel adapter.
 - `CandidatePanelWindowController` owns the AppKit panel, mouse interaction, and row accessibility.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
 - `CandidatePanelLayoutEngine` measures rendered rows before AppKit layout, chooses horizontal versus vertical
@@ -236,6 +241,13 @@ colors, compact 16 pt candidate text, 11 pt monospaced shortcut labels, a 0.5 pt
 corners, and system shadowing. The layout layer does not drop selectable rows after shortcuts are assigned; on
 constrained visible frames it compresses vertical row height and spacing, and hides only when the frame cannot fit
 the current page at the minimum row height.
+
+Panel publication is separate from Rime selection and commit decisions.
+`InputCandidatePanelPublicationRuntime` applies visible or layout-impossible
+frames only when raw input, raw revision, and composition id still match the
+scheduled snapshot. It hides raw-empty and stale-suggestion snapshots with
+explicit reasons, and delayed re-anchor callbacks can republish only the latest
+same-raw-input, same-composition active panel.
 
 Mouse hover selects enabled visible rows, click commits the same target as keyboard selection, and scroll-wheel
 events page the panel. Arrow keys update Rime's highlighted candidate: right/down at the page end moves to the

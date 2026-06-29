@@ -2645,7 +2645,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
     func testDelayedReanchorAppliesOnlyForCurrentComposition() {
         let client = FakeInputControllerClient()
         client.firstRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
-        let (coordinator, host, _) = makeCoordinator(client: client)
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         let initialUpdateCount = host.panelStates.count

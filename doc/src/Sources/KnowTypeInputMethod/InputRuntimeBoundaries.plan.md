@@ -14,6 +14,10 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `CandidatePanelFrame` is the only shape passed to `CandidatePanelPresenter`.
   It carries composition id, raw revision, raw length, anchor source, panel
   model, and `CandidatePanelVisibilityReason`.
+- `InputCandidatePanelPublicationRuntime` owns candidate-panel publication
+  state, frame emission, async stale-snapshot gating, hide reasons, delayed
+  re-anchor generation, and panel diagnostics. It must receive Rime/native
+  facts from the coordinator instead of reading the conversion engine.
 - `AIRecommendationPatch` is slot-only. `InputAIRecommendationRuntime` creates
   and validates patches, and they can be applied only when request id, AI
   generation, composition id, raw revision, and raw input still match.
@@ -31,6 +35,9 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - Candidate-panel debug logs are enabled with `KNOWTYPE_PANEL_DEBUG=1` and
   include frame reasons such as `composition_active`, `composition_ended`,
   `layout_impossible`, and `stale_update`.
+- Candidate-panel publication may hide for raw-empty or stale-suggestion
+  snapshots, but anchor source `.none` remains an undisplayable published frame
+  so layout-impossible behavior stays diagnosable.
 - AI patches must not change Rime selection, marked text, base candidates, or
   panel visibility.
 - Background consumers may observe events, but they must not call back into the
@@ -39,6 +46,7 @@ input, candidate-panel presentation, AI slot patches, and background events.
 ## Tests
 
 - `InputControllerCoordinatorTests`
+- `InputCandidatePanelPublicationRuntimeTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`

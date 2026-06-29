@@ -5,7 +5,8 @@
 Current behavior:
 
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
-- owns the composing raw buffer, `CompositionBuffer`, composition id, input mode runtime, Rime snapshots, native candidate selection, and candidate panel state
+- owns the composing raw buffer, `CompositionBuffer`, composition id, input
+  mode runtime, Rime snapshots, and native candidate selection
 - selects a host compatibility write mode before writing or passing through
   printable input through `InputClientCompositionWriter`
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
@@ -28,7 +29,12 @@ Current behavior:
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
 - cancels any pending retired local-candidate task before synchronous native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
-- coalesces candidate panel refreshes so anchor resolution and AppKit panel layout run after the key event returns
+- delegates candidate-panel state publication, async refresh coalescing,
+  visibility decisions, delayed re-anchor generation, and panel diagnostics to
+  `InputCandidatePanelPublicationRuntime`
+- supplies candidate-panel publication context: raw input, composition id, raw
+  revision, suggestion snapshots, preferred native highlight, AI slot state,
+  placement preference, preedit display text, and resolved anchor facts
 - keeps `Space` tied to Rime's highlighted/current candidate for the current raw input; while Rime handles composition without commit, the key is consumed and the marked text refreshes
 - passes idle printable ASCII back to compatibility hosts when no composition is
   active; native candidate-only snapshots still count as active composition for
@@ -68,8 +74,9 @@ Current behavior:
 - routes committed typing events and no-composition external Delete events
   through `InputAIAcceptanceRuntime`
 - rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
-- uses `InputTaskSupervisor` to replace stale local-candidate and panel-render
-  tasks; real-time AI request tasks are owned by `InputAIRecommendationRuntime`
+- uses `InputTaskSupervisor` to replace stale local-candidate tasks; panel
+  render work is supervised by `InputCandidatePanelPublicationRuntime`, and
+  real-time AI request tasks are owned by `InputAIRecommendationRuntime`
 - constructs AI recommendation input context and applies returned AI slot states
   to the candidate panel, while request lifecycle, active request ids,
   generation checks, task cancellation, and stale-result diagnostics live in
@@ -103,7 +110,9 @@ Current behavior:
 - delegates Rime userdb lexical refreshes to `LexicalProfileRuntime`; commit/selection refresh reads existing snapshots only and does not call `sync_user_data`; profile JSON/Markdown staging, stale-write gates, and userdb parse diagnostics live outside the coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
-- emits candidate-panel updates as `CandidatePanelFrame` values consumed by `CandidatePanelPresenter`, with explicit visibility reasons and `KNOWTYPE_PANEL_DEBUG=1` frame logs
+- receives candidate-panel publication results from
+  `InputCandidatePanelPublicationRuntime` and maps visible panel selection back
+  into native/Rime candidate selection state
 - emits privacy-safe `KNOWTYPE_STARTUP_DEBUG=1` timing logs for first
   composition begin and first candidate-panel materialization; logs include
   timing and state metadata, not user text
@@ -111,7 +120,14 @@ Current behavior:
   `KNOWTYPE_CLIENT_WRITE_DEBUG=1`; logs include bundle id, write mode,
   handled/pass-through state, ranges, write kind, and reasons, never user text
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
-- rejects candidate-panel publication unless the current raw/native preedit composition is active, while preserving a raw/preedit fallback frame for transient empty Rime snapshots with non-empty raw input; stale suggestions, AI results, or delayed reanchors cannot revive a hidden panel
+- keeps Rime/native candidate navigation authoritative; panel selection helpers
+  live in `InputCandidatePanelPublicationRuntime`, but Rime highlight, page,
+  number selection, and commit decisions remain in the coordinator
+- relies on `InputCandidatePanelPublicationRuntime` to reject publication unless
+  the current raw/native preedit composition is active, while preserving a
+  raw/preedit fallback frame for transient empty Rime snapshots with non-empty
+  raw input; stale suggestions, AI results, or delayed reanchors cannot revive a
+  hidden panel
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions
 - flushes user selection history through `InputSelectionHistoryRuntime` on
   deactivate and close; deactivate falls back
@@ -119,7 +135,9 @@ Current behavior:
   normal clear-owned-marked-text plus insert path
 - clears KnowType-owned marked text when native handled/no-commit output ends
   with no active raw/preedit, because composition ended without inserted text
-- schedules delayed candidate re-anchor through `InputControllerHost` and applies only the latest same-raw-input, same-composition reanchor
+- asks `InputCandidatePanelPublicationRuntime` to schedule delayed candidate
+  re-anchor through `InputControllerHost`; only the latest same-raw-input,
+  same-composition reanchor is allowed to republish the panel
 - delegates inline marked text, commit-only placeholder marked text, idle ASCII
   passthrough, and owned marked-text cleanup to
   `InputClientCompositionWriter`; the coordinator still decides when to refresh
