@@ -74,6 +74,7 @@ required for every test file.
 - [CandidatePanelState](Sources/KnowTypeInputMethod/CandidatePanelState.plan.md)
 - [CandidatePanelWindowController](Sources/KnowTypeInputMethod/CandidatePanelWindowController.plan.md)
 - [CompositionBuffer](Sources/KnowTypeInputMethod/CompositionBuffer.plan.md)
+- [InputAIRecommendationSchedulePolicy](Sources/KnowTypeInputMethod/InputAIRecommendationSchedulePolicy.plan.md)
 - [InputActions](Sources/KnowTypeInputMethod/InputActions.plan.md)
 - [InputCandidateListBuilder](Sources/KnowTypeInputMethod/InputCandidateListBuilder.plan.md)
 - [InputCommitResultPolicy](Sources/KnowTypeInputMethod/InputCommitResultPolicy.plan.md)

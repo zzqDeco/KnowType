@@ -220,6 +220,9 @@ Core candidate types:
 - `ContinuationCandidate`: text after the locked prefix only.
 - `AIRecommendationCandidate`: ready AI slot payload with the locked prefix, optional continuation, display text, provider, confidence, and context version.
 - `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
+- `InputAIRecommendationSchedulePolicy`: input-method value policy that returns
+  either an AI recommendation schedule decision or the skipped AI state plus
+  diagnostic stage and reason before provider tasks are started.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
 - `AIAcceptedLearningRecord`: local-only JSONL record for an AI recommendation the user explicitly accepted.
 - `AIAcceptedLanguageSummary`: bounded accepted-AI term, style, and recent-commit summary used by lexical profile merging.

@@ -27,6 +27,8 @@ Current package-level implementation covers:
 - persisted prefix selection history used as a local-only ranking signal
 - input-method selection history runtime for protected-input filtering, recent
   selection cache, runtime event construction, and persistence flush delegation
+- AI recommendation schedule policy for pure schedule/skip decisions before
+  asynchronous provider requests are started
 - optional `RimeConversionEngine` boundary with a dynamic `librime` bridge and deterministic `TraditionalInputEngine` fallback
 - lexical profile snapshots for AI recommendation that exclude Level 0/protected app commits and protected-app selection history
 - `InputTaskSupervisor` cancellation for local candidates, AI, runtime lexicon reload, and panel rendering work
@@ -39,6 +41,13 @@ Current package-level implementation covers:
 The AppKit candidate panel is the active candidate presentation for the IMK bundle. This avoids the `IMKCandidates` failure mode where the system panel accepts data but does not become visible in some host apps. `CandidatePanelRowBuilder` owns row ordering and selection identity for both state and rendering. Commit-only preedit rows render above candidates when the host text field receives only a placeholder carrier. Prefix rows are rendered first after any preedit row, continuation rows after them, and raw input is rendered only while no suggestion exists. The panel uses native AppKit material, system colors, compact row metrics, row hit-testing, and accessibility elements. `Space` commits the visible snapshot for the current raw input; mouse click commits the same `CandidatePanelSelection` as keyboard selection and never commits disabled status rows.
 
 When a provider is configured, the IMK controller publishes raw marked text and current-page Rime prefix candidates synchronously; provider-backed AI recommendation rows remain asynchronous. The first candidate publication does not include local fallback continuation rows. If the provider fails or returns no usable continuation, the async update keeps the AI slot unavailable instead of substituting local fallback text, so `Space` still commits through Rime while `Tab` does not present fake AI output. Ready AI remains the second shortcutable slot; pending, unavailable, and ineligible AI states are disabled status rows with muted styling, no shortcut, no hover selection, and no click commit. Without a provider, the product input path still uses Rime only for Chinese conversion.
+
+`InputAIRecommendationSchedulePolicy` decides whether the current input state is
+eligible to start that asynchronous AI recommendation. It returns the skipped AI
+state and diagnostic reason for unstable composition, short triggers,
+secret-like text, disabled cloud continuation, and missing provider cases; the
+coordinator still owns request construction, task cancellation, patch
+application, and panel refresh.
 
 The IMK controller marks composing text with `IMKTextInput.setMarkedText`. Inline-compatible hosts, including browsers, text editors, IDEs, Electron shells, and JetBrains-style clients by default, receive Rime preedit as attributed marked text. Terminal-style or explicit override commit-only hosts receive a full-width-space attributed placeholder so IMK composition ownership and candidate anchoring stay stable without exposing raw pinyin in the host field. `InputClientCompositionWriter` owns that carrier choice, idle ASCII passthrough decisions, and KnowType-owned marked-text cleanup, while `InputClientWriteCoordinator` owns the low-level `setMarkedText`/`insertText` calls and privacy-safe diagnostics. Their real preedit is shown in the candidate panel instead. Candidate anchor lookup is delegated to `CandidateAnchorResolver`, which prefers fresh IMK text rects, then line-height rects, then Accessibility focused-range bounds if permission is already granted, then a same-composition scoped last usable anchor, and finally a stable safe point inside the screen visible frame. The panel no longer follows the mouse pointer when host text geometry is temporarily unavailable.
 

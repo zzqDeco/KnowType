@@ -825,87 +825,28 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let requestID = UUID()
         let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
 
-        guard !rawBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !compositionBuffer.hasResolvedSegments || compositionBuffer.isFullyResolved else {
-            recordAIDiagnostic(
-                .skippedIneligible,
-                requestID: requestID,
-                compositionID: compositionID,
-                rawLength: rawBuffer.count,
-                prefixLength: lockedPrefixText?.count,
-                appBundleID: currentAppBundleID,
-                reason: "no_stable_prefix"
+        let scheduleDecision = InputAIRecommendationSchedulePolicy.default.decision(
+            for: InputAIRecommendationScheduleContext(
+                rawInput: rawBuffer,
+                hasResolvedSegments: compositionBuffer.hasResolvedSegments,
+                isFullyResolved: compositionBuffer.isFullyResolved,
+                lockedPrefix: lockedPrefixText,
+                cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
+                canRequestAIRecommendations: canRequestAIRecommendations,
+                hasRecommendationProvider: aiRecommendationProvider != nil
             )
-            aiRecommendationState = .idle
-            updateCandidatePanel(suggestion: suggestion, client: client)
-            return
-        }
-
-        let triggerDecision = AIRecommendationTriggerPolicy.default.decision(
-            rawInput: rawBuffer,
-            lockedPrefix: lockedPrefixText
         )
-        guard triggerDecision.isEligible else {
+        if case .skip(let skip) = scheduleDecision {
             recordAIDiagnostic(
-                .skippedPrefixTooShort,
+                skip.diagnosticStage,
                 requestID: requestID,
                 compositionID: compositionID,
                 rawLength: rawBuffer.count,
                 prefixLength: lockedPrefixText?.count,
                 appBundleID: currentAppBundleID,
-                reason: triggerDecision.rejectionReason?.rawValue ?? "prefix_too_short"
+                reason: skip.reason
             )
-            aiRecommendationState = .idle
-            updateCandidatePanel(suggestion: suggestion, client: client)
-            return
-        }
-
-        guard !TextProtection.containsSecretLikeContent(rawBuffer),
-              lockedPrefixText.map({
-                  !TextProtection.containsSecretLikeContent($0)
-              }) ?? true else {
-            recordAIDiagnostic(
-                .skippedProtectedText,
-                requestID: requestID,
-                compositionID: compositionID,
-                rawLength: rawBuffer.count,
-                prefixLength: lockedPrefixText?.count,
-                appBundleID: currentAppBundleID,
-                reason: "secret_like_text"
-            )
-            aiRecommendationState = .ineligible(reason: "AI 已禁用")
-            updateCandidatePanel(suggestion: suggestion, client: client)
-            return
-        }
-
-        guard runtimePreferences.cloudContinuationEnabled else {
-            recordAIDiagnostic(
-                .skippedDisabled,
-                requestID: requestID,
-                compositionID: compositionID,
-                rawLength: rawBuffer.count,
-                prefixLength: lockedPrefixText?.count,
-                appBundleID: currentAppBundleID,
-                reason: "cloud_continuation_disabled"
-            )
-            aiRecommendationState = .ineligible(reason: "AI 已关闭")
-            updateCandidatePanel(suggestion: suggestion, client: client)
-            return
-        }
-
-        guard canRequestAIRecommendations else {
-            recordAIDiagnostic(
-                .skippedNoProvider,
-                requestID: requestID,
-                compositionID: compositionID,
-                rawLength: rawBuffer.count,
-                prefixLength: lockedPrefixText?.count,
-                appBundleID: currentAppBundleID,
-                reason: "provider_not_configured"
-            )
-            aiRecommendationState = aiRecommendationProvider == nil
-                ? .idle
-                : .unavailable(reason: "AI 未配置")
+            aiRecommendationState = skip.state
             updateCandidatePanel(suggestion: suggestion, client: client)
             return
         }
