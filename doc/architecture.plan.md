@@ -181,7 +181,10 @@ LevelDB state.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
 - The IMK controller publishes Rime preedit marked text and immediate current-page Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
 - Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.
-- The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
+- `InputSelectionHistoryRuntime` records accepted prefix selections, skips
+  protected selected text and raw input, persists selections through the local
+  user-selection history store, and feeds only the active process's recent
+  selection cache into lexical profile refresh.
 - The input-method menu follows mature IMK inputs such as McBopomofo: common toggles appear first, user data and diagnostic folders are in the middle, and `KnowType Settings...` calls `showPreferences(_:)` to open the in-bundle settings window.
 - `CandidatePanelRowBuilder` maps candidate-panel state into fixed and pageable
   semantic rows so selection, paging, and rendering share one ordering model.
@@ -200,7 +203,11 @@ passthrough decisions, and KnowType-owned marked-text cleanup. The lower-level
 `InputClientWriteCoordinator` still owns the actual `setMarkedText`/`insertText`
 calls, `NSNotFound` replacement ranges, and privacy-safe diagnostics.
 
-User selection history is stored under Application Support as `user-selection-history.json`. This file is local candidate-learning data only; it is not serialized into provider requests.
+User selection history is stored under Application Support as
+`user-selection-history.json`. This file is local candidate-learning data only;
+it is not serialized into provider requests. Fresh IMK processes can load it for
+local persistence continuity, but AI context receives only bounded lexical
+summaries rather than the raw selection log.
 
 ## Candidate Window
 

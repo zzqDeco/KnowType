@@ -46,6 +46,7 @@ when converting a shipped plan into a short record.
 | [rime-userdb-lexical-profile.plan.md](rime-userdb-lexical-profile.plan.md) | Persist AI lexical profile from Rime userdb frequency plus recent KnowType commits/selections | Active |
 | [input-runtime-boundaries.plan.md](input-runtime-boundaries.plan.md) | Separate Rime hot path, candidate panel presentation, AI patches, and Rime maintenance side effects | Active |
 | [input-client-composition-writer-refactor.plan.md](input-client-composition-writer-refactor.plan.md) | Extract host composition write state and owned marked-text cleanup from the coordinator | Active |
+| [input-selection-history-runtime-refactor.plan.md](input-selection-history-runtime-refactor.plan.md) | Extract local prefix-selection history filtering, recent cache, event payload, and persistence delegation from the coordinator | Active |
 | [session-suggestion-pipeline-refactor.plan.md](session-suggestion-pipeline-refactor.plan.md) | Rename the session suggestion pipeline boundary and remove the obsolete InputMethodPipeline name without a compatibility alias | Active |
 | [rime-only-hotpath-performance.plan.md](rime-only-hotpath-performance.plan.md) | Retire production local conversion fallback and enforce Rime-only hot-path performance budgets | Active |
 | [rime-native-interaction-polish.plan.md](rime-native-interaction-polish.plan.md) | Align marked text, arrows, pages, numbers, symbols, and AI shortcuts with Rime-native IME behavior | Active |

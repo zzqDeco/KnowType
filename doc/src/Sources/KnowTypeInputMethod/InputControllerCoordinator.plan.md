@@ -48,6 +48,9 @@ Current behavior:
 - highlight-only updates refresh marked text and the panel without restarting AI recommendation requests
 - preserves an explicitly selected non-Rime row from the IMK/custom candidate window before falling back to native Rime Space
 - native final Space, numeric, and mouse/panel candidate commits record local selection history before composition reset; partial native commits do not
+- delegates selected-text trimming, protected-input filtering, recent selection
+  cache updates, persistence writes, and `candidateSelected` event payload
+  construction to `InputSelectionHistoryRuntime`
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - explicit AI commits through Tab or Option+number are recorded into local accepted AI learning history for long-term language-profile summaries; this path is asynchronous, secret-only gated, and does not touch Rime userdb
 - explicit AI commits create a short-lived accepted-text span for feedback
@@ -95,7 +98,8 @@ Current behavior:
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
 - rejects candidate-panel publication unless the current raw/native preedit composition is active, while preserving a raw/preedit fallback frame for transient empty Rime snapshots with non-empty raw input; stale suggestions, AI results, or delayed reanchors cannot revive a hidden panel
 - resets the conversion engine when Delete clears the raw buffer, including native raw-bypass state from non-ASCII compositions
-- flushes user selection history on deactivate and close; deactivate falls back
+- flushes user selection history through `InputSelectionHistoryRuntime` on
+  deactivate and close; deactivate falls back
   to the current IMK client before committing active raw composition through the
   normal clear-owned-marked-text plus insert path
 - clears KnowType-owned marked text when native handled/no-commit output ends
