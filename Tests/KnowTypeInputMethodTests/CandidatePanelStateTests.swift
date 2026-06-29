@@ -135,6 +135,25 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
     }
 
+    func testPendingAIWithoutCandidatesDoesNotSelectHiddenRawFallback() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: nil,
+            aiRecommendation: .pending(requestID: UUID())
+        )
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertTrue(state.windowState.isVisible)
+        XCTAssertNil(state.windowState.selection)
+        XCTAssertEqual(rendered.rows.map(\.kind), [.aiRecommendation])
+        XCTAssertEqual(rendered.rows.map(\.selection), [nil])
+    }
+
     func testNavigationSkipsNonReadyAIStatusRows() {
         var state = CandidatePanelState()
         state.update(

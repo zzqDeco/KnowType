@@ -259,7 +259,9 @@ Interactive correction calls use `TraditionalInputQueryOptions.interactive`. The
 
 `LexiconSettingsViewModel` uses the shared resolver for settings status. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, can create missing directories or a non-overwriting `knowtype-sample.tsv`, and can install the recommended managed lexicon pack on explicit user action. It displays `*.metadata.json` pack metadata but does not treat metadata files as lexicon resources.
 
-Input-method presentation maps `SuggestionResponse` into compact candidate rows:
+Input-method presentation maps `SuggestionResponse` into compact candidate rows
+through `CandidatePanelRowBuilder`, which is shared by selection state and
+rendering:
 
 - raw input is shown only when no prefix or continuation suggestion exists
 - Rime prefix candidate 1 is the first selectable row

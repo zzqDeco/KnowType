@@ -11,8 +11,8 @@ Current package-level implementation covers:
 - candidate anchor range policy for IMK clients with known or unknown selection ranges
 - candidate anchor resolver for IMK rects, line-height rects, Accessibility rects, scoped last-anchor fallback, safe screen fallback, and debug tracing
 - custom AppKit candidate presentation styled as a compact macOS candidate list
-- candidate panel renderer with raw input, commit-only preedit, locked prefix,
-  AI status, and continuation rows
+- candidate panel row builder and renderer with raw input, commit-only preedit,
+  locked prefix, AI status, and continuation rows
 - candidate panel mouse hover, click commit, scroll paging, row accessibility, and PNG snapshot regression tests
 - shortcut-to-commit behavior
 - key intent modeling for key down, key up, modifier flag changes, cancel, delete, navigation keys, punctuation, and numeric candidate selection
@@ -31,7 +31,7 @@ Current package-level implementation covers:
 - minimal InputMethodKit server bootstrap guarded by `canImport(InputMethodKit)`
 - `KnowTypeInputMethodApp` bundle entry assembled by `scripts/build-inputmethod-bundle.sh`
 
-The AppKit candidate panel is the active candidate presentation for the IMK bundle. This avoids the `IMKCandidates` failure mode where the system panel accepts data but does not become visible in some host apps. Commit-only preedit rows render above candidates when the host text field receives only a placeholder carrier. Prefix rows are rendered first after any preedit row, continuation rows after them, and raw input is rendered only while no suggestion exists. The panel uses native AppKit material, system colors, compact row metrics, row hit-testing, and accessibility elements. `Space` commits the visible snapshot for the current raw input; mouse click commits the same `CandidatePanelSelection` as keyboard selection and never commits disabled status rows.
+The AppKit candidate panel is the active candidate presentation for the IMK bundle. This avoids the `IMKCandidates` failure mode where the system panel accepts data but does not become visible in some host apps. `CandidatePanelRowBuilder` owns row ordering and selection identity for both state and rendering. Commit-only preedit rows render above candidates when the host text field receives only a placeholder carrier. Prefix rows are rendered first after any preedit row, continuation rows after them, and raw input is rendered only while no suggestion exists. The panel uses native AppKit material, system colors, compact row metrics, row hit-testing, and accessibility elements. `Space` commits the visible snapshot for the current raw input; mouse click commits the same `CandidatePanelSelection` as keyboard selection and never commits disabled status rows.
 
 When a provider is configured, the IMK controller publishes raw marked text and current-page Rime prefix candidates synchronously; provider-backed AI recommendation rows remain asynchronous. The first candidate publication does not include local fallback continuation rows. If the provider fails or returns no usable continuation, the async update keeps the AI slot unavailable instead of substituting local fallback text, so `Space` still commits through Rime while `Tab` does not present fake AI output. Ready AI remains the second shortcutable slot; pending, unavailable, and ineligible AI states are disabled status rows with muted styling, no shortcut, no hover selection, and no click commit. Without a provider, the product input path still uses Rime only for Chinese conversion.
 

@@ -99,17 +99,10 @@ public struct CandidatePanelState: Sendable, Equatable {
             continuationCandidates: continuationCandidates,
             aiRecommendation: aiRecommendation
         )
-        let hasAIRow = aiRecommendation.displayText != nil
-        let hasRows = normalizedPreeditDisplayText != nil
-            || !rawInput.isEmpty
-            || !prefixCandidates.isEmpty
-            || !continuationCandidates.isEmpty
-            || hasAIRow
+        let hasRows = !CandidatePanelRowBuilder().buildRows(in: viewModel).isEmpty
         let isVisible = isDisplayable && hasRows
         let selection = isVisible ? selectionAfterUpdate(
             rawInput: rawInput,
-            prefixCandidates: prefixCandidates,
-            continuationCandidates: continuationCandidates,
             viewModel: viewModel,
             preferredSelection: preferredSelection
         ) : nil
@@ -215,32 +208,8 @@ public struct CandidatePanelState: Sendable, Equatable {
         return selection
     }
 
-    private func defaultSelection(
-        rawInput: String,
-        preeditDisplayText: String?,
-        prefixCandidates: [CorrectionCandidate],
-        continuationCandidates: [ContinuationCandidate],
-        aiRecommendation: AIRecommendationState
-    ) -> CandidatePanelSelection? {
-        if let firstPrefix = prefixCandidates.first {
-            return prefixSelection(for: firstPrefix, rawInput: rawInput, index: 0)
-        }
-        if !rawInput.isEmpty, preeditDisplayText == nil {
-            return .rawInput
-        }
-        if aiRecommendation.isSelectableRecommendation {
-            return .aiRecommendation
-        }
-        if !continuationCandidates.isEmpty {
-            return .continuationCandidate(0)
-        }
-        return nil
-    }
-
     private func selectionAfterUpdate(
         rawInput: String,
-        prefixCandidates: [CorrectionCandidate],
-        continuationCandidates: [ContinuationCandidate],
         viewModel: CandidatePanelViewModel,
         preferredSelection: CandidatePanelSelection?
     ) -> CandidatePanelSelection? {
@@ -253,13 +222,7 @@ public struct CandidatePanelState: Sendable, Equatable {
            canPreserveSelection(selection, in: viewModel) {
             return selection
         }
-        return defaultSelection(
-            rawInput: rawInput,
-            preeditDisplayText: viewModel.preeditDisplayText,
-            prefixCandidates: prefixCandidates,
-            continuationCandidates: continuationCandidates,
-            aiRecommendation: viewModel.aiRecommendation
-        )
+        return CandidatePanelRowBuilder().defaultSelection(in: viewModel)
     }
 
     private func canPreserveSelection(
@@ -279,11 +242,6 @@ public struct CandidatePanelState: Sendable, Equatable {
                 return false
             }
             return windowState.viewModel.prefixCandidates[index].text == viewModel.prefixCandidates[index].text
-                && prefixSelection(
-                    for: viewModel.prefixCandidates[index],
-                    rawInput: viewModel.rawInput,
-                    index: index
-                ) == selection
         case .continuationCandidate(let index):
             guard windowState.viewModel.continuationCandidates.indices.contains(index),
                   viewModel.continuationCandidates.indices.contains(index) else {
@@ -311,29 +269,7 @@ public struct CandidatePanelState: Sendable, Equatable {
     }
 
     private func renderRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection?] {
-        let hasSuggestions = !viewModel.prefixCandidates.isEmpty
-            || !viewModel.continuationCandidates.isEmpty
-            || viewModel.aiRecommendation.displayText != nil
-        let hasPreeditDisplayText = viewModel.preeditDisplayText?.isEmpty == false
-        var rows: [CandidatePanelSelection?] = []
-
-        if !viewModel.rawInput.isEmpty && !hasSuggestions && !hasPreeditDisplayText {
-            rows.append(.rawInput)
-        }
-        let prefixRows = prefixRows(in: viewModel)
-        if let first = prefixRows.first {
-            rows.append(first)
-            if viewModel.aiRecommendation.displayText != nil {
-                rows.append(viewModel.aiRecommendation.isSelectableRecommendation ? .aiRecommendation : nil)
-            }
-            rows.append(contentsOf: prefixRows.dropFirst().map { Optional.some($0) })
-        } else if viewModel.aiRecommendation.displayText != nil {
-            rows.append(viewModel.aiRecommendation.isSelectableRecommendation ? .aiRecommendation : nil)
-        }
-        rows.append(
-            contentsOf: viewModel.continuationCandidates.indices.map { .continuationCandidate($0) }
-        )
-        return rows
+        CandidatePanelRowBuilder().pageableSelections(in: viewModel)
     }
 
     private func firstSelectableRenderedIndex(
@@ -418,36 +354,10 @@ public struct CandidatePanelState: Sendable, Equatable {
         )
     }
 
-    private func prefixRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelSelection] {
-        viewModel.prefixCandidates.enumerated().map { index, candidate in
-            prefixSelection(for: candidate, rawInput: viewModel.rawInput, index: index)
-        }
-    }
-
-    private func prefixSelection(
-        for candidate: CorrectionCandidate,
-        rawInput: String,
-        index: Int
-    ) -> CandidatePanelSelection {
-        guard let range = candidate.rawRange else {
-            return .prefixCandidate(index)
-        }
-        return range == KnowTypeCore.TextRange(start: 0, length: rawInput.count)
-            ? .fullCandidate(index)
-            : .segmentCandidate(index)
-    }
-
     private func hasVisibleNumberShortcut(
         _ selection: CandidatePanelSelection,
         in viewModel: CandidatePanelViewModel
     ) -> Bool {
-        switch selection {
-        case .prefixCandidate, .fullCandidate, .segmentCandidate:
-            return true
-        case .aiRecommendation:
-            return false
-        case .rawInput, .continuationCandidate:
-            return false
-        }
+        CandidatePanelRowBuilder().hasVisibleNumberShortcut(selection, in: viewModel)
     }
 }
