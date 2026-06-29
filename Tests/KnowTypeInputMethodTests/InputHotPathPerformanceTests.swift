@@ -27,7 +27,7 @@ final class InputHotPathPerformanceTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertFalse(coordinator.contains("InputMethodPipeline.localSuggestions"))
+        XCTAssertFalse(coordinator.contains("SessionSuggestionPipeline.localSuggestions"))
         XCTAssertFalse(coordinator.contains(".segmentCandidates("))
         XCTAssertFalse(coordinator.contains("mergedPrefixCandidates"))
         XCTAssertFalse(coordinator.contains("prioritizedSegmentCandidates"))

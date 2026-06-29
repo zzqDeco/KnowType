@@ -29,7 +29,7 @@ while (($# > 0)); do
 done
 
 coordinator_source="$ROOT_DIR/Sources/KnowTypeInputMethod/InputControllerCoordinator.swift"
-if grep -q 'InputMethodPipeline\.localSuggestions' "$coordinator_source"; then
+if grep -q 'SessionSuggestionPipeline\.localSuggestions' "$coordinator_source"; then
   echo "error: retired local suggestion pipeline is still referenced by InputControllerCoordinator" >&2
   exit 1
 fi

@@ -6,7 +6,7 @@
 
 - `mode`: explicit IME mode for `empty`, `composing`, `candidate`, `aiPending`, `polish`, and `ascii` sessions.
 - `rawInput`: latest raw composing text from the input method host.
-- `latestSuggestion`: latest `SuggestionResponse` from `InputMethodPipeline`.
+- `latestSuggestion`: latest `SuggestionResponse` from `SessionSuggestionPipeline`.
 - `latestSuggestionRawInput`: raw input that produced `latestSuggestion`, used to reject stale candidate actions.
 - `selectedPrefixIndex`: active correction candidate index, defaulting to `0` after each update.
 - `selectedContinuationIndex`: active continuation candidate index, defaulting to `nil` after each update.

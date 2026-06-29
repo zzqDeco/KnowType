@@ -143,7 +143,7 @@ final class InputMethodLexiconRuntimeTests: XCTestCase {
         try Data("ce shi ci\t测试词\t0.995\n".utf8)
             .write(to: directory.appendingPathComponent("user.tsv"))
         let engine = InputMethodLexiconRuntime(directories: [directory]).makeEngine()
-        let pipeline = InputMethodPipeline(provider: nil, traditionalInputEngine: engine)
+        let pipeline = SessionSuggestionPipeline(provider: nil, traditionalInputEngine: engine)
         let response = await pipeline.suggestions(
             for: InputContext(rawInput: "ceshici", locale: .zhCN)
         )

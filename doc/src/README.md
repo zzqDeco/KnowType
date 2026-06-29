@@ -93,6 +93,7 @@ required for every test file.
 - [LexicalProfileRuntime](Sources/KnowTypeInputMethod/LexicalProfileRuntime.plan.md)
 - [RimeConversionEngine](Sources/KnowTypeInputMethod/RimeConversionEngine.plan.md)
 - [RimeMaintenanceService](Sources/KnowTypeInputMethod/RimeMaintenanceService.plan.md)
+- [SessionSuggestionPipeline](Sources/KnowTypeInputMethod/SessionSuggestionPipeline.plan.md)
 - [SuggestionPublicationGuard](Sources/KnowTypeInputMethod/SuggestionPublicationGuard.plan.md)
 - [SuggestionRefreshPolicy](Sources/KnowTypeInputMethod/SuggestionRefreshPolicy.plan.md)
 - [UserSelectionHistoryStore](Sources/KnowTypeInputMethod/UserSelectionHistoryStore.plan.md)
