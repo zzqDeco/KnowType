@@ -2,18 +2,21 @@
 
 ## Responsibility
 
-`CandidatePanelState` tracks visible rows, selection, paging, and shortcut
-mapping for the candidate panel.
+`CandidatePanelState` tracks selection, paging, and shortcut state for the
+candidate panel.
 
 ## Boundaries
 
 - It is UI state, not correction or provider logic.
-- Candidate row construction stays in `CandidatePanelRenderer` and
-  `InputCandidateListBuilder`.
+- Candidate row ordering and selection identity come from
+  `CandidatePanelRowBuilder`.
+- Rendering, labels, layout, and AppKit drawing stay outside this type.
 
 ## Behavior Notes
 
 - Numeric shortcuts are page-local for visible rows.
+- Page-local numeric shortcut eligibility is derived from the shared row model,
+  not reimplemented in state.
 - Commit-only preedit is stored in the view model and can make the panel
   visible, but it has no `CandidatePanelSelection`, no numeric shortcut, and no
   raw-input fallback selection.
@@ -29,5 +32,6 @@ mapping for the candidate panel.
 ## Tests
 
 - `CandidatePanelStateTests`
+- `CandidatePanelRowBuilderTests`
 - `CandidatePanelRendererTests`
 - `InputKeyCommandMapperTests`

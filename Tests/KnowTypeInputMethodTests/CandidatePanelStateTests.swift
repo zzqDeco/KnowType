@@ -135,6 +135,54 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(1))
     }
 
+    func testPendingAIWithoutCandidatesDoesNotSelectHiddenRawFallback() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: nil,
+            aiRecommendation: .pending(requestID: UUID())
+        )
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertTrue(state.windowState.isVisible)
+        XCTAssertNil(state.windowState.selection)
+        XCTAssertEqual(rendered.rows.map(\.kind), [.aiRecommendation])
+        XCTAssertEqual(rendered.rows.map(\.selection), [nil])
+    }
+
+    func testReadyAIWithoutCandidatesDoesNotBecomeDefaultSelection() {
+        var state = CandidatePanelState()
+        state.update(
+            rawInput: "nihao",
+            suggestion: nil,
+            aiRecommendation: .ready(
+                AIRecommendationCandidate(
+                    prefixText: "",
+                    continuationText: nil,
+                    displayText: "继续推进",
+                    confidence: 0.9,
+                    provider: "test",
+                    contextVersion: "v1"
+                )
+            )
+        )
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        )
+
+        XCTAssertTrue(state.windowState.isVisible)
+        XCTAssertNil(state.windowState.selection)
+        XCTAssertEqual(rendered.rows.map(\.kind), [.aiRecommendation])
+        XCTAssertEqual(rendered.rows.map(\.selection), [.aiRecommendation])
+        XCTAssertFalse(rendered.rows[0].isSelected)
+    }
+
     func testNavigationSkipsNonReadyAIStatusRows() {
         var state = CandidatePanelState()
         state.update(

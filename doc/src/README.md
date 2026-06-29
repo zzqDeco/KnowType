@@ -70,6 +70,7 @@ required for every test file.
 - [CandidatePanelAppearance](Sources/KnowTypeInputMethod/CandidatePanelAppearance.plan.md)
 - [CandidatePanelLayoutEngine](Sources/KnowTypeInputMethod/CandidatePanelLayoutEngine.plan.md)
 - [CandidatePanelRenderer](Sources/KnowTypeInputMethod/CandidatePanelRenderer.plan.md)
+- [CandidatePanelRowBuilder](Sources/KnowTypeInputMethod/CandidatePanelRowBuilder.plan.md)
 - [CandidatePanelState](Sources/KnowTypeInputMethod/CandidatePanelState.plan.md)
 - [CandidatePanelWindowController](Sources/KnowTypeInputMethod/CandidatePanelWindowController.plan.md)
 - [CompositionBuffer](Sources/KnowTypeInputMethod/CompositionBuffer.plan.md)

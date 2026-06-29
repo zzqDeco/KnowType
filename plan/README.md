@@ -35,6 +35,7 @@ when converting a shipped plan into a short record.
 | [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Candidate-window geometry resolver behavior | Active |
 | [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | PageDown/PageUp offset-preserving candidate paging | Active |
 | [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive candidate panel layout | Active |
+| [candidate-panel-row-builder-refactor.plan.md](candidate-panel-row-builder-refactor.plan.md) | Share candidate-panel row ordering between state and renderer | Active |
 | [native-candidate-panel-spotlight-ui.plan.md](native-candidate-panel-spotlight-ui.plan.md) | macOS-native compact candidate panel styling and Spotlight window-level fix | Active |
 | [candidate-panel-lifecycle-teardown.plan.md](candidate-panel-lifecycle-teardown.plan.md) | Hide and invalidate the AppKit candidate panel across commit, deactivate, close, and stale async updates | Active |
 | [candidate-panel-search-overlay-placement.plan.md](candidate-panel-search-overlay-placement.plan.md) | Place the candidate panel above Spotlight search overlays while preserving ordinary text-field placement | Active |

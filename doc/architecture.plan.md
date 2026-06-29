@@ -183,7 +183,10 @@ LevelDB state.
 - Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.
 - The IMK controller loads and saves recent prefix selections through a local user-selection history store, then passes snapshots into the suggestion context for local-only ranking.
 - The input-method menu follows mature IMK inputs such as McBopomofo: common toggles appear first, user data and diagnostic folders are in the middle, and `KnowType Settings...` calls `showPreferences(_:)` to open the in-bundle settings window.
-- `CandidatePanelRenderer` maps suggestion state into compact macOS-style rows.
+- `CandidatePanelRowBuilder` maps candidate-panel state into fixed and pageable
+  semantic rows so selection, paging, and rendering share one ordering model.
+- `CandidatePanelRenderer` projects those semantic rows into compact
+  macOS-style render rows.
 - `CandidatePanelPresenter` is the coordinator-side presentation boundary. It consumes `CandidatePanelFrame` values with composition id, raw revision, anchor source, panel model, and explicit visibility reason before touching the host's AppKit panel adapter.
 - `CandidatePanelWindowController` owns the AppKit panel, mouse interaction, and row accessibility.
 - `CandidateAnchorResolver` resolves panel geometry from host text-system rectangles.
@@ -199,7 +202,8 @@ User selection history is stored under Application Support as `user-selection-hi
 
 KnowType uses a custom AppKit `NSPanel` as the primary candidate surface. It does not rely on `IMKCandidates` for active display because host-app behavior is inconsistent.
 
-Candidate rows are flat and compact:
+Candidate rows are flat and compact. `CandidatePanelRowBuilder` owns this row
+order and `CandidatePanelState` and `CandidatePanelRenderer` both consume it:
 
 - Rime prefix candidate 1 appears first
 - the AI recommendation slot appears second when AI state is pending, ready, disabled, or unavailable
