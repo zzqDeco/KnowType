@@ -70,12 +70,12 @@ InputClientWriteMode =
   disabled
 ```
 
-Unknown and standard text clients use `inlineComposition`. Codex, Chrome,
-TextEdit, Xcode, VS Code, common Electron hosts, and JetBrains IDEs also default
-to inline carrier, so raw preedit appears in the focused text field. Terminal,
-iTerm, MacVim, and Emacs-style profiles use placeholder carrier during Chinese
-composition, while their app-mode default keeps idle printable ASCII in
-`asciiPassthrough`. Commit-only composition uses a full-width-space
+Unknown clients, standard text clients, browsers, editors, IDEs, Electron
+shells, and JetBrains-style clients use `inlineComposition` by default, so raw
+preedit appears in the focused text field. Terminal, iTerm, MacVim, and
+Emacs-style profiles use placeholder carrier during Chinese composition, while
+their app-mode default keeps idle printable ASCII in `asciiPassthrough`.
+Commit-only composition uses a full-width-space
 `NSAttributedString` marked-text placeholder with marked attributes to keep the
 IMK composition and candidate anchor alive. The host text field sees only that
 placeholder; the candidate panel receives the real raw/preedit display text as a
@@ -398,7 +398,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
 - plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
-- `Option + /` toggles Chinese/ASCII text mode for the active controller session; compatibility hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
+- `Option + /` toggles Chinese/ASCII text mode for the active controller session; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.

@@ -15,8 +15,9 @@
 - KnowType tracks the client that owns its marked text and clears only that
   owned mark before `insertText` commits or composition teardown.
 - Commit-only placeholder writes schedule the same delayed candidate re-anchor
-  as inline composition, so Codex, Electron, editor, and terminal hosts are not
-  dependent on the first stale caret rectangle.
+  as inline composition, so terminal-style and explicit override hosts are not
+  dependent on the first stale caret rectangle. Later carrier decoupling removed
+  non-terminal hosts from the default placeholder path.
 - Coordinator-level client fallback is limited to active composition and
   lifecycle teardown; idle printable input with a missing client passes through
   instead of using a possibly stale host client.

@@ -20,8 +20,8 @@ carrier table.
 
 - Unknown hosts use `inlineComposition` so standard AppKit clients keep marked
   text behavior.
-- Codex, Xcode, VS Code, Electron, ToDesktop, and JetBrains-style hosts default
-  to inline carrier; their code-app input defaults remain in
+- Browser, editor, IDE, Electron/ToDesktop, JetBrains-style, and unknown hosts
+  default to inline carrier. Code-app preference defaults remain in
   `InputModeAppPolicy`.
 - Any host uses `asciiPassthrough` while idle when the active input mode is
   ASCII. Terminal, iTerm, MacVim, and Emacs-style hosts receive that ASCII idle

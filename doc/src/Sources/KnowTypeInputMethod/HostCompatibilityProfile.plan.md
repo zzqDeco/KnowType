@@ -16,11 +16,11 @@ carrier layer.
 
 ## Behavior Notes
 
-- TextEdit, Safari, Chrome, unknown AppKit-style clients, and other unmatched
+- TextEdit, Safari, Chrome, editors, IDEs, Electron/ToDesktop shells,
+  JetBrains-style clients, unknown AppKit-style clients, and other unmatched
   hosts default to inline composition.
-- Codex, Xcode, VS Code, Electron, ToDesktop, and JetBrains-style hosts also
-  default to inline composition; their code-app punctuation and symbol defaults
-  are owned by `InputModeAppPolicy`, not this carrier table.
+- Code-app entries can still exist in `InputModeAppPolicy` for punctuation and
+  symbol defaults, but they do not create carrier-table matches.
 - Terminal, iTerm, MacVim, and Emacs-style hosts use placeholder carrier during
   Chinese composition and start from the ASCII idle policy owned by
   `InputModeAppPolicy`.

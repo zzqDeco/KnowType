@@ -19,6 +19,7 @@ and the input-method runtime.
 - Text mode, punctuation language, and symbol width are separate fields.
 - Code-style app defaults include terminal, editor, Codex, Electron, and
   JetBrains-style bundle identifiers for punctuation and symbol-width defaults.
+  This is independent from host marked-text carrier selection.
 - Terminal-style apps, including Terminal, iTerm, MacVim, and Emacs-style
   bundles, keep the code-app ASCII text default. Editor, Codex, Electron, and
   JetBrains-style apps inherit the normal text-mode default so Chinese

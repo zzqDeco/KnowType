@@ -23,11 +23,12 @@ raw input
   -> commit
 ```
 
-KnowType keeps standard AppKit hosts on inline marked-text composition, but
-separates app input defaults from host carrier compatibility. `InputModeAppPolicy`
-owns code/terminal text-mode, punctuation, and symbol-width defaults.
-`HostCompatibilityProfile` owns only the marked-text carrier. Codex, Chrome,
-TextEdit, Xcode, VS Code, Electron, JetBrains, and unknown AppKit-style clients
+KnowType keeps standard AppKit-style hosts on inline marked-text composition,
+but separates app input defaults from host carrier compatibility.
+`InputModeAppPolicy` owns code/terminal text-mode, punctuation, and symbol-width
+defaults, including code-app entries that are not carrier matches. `HostCompatibilityProfile`
+owns only the marked-text carrier. Standard text clients, browsers, editors,
+IDEs, Electron shells, JetBrains-style clients, and unknown AppKit-style clients
 default to inline attributed preedit so the focused text field shows the raw
 composition. Terminal-style hosts default to idle ASCII passthrough through
 their input-mode default and use a full-width-space `NSAttributedString`

@@ -300,18 +300,18 @@ text. To inspect them, run
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
-Host compatibility is conservative. Standard AppKit text fields keep inline
-composition with attributed marked text; Codex, Chrome, TextEdit, Xcode, VS
-Code, common Electron apps, and JetBrains IDEs use that inline path by default
-so raw preedit appears in the focused text field. Terminal, iTerm, MacVim, and
-Emacs-style hosts default to idle ASCII passthrough, so ordinary letters,
-digits, spaces, and punctuation stay owned by the shell or editor until the
-session is switched with `Option + /`. In those terminal-style hosts, Chinese
-composition uses a full-width-space attributed marked-text placeholder to keep
-the host composition and candidate anchor alive; the real raw/preedit string is
-shown in KnowType's candidate panel above the candidates, then committed with
-`insertText`. A UserDefaults override can force any bundle back to
-`commitOnlyComposition` when a host proves incompatible with inline marked text.
+Host compatibility is conservative. Standard AppKit-style text fields, browsers,
+editors, IDEs, Electron shells, and unknown clients use inline composition with
+attributed marked text by default, so raw preedit appears in the focused text
+field. Terminal, iTerm, MacVim, and Emacs-style hosts default to idle ASCII
+passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
+the shell or editor until the session is switched with `Option + /`. In those
+terminal-style hosts, Chinese composition uses a full-width-space attributed
+marked-text placeholder to keep the host composition and candidate anchor alive;
+the real raw/preedit string is shown in KnowType's candidate panel above the
+candidates, then committed with `insertText`. A UserDefaults override can force
+any bundle back to `commitOnlyComposition` when a host proves incompatible with
+inline marked text.
 
 The candidate panel shows Rime prefix candidates, a fixed AI recommendation
 state row, terminal/override commit-only preedit when the host receives a

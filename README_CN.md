@@ -256,12 +256,11 @@ prefix 太短等原因。查看命令：
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
-宿主兼容策略优先保证不吞普通输入。TextEdit 等标准 AppKit 文本框继续使用
-inline attributed marked text；Codex、Chrome、TextEdit、Xcode、VS Code、
-常见 Electron 应用和 JetBrains IDE 默认也走 inline，因此 raw preedit 会显示在
-当前宿主输入框内。Terminal、iTerm、MacVim 和 Emacs 风格宿主默认空闲
-ASCII 直通，普通字母、数字、空格和标点先交还给 shell 或编辑器，按
-`Option + /` 后再进入中文输入。这些终端类宿主的中文 composition 使用带
+宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
+IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
+因此 raw preedit 会显示在当前宿主输入框内。Terminal、iTerm、MacVim 和 Emacs
+风格宿主默认空闲 ASCII 直通，普通字母、数字、空格和标点先交还给 shell 或编辑器，
+按 `Option + /` 后再进入中文输入。这些终端类宿主的中文 composition 使用带
 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
 上方，确认时再通过 `insertText` 上屏。仍可用 UserDefaults override 将任意

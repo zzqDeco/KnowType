@@ -31,12 +31,12 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testCodeClientUsesAsciiPassthroughWhenIdleInAsciiMode() {
+    func testAsciiModeUsesPassthroughForAnyInlineHostWhenIdle() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
 
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.GenericInlineHost",
                 inputModeState: InputModeState(textMode: .ascii),
                 hasActiveComposition: false,
                 hasClient: true
@@ -115,12 +115,12 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testCodeClientUsesInlineForChineseOrActiveCompositionByDefault() {
+    func testInlineHostUsesInlineForChineseOrActiveCompositionByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
 
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.GenericInlineHost",
                 inputModeState: InputModeState(textMode: .chinese),
                 hasActiveComposition: false,
                 hasClient: true
@@ -129,7 +129,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.GenericInlineHost",
                 inputModeState: InputModeState(textMode: .ascii),
                 hasActiveComposition: true,
                 hasClient: true
@@ -144,13 +144,13 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         defaults.set(
             InputClientWriteMode.commitOnlyComposition.rawValue,
-            forKey: "input.client.com.openai.codex.writeMode"
+            forKey: "input.client.com.example.OverrideHost.writeMode"
         )
         let policy = InputClientCompatibilityPolicy(userDefaults: defaults)
 
         XCTAssertEqual(
             policy.writeMode(
-                bundleIdentifier: "com.openai.codex",
+                bundleIdentifier: "com.example.OverrideHost",
                 inputModeState: InputModeState(textMode: .ascii),
                 hasActiveComposition: false,
                 hasClient: true

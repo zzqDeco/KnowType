@@ -6,9 +6,13 @@
 - Branch: `fix/input-method-decouple-host-carrier`.
 - `HostCompatibilityProfile` now owns only the host marked-text carrier table.
   Code-app input defaults stay in `InputModeAppPolicy`.
-- Codex, Xcode, VS Code, Electron, ToDesktop, and JetBrains-style hosts default
-  to inline composition, so raw preedit is visible in the focused text field
-  instead of only as a candidate-panel preedit row.
+- Browsers, editors, IDEs, Electron/ToDesktop shells, JetBrains-style hosts, and
+  other inline-compatible clients default to inline composition, so raw preedit
+  is visible in the focused text field instead of only as a candidate-panel
+  preedit row.
+- Any Codex-specific carrier or candidate-panel preedit display branch has been
+  removed; Codex can remain a code-app preference entry without affecting host
+  carrier selection.
 - Terminal, iTerm, MacVim, and Emacs-style hosts keep idle ASCII passthrough via
   their input-mode default and use placeholder carrier during Chinese
   composition.
