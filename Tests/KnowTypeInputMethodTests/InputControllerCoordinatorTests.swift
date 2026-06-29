@@ -1337,15 +1337,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testCodexDefaultsToChineseCommitOnlyComposition() {
+    func testCodexDefaultsToChineseInlineComposition() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
-        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        XCTAssertEqual(client.markedTextWrites.last?.text, "n")
         XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
-        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.preeditDisplayText, "n")
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
         XCTAssertEqual(
             client.markedTextWrites.last?.attributeKeyNames,
             Set([
@@ -1353,14 +1353,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 InputClientMarkedText.tsmMarkedClauseSegmentAttribute.rawValue
             ])
         )
-        XCTAssertEqual(client.markedTextWrites.last?.selectionRange, NSRange(location: 0, length: 0))
+        XCTAssertEqual(client.markedTextWrites.last?.selectionRange, NSRange(location: 1, length: 0))
         XCTAssertEqual(
             client.markedTextWrites.last?.replacementRange,
             NSRange(location: NSNotFound, length: NSNotFound)
         )
         XCTAssertTrue(coordinator.handleText("i", client: client))
         let windowState = host.panelStates.last?.windowState
-        XCTAssertEqual(windowState?.viewModel.preeditDisplayText, "ni")
+        XCTAssertNil(windowState?.viewModel.preeditDisplayText)
         let rendered = windowState.map {
             CandidatePanelRenderer(locale: .zhCN).render(
                 $0.viewModel,
@@ -1368,15 +1368,12 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 paging: $0.paging
             )
         }
-        XCTAssertEqual(rendered?.rows.first?.kind, .preedit)
-        XCTAssertEqual(rendered?.rows.first?.text, "ni")
-        XCTAssertNil(rendered?.rows.first?.selection)
-        XCTAssertNil(rendered?.rows.first?.shortcutLabel)
-        XCTAssertEqual(rendered?.rows.dropFirst().first?.shortcutLabel, "1")
+        XCTAssertFalse(rendered?.rows.contains(where: { $0.kind == .preedit }) ?? true)
+        XCTAssertEqual(rendered?.rows.first?.shortcutLabel, "1")
         let firstCandidate = windowState?.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
-        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n", "ni"])
         XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
         XCTAssertGreaterThan(host.scheduledOperations.count, 0)
         XCTAssertTrue(coordinator.handleText(" ", client: client))
@@ -1442,7 +1439,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(textClient.markedTextWrites.last?.text, "n")
     }
 
-    func testTextEditInlineCompositionUsesPlainMarkedTextCarrier() {
+    func testTextEditInlineCompositionUsesAttributedMarkedTextCarrier() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.TextEdit"
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -1450,7 +1447,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("n", client: client))
 
         XCTAssertEqual(client.markedTextWrites.last?.text, "n")
-        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, false)
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(
+            client.markedTextWrites.last?.attributeKeyNames,
+            Set([
+                InputClientMarkedText.tsmUnderlineAttribute.rawValue,
+                InputClientMarkedText.tsmMarkedClauseSegmentAttribute.rawValue
+            ])
+        )
         XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
     }
 
@@ -1497,9 +1501,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
     func testCommitOnlyCancelClearsOwnedPlaceholderAndHidesPanel() {
         let client = FakeInputControllerClient()
-        client.bundleIdentifier = "com.openai.codex"
+        client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
@@ -1519,9 +1529,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
     func testCommitOnlyCancelUsesCallbackClientWhenCurrentHostClientIsMissing() {
         let client = FakeInputControllerClient()
-        client.bundleIdentifier = "com.openai.codex"
+        client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         host.currentClientValue = nil
@@ -1541,11 +1557,17 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
     func testCommitOnlyCancelDoesNotDropOwnedMarkWhenCurrentHostClientIsStale() {
         let client = FakeInputControllerClient()
-        client.bundleIdentifier = "com.openai.codex"
+        client.bundleIdentifier = "com.apple.Terminal"
         let staleClient = FakeInputControllerClient()
-        staleClient.bundleIdentifier = "com.openai.codex"
+        staleClient.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         host.currentClientValue = staleClient

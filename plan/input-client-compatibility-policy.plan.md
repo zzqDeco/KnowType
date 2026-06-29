@@ -2,7 +2,8 @@
 
 ## Summary
 
-- Status: Active.
+- Status: Absorbed by
+  [input-method-decouple-host-carrier.plan.md](input-method-decouple-host-carrier.plan.md).
 - Branch: `fix/input-client-compatibility-policy`.
 - Goal: prevent ordinary typing from being swallowed in host apps that do not
   reliably accept inline IMK marked text.
@@ -13,8 +14,10 @@
   composition, ASCII passthrough, and missing-client disabled handling.
 - Keep standard AppKit hosts on inline composition.
 - Default terminal-style hosts to idle ASCII passthrough.
-- Default editor, Codex, common Electron, and JetBrains-style hosts to Chinese
-  commit-only composition so candidates can appear without inline marked text.
+- Initial versions defaulted editor, Codex, common Electron, and
+  JetBrains-style hosts to Chinese commit-only composition; this has been
+  superseded by the decoupled host-carrier policy, where those hosts default to
+  inline composition unless a UserDefaults override says otherwise.
 - Persist `InputTextMode` alongside punctuation and symbol-width defaults.
 - Add a session-local `Option + /` text-mode toggle so compatibility hosts can
   switch between Chinese composition and idle ASCII passthrough without a
@@ -52,8 +55,9 @@
 - `swift test --quiet --filter InputSymbolModeTests`
 - `swift test`
 - `git diff --check`
-- Manual host acceptance should cover TextEdit, Terminal/iTerm, VS Code,
-  Codex/Electron, and Xcode before the PR is marked ready.
+- Manual host acceptance for the superseding policy should cover TextEdit,
+  Chrome, Codex inline, Terminal/iTerm placeholder, and any override host before
+  the PR is marked ready.
 
 ## Assumptions
 

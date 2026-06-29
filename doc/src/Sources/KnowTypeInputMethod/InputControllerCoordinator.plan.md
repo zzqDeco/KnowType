@@ -9,12 +9,14 @@ Current behavior:
 - selects a host compatibility write mode before writing or passing through
   printable input
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
-  receive Rime preedit, while commit-only hosts receive a full-width-space
-  `NSAttributedString` placeholder with marked attributes that keeps IMK
-  composition ownership without exposing raw pinyin
+  receive Rime preedit as attributed marked text, while terminal-style or
+  override commit-only hosts receive a full-width-space `NSAttributedString`
+  placeholder with marked attributes that keeps IMK composition ownership
+  without exposing raw pinyin
 - sends the real raw/preedit display text to the candidate-panel view model for
-  commit-only hosts, so placeholder hosts show preedit above candidates without
-  writing it into the host text field
+  commit-only hosts only, so placeholder hosts show preedit above candidates
+  without writing it into the host text field while inline hosts avoid duplicate
+  preedit rows
 - commits through `InputControllerClient.insertText` with a centralized write
   coordinator; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
@@ -30,8 +32,8 @@ Current behavior:
   active; native candidate-only snapshots still count as active composition for
   number selection
 - maps Option+/ to a session-local Chinese/ASCII text-mode toggle so
-  compatibility hosts can switch between Chinese commit-only composition and
-  idle ASCII passthrough
+  terminal-style compatibility hosts can switch between Chinese placeholder
+  composition and idle ASCII passthrough
 - bypasses the input-mode preference reload throttle when the focused app bundle
   changes, so quick host switches do not reuse the previous host's text mode
 - keeps AI recommendation explicit: Tab, Option-number, and mouse click can commit a ready AI row, but ordinary digits are reserved for Rime candidates

@@ -61,14 +61,14 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testAsciiDefaultPlaceholderProfileUsesIdlePassthroughByDefault() {
+    func testTerminalPlaceholderProfileUsesIdlePassthroughFromInputModeByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
         let state = InputModeAppPolicy.defaultState(appBundleID: "org.vim.MacVim")
 
         XCTAssertEqual(state.textMode, .ascii)
         XCTAssertEqual(
             HostCompatibilityProfile.profile(bundleIdentifier: "org.vim.MacVim"),
-            .asciiDefaultPlaceholder
+            .terminalPlaceholder
         )
         XCTAssertEqual(
             policy.writeMode(
@@ -99,7 +99,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testEditorCompatibilityClientsUseCommitOnlyByDefault() {
+    func testEditorCompatibilityClientsUseInlineByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
         let state = InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij")
 
@@ -111,11 +111,11 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
                 hasActiveComposition: false,
                 hasClient: true
             ),
-            .commitOnlyComposition
+            .inlineComposition
         )
     }
 
-    func testCodeClientUsesCommitOnlyForChineseOrActiveComposition() {
+    func testCodeClientUsesInlineForChineseOrActiveCompositionByDefault() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
 
         XCTAssertEqual(
@@ -125,7 +125,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
                 hasActiveComposition: false,
                 hasClient: true
             ),
-            .commitOnlyComposition
+            .inlineComposition
         )
         XCTAssertEqual(
             policy.writeMode(
@@ -134,7 +134,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
                 hasActiveComposition: true,
                 hasClient: true
             ),
-            .commitOnlyComposition
+            .inlineComposition
         )
     }
 
@@ -143,7 +143,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
         defaults.set(
-            InputClientWriteMode.inlineComposition.rawValue,
+            InputClientWriteMode.commitOnlyComposition.rawValue,
             forKey: "input.client.com.openai.codex.writeMode"
         )
         let policy = InputClientCompatibilityPolicy(userDefaults: defaults)
@@ -155,7 +155,7 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
                 hasActiveComposition: false,
                 hasClient: true
             ),
-            .inlineComposition
+            .commitOnlyComposition
         )
     }
 

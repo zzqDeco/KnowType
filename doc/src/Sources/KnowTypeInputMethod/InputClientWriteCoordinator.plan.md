@@ -25,8 +25,8 @@ write diagnostics for `InputControllerCoordinator`.
   diagnostics can distinguish them from raw inline preedit writes without
   logging user text.
 - The coordinator preserves the marked-text carrier supplied by the state
-  machine. Commit-only placeholders are `NSAttributedString` payloads with
-  marked attributes; inline hosts can still receive plain marked text.
+  machine. Inline preedit and commit-only placeholders are `NSAttributedString`
+  payloads with marked attributes.
 
 ## Tests
 

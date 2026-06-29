@@ -2,25 +2,22 @@ import XCTest
 @testable import KnowTypeInputMethod
 
 final class HostCompatibilityProfileTests: XCTestCase {
-    func testPlaceholderHostsMatchEditorAndElectronBundles() {
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.openai.codex"), .placeholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.apple.dt.Xcode"), .placeholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.microsoft.VSCode"), .placeholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.electron.host"), .placeholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.jetbrains.intellij"), .placeholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.todesktop.app"), .placeholder)
+    func testCodeEditorAndElectronHostsDefaultToInlineCarrier() {
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.openai.codex"), .inline)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.apple.dt.Xcode"), .inline)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.microsoft.VSCode"), .inline)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.visualstudio.code.oss"), .inline)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.electron.host"), .inline)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.jetbrains.intellij"), .inline)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.todesktop.app"), .inline)
     }
 
-    func testTerminalStyleHostsMatchAsciiDefaultPlaceholderProfile() {
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.apple.Terminal"), .asciiDefaultPlaceholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.googlecode.iterm2"), .asciiDefaultPlaceholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "org.vim.MacVim"), .asciiDefaultPlaceholder)
-        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "org.gnu.Emacs"), .asciiDefaultPlaceholder)
-        XCTAssertTrue(
-            HostCompatibilityProfile
-                .profile(bundleIdentifier: "com.googlecode.iterm2.helper")
-                .prefersIdleAsciiPassthrough
-        )
+    func testTerminalStyleHostsMatchPlaceholderCarrierProfile() {
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.apple.Terminal"), .terminalPlaceholder)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.googlecode.iterm2"), .terminalPlaceholder)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "org.vim.MacVim"), .terminalPlaceholder)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "org.gnu.Emacs"), .terminalPlaceholder)
+        XCTAssertEqual(HostCompatibilityProfile.profile(bundleIdentifier: "com.googlecode.iterm2.helper"), .terminalPlaceholder)
     }
 
     func testInlineHostsRemainDefaultForBrowsersAndUnknownClients() {

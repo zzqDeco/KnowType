@@ -22,7 +22,8 @@ and the input-method runtime.
 - Terminal-style apps, including Terminal, iTerm, MacVim, and Emacs-style
   bundles, keep the code-app ASCII text default. Editor, Codex, Electron, and
   JetBrains-style apps inherit the normal text-mode default so Chinese
-  composition can start immediately while still using compatibility writes.
+  composition can start immediately while still using code-app punctuation and
+  symbol-width defaults.
 - The ASCII text pipeline remains available when the active session switches
   through the session-local text-mode toggle.
 

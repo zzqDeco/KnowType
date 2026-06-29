@@ -251,27 +251,29 @@ prefix 太短等原因。查看命令：
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点/在兼容宿主中直通给宿主。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
-| `Option + /` | 切换当前输入会话的中文/ASCII 文本模式；在兼容宿主中用于在中文 commit-only composition 和空闲 ASCII 直通之间切换。 |
+| `Option + /` | 切换当前输入会话的中文/ASCII 文本模式；在终端类兼容宿主中用于在中文 placeholder composition 和空闲 ASCII 直通之间切换。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
 宿主兼容策略优先保证不吞普通输入。TextEdit 等标准 AppKit 文本框继续使用
-inline marked text。Terminal、iTerm、MacVim 和 Emacs 风格宿主默认空闲
+inline attributed marked text；Codex、Chrome、TextEdit、Xcode、VS Code、
+常见 Electron 应用和 JetBrains IDE 默认也走 inline，因此 raw preedit 会显示在
+当前宿主输入框内。Terminal、iTerm、MacVim 和 Emacs 风格宿主默认空闲
 ASCII 直通，普通字母、数字、空格和标点先交还给 shell 或编辑器，按
-`Option + /` 后再进入中文输入。Xcode、VS Code、Codex、常见 Electron 应用和
-JetBrains IDE 默认中文 commit-only composition：KnowType 使用带 marked
-attributes 的全角空格 attributed marked-text placeholder 稳住宿主 composition
-和候选窗 anchor，不在宿主文本区暴露 raw 拼音；真实 raw/preedit 会显示在
-KnowType 候选窗候选行上方，确认时再通过 `insertText` 上屏。在任一兼容宿主中，
-`Option + /` 都用于在中文 commit-only 路径和空闲 ASCII 直通之间切换。
+`Option + /` 后再进入中文输入。这些终端类宿主的中文 composition 使用带
+marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
+composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
+上方，确认时再通过 `insertText` 上屏。仍可用 UserDefaults override 将任意
+bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline marked text 的宿主。
 
-候选窗显示 Rime 前缀候选、固定 AI 推荐状态行、placeholder 宿主中的真实
-preedit，以及没有建议时的 raw input。preedit 行没有快捷键、不可选、不能提交。
-它是紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click
-选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，KnowType 会先发布
-Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider 失败时，不会把固定
-本地 fallback 文本伪装成 AI 输出。
+候选窗显示 Rime 前缀候选、固定 AI 推荐状态行、终端/override commit-only
+placeholder 宿主中的真实 preedit，以及没有建议时的 raw input。preedit 行没有
+快捷键、不可选、不能提交；inline 宿主不会额外显示这一行，避免和宿主输入框里的
+preedit 重复。它是紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标
+hover/click 选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，
+KnowType 会先发布 Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider
+失败时，不会把固定本地 fallback 文本伪装成 AI 输出。
 
 候选窗第一项固定为 Rime 转换推荐，第二项固定为 AI 推荐状态。Provider 返回后
 只更新第二项，不重排 Rime 候选列表。Ready AI 使用 Tab 或显式 Option+数字，不占用
