@@ -25,7 +25,8 @@
 - Protected app contexts skip accepted learning and feedback tracking with the
   existing diagnostic stages.
 - Secret-like raw input or committed text suppresses typing-context events and
-  the coordinator's lexical-commit effect.
+  the lexical-commit effect that is now consumed by
+  `InputLexicalCommitRuntime`.
 - The insert sequence remains prepare feedback tracking, record commit side
   effects, insert text, delayed post-insert caret verification, then reset.
 
@@ -41,6 +42,7 @@
 ## Assumptions
 
 - This is an input-method runtime boundary refactor.
-- Lexical profile refresh stays in the coordinator for this slice.
+- Lexical profile refresh moved later to `InputLexicalCommitRuntime`; this
+  acceptance runtime still does not access profile refresh directly.
 - The new runtime does not access host insertion, marked text, Rime selection,
   candidate-panel state, or settings persistence.

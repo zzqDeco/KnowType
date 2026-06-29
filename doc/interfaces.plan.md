@@ -235,6 +235,10 @@ Core candidate types:
 - `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
 - `RimeMaintenanceService`: background owner of explicit `sync_user_data`, userdb snapshot discovery, and idle/manual maintenance policy.
 - `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, schedules background profile refresh from existing userdb snapshots, and clears summary-ready observer state when refreshes are cancelled during controller close.
+- `InputLexicalCommitRuntime`: input-method runtime that owns local lexical
+  commit/selection side effects, including bounded recent commits,
+  selection-history orchestration, lexical profile refresh scheduling, and
+  `compositionCommitted` / `candidateSelected` event payload construction.
 - `InputSelectionHistoryRuntime`: input-method session owner for protected-input
   filtering, recent selection history, `candidateSelected` event payloads, and
   persistence delegation for prefix candidate choices.
@@ -356,7 +360,8 @@ Current write contract:
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
 - The hot path emits `InputFrame`/`CandidatePanelFrame`-style state and side-effect events. It must not call AI providers,
-  lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly. Real-time AI provider calls go through
+  lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly. Lexical commit/selection facts go through
+  `InputLexicalCommitRuntime`, which may schedule refresh from bounded local snapshots but does not run userdb sync. Real-time AI provider calls go through
   `InputAIRecommendationRuntime`, which publishes only AI slot state after stale-result guards pass.
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the

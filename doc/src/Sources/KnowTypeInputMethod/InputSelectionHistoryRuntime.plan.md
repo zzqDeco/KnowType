@@ -9,6 +9,8 @@ It trims selected candidate text, applies `TextProtection` guards to the selecte
 text and raw input, publishes the `candidateSelected` runtime event payload, keeps
 the in-process recent selection cache used by lexical profile refresh, and routes
 accepted selections to `InputControllerUserSelectionHistoryPersisting`.
+`InputLexicalCommitRuntime` composes this runtime with lexical profile refresh
+and recent commit tracking.
 
 ## Boundaries
 

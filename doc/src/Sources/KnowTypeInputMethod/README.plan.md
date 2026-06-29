@@ -31,6 +31,9 @@ Current package-level implementation covers:
 - persisted prefix selection history used as a local-only ranking signal
 - input-method selection history runtime for protected-input filtering, recent
   selection cache, runtime event construction, and persistence flush delegation
+- lexical commit runtime for bounded recent commit tracking, selection-history
+  orchestration, lexical profile refresh scheduling, and commit/selection event
+  payloads
 - AI recommendation schedule policy for pure schedule/skip decisions before
   asynchronous provider requests are started
 - AI recommendation runtime for IMK-side request construction, cancellation,
@@ -61,8 +64,12 @@ coordinator applies the returned state to the candidate panel.
 `InputAIAcceptanceRuntime` owns post-commit AI side effects after the
 coordinator has chosen a commit result: accepted-learning writes,
 typing-context events, accepted-feedback tracking, and protected/secret gates.
-The coordinator still owns host insertion, composition lifecycle, and lexical
-profile refresh scheduling.
+`InputLexicalCommitRuntime` owns local lexical commit and selection side
+effects after the coordinator has chosen a commit or selection fact: bounded
+recent commits, protected selection-history recording, lexical profile refresh
+scheduling, and commit/selection event payload construction. The coordinator
+still owns host insertion, composition lifecycle, and asynchronous event-bus
+publication.
 
 The IMK controller marks composing text with `IMKTextInput.setMarkedText`. Inline-compatible hosts, including browsers, text editors, IDEs, Electron shells, and JetBrains-style clients by default, receive Rime preedit as attributed marked text. Terminal-style or explicit override commit-only hosts receive a full-width-space attributed placeholder so IMK composition ownership and candidate anchoring stay stable without exposing raw pinyin in the host field. `InputClientCompositionWriter` owns that carrier choice, idle ASCII passthrough decisions, and KnowType-owned marked-text cleanup, while `InputClientWriteCoordinator` owns the low-level `setMarkedText`/`insertText` calls and privacy-safe diagnostics. Their real preedit is shown in the candidate panel instead. Candidate anchor lookup is delegated to `CandidateAnchorResolver`, which prefers fresh IMK text rects, then line-height rects, then Accessibility focused-range bounds if permission is already granted, then a same-composition scoped last usable anchor, and finally a stable safe point inside the screen visible frame. The panel no longer follows the mouse pointer when host text geometry is temporarily unavailable.
 
@@ -70,10 +77,11 @@ Product commit decisions are shared through the session commit policy and coordi
 
 Candidate paging keeps 6 visible rows per page in adaptive horizontal mode so short candidates do not force a vertical panel. Vertical-list mode can show up to 9 visible rows per page. Arrow keys move one selectable row, PageDown/PageUp preserve the selected row's visible offset on the target page, and short final pages clamp to their last available row. Scroll-wheel paging maps to PageDown/PageUp with a small delta threshold to avoid trackpad jitter. Screenshot baselines under `Tests/KnowTypeInputMethodTests/__Snapshots__/` cover light horizontal, dark vertical, and AI status panel states.
 
-`InputSelectionHistoryRuntime` records recently committed prefix candidates for
-the active input-method process, skips protected selected text and raw input,
-persists accepted selections through `UserSelectionHistoryPersistence`, and
-feeds only the in-process recent selection cache into lexical profile refresh.
+`InputLexicalCommitRuntime` records local lexical commits and delegates
+recently committed prefix candidate learning to `InputSelectionHistoryRuntime`.
+That selection runtime skips protected selected text and raw input, persists
+accepted selections through `UserSelectionHistoryPersistence`, and feeds only
+the in-process recent selection cache into lexical profile refresh.
 Persistence appends newly selected prefixes on a shared serial queue and
 controller shutdown waits for pending writes, so stale snapshots do not
 overwrite newer selections from another host app. The ranking signal stays

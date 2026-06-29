@@ -21,12 +21,14 @@
 - The coordinator initializes one `InputSelectionHistoryRuntime` with the
   existing `InputControllerUserSelectionHistoryPersisting` boundary and the
   current maximum history size.
-- `recordUserSelection` asks the runtime for an optional
-  `InputRuntimeEvent.candidateSelected`, publishes it when present, and then
-  schedules lexical profile refresh exactly as before.
-- `LexicalProfileRuntime` receives only the runtime's in-process
-  `recentSelectionHistory`, preserving the existing privacy boundary where a
-  fresh process does not inject all persisted selections into AI context.
+- `recordUserSelection` originally asked the runtime for an optional
+  `InputRuntimeEvent.candidateSelected`; current code routes that selection
+  fact through `InputLexicalCommitRuntime`, which publishes the same event
+  payload and schedules lexical profile refresh.
+- `LexicalProfileRuntime` receives only the active runtime's in-process
+  `recentSelectionHistory` through `InputLexicalCommitRuntime`, preserving the
+  privacy boundary where a fresh process does not inject all persisted
+  selections into AI context.
 - `flushUserSelectionHistory` delegates to the runtime.
 
 ## Test Plan

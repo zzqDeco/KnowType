@@ -27,7 +27,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var runtimePreferences: InputMethodRuntimePreferences
     private var suggestionTask: Task<Void, Never>?
     private let nativeCandidateNavigationRuntime = InputNativeCandidateNavigationRuntime()
-    private let selectionHistoryRuntime: InputSelectionHistoryRuntime
+    private let lexicalCommitRuntime: InputLexicalCommitRuntime
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
     private var suggestionGeneration = 0
@@ -36,8 +36,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let aiAcceptanceRuntime: InputAIAcceptanceRuntime
     private var aiRecommendationState: AIRecommendationState = .idle
     private var deleteCountBeforeCommit = 0
-    private var recentLexicalCommits: [String] = []
-    private let lexicalProfileRuntime: LexicalProfileRuntime
     private let inputClientCompositionWriter: InputClientCompositionWriter
     private let taskSupervisor = InputTaskSupervisor()
     private let candidatePanelPublicationRuntime: InputCandidatePanelPublicationRuntime
@@ -97,7 +95,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             preferences: inputModePreferences,
             appBundleID: initialAppBundleID
         )
-        self.selectionHistoryRuntime = InputSelectionHistoryRuntime(
+        let selectionHistoryRuntime = InputSelectionHistoryRuntime(
             persistence: userSelectionHistoryPersistence,
             maxEntries: Self.maxUserSelectionHistory
         )
@@ -116,12 +114,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
             canRequestAIRecommendations: self.canRequestAIRecommendations,
             runtimePreferences: runtimePreferences
         )
-        self.lexicalProfileRuntime = LexicalProfileRuntime(
+        let lexicalProfileRuntime = LexicalProfileRuntime(
             store: lexicalProfileStore,
             rimeMaintenanceService: rimeUserDBTextProvider,
             acceptedLearningProvider: aiAcceptedLearning,
             diagnosticSink: aiDiagnosticSink,
             refreshGate: lexicalProfileRefreshGate
+        )
+        self.lexicalCommitRuntime = InputLexicalCommitRuntime(
+            selectionHistoryRuntime: selectionHistoryRuntime,
+            lexicalProfileRuntime: lexicalProfileRuntime
         )
         self.inputClientCompositionWriter = InputClientCompositionWriter(
             compatibilityPolicy: clientCompatibilityPolicy,
@@ -292,7 +294,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reason: "input_controller_will_close"
         )
         aiAcceptanceRuntime.cancelFeedback(reason: "input_controller_will_close")
-        lexicalProfileRuntime.cancelRefresh()
+        lexicalCommitRuntime.cancelRefresh()
         taskSupervisor.cancelAll()
         _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
     }
@@ -759,11 +761,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func lexicalContextSnapshot(for _: SuggestionResponse) -> LexicalContextSnapshot? {
-        lexicalProfileRuntime.lexicalContextSnapshot(
-            schemaID: conversionEngine.activeSchemaID,
-            recentCommits: recentLexicalCommits,
-            selectionHistory: selectionHistoryRuntime.recentSelectionHistory
-        )
+        lexicalCommitRuntime.lexicalContextSnapshot(schemaID: conversionEngine.activeSchemaID)
     }
 
     static func confirmedLockedPrefixText(for suggestion: SuggestionResponse) -> String? {
@@ -1195,17 +1193,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func recordUserSelection(_ text: String, client: InputControllerClient?) {
-        guard let event = selectionHistoryRuntime.recordSelection(
-            text,
+        let context = InputLexicalSelectionContext(
+            text: text,
             rawInput: rawBuffer,
             appBundleID: appBundleIdentifier(client: client),
             schemaID: conversionEngine.activeSchemaID,
             compositionID: compositionID
-        ) else {
+        )
+        guard let event = lexicalCommitRuntime.recordSelection(context: context) else {
             return
         }
         publishRuntimeEvent(event)
-        scheduleLexicalProfileRefresh(reason: "selection")
     }
 
     private func publishRuntimeEvent(_ event: InputRuntimeEvent) {
@@ -1215,7 +1213,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func flushUserSelectionHistory() {
-        selectionHistoryRuntime.flush()
+        lexicalCommitRuntime.flushSelectionHistory()
     }
 
     private func commitResult(for action: InputAction, client: InputControllerClient?) -> InputCommitResult {
@@ -1447,36 +1445,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
         )
         if effects.shouldRecordLexicalCommit {
-            recordLexicalCommit(text)
-        }
-    }
-
-    private func recordLexicalCommit(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return
-        }
-        recentLexicalCommits.append(trimmed)
-        if recentLexicalCommits.count > Self.maxRecentLexicalCommits {
-            recentLexicalCommits.removeFirst(recentLexicalCommits.count - Self.maxRecentLexicalCommits)
-        }
-        publishRuntimeEvent(
-            .compositionCommitted(
-                text: trimmed,
+            let context = InputLexicalCommitContext(
+                text: text,
                 schemaID: conversionEngine.activeSchemaID,
                 compositionID: compositionID
             )
-        )
-        scheduleLexicalProfileRefresh(reason: "commit")
-    }
-
-    private func scheduleLexicalProfileRefresh(reason: String) {
-        lexicalProfileRuntime.scheduleRefresh(
-            reason: reason,
-            schemaID: conversionEngine.activeSchemaID,
-            recentCommits: recentLexicalCommits,
-            selectionHistory: selectionHistoryRuntime.recentSelectionHistory
-        )
+            if let event = lexicalCommitRuntime.recordCommit(context: context) {
+                publishRuntimeEvent(event)
+            }
+        }
     }
 
     private func acceptedAIRecommendationCandidate(
@@ -1928,7 +1905,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private static let textOnlyKeyCode = -1
     private static let maxUserSelectionHistory = 64
-    private static let maxRecentLexicalCommits = 32
     private static let leadingFullCandidateCount = 5
     private static let preferenceReloadInterval: TimeInterval = 1
 
