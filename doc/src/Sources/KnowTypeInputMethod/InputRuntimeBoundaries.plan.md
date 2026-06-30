@@ -36,6 +36,10 @@ input, candidate-panel presentation, AI slot patches, and background events.
   commit tracking, lexical profile refresh scheduling, and commit/selection
   event payload construction without touching host writes, Rime navigation, AI
   providers, or candidate-panel publication.
+- `InputSuggestionStateRuntime` owns current suggestion state, its raw-input
+  identity, commit suggestion snapshots, and narrow no-provider fallback cleanup.
+  It must not call Rime, host clients, AI providers, candidate-panel presenters,
+  or runtime preferences.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method
@@ -58,6 +62,8 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - Lexical commit and selection events are returned to the coordinator for
   asynchronous event-bus publication; lexical refresh can use only bounded
   recent commits and in-process recent selection history.
+- Suggestion commit snapshots retain `usesPendingFallback = false`; the retired
+  async local-candidate path remains disabled.
 - Background consumers may observe events, but they must not call back into the
   active Rime session or AppKit panel.
 
@@ -67,6 +73,7 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `InputCandidatePanelPublicationRuntimeTests`
 - `InputNativeCandidateNavigationRuntimeTests`
 - `InputLexicalCommitRuntimeTests`
+- `InputSuggestionStateRuntimeTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`

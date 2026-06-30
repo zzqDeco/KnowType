@@ -239,6 +239,10 @@ Core candidate types:
   commit/selection side effects, including bounded recent commits,
   selection-history orchestration, lexical profile refresh scheduling, and
   `compositionCommitted` / `candidateSelected` event payload construction.
+- `InputSuggestionStateRuntime`: input-method runtime that owns the latest
+  `SuggestionResponse`, the raw input that produced it, commit suggestion
+  snapshots, current-suggestion checks, and resolved-composition no-provider
+  fallback cleanup.
 - `InputSelectionHistoryRuntime`: input-method session owner for protected-input
   filtering, recent selection history, `candidateSelected` event payloads, and
   persistence delegation for prefix candidate choices.
@@ -255,7 +259,11 @@ Core candidate types:
 - `CandidatePanelFrame`: candidate-panel presentation intent with composition id, raw revision, raw length, anchor source, panel model, and explicit visibility reason.
 - `AIRecommendationPatch`: AI slot-only update guarded by request id, generation, composition id, raw revision, and raw input.
 
-Raw input is tracked outside `SuggestionResponse` by the input-method session, for example through stale-result guards such as `latestSuggestionRawInput`. Protection metadata lives on correction candidates, locked prefixes, and protected ranges rather than on the top-level suggestion response.
+Raw input is tracked outside `SuggestionResponse` by
+`InputSuggestionStateRuntime`, because the UI-facing suggestion snapshot remains
+focused on candidates and latency rather than identity. Protection metadata
+lives on correction candidates, locked prefixes, and protected ranges rather
+than on the top-level suggestion response.
 
 Core correction and traditional-input candidates may carry `rawRange` and `segments` for offline/session tests. The production IMK coordinator no longer generates segment candidates from `TraditionalInputEngine`; Rime candidates are treated as whole-prefix candidates over the current raw input.
 

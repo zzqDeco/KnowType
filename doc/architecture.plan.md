@@ -117,13 +117,20 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 - Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction, context digest, and polish keep separate instructions.
 
-The input-method keydown path never awaits this layer. It publishes raw marked text and local candidates first, then receives AI slot updates asynchronously. `InputAIRecommendationRuntime` owns request ids, generations, task cancellation, stale-result diagnostics, and `AIRecommendationPatch` validation for the IMK side of the real-time recommendation flow. Matching AI results update only the coordinator's fixed AI slot after request id, generation, composition id, raw revision, and raw input all still match. They cannot change Rime selection, marked text, base candidates, or panel visibility. `InputAIAcceptanceRuntime` owns post-commit AI acceptance side effects: accepted-learning records, typing-context events, accepted-feedback tracking orchestration, and protected/secret gates. It does not write host text or refresh candidate UI. `InputLexicalCommitRuntime` owns local lexical commit/selection side effects: bounded recent commits, protected selection-history recording, lexical profile refresh scheduling, and commit/selection event payload construction. Rime userdb sync is a maintenance action and is not part of commit. Commit/selection profile refresh is executed by `LexicalProfileRuntime` and reads only an already exported userdb snapshot; explicit `sync_user_data` is owned by `RimeMaintenanceService` for manual or idle maintenance paths. Keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime debounces for 350 ms by default and has a 10-second hard timeout; continuing to type still cancels older requests immediately.
+The input-method keydown path never awaits this layer. It publishes raw marked text and current-page Rime candidates first, then receives AI slot updates asynchronously. `InputAIRecommendationRuntime` owns request ids, generations, task cancellation, stale-result diagnostics, and `AIRecommendationPatch` validation for the IMK side of the real-time recommendation flow. Matching AI results update only the coordinator's fixed AI slot after request id, generation, composition id, raw revision, and raw input all still match. They cannot change Rime selection, marked text, base candidates, or panel visibility. `InputAIAcceptanceRuntime` owns post-commit AI acceptance side effects: accepted-learning records, typing-context events, accepted-feedback tracking orchestration, and protected/secret gates. It does not write host text or refresh candidate UI. `InputLexicalCommitRuntime` owns local lexical commit/selection side effects: bounded recent commits, protected selection-history recording, lexical profile refresh scheduling, and commit/selection event payload construction. Rime userdb sync is a maintenance action and is not part of commit. Commit/selection profile refresh is executed by `LexicalProfileRuntime` and reads only an already exported userdb snapshot; explicit `sync_user_data` is owned by `RimeMaintenanceService` for manual or idle maintenance paths. Keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime debounces for 350 ms by default and has a 10-second hard timeout; continuing to type still cancels older requests immediately.
 Before a provider request starts, `InputAIRecommendationSchedulePolicy` makes the
 pure schedule/skip decision for input stability, trigger length, secret-like
 text, cloud-continuation preference, and provider availability. The coordinator
 constructs the current input context and applies the returned AI state to the
 candidate panel; request construction, async task cancellation, stale-result
 checks, and lifecycle diagnostics live in `InputAIRecommendationRuntime`.
+Current suggestion state is owned separately by
+`InputSuggestionStateRuntime`. It stores the latest Rime-facing
+`SuggestionResponse` plus the raw input that produced it, builds commit
+snapshots for the existing commit policy, and clears only
+resolved-composition no-provider fallback continuation rows after provider
+availability becomes known. It does not restart the retired async
+local-candidate path.
 
 ## Settings Layer
 
@@ -202,6 +209,8 @@ LevelDB state.
 - `InputNativeCandidateNavigationRuntime` owns displayed native selection
   state, panel selection mapping, Rime highlight, current-page select, paging,
   and boundary paging decisions.
+- `InputSuggestionStateRuntime` owns current suggestion/raw-input snapshots,
+  commit suggestion reads, and narrow no-provider fallback cleanup.
 - `CandidatePanelPresenter` consumes `CandidatePanelFrame` values with
   composition id, raw revision, anchor source, panel model, and explicit
   visibility reason before touching the host's AppKit panel adapter.
