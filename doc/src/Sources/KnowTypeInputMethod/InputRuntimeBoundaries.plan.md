@@ -45,6 +45,11 @@ input, candidate-panel presentation, AI slot patches, and background events.
   identity, commit suggestion snapshots, and narrow no-provider fallback cleanup.
   It must not call Rime, host clients, AI providers, candidate-panel presenters,
   or runtime preferences.
+- `InputCommitApplicationRuntime` owns commit-result plan mapping, accepted
+  feedback context construction, commit side-effect context construction, and
+  lifecycle finish planning. It returns values only; host writes, marked-text
+  cleanup, Rime reset, candidate-panel hide, AI/lexical runtime calls, and
+  lifecycle event publication remain in the coordinator.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method
@@ -71,6 +76,8 @@ input, candidate-panel presentation, AI slot patches, and background events.
   recent commits and in-process recent selection history.
 - Suggestion commit snapshots retain `usesPendingFallback = false`; the retired
   async local-candidate path remains disabled.
+- Commit side-effect and lifecycle finish contexts must be built from the
+  finishing composition snapshot before composition state is reset.
 - Background consumers may observe events, but they must not call back into the
   active Rime session or AppKit panel.
 
@@ -82,6 +89,7 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `InputNativeCandidateNavigationRuntimeTests`
 - `InputLexicalCommitRuntimeTests`
 - `InputSuggestionStateRuntimeTests`
+- `InputCommitApplicationRuntimeTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`

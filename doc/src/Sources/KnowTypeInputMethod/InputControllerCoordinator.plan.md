@@ -73,6 +73,11 @@ Current behavior:
   `InputLexicalCommitRuntime`, including selection-history recording, bounded
   recent commit tracking, lexical profile refresh scheduling, and
   `candidateSelected` / `compositionCommitted` event construction
+- delegates commit result planning, commit side-effect context construction, and
+  lifecycle finish planning to `InputCommitApplicationRuntime`; the coordinator
+  still executes host insertion, marked-text cleanup, Rime reset, panel hide,
+  anchor reset, AI/lexical runtime calls, and lifecycle event publication in
+  order
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - delegates explicit AI accepted-learning records, typing-context events, and
   accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the
