@@ -73,6 +73,10 @@ Current behavior:
 - highlight-only updates refresh marked text and the panel without restarting AI recommendation requests
 - preserves an explicitly selected non-Rime row from the IMK/custom candidate window before falling back to native Rime Space
 - native final Space, numeric, and mouse/panel candidate commits record local selection history before composition reset; partial native commits do not
+- delegates commit-choice planning to `InputCommitDecisionRuntime`, including
+  Space/Tab/Option-number priority, selected AI/segment/continuation/native row
+  decisions, panel-number selection, accepted-AI candidate identity, and
+  prefix-learning candidate selection
 - delegates local lexical selection and commit side effects to
   `InputLexicalCommitRuntime`, including selection-history recording, bounded
   recent commit tracking, lexical profile refresh scheduling, and
