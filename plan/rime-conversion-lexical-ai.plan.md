@@ -45,9 +45,10 @@
   recipe repositories are pinned by exact commit, and `KnowTypeInputMethodApp`
   is linked with the Rime Frameworks rpath instead of patching the executable
   during packaging.
-- Synchronous native/local candidate publication cancels stale async local
-  refresh tasks before publishing, and Delete-to-empty resets the conversion
-  engine so non-ASCII fallback bypasses do not leak into the next composition.
+- Synchronous Rime candidate publication now owns the production key path; the
+  later suggestion-state cleanup retired stale async local refresh tasks.
+  Delete-to-empty resets the conversion engine so non-ASCII fallback bypasses
+  do not leak into the next composition.
 - Native duplicate candidate text no longer falls back to the first text match
   when a stable native index is unavailable; ambiguous rows commit through the
   selected UI candidate path instead of calling the wrong Rime index.

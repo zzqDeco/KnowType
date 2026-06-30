@@ -87,6 +87,7 @@ required for every test file.
 - [HostCompatibilityProfile](Sources/KnowTypeInputMethod/HostCompatibilityProfile.plan.md)
 - [InputLexicalCommitRuntime](Sources/KnowTypeInputMethod/InputLexicalCommitRuntime.plan.md)
 - [InputNativeCandidateNavigationRuntime](Sources/KnowTypeInputMethod/InputNativeCandidateNavigationRuntime.plan.md)
+- [InputSuggestionStateRuntime](Sources/KnowTypeInputMethod/InputSuggestionStateRuntime.plan.md)
 - [InputController](Sources/KnowTypeInputMethod/InputController.plan.md)
 - [InputControllerCoordinator](Sources/KnowTypeInputMethod/InputControllerCoordinator.plan.md)
 - [InputControllerHostClientSeams](Sources/KnowTypeInputMethod/InputControllerHostClientSeams.plan.md)

@@ -28,6 +28,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         )
 
         XCTAssertFalse(coordinator.contains("SessionSuggestionPipeline.localSuggestions"))
+        XCTAssertFalse(coordinator.contains("suggestionTask"))
+        XCTAssertFalse(coordinator.contains(".localCandidates"))
         XCTAssertFalse(coordinator.contains(".segmentCandidates("))
         XCTAssertFalse(coordinator.contains("mergedPrefixCandidates"))
         XCTAssertFalse(coordinator.contains("prioritizedSegmentCandidates"))

@@ -28,7 +28,9 @@ Current behavior:
   stale host marked ranges
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
-- cancels any pending retired local-candidate task before synchronous native candidate publication, so an older background snapshot cannot overwrite a fresh native state update
+- delegates current suggestion storage, raw-input freshness checks, commit
+  suggestion snapshots, and no-provider fallback continuation cleanup to
+  `InputSuggestionStateRuntime`
 - delegates candidate-panel state publication, async refresh coalescing,
   visibility decisions, delayed re-anchor generation, and panel diagnostics to
   `InputCandidatePanelPublicationRuntime`
@@ -82,10 +84,13 @@ Current behavior:
 - native candidate mapping uses the encoded current-page index when present; ambiguous duplicate text without an index does not fall back to the retired local converter
 - routes committed typing events and no-composition external Delete events
   through `InputAIAcceptanceRuntime`
-- rejects stale async candidate publications by raw input, composition id, composition buffer, cancellation state, and suggestion generation
-- uses `InputTaskSupervisor` to replace stale local-candidate tasks; panel
-  render work is supervised by `InputCandidatePanelPublicationRuntime`, and
-  real-time AI request tasks are owned by `InputAIRecommendationRuntime`
+- rejects stale candidate-panel publications by raw input, composition id,
+  composition buffer, and cancellation state through
+  `InputCandidatePanelPublicationRuntime`
+- uses `InputTaskSupervisor` only for still-active background task categories;
+  panel render work is supervised by `InputCandidatePanelPublicationRuntime`,
+  and real-time AI request tasks are owned by
+  `InputAIRecommendationRuntime`
 - constructs AI recommendation input context and applies returned AI slot states
   to the candidate panel, while request lifecycle, active request ids,
   generation checks, task cancellation, and stale-result diagnostics live in
@@ -107,8 +112,9 @@ Current behavior:
 - treats lazy AI runtime presence as an asynchronous recommendation capability,
   not as proof that a provider is configured; no-provider local continuation
   fallback remains available until an eager provider is known or a lazy provider
-  has actually loaded, and stale local fallback rows are cleared once lazy
-  provider availability becomes known
+  has actually loaded, and stale resolved-composition fallback rows are cleared
+  by `InputSuggestionStateRuntime` once lazy provider availability becomes
+  known
 - gates real-time cloud AI scheduling only on secret-like raw input or confirmed
   locked prefixes; normal technical tokens, commands, paths, URLs, and app
   context do not directly set `AI 已禁用`
@@ -158,7 +164,8 @@ Current behavior:
   `InputClientCompositionWriter`; the coordinator still decides when to refresh
   composition and when a successful marked-text write should schedule delayed
   re-anchor
-- keeps provider-backed suggestion publication guarded by `SuggestionPublicationGuard`
+- keeps suggestion freshness checks guarded by `SuggestionPublicationGuard`
+  through `InputSuggestionStateRuntime`
 - suppresses AI recommendation while the composition is only partially resolved, so half-pinyin marked text is not sent as a locked prefix
 
 The coordinator remains IMK-free. Production host/client adapters live beside the IMK wrapper, while tests use fake clients, fake host scheduling, fake panel capture, and fake history persistence.

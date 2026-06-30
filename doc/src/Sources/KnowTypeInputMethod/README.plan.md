@@ -17,6 +17,8 @@ Current package-level implementation covers:
   async publication gating, delayed re-anchor, and panel diagnostics
 - native candidate navigation runtime for Rime current-page selection,
   highlight, paging, boundary paging, and panel selection mapping
+- suggestion state runtime for current suggestion/raw-input snapshots, commit
+  suggestion reads, and narrow no-provider fallback continuation cleanup
 - candidate panel mouse hover, click commit, scroll paging, row accessibility, and PNG snapshot regression tests
 - shortcut-to-commit behavior
 - key intent modeling for key down, key up, modifier flag changes, cancel, delete, navigation keys, punctuation, and numeric candidate selection
@@ -43,9 +45,10 @@ Current package-level implementation covers:
   secret gates
 - optional `RimeConversionEngine` boundary with a dynamic `librime` bridge and deterministic `TraditionalInputEngine` fallback
 - lexical profile snapshots for AI recommendation that exclude Level 0/protected app commits and protected-app selection history
-- `InputTaskSupervisor` cancellation for local candidates, runtime lexicon reload, and panel rendering work
+- `InputTaskSupervisor` cancellation for runtime lexicon reload and panel
+  rendering work
 - testable host/client seams for the IMK controller boundary
-- async suggestion pipeline wiring
+- synchronous Rime suggestion publication state
 - Level 0 no-provider routing for protected input
 - minimal InputMethodKit server bootstrap guarded by `canImport(InputMethodKit)`
 - `KnowTypeInputMethodApp` bundle entry assembled by `scripts/build-inputmethod-bundle.sh`
@@ -70,6 +73,11 @@ recent commits, protected selection-history recording, lexical profile refresh
 scheduling, and commit/selection event payload construction. The coordinator
 still owns host insertion, composition lifecycle, and asynchronous event-bus
 publication.
+`InputSuggestionStateRuntime` owns the current `SuggestionResponse` and
+associated raw input. It keeps suggestion commit snapshots and stale checks out
+of the coordinator while preserving the Rime-only product path: it does not
+create pending fallback continuations or restart the retired async local
+candidate pipeline.
 
 The IMK controller marks composing text with `IMKTextInput.setMarkedText`. Inline-compatible hosts, including browsers, text editors, IDEs, Electron shells, and JetBrains-style clients by default, receive Rime preedit as attributed marked text. Terminal-style or explicit override commit-only hosts receive a full-width-space attributed placeholder so IMK composition ownership and candidate anchoring stay stable without exposing raw pinyin in the host field. `InputClientCompositionWriter` owns that carrier choice, idle ASCII passthrough decisions, and KnowType-owned marked-text cleanup, while `InputClientWriteCoordinator` owns the low-level `setMarkedText`/`insertText` calls and privacy-safe diagnostics. Their real preedit is shown in the candidate panel instead. Candidate anchor lookup is delegated to `CandidateAnchorResolver`, which prefers fresh IMK text rects, then line-height rects, then Accessibility focused-range bounds if permission is already granted, then a same-composition scoped last usable anchor, and finally a stable safe point inside the screen visible frame. The panel no longer follows the mouse pointer when host text geometry is temporarily unavailable.
 

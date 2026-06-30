@@ -18,19 +18,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var compositionBuffer = CompositionBuffer()
     private var compositionID = 0
     private var rawRevision = 0
-    private var lastSuggestion: SuggestionResponse?
-    private var lastSuggestionRawInput: String?
+    private let suggestionStateRuntime = InputSuggestionStateRuntime()
     private var locale: KnowTypeLocale = .mixed
     private let inputModePreferenceStore: any InputModePreferenceStore
     private var inputModeRuntime: InputModePreferenceRuntime
     private let runtimePreferenceStore: any InputMethodRuntimePreferenceStore
     private var runtimePreferences: InputMethodRuntimePreferences
-    private var suggestionTask: Task<Void, Never>?
     private let nativeCandidateNavigationRuntime = InputNativeCandidateNavigationRuntime()
     private let lexicalCommitRuntime: InputLexicalCommitRuntime
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
-    private var suggestionGeneration = 0
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
     private let aiRecommendationRuntime: InputAIRecommendationRuntime
     private let aiAcceptanceRuntime: InputAIAcceptanceRuntime
@@ -179,7 +176,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     func candidates() -> [Any] {
         let selections = candidateListBuilder.candidateSelections(
             rawInput: rawBuffer,
-            suggestion: lastSuggestion
+            suggestion: suggestionStateRuntime.currentSnapshot().suggestion
         )
         nativeCandidateNavigationRuntime.cacheDisplayedCandidates(selections)
         return selections.map(\.text)
@@ -306,7 +303,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let client = host?.currentClient
         publishLocalSuggestionSynchronously(client: client)
-        updateCandidatePanelImmediately(suggestion: lastSuggestion, client: client)
+        updateCandidatePanelImmediately(
+            suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
+            client: client
+        )
     }
 
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
@@ -364,7 +364,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             invalidateSuggestion()
             publishLocalSuggestion(client: client)
-            refreshSuggestion(client: client)
             return true
         case .action(let action):
             if action == .toggleSymbolMode {
@@ -405,12 +404,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             let panelState = candidatePanelPublicationRuntime.state
             if panelState.windowState.isVisible {
+                let suggestionSnapshot = suggestionStateRuntime.currentSnapshot()
                 if number == 0,
                    let result = InputSessionCommitPolicy.resultForCandidateNumber(
                        number,
                        rawInput: rawBuffer,
-                       suggestion: lastSuggestion,
-                       suggestionRawInput: lastSuggestionRawInput
+                       suggestion: suggestionSnapshot.suggestion,
+                       suggestionRawInput: suggestionSnapshot.rawInput
                    ) {
                     return applyCommitResult(result, client: client)
                 }
@@ -457,7 +457,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiRecommendationState = .idle
         invalidateSuggestion()
         publishLocalSuggestion(client: client)
-        refreshSuggestion(client: client)
         return true
     }
 
@@ -493,30 +492,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func refreshSuggestion(client: InputControllerClient?) {
-        suggestionTask?.cancel()
-        taskSupervisor.cancel(.localCandidates)
-        guard enablesAsyncSuggestionRefresh else {
-            return
-        }
-        let rawInput = rawBuffer
-        guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawInput) else {
-            return
-        }
-        guard !compositionBuffer.isFullyResolved else {
-            return
-        }
-        // Rime already produced the synchronous candidate state. The retired
-        // local converter must not run as a delayed second pass over the same
-        // keystroke.
-    }
-
     private func refreshResolvedCompositionContinuations(client: InputControllerClient?) {
         guard enablesAsyncSuggestionRefresh,
               compositionBuffer.isFullyResolved else {
             return
         }
-        suggestionTask?.cancel()
         let rawInput = rawBuffer
         let lockedPrefixText = compositionBuffer.commitText
         let lockedPrefix = LockedPrefix(
@@ -532,10 +512,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let suggestion = resolvedCompositionSuggestion(
             lockedPrefix: lockedPrefix,
             continuations: continuations,
-            fallbackLatency: lastSuggestion?.latencyMs ?? 0
+            fallbackLatency: suggestionStateRuntime.currentSnapshot().suggestion?.latencyMs ?? 0
         )
-        lastSuggestion = suggestion
-        lastSuggestionRawInput = rawInput
+        suggestionStateRuntime.store(suggestion: suggestion, rawInput: rawInput)
         refreshComposition(client: client)
         updateCandidatePanel(suggestion: suggestion, client: client)
         scheduleAIRecommendation(for: suggestion, client: client)
@@ -546,8 +525,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         continuations: [ContinuationCandidate],
         fallbackLatency: Int
     ) -> SuggestionResponse {
-        let prefixCandidates = lastSuggestion?.prefixCandidates.isEmpty == false
-            ? lastSuggestion?.prefixCandidates ?? []
+        let currentSuggestion = suggestionStateRuntime.currentSnapshot().suggestion
+        let prefixCandidates = currentSuggestion?.prefixCandidates.isEmpty == false
+            ? currentSuggestion?.prefixCandidates ?? []
             : [resolvedCompositionCandidate()]
         return SuggestionResponse(
             prefixCandidates: prefixCandidates,
@@ -608,11 +588,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
             guard let selectedCandidate = sessionSelection(from: selection) else {
                 return .noAction
             }
+            let suggestionSnapshot = suggestionStateRuntime.currentSnapshot()
             return InputSessionCommitPolicy.result(
                 for: .space,
                 rawInput: rawBuffer,
-                suggestion: lastSuggestion,
-                suggestionRawInput: lastSuggestionRawInput,
+                suggestion: suggestionSnapshot.suggestion,
+                suggestionRawInput: suggestionSnapshot.rawInput,
                 selectedCandidate: selectedCandidate,
                 appBundleID: appBundleIdentifier(client: client),
                 locale: locale,
@@ -707,50 +688,40 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func publishLocalSuggestion(client: InputControllerClient?) {
-        cancelPendingSuggestionRefresh()
         publishLocalSuggestionSynchronously(client: client)
-    }
-
-    private func cancelPendingSuggestionRefresh() {
-        suggestionGeneration += 1
-        suggestionTask?.cancel()
-        suggestionTask = nil
-        taskSupervisor.cancel(.localCandidates)
     }
 
     private func publishLocalSuggestionSynchronously(client: InputControllerClient?) {
         guard SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
-            lastSuggestion = nil
-            lastSuggestionRawInput = nil
+            suggestionStateRuntime.clear()
             refreshComposition(client: client)
             updateCandidatePanelImmediately(suggestion: nil, client: client)
             return
         }
 
         guard let suggestion = conversionSuggestion() else {
-            lastSuggestion = nil
-            lastSuggestionRawInput = nil
+            suggestionStateRuntime.clear()
             refreshComposition(client: client)
             updateCandidatePanelImmediately(suggestion: nil, client: client)
             return
         }
 
         let rimeSuggestion = augmentedSuggestion(suggestion)
-        lastSuggestion = rimeSuggestion
-        lastSuggestionRawInput = rawBuffer
+        suggestionStateRuntime.store(suggestion: rimeSuggestion, rawInput: rawBuffer)
         refreshComposition(client: client)
         updateCandidatePanelImmediately(suggestion: rimeSuggestion, client: client)
         scheduleAIRecommendation(for: rimeSuggestion, client: client)
     }
 
     private func refreshNativeHighlightPresentation(client: InputControllerClient?) {
-        guard lastSuggestionRawInput == rawBuffer,
-              let lastSuggestion else {
+        let snapshot = suggestionStateRuntime.currentSnapshot()
+        guard suggestionStateRuntime.hasCurrentSuggestion(rawInput: rawBuffer),
+              let suggestion = snapshot.suggestion else {
             publishLocalSuggestion(client: client)
             return
         }
         refreshComposition(client: client)
-        updateCandidatePanelImmediately(suggestion: lastSuggestion, client: client)
+        updateCandidatePanelImmediately(suggestion: suggestion, client: client)
     }
 
     private func conversionSuggestion() -> SuggestionResponse? {
@@ -804,24 +775,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 }
                 self.aiRecommendationState = state
                 self.clearNoProviderFallbackContinuationsIfProviderIsKnown()
-                self.updateCandidatePanel(suggestion: self.lastSuggestion, client: self.host?.currentClient)
+                self.updateCandidatePanel(
+                    suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
+                    client: self.host?.currentClient
+                )
             }
         )
         updateCandidatePanel(suggestion: suggestion, client: client)
     }
 
     private func clearNoProviderFallbackContinuationsIfProviderIsKnown() {
-        guard aiRecommendationRuntime.hasKnownProvider,
-              let suggestion = lastSuggestion,
-              suggestion.lockedPrefix?.candidateID == "composition-buffer",
-              !suggestion.continuationCandidates.isEmpty else {
-            return
-        }
-        lastSuggestion = SuggestionResponse(
-            prefixCandidates: suggestion.prefixCandidates,
-            lockedPrefix: suggestion.lockedPrefix,
-            continuationCandidates: [],
-            latencyMs: suggestion.latencyMs
+        _ = suggestionStateRuntime.clearNoProviderFallbackContinuationsIfNeeded(
+            hasKnownProvider: aiRecommendationRuntime.hasKnownProvider
         )
     }
 
@@ -902,23 +867,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if compositionBuffer.hasResolvedSegments && !compositionBuffer.isFullyResolved {
             return true
         }
-        guard SuggestionPublicationGuard.hasCurrentSuggestion(
-            suggestionRawInput: lastSuggestionRawInput,
-            currentRawInput: rawBuffer
-        ) else {
+        guard suggestionStateRuntime.hasCurrentSuggestion(rawInput: rawBuffer) else {
             return false
         }
-        return shouldSuppressContinuations(prefixCandidates: lastSuggestion?.prefixCandidates ?? [])
+        return shouldSuppressContinuations(
+            prefixCandidates: suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates ?? []
+        )
     }
 
     private func hasVisibleContinuationForCurrentSuggestion() -> Bool {
-        guard SuggestionPublicationGuard.hasCurrentSuggestion(
-            suggestionRawInput: lastSuggestionRawInput,
-            currentRawInput: rawBuffer
-        ) else {
+        guard suggestionStateRuntime.hasCurrentSuggestion(rawInput: rawBuffer) else {
             return false
         }
-        return lastSuggestion?.continuationCandidates.isEmpty == false
+        return suggestionStateRuntime.currentSnapshot().suggestion?.continuationCandidates.isEmpty == false
     }
 
     private static func shouldSuppressContinuations(
@@ -1163,32 +1124,33 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func selectedPrefixTextForLearning() -> String? {
+        let suggestion = suggestionStateRuntime.currentSnapshot().suggestion
         if let selectedNativeCandidate = nativeCandidateNavigationRuntime.selectedCandidate {
             switch selectedNativeCandidate.kind {
             case .rawInput:
                 return nil
             case .prefixCandidate(let index), .fullCandidate(let index):
-                return lastSuggestion?.prefixCandidates[inputControllerSafe: index]?.text
+                return suggestion?.prefixCandidates[inputControllerSafe: index]?.text
             case .segmentCandidate:
                 return nil
             case .aiRecommendation:
                 return nil
             case .continuationCandidate:
-                return lastSuggestion?.prefixCandidates.first?.text
+                return suggestion?.prefixCandidates.first?.text
             }
         }
 
         switch candidatePanelPublicationRuntime.state.windowState.selection {
         case .prefixCandidate(let index), .fullCandidate(let index):
-            return lastSuggestion?.prefixCandidates[inputControllerSafe: index]?.text
+            return suggestion?.prefixCandidates[inputControllerSafe: index]?.text
         case .segmentCandidate:
             return nil
         case .aiRecommendation:
             return nil
         case .continuationCandidate:
-            return lastSuggestion?.prefixCandidates.first?.text
+            return suggestion?.prefixCandidates.first?.text
         case .rawInput, .none:
-            return lastSuggestion?.prefixCandidates.first?.text
+            return suggestion?.prefixCandidates.first?.text
         }
     }
 
@@ -1254,7 +1216,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if action == .space,
            let selectedNativeCandidate,
            case .continuationCandidate = selectedNativeCandidate.kind {
-            let commitSuggestion = commitSuggestionSnapshot(for: action, client: client)
+            let commitSuggestion = commitSuggestionSnapshot(for: action)
             return InputSessionCommitPolicy.result(
                 for: action,
                 rawInput: rawBuffer,
@@ -1269,14 +1231,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         if compositionBuffer.hasResolvedSegments,
            compositionBuffer.isFullyResolved {
+            let suggestion = suggestionStateRuntime.currentSnapshot().suggestion
             if let selectedNativeCandidate,
                case .continuationCandidate(let index) = selectedNativeCandidate.kind,
                action == .space,
-               lastSuggestion?.continuationCandidates.indices.contains(index) == true {
+               suggestion?.continuationCandidates.indices.contains(index) == true {
                 return InputCompositionController().handle(
                     action: .optionNumber(index + 1),
                     prefixCandidates: [resolvedCompositionCandidate()],
-                    continuationCandidates: lastSuggestion?.continuationCandidates ?? [],
+                    continuationCandidates: suggestion?.continuationCandidates ?? [],
                     originalText: rawBuffer
                 )
             }
@@ -1284,13 +1247,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
             case .space:
                 return .commit(compositionBuffer.commitText)
             case .tab:
-                guard lastSuggestion?.continuationCandidates.isEmpty == false else {
+                guard suggestion?.continuationCandidates.isEmpty == false else {
                     return .noAction
                 }
                 return InputCompositionController().handle(
                     action: .tab,
                     prefixCandidates: [resolvedCompositionCandidate()],
-                    continuationCandidates: lastSuggestion?.continuationCandidates ?? [],
+                    continuationCandidates: suggestion?.continuationCandidates ?? [],
                     originalText: rawBuffer
                 )
             case .optionR:
@@ -1339,7 +1302,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return .noAction
         }
 
-        let commitSuggestion = commitSuggestionSnapshot(for: action, client: client)
+        let commitSuggestion = commitSuggestionSnapshot(for: action)
         return InputSessionCommitPolicy.result(
             for: action,
             rawInput: rawBuffer,
@@ -1356,21 +1319,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func commitSuggestionSnapshot(
-        for action: InputAction,
-        client: InputControllerClient?
+        for action: InputAction
     ) -> (suggestion: SuggestionResponse?, rawInput: String?, usesPendingFallback: Bool) {
-        if SuggestionPublicationGuard.hasCurrentSuggestion(
-            suggestionRawInput: lastSuggestionRawInput,
-            currentRawInput: rawBuffer
-        ) {
-            return (lastSuggestion, lastSuggestionRawInput, false)
-        }
-        guard enablesAsyncSuggestionRefresh,
-              action == .tab,
-              SuggestionRefreshPolicy.shouldRefresh(rawInput: rawBuffer) else {
-            return (lastSuggestion, lastSuggestionRawInput, false)
-        }
-        return (lastSuggestion, lastSuggestionRawInput, false)
+        let snapshot = suggestionStateRuntime.commitSnapshot(
+            action: action,
+            rawInput: rawBuffer,
+            asyncEnabled: enablesAsyncSuggestionRefresh
+        )
+        return (snapshot.suggestion, snapshot.rawInput, snapshot.usesPendingFallback)
     }
 
     private func applySegmentCandidate(
@@ -1378,7 +1334,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         commitIfFullyResolved: Bool,
         client: InputControllerClient?
     ) -> InputCommitResult {
-        guard let candidate = lastSuggestion?.prefixCandidates[inputControllerSafe: index],
+        guard let candidate = suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates[inputControllerSafe: index],
               candidate.rawRange != compositionBuffer.rawRange else {
             return .noAction
         }
@@ -1389,8 +1345,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         publishLocalSuggestion(client: client)
         if isFullyResolvedAfterApply {
             refreshResolvedCompositionContinuations(client: client)
-        } else {
-            refreshSuggestion(client: client)
         }
         if commitIfFullyResolved, isFullyResolvedAfterApply {
             return .commit(compositionBuffer.commitText)
@@ -1439,7 +1393,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 acceptedAIRecommendation: acceptedAIRecommendation,
                 acceptID: acceptID,
                 selectedNativeCandidateSource: nativeCandidateNavigationRuntime.selectedCandidate?.kind.analyticsSource,
-                prefixCandidateSource: lastSuggestion?.prefixCandidates.first?.source,
+                prefixCandidateSource: suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates.first?.source,
                 deleteCountBeforeCommit: deleteCountBeforeCommit,
                 client: client
             )
@@ -1603,13 +1557,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func invalidateSuggestion() {
-        suggestionGeneration += 1
-        lastSuggestion = nil
-        lastSuggestionRawInput = nil
+        suggestionStateRuntime.invalidate()
         nativeCandidateNavigationRuntime.clearSelectedCandidate()
-        suggestionTask?.cancel()
-        suggestionTask = nil
-        taskSupervisor.cancel(.localCandidates)
         aiRecommendationState = aiRecommendationRuntime.reset(
             compositionID: compositionID,
             rawLength: rawBuffer.count,
@@ -1661,7 +1610,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             compositionID: compositionID,
             rawRevision: rawRevision,
             suggestion: suggestion,
-            lastSuggestionRawInput: lastSuggestionRawInput,
+            lastSuggestionRawInput: suggestionStateRuntime.currentSnapshot().rawInput,
             nativeIsActive: conversionEngine.isNativeActive,
             nativeHasActiveInput: nativeSnapshotHasActiveInput(conversionEngine.snapshot)
         )
@@ -1898,7 +1847,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 guard let self else {
                     return
                 }
-                self.updateCandidatePanelImmediately(suggestion: self.lastSuggestion, client: client)
+                self.updateCandidatePanelImmediately(
+                    suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
+                    client: client
+                )
             }
         )
     }
