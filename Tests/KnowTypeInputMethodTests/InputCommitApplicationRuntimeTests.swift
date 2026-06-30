@@ -73,53 +73,6 @@ final class InputCommitApplicationRuntimeTests: XCTestCase {
         XCTAssertEqual(contexts.lexicalCommit.compositionID, 42)
     }
 
-    func testLifecycleFinishPlanClearsOwnedMarkedTextOnlyForActiveComposition() {
-        let runtime = InputCommitApplicationRuntime()
-        let activeSnapshot = compositionSnapshot(rawInput: "ni", compositionID: 7)
-        let idleSnapshot = compositionSnapshot(rawInput: "", compositionID: 8)
-
-        let activePlan = runtime.lifecycleFinishPlan(
-            panelVisibilityReason: .reset,
-            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: true,
-            compositionSnapshot: activeSnapshot,
-            hasNativeComposition: false,
-            commitText: nil
-        )
-        let nativeActivePlan = runtime.lifecycleFinishPlan(
-            panelVisibilityReason: .nativeEnded,
-            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: true,
-            compositionSnapshot: idleSnapshot,
-            hasNativeComposition: true,
-            commitText: nil
-        )
-        let idlePlan = runtime.lifecycleFinishPlan(
-            panelVisibilityReason: .close,
-            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: true,
-            compositionSnapshot: idleSnapshot,
-            hasNativeComposition: false,
-            commitText: nil
-        )
-        let noClearReasonPlan = runtime.lifecycleFinishPlan(
-            panelVisibilityReason: .compositionEnded,
-            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: false,
-            compositionSnapshot: activeSnapshot,
-            hasNativeComposition: true,
-            commitText: "ni"
-        )
-
-        XCTAssertEqual(activePlan.finishedCompositionID, 7)
-        XCTAssertEqual(activePlan.panelVisibilityReason, .reset)
-        XCTAssertNil(activePlan.commitText)
-        XCTAssertTrue(activePlan.shouldClearOwnedMarkedText)
-
-        XCTAssertEqual(nativeActivePlan.finishedCompositionID, 8)
-        XCTAssertTrue(nativeActivePlan.shouldClearOwnedMarkedText)
-
-        XCTAssertFalse(idlePlan.shouldClearOwnedMarkedText)
-        XCTAssertEqual(noClearReasonPlan.commitText, "ni")
-        XCTAssertFalse(noClearReasonPlan.shouldClearOwnedMarkedText)
-    }
-
     private func compositionSnapshot(
         rawInput: String,
         compositionID: Int,

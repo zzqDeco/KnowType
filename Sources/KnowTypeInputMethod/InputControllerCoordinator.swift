@@ -15,6 +15,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private weak var host: InputControllerHost?
     private let inputEventBus = InputEventBus()
     private let compositionStateRuntime = InputCompositionStateRuntime()
+    private let compositionLifecycleRuntime = InputCompositionLifecycleRuntime()
     private let suggestionStateRuntime = InputSuggestionStateRuntime()
     private var locale: KnowTypeLocale = .mixed
     private let inputModePreferenceStore: any InputModePreferenceStore
@@ -37,7 +38,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var lastInputModePreferenceReload = Date.distantPast
     private var lastRuntimePreferenceReload = Date.distantPast
     private let startupDebugStartedAt: Date
-    private var didTraceFirstCompositionBegin = false
 
     private var compositionState: InputCompositionStateSnapshot {
         compositionStateRuntime.currentSnapshot()
@@ -1462,16 +1462,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
     ) -> Bool {
         traceCompositionLifecycleFinish(reason: reason)
         let finishingSnapshot = compositionState
-        hideCandidatePanel(reason: reason.panelVisibilityReason)
-
-        let lifecycleClient = client ?? host?.currentClient
-        let finishPlan = commitApplicationRuntime.lifecycleFinishPlan(
-            panelVisibilityReason: reason.panelVisibilityReason,
-            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: reason.shouldClearMarkedTextWhenEndingWithoutCommit,
+        let finishPlan = compositionLifecycleRuntime.finishPlan(
+            reason: reason,
             compositionSnapshot: finishingSnapshot,
             hasNativeComposition: conversionEngine.snapshot.hasComposition,
             commitText: compositionStateRuntime.lifecycleCommitText(policy: commitPolicy)
         )
+        hideCandidatePanel(reason: finishPlan.panelVisibilityReason)
+
+        let lifecycleClient = client ?? host?.currentClient
         if let commitText = finishPlan.commitText,
            !commitText.isEmpty {
             recordCommitSideEffects(
@@ -1496,37 +1495,50 @@ final class InputControllerCoordinator: @unchecked Sendable {
         inputClientCompositionWriter.finishLifecycle(
             shouldClearOwnedMarkedTextWhenEndingWithoutCommit: finishPlan.shouldClearOwnedMarkedText
         )
-        publishRuntimeEvent(
-            .compositionEnded(
-                reason: finishPlan.panelVisibilityReason,
-                compositionID: finishPlan.finishedCompositionID
+        if finishPlan.shouldPublishCompositionEnded {
+            publishRuntimeEvent(
+                .compositionEnded(
+                    reason: finishPlan.panelVisibilityReason,
+                    compositionID: finishPlan.finishedCompositionID
+                )
             )
-        )
+        }
         return finishPlan.commitText?.isEmpty == false
     }
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
-        if rawBuffer.isEmpty {
-            if !didTraceFirstCompositionBegin {
-                didTraceFirstCompositionBegin = true
-                traceStartupEvent(
-                    "first_composition_begin",
-                    details: "bundle=\(appBundleIdentifier(client: client) ?? "<unknown>")"
-                )
-            }
-            if !aiAcceptanceRuntime.preserveFeedbackForReplacementComposition(client: client) {
-                aiAcceptanceRuntime.cancelFeedback(reason: "new_composition")
-            }
+        let beginPlan = compositionLifecycleRuntime.beginPlan(compositionSnapshot: compositionState)
+        guard beginPlan.shouldBegin else {
+            return
+        }
+
+        if beginPlan.shouldTraceFirstCompositionBegin {
+            traceStartupEvent(
+                "first_composition_begin",
+                details: "bundle=\(appBundleIdentifier(client: client) ?? "<unknown>")"
+            )
+        }
+        if let feedbackCancellationReason = beginPlan.feedbackCancellationReason,
+           !aiAcceptanceRuntime.preserveFeedbackForReplacementComposition(client: client) {
+            aiAcceptanceRuntime.cancelFeedback(reason: feedbackCancellationReason)
+        }
+        if beginPlan.shouldReloadPreferences {
             reloadInputModeDefaultsIfNeeded(client: client)
             reloadRuntimePreferencesIfNeeded()
+        }
+        if beginPlan.shouldReloadRuntimeLexicon {
             reloadRuntimeLexiconEngineIfNeeded()
-            let beginResult = compositionStateRuntime.beginCompositionIfNeeded()
+        }
+        let beginResult = compositionStateRuntime.beginCompositionIfNeeded()
+        if beginPlan.shouldPublishCompositionStarted {
             publishRuntimeEvent(
                 .compositionStarted(
                     compositionID: beginResult.snapshot.compositionID,
                     rawRevision: beginResult.snapshot.rawRevision
                 )
             )
+        }
+        if beginPlan.shouldResetAnchor {
             anchorResolver.reset()
         }
     }
@@ -1894,33 +1906,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
         !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
             scalar.value >= 48 && scalar.value <= 57
-        }
-    }
-}
-
-private enum CompositionLifecycleFinishReason: String {
-    case commit
-    case deactivate
-    case close
-    case reset
-    case nativeEnded = "native_ended"
-
-    var shouldClearMarkedTextWhenEndingWithoutCommit: Bool {
-        true
-    }
-
-    var panelVisibilityReason: CandidatePanelVisibilityReason {
-        switch self {
-        case .commit:
-            return .compositionEnded
-        case .deactivate:
-            return .deactivate
-        case .close:
-            return .close
-        case .reset:
-            return .reset
-        case .nativeEnded:
-            return .nativeEnded
         }
     }
 }

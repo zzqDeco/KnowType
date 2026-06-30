@@ -246,10 +246,13 @@ Core candidate types:
 - `InputCompositionStateRuntime`: input-method runtime that owns raw input,
   `CompositionBuffer`, composition id, raw revision, delete count, and pure
   composition-state mutation results.
+- `InputCompositionLifecycleRuntime`: input-method runtime that owns
+  composition begin/finish plans, first-begin trace-once state, finish reason
+  mapping, finished composition id capture, and owned marked-text clear intent.
 - `InputCommitApplicationRuntime`: input-method runtime that maps commit
   results to coordinator plans and constructs accepted-feedback, AI acceptance,
-  lexical commit, and lifecycle finish contexts without performing host writes
-  or Rime/candidate-panel side effects.
+  and lexical commit contexts without performing host writes or
+  Rime/candidate-panel side effects.
 - `InputSelectionHistoryRuntime`: input-method session owner for protected-input
   filtering, recent selection history, `candidateSelected` event payloads, and
   persistence delegation for prefix candidate choices.
@@ -379,7 +382,8 @@ Current write contract:
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
 - The hot path emits `InputFrame`/`CandidatePanelFrame`-style state and side-effect events. It must not call AI providers,
   lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly. Lexical commit/selection facts go through
-  `InputLexicalCommitRuntime`, which may schedule refresh from bounded local snapshots but does not run userdb sync. Commit side-effect contexts go through
+  `InputLexicalCommitRuntime`, which may schedule refresh from bounded local snapshots but does not run userdb sync. Composition lifecycle plans go through
+  `InputCompositionLifecycleRuntime`, and commit side-effect contexts go through
   `InputCommitApplicationRuntime` before the coordinator executes order-sensitive host writes and lifecycle cleanup. Real-time AI provider calls go through
   `InputAIRecommendationRuntime`, which publishes only AI slot state after stale-result guards pass.
 

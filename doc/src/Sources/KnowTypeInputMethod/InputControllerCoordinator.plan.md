@@ -7,6 +7,10 @@ Current behavior:
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
 - delegates raw input, `CompositionBuffer`, composition id, raw revision, and
   delete-count state to `InputCompositionStateRuntime`
+- delegates composition begin and finish lifecycle planning to
+  `InputCompositionLifecycleRuntime`, including first-begin trace-once state,
+  lifecycle reason to panel reason mapping, finished composition id capture,
+  lifecycle commit text carrying, and owned marked-text clear intent
 - owns input-mode runtime, Rime snapshots, and native candidate navigation
   orchestration
 - selects a host compatibility write mode before writing or passing through
@@ -73,11 +77,10 @@ Current behavior:
   `InputLexicalCommitRuntime`, including selection-history recording, bounded
   recent commit tracking, lexical profile refresh scheduling, and
   `candidateSelected` / `compositionCommitted` event construction
-- delegates commit result planning, commit side-effect context construction, and
-  lifecycle finish planning to `InputCommitApplicationRuntime`; the coordinator
-  still executes host insertion, marked-text cleanup, Rime reset, panel hide,
-  anchor reset, AI/lexical runtime calls, and lifecycle event publication in
-  order
+- delegates commit result planning and commit side-effect context construction
+  to `InputCommitApplicationRuntime`; the coordinator still executes host
+  insertion, marked-text cleanup, Rime reset, panel hide, anchor reset,
+  AI/lexical runtime calls, and lifecycle event publication in order
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - delegates explicit AI accepted-learning records, typing-context events, and
   accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the
@@ -139,7 +142,8 @@ Current behavior:
   coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
 - clears composition state for cancel and commit through
-  `InputCompositionStateRuntime` while the coordinator keeps candidate-panel
+  `InputCompositionStateRuntime` and lifecycle plans from
+  `InputCompositionLifecycleRuntime` while the coordinator keeps candidate-panel
   hide, Rime reset, marked-text cleanup, and runtime-event publication in order
 - receives candidate-panel publication results from
   `InputCandidatePanelPublicationRuntime` and asks
