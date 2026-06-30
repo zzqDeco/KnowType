@@ -4880,6 +4880,272 @@ private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @un
     }
 }
 
+final class InputControllerCoordinatorRefactorRegressionTests: XCTestCase {
+    func testInlineHostCompositionKeepsMarkedPanelCommitAndResetOrder() throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+
+        let windowState = try XCTUnwrap(host.panelStates.last?.windowState)
+        let firstCandidate = try XCTUnwrap(windowState.viewModel.prefixCandidates.first?.text)
+        XCTAssertEqual(windowState.viewModel.rawInput, "ni")
+        XCTAssertNil(windowState.viewModel.preeditDisplayText)
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n", "ni"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testTerminalHostKeepsIdlePassthroughAndActivePlaceholderCommitPath() throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertFalse(coordinator.handleText("a", client: client))
+        XCTAssertFalse(coordinator.handleText("1", client: client))
+        XCTAssertFalse(coordinator.handleText(" ", client: client))
+        XCTAssertFalse(coordinator.handleText(".", client: client))
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertTrue(host.panelStates.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+
+        let windowState = try XCTUnwrap(host.panelStates.last?.windowState)
+        let firstCandidate = try XCTUnwrap(windowState.viewModel.prefixCandidates.first?.text)
+        XCTAssertEqual(windowState.viewModel.preeditDisplayText, "ni")
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testDeactivateLifecycleCommitsRawUsingPreResetSnapshotAndResetsNativeState() async {
+        let client = FakeInputControllerClient()
+        let contextRecorder = RecordingAIContextEventRecorder()
+        let conversionRecorder = RefactorRegressionConversionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiContextEventRecorder: contextRecorder,
+            conversionEngine: ResetRecordingNativeConversionEngine(recorder: conversionRecorder)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        coordinator.deactivateServer(client: client)
+
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "n")
+        XCTAssertEqual(conversionRecorder.resetCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+
+        let recorded = await waitUntil {
+            await contextRecorder.events.contains {
+                $0.rawInput == "n"
+                    && $0.committedText == "n"
+                    && $0.commitKind == .raw
+                    && $0.deleteCountBeforeCommit == 0
+            }
+        }
+        XCTAssertTrue(recorded)
+    }
+
+    func testCloseLifecycleClearsOwnedMarkedTextWithoutCommittingRawText() {
+        let client = FakeInputControllerClient()
+        let conversionRecorder = RefactorRegressionConversionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: ResetRecordingNativeConversionEngine(recorder: conversionRecorder)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        coordinator.inputControllerWillClose()
+
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(conversionRecorder.resetCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testNativeEndedLifecycleClearsOwnedMarkedTextWithoutPanelRevival() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: NativeEndedNoCommitConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        let panelUpdateCountBeforeCommit = host.panelStates.count
+
+        coordinator.commitComposition(client: client)
+        host.runScheduledOperations()
+
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(host.panelStates.count, panelUpdateCountBeforeCommit)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testDelayedReanchorDoesNotRevivePanelAfterCompositionCommit() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertFalse(host.scheduledOperations.isEmpty)
+        let firstCandidate = try XCTUnwrap(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        let panelUpdateCountAfterCommit = host.panelStates.count
+        let hideCountAfterCommit = host.hideCandidatePanelCount
+
+        host.runScheduledOperations()
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(host.panelStates.count, panelUpdateCountAfterCommit)
+        XCTAssertEqual(host.hideCandidatePanelCount, hideCountAfterCommit)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    private func makeCoordinator(
+        client: FakeInputControllerClient,
+        provider: (any LLMProvider)? = nil,
+        aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        inputModePreferences: InputModePreferences = .standard,
+        runtimePreferences: InputMethodRuntimePreferences = .standard,
+        conversionEngine: (any KnowTypeConversionEngine)? = nil,
+        enablesAsyncSuggestionRefresh: Bool = false
+    ) -> (
+        InputControllerCoordinator,
+        FakeInputControllerHost,
+        FakeUserSelectionHistoryPersistence
+    ) {
+        let host = FakeInputControllerHost()
+        host.currentClientValue = client
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let coordinator = InputControllerCoordinator(
+            provider: provider,
+            traditionalInputEngine: nil,
+            inputModePreferenceStore: FixedInputModePreferenceStore(preferences: inputModePreferences),
+            runtimePreferenceStore: FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
+            initialRuntimePreferences: runtimePreferences,
+            initialAppBundleID: client.bundleIdentifier,
+            userSelectionHistoryPersistence: persistence,
+            aiContextEventRecorder: aiContextEventRecorder,
+            conversionEngine: conversionEngine ?? FixtureNativeConversionEngine(),
+            host: host,
+            anchorResolver: CandidateAnchorResolver(
+                screenProvider: FixedInputControllerScreenProvider(),
+                accessibilityProvider: NoopAccessibilityAnchorProvider(),
+                traceEnabled: false
+            ),
+            enablesAsyncSuggestionRefresh: enablesAsyncSuggestionRefresh
+        )
+        return (coordinator, host, persistence)
+    }
+
+    @MainActor
+    private func waitUntil(
+        timeout: TimeInterval = 3,
+        condition: @escaping () async -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await condition() {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return await condition()
+    }
+}
+
+private final class RefactorRegressionConversionRecorder: @unchecked Sendable {
+    var resetCount = 0
+}
+
+private struct ResetRecordingNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    let recorder: RefactorRegressionConversionRecorder
+    private var rawInput = ""
+
+    var activeSchemaID = "pinyin_simp"
+
+    init(recorder: RefactorRegressionConversionRecorder) {
+        self.recorder = recorder
+    }
+
+    var snapshot: ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-reset-recording")
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [ConversionEngineCandidate(text: "候选\(rawInput)", index: 0, source: "native-reset-recording")],
+            highlightedIndex: 0,
+            pageSize: 1,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-reset-recording"
+        )
+    }
+
+    mutating func reset() {
+        recorder.resetCount += 1
+        rawInput = ""
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
+        }
+    }
+}
+
 private actor RecordingAIContextEventRecorder: AIContextEventRecording {
     private var recordedEvents: [AITypingEvent] = []
 

@@ -55,6 +55,7 @@ when converting a shipped plan into a short record.
 | [input-composition-state-runtime-refactor.plan.md](input-composition-state-runtime-refactor.plan.md) | Extract raw input, composition buffer, composition id/revision, and delete-count state from the coordinator | Active |
 | [input-composition-lifecycle-runtime-refactor.plan.md](input-composition-lifecycle-runtime-refactor.plan.md) | Extract composition begin/finish lifecycle planning and trace-once state from the coordinator | Active |
 | [input-commit-application-runtime-refactor.plan.md](input-commit-application-runtime-refactor.plan.md) | Extract commit-result planning and side-effect context construction from the coordinator | Active |
+| [input-refactor-regression-audit.plan.md](input-refactor-regression-audit.plan.md) | Lock coordinator-level behavior after the input-method runtime extraction sequence | Active |
 | [input-client-composition-writer-refactor.plan.md](input-client-composition-writer-refactor.plan.md) | Extract host composition write state and owned marked-text cleanup from the coordinator | Active |
 | [input-selection-history-runtime-refactor.plan.md](input-selection-history-runtime-refactor.plan.md) | Extract local prefix-selection history filtering, recent cache, event payload, and persistence delegation from the coordinator | Active |
 | [session-suggestion-pipeline-refactor.plan.md](session-suggestion-pipeline-refactor.plan.md) | Rename the session suggestion pipeline boundary and remove the obsolete InputMethodPipeline name without a compatibility alias | Active |

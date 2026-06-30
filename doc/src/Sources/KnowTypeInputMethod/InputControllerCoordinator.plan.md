@@ -145,6 +145,10 @@ Current behavior:
   `InputCompositionStateRuntime` and lifecycle plans from
   `InputCompositionLifecycleRuntime` while the coordinator keeps candidate-panel
   hide, Rime reset, marked-text cleanup, and runtime-event publication in order
+- has post-refactor regression coverage for the cross-runtime paths that must
+  remain order-stable after the extraction sequence: inline marked text,
+  terminal placeholder composition, lifecycle close/deactivate/native-ended
+  cleanup, delayed re-anchor stale gating, and AI typing-context snapshots
 - receives candidate-panel publication results from
   `InputCandidatePanelPublicationRuntime` and asks
   `InputNativeCandidateNavigationRuntime` to map visible panel selection back
