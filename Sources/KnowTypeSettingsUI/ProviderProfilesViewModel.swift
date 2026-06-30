@@ -49,7 +49,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         do {
             let loaded = try profileStore.loadProfiles()
             if loaded.profiles.isEmpty && loadDefaultsWhenEmpty {
-                let defaults = Self.profileScopedSecrets(ProviderProfileTemplates.defaultProfiles())
+                let defaults = ProviderProfileEditingPolicy.profileScopedSecrets(ProviderProfileTemplates.defaultProfiles())
                 resolvedFile = loaded
                 resolvedProfiles = defaults
             } else {
@@ -94,7 +94,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
     public func createProfile(kind: ProviderKind) {
         var profile = ProviderProfileTemplates.defaultProfile(kind: kind)
         if profile.secretName != nil {
-            profile.secretName = Self.secretName(for: profile.id)
+            profile.secretName = ProviderProfileEditingPolicy.secretName(for: profile.id)
         }
         selectedProfileID = profile.id
         draft = ProviderProfileDraft(profile: profile)
@@ -118,7 +118,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
             draft.apiKey = ""
         } else {
             let existingProfile = profiles.first(where: { $0.id == draft.id })
-            draft.secretName = existingProfile?.secretName ?? Self.secretName(for: draft.id)
+            draft.secretName = existingProfile?.secretName ?? ProviderProfileEditingPolicy.secretName(for: draft.id)
         }
         draft.customBodyTemplate = template.customBodyTemplate ?? ""
         draft.customResponsePath = template.customResponsePath ?? ""
@@ -133,60 +133,25 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return false
         }
 
-        validationErrors = validate(draft)
-        if !draft.isDefault && !profiles.contains(where: { $0.id != draft.id && $0.isDefault }) {
-            validationErrors.append(Self.defaultProviderValidationError)
-        }
+        validationErrors = ProviderProfileEditingPolicy.saveValidationErrors(draft: draft, profiles: profiles)
         guard validationErrors.isEmpty else {
             return false
         }
 
         do {
-            var profile = try draft.makeProfile()
-            let existingProfile = profiles.first(where: { $0.id == profile.id })
-            let secretMutation = Self.secretMutation(
-                for: profile,
-                existingProfile: existingProfile,
-                draftAPIKey: draft.apiKey
+            let plan = try ProviderProfileEditingPolicy.makeSavePlan(
+                draft: draft,
+                profiles: profiles,
+                file: file,
+                secretResolver: { try secretStore.secret(named: $0) }
             )
-            try validateSecretAvailability(for: profile, existingProfile: existingProfile, mutation: secretMutation)
-
-            switch secretMutation {
-            case .set(_, let secretName, _):
-                profile.secretName = secretName
-            case .delete:
-                profile.secretName = nil
-            case .none:
-                if Self.requiresSecret(profile) {
-                    profile.secretName = existingProfile?.secretName ?? profile.secretName ?? Self.secretName(for: profile.id)
-                } else if Self.acceptsOptionalSecret(profile),
-                          Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) {
-                    profile.secretName = try retainedOptionalSecretName(from: existingProfile)
-                } else {
-                    profile.secretName = nil
-                }
-            }
-
-            var updatedProfiles = profiles
-            if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-                updatedProfiles[index] = profile
-            } else {
-                updatedProfiles.append(profile)
-            }
-
-            if profile.isDefault {
-                updatedProfiles = updatedProfiles.map { existing in
-                    var updated = existing
-                    updated.isDefault = existing.id == profile.id
-                    return updated
-                }
-            }
-
-            var updatedFile = file
-            updatedFile.profiles = updatedProfiles
-            try profileStore.saveProfiles(updatedFile)
+            try profileStore.saveProfiles(plan.updatedFile)
             do {
-                try apply(secretMutation, updatedProfiles: updatedProfiles)
+                try ProviderProfileEditingPolicy.applySecretMutation(
+                    plan.secretMutation,
+                    updatedProfiles: plan.updatedProfiles,
+                    secretStore: secretStore
+                )
             } catch {
                 let secretMutationError = error
                 do {
@@ -199,10 +164,10 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 }
                 throw secretMutationError
             }
-            profiles = updatedProfiles
-            file = updatedFile
-            selectedProfileID = profile.id
-            draft = ProviderProfileDraft(profile: profile)
+            profiles = plan.updatedProfiles
+            file = plan.updatedFile
+            selectedProfileID = plan.selectedProfileID
+            draft = plan.postSaveDraft
             lastErrorMessage = nil
             resetConnectionStatus()
             return true
@@ -256,21 +221,25 @@ public final class ProviderProfilesViewModel: ObservableObject {
             draft: draft
         )
 
-        let connectionValidationErrors = validate(snapshot.draft)
+        let connectionValidationErrors = ProviderProfileEditingPolicy.validate(snapshot.draft)
         guard connectionValidationErrors.isEmpty else {
-            validationErrors = Self.mergedValidationErrors(
+            validationErrors = ProviderProfileEditingPolicy.mergedValidationErrors(
                 connectionValidationErrors,
-                Self.saveOnlyValidationErrors(from: validationErrors)
+                ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
             )
             connectionStatus = .failure("Fix validation errors before testing.")
             return false
         }
-        validationErrors = Self.saveOnlyValidationErrors(from: validationErrors)
+        validationErrors = ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
 
         connectionTestGeneration &+= 1
         let generation = connectionTestGeneration
         do {
-            let configuration = try connectionTestConfiguration(for: snapshot.draft)
+            let configuration = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
+                draft: snapshot.draft,
+                profiles: profiles,
+                secretResolver: { try secretStore.secret(named: $0) }
+            )
             connectionStatus = .testing
             let result = try await connectionTester(configuration)
             guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
@@ -289,78 +258,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 
     public func validate(_ draft: ProviderProfileDraft) -> [String] {
-        var errors: [String] = []
-        if draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errors.append("Display name is required.")
-        }
-        let validBaseURL = Self.validHTTPURL(draft.baseURL)
-        if validBaseURL == nil {
-            errors.append("Base URL must be an HTTP or HTTPS URL.")
-        }
-        if Self.requiresModel(kind: draft.kind, baseURL: validBaseURL) {
-            let model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
-            if model.isEmpty || Self.isRemoteOpenAIPlaceholderModel(
-                kind: draft.kind,
-                baseURL: validBaseURL,
-                model: model
-            ) {
-                errors.append("Model is required.")
-            }
-        }
-        if draft.timeoutSeconds <= 0 {
-            errors.append("Timeout must be greater than zero.")
-        }
-        if draft.kind == .customHTTP {
-            if draft.customBodyTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                errors.append("Custom HTTP body template is required.")
-            }
-            if draft.customResponsePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                errors.append("Custom HTTP response path is required.")
-            }
-        }
-        return errors
-    }
-
-    private func connectionTestConfiguration(for draft: ProviderProfileDraft) throws -> ProviderConfiguration {
-        var profile = try draft.makeProfile()
-        let existingProfile = profiles.first(where: { $0.id == profile.id })
-        let trimmedAPIKey = draft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let apiKey: String?
-        if trimmedAPIKey.isEmpty {
-            if Self.shouldClearBlankOptionalSecret(for: profile, existingProfile: existingProfile) {
-                apiKey = nil
-            } else if Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) {
-                apiKey = try resolvedExistingSecret(for: profile)
-            } else {
-                apiKey = nil
-            }
-            if Self.requiresSecret(profile), apiKey == nil {
-                throw ProviderProfilesViewModelError.missingAPIKey
-            }
-        } else {
-            apiKey = trimmedAPIKey
-        }
-
-        profile.secretName = apiKey == nil ? nil : profile.secretName
-        return ProviderConfiguration(
-            kind: profile.kind,
-            baseURL: profile.baseURL,
-            apiKey: apiKey,
-            model: profile.model,
-            timeoutSeconds: profile.timeoutSeconds,
-            headers: profile.headers,
-            customBodyTemplate: profile.customBodyTemplate,
-            customResponsePath: profile.customResponsePath
-        )
-    }
-
-    private func resolvedExistingSecret(for profile: ProviderProfile) throws -> String? {
-        guard let secretName = profile.secretName,
-              let existingSecret = try secretStore.secret(named: secretName) else {
-            return nil
-        }
-        let trimmed = existingSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        ProviderProfileEditingPolicy.validate(draft)
     }
 
     private func resetConnectionStatus() {
@@ -375,247 +273,6 @@ public final class ProviderProfilesViewModel: ObservableObject {
         generation == connectionTestGeneration
             && selectedProfileID == snapshot.selectedProfileID
             && draft == snapshot.draft
-    }
-
-    private static func secretName(for profileID: String) -> String {
-        "knowtype.provider.\(profileID).apiKey"
-    }
-
-    private static func profileScopedSecrets(_ profiles: [ProviderProfile]) -> [ProviderProfile] {
-        profiles.map { profile in
-            var scoped = profile
-            if scoped.secretName != nil {
-                scoped.secretName = secretName(for: scoped.id)
-            }
-            return scoped
-        }
-    }
-
-    private static func requiresSecret(_ profile: ProviderProfile) -> Bool {
-        switch profile.kind {
-        case .openAIChat, .openAIResponses:
-            return !isLocalBaseURL(profile.baseURL)
-        case .anthropicMessages, .geminiNative:
-            return true
-        case .ollamaNative, .customHTTP:
-            return false
-        }
-    }
-
-    private static func acceptsOptionalSecret(_ profile: ProviderProfile) -> Bool {
-        switch profile.kind {
-        case .openAIChat, .openAIResponses:
-            return isLocalBaseURL(profile.baseURL)
-        case .customHTTP:
-            return true
-        case .anthropicMessages, .geminiNative, .ollamaNative:
-            return false
-        }
-    }
-
-    private static func requiresModel(kind: ProviderKind, baseURL: URL?) -> Bool {
-        switch kind {
-        case .anthropicMessages, .geminiNative, .ollamaNative:
-            return true
-        case .openAIChat, .openAIResponses:
-            guard let baseURL else {
-                return false
-            }
-            return !isLocalBaseURL(baseURL)
-        case .customHTTP:
-            return false
-        }
-    }
-
-    private static func isRemoteOpenAIPlaceholderModel(
-        kind: ProviderKind,
-        baseURL: URL?,
-        model: String
-    ) -> Bool {
-        switch kind {
-        case .openAIChat, .openAIResponses:
-            guard let baseURL,
-                  !isLocalBaseURL(baseURL) else {
-                return false
-            }
-            return OpenAICompatibleModelDiscovery.requiresDiscovery(model)
-        case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
-            return false
-        }
-    }
-
-    private static func isLocalBaseURL(_ url: URL) -> Bool {
-        guard let host = url.host(percentEncoded: false)?.lowercased() else {
-            return false
-        }
-        return host == "localhost"
-            || host == "127.0.0.1"
-            || host == "::1"
-            || host.hasSuffix(".local")
-    }
-
-    private func validateSecretAvailability(
-        for profile: ProviderProfile,
-        existingProfile: ProviderProfile?,
-        mutation: SecretMutation
-    ) throws {
-        guard Self.requiresSecret(profile), case .none = mutation else {
-            return
-        }
-        guard Self.canReuseExistingSecret(for: profile, existingProfile: existingProfile) else {
-            throw ProviderProfilesViewModelError.missingAPIKey
-        }
-        guard let secretName = profile.secretName,
-              let existingSecret = try secretStore.secret(named: secretName),
-              !existingSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ProviderProfilesViewModelError.missingAPIKey
-        }
-    }
-
-    private func retainedOptionalSecretName(from existingProfile: ProviderProfile?) throws -> String? {
-        guard let secretName = existingProfile?.secretName else {
-            return nil
-        }
-        guard let existingSecret = try secretStore.secret(named: secretName),
-              !existingSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
-        }
-        return secretName
-    }
-
-    private enum SecretMutation {
-        case none
-        case set(value: String, secretName: String, oldSecretName: String?)
-        case delete(secretName: String)
-    }
-
-    private static func secretMutation(
-        for profile: ProviderProfile,
-        existingProfile: ProviderProfile?,
-        draftAPIKey: String
-    ) -> SecretMutation {
-        let trimmedAPIKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if requiresSecret(profile) || acceptsOptionalSecret(profile) {
-            guard !trimmedAPIKey.isEmpty else {
-                if shouldClearBlankOptionalSecret(for: profile, existingProfile: existingProfile),
-                   let oldSecretName = existingProfile?.secretName {
-                    return .delete(secretName: oldSecretName)
-                }
-                if acceptsOptionalSecret(profile),
-                   !canReuseExistingSecret(for: profile, existingProfile: existingProfile),
-                   let oldSecretName = existingProfile?.secretName {
-                    return .delete(secretName: oldSecretName)
-                }
-                return .none
-            }
-            let secretName = secretName(for: profile.id)
-            return .set(value: trimmedAPIKey, secretName: secretName, oldSecretName: existingProfile?.secretName)
-        }
-
-        guard let oldSecretName = existingProfile?.secretName else {
-            return .none
-        }
-        return .delete(secretName: oldSecretName)
-    }
-
-    private static func shouldClearBlankOptionalSecret(
-        for profile: ProviderProfile,
-        existingProfile: ProviderProfile?
-    ) -> Bool {
-        guard let existingProfile else {
-            return false
-        }
-        switch profile.kind {
-        case .openAIChat, .openAIResponses:
-            return isLocalBaseURL(profile.baseURL)
-                && (profile.kind != existingProfile.kind || !isLocalBaseURL(existingProfile.baseURL))
-        case .anthropicMessages, .geminiNative, .ollamaNative, .customHTTP:
-            return false
-        }
-    }
-
-    private static let defaultProviderValidationError = "At least one default provider is required."
-
-    private static func saveOnlyValidationErrors(from errors: [String]) -> [String] {
-        errors.filter { $0 == defaultProviderValidationError }
-    }
-
-    private static func mergedValidationErrors(_ groups: [String]...) -> [String] {
-        var seen = Set<String>()
-        var merged: [String] = []
-        for error in groups.flatMap({ $0 }) where seen.insert(error).inserted {
-            merged.append(error)
-        }
-        return merged
-    }
-
-    private static func canReuseExistingSecret(
-        for profile: ProviderProfile,
-        existingProfile: ProviderProfile?
-    ) -> Bool {
-        guard let existingProfile,
-              profile.secretName == existingProfile.secretName else {
-            return false
-        }
-        return profile.kind == existingProfile.kind
-            && credentialEndpointScope(profile.baseURL) == credentialEndpointScope(existingProfile.baseURL)
-    }
-
-    private static func credentialEndpointScope(_ url: URL) -> String {
-        let scheme = url.scheme?.lowercased() ?? ""
-        let host = url.host(percentEncoded: false)?.lowercased() ?? ""
-        let port = url.port ?? defaultPort(for: scheme)
-        let portValue = port.map(String.init) ?? ""
-        return "\(scheme)://\(host):\(portValue)"
-    }
-
-    private static func defaultPort(for scheme: String) -> Int? {
-        switch scheme {
-        case "http":
-            return 80
-        case "https":
-            return 443
-        default:
-            return nil
-        }
-    }
-
-    private func apply(_ mutation: SecretMutation, updatedProfiles: [ProviderProfile]) throws {
-        switch mutation {
-        case .none:
-            return
-        case .set(let value, let secretName, let oldSecretName):
-            try secretStore.setSecret(value, named: secretName)
-            if let oldSecretName,
-               oldSecretName != secretName,
-               !Self.isSecretReferenced(oldSecretName, in: updatedProfiles) {
-                do {
-                    try secretStore.deleteSecret(named: oldSecretName)
-                } catch {
-                    try? secretStore.deleteSecret(named: secretName)
-                    throw error
-                }
-            }
-        case .delete(let secretName):
-            if !Self.isSecretReferenced(secretName, in: updatedProfiles) {
-                try secretStore.deleteSecret(named: secretName)
-            }
-        }
-    }
-
-    private static func isSecretReferenced(_ secretName: String, in profiles: [ProviderProfile]) -> Bool {
-        profiles.contains { $0.secretName == secretName }
-    }
-
-    private static func validHTTPURL(_ value: String) -> URL? {
-        guard let url = URL(string: value),
-              let scheme = url.scheme,
-              (scheme == "http" || scheme == "https"),
-              url.host?.isEmpty == false else {
-            return nil
-        }
-        return url
     }
 }
 
