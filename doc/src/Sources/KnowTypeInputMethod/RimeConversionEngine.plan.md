@@ -12,6 +12,11 @@ input.
 - Engine initialization is cold-start read-only. It stores the native Rime
   configuration but does not create the `NativeRimeSession`, user data
   directory, or log directory until the first real `process(_:)` call.
+- `RimeConversionEngine.prewarmNativeSession(configuration:)` is the explicit
+  exception used after the IMK controller is live. It creates and releases a
+  temporary native session to move cold Rime/dyld cost off the user's first
+  key, while normal engine construction, `snapshot`, `activeSchemaID`,
+  `isNativeActive`, and `reset()` remain read-only.
 - Source-tree artifacts under `Vendor/Rime` require explicit `KNOWTYPE_RIME_ENABLED=1`; installed app bundles use bundled Frameworks/Resources automatically.
 - xctest processes use temporary Rime user/log directories to avoid locking the user's live Rime DB.
 - Explicit Rime environment paths expand leading `~` before URL conversion, so
@@ -29,6 +34,11 @@ input.
   initializing Rime user data.
 - With `KNOWTYPE_STARTUP_DEBUG=1`, first native session creation logs elapsed
   time, schema id, and success state without logging input text.
+- With `KNOWTYPE_STARTUP_DEBUG=1`, native prewarm logs start/done events with
+  elapsed time, schema id, and success state without logging input text.
+- Native session creation is serialized with a narrow Swift lock so background
+  prewarm and a very early first key cannot concurrently enter librime session
+  creation.
 - Native sessions initially select the configured schema, but
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct

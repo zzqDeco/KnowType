@@ -485,6 +485,36 @@ final class RimeConversionEngineTests: XCTestCase {
         )
     }
 
+    func testNativeRimePrewarmHandlesMissingConfiguration() {
+        XCTAssertFalse(RimeConversionEngine.prewarmNativeSession(configuration: nil))
+    }
+
+    func testNativeRimePrewarmKeepsFirstProcessUsableWhenArtifactsAreAvailable() throws {
+        let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
+            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-prewarm-\(UUID().uuidString)", isDirectory: true)
+        configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
+        configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
+        // librime keeps process-global state after a session is destroyed, so do
+        // not remove this sandbox before the test process exits.
+
+        XCTAssertTrue(RimeConversionEngine.prewarmNativeSession(configuration: configuration))
+
+        var engine = RimeConversionEngine(
+            traditionalInputEngine: TraditionalInputEngine(),
+            configuration: configuration
+        )
+        XCTAssertTrue(engine.process(.text("n")).handled)
+        guard engine.isNativeActive else {
+            throw XCTSkip("librime could not create a native session")
+        }
+        XCTAssertTrue(engine.process(.text("i")).handled)
+        XCTAssertFalse(engine.snapshot.candidates.isEmpty)
+    }
+
     func testNativeRimeSessionSmokeWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {

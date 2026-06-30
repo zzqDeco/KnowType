@@ -16,11 +16,16 @@ Current behavior:
 - keeps AppKit/InputMethodKit imports guarded by `canImport(InputMethodKit)`
 - owns the production `CandidatePanelWindowController` and exposes it through the host seam
 - starts the coordinator without `InputMethodLexiconRuntime`; production Chinese conversion is Rime-only and must not build `TraditionalInputEngine` during controller startup
-- keeps cold start read-only for user data: provider loading, AI recommendation
-  runtime documents, AI context memory, accepted learning/feedback writes, and
-  Rime native sessions are lazy until real input, AI scheduling, or explicit
-  maintenance occurs; selection history opens in no-create mode and only writes
-  after a real candidate selection
+- schedules a process-wide native Rime session prewarm on a utility task after
+  controller initialization; this does not change `RimeConversionEngine`'s
+  read-only construction semantics, and a very early first key can still use the
+  normal lazy synchronous session creation path
+- keeps controller construction read-only for provider and AI user data:
+  provider loading, AI recommendation runtime documents, AI context memory, and
+  accepted learning/feedback writes stay lazy until real input, AI scheduling,
+  or explicit maintenance occurs; Rime native session prewarm is the explicit
+  post-init performance exception, and selection history opens in no-create mode
+  and only writes after a real candidate selection
 - injects a process-wide lexical profile store, refresh gate, and Rime userdb snapshot provider so multiple IMK controller sessions cannot independently overwrite the global `LEXICAL_PROFILE.md`
 - overrides `showPreferences(_:)` and retains `KnowTypePreferencesWindowController`, so the input-method menu opens the SwiftUI settings window without relying on InputMethodKit's default nib-backed preferences loader
 - builds its input-method menu through `KnowTypeInputMethodMenuBuilder`: `AI Continuation`, log/support/Rime folders, `KnowType Settings...`, and About
@@ -29,5 +34,5 @@ Current behavior:
 
 The controller should stay small. Product input behavior, marked text writes, commit replacement ranges, lifecycle flushing, and delayed re-anchor gating belong in `InputControllerCoordinator` so they can be covered by unit tests without installing a real Text Input Source.
 
-Set `KNOWTYPE_STARTUP_DEBUG=1` to log controller init timing and lazy runtime
-state without recording user text.
+Set `KNOWTYPE_STARTUP_DEBUG=1` to log controller init timing, Rime prewarm
+timing, and lazy runtime state without recording user text.

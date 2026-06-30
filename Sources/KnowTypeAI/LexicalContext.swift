@@ -2,6 +2,19 @@ import CryptoKit
 import Foundation
 import KnowTypeCore
 
+private struct LexicalContextRegex: @unchecked Sendable {
+    let regex: NSRegularExpression
+
+    init(_ pattern: String) {
+        self.regex = try! NSRegularExpression(pattern: pattern, options: [])
+    }
+
+    func matches(_ text: String) -> Bool {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.firstMatch(in: text, options: [], range: range) != nil
+    }
+}
+
 public struct LexicalContextTerm: Codable, Sendable, Equatable, Hashable {
     public var text: String
     public var score: Double
@@ -133,6 +146,16 @@ public protocol LexicalContextProviding: Sendable {
 }
 
 public struct LexicalContextBuilder: Sendable {
+    private static let wordRegex = LexicalContextRegex(#"[A-Za-z_]"#)
+    private static let asciiWordRegex = LexicalContextRegex(#"[A-Za-z0-9_]"#)
+    private static let hanRegex = LexicalContextRegex(#"\p{Han}"#)
+    private static let numericRegex = LexicalContextRegex(#"^\d+$"#)
+    private static let protectedPrefixRegex = LexicalContextRegex(#"^(https?://|[A-Za-z]:/|/|~/)"#)
+    private static let acceptedProtectedPrefixRegex = LexicalContextRegex(#"(?i)^(https?://|www\.|[A-Za-z]:[\\/]|/|~/|\./|\.\./)"#)
+    private static let acceptedEmailRegex = LexicalContextRegex(#"(?i)^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$"#)
+    private static let acceptedHostRegex = LexicalContextRegex(#"(?i)^[A-Z0-9.-]+\.[A-Z]{2,}([/?#].*)?$"#)
+    private static let technicalTokenRegex = LexicalContextRegex(#"^[A-Za-z0-9_./:-]{2,}$"#)
+
     public var maxTerms: Int
     public var maxRecentCommits: Int
 
@@ -290,13 +313,13 @@ public struct LexicalContextBuilder: Sendable {
 
         let technicalTokenCount = joined.components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { token in
-                token.count >= 2 && token.range(of: #"[A-Za-z_]"#, options: .regularExpression) != nil
+                token.count >= 2 && Self.wordRegex.matches(token)
             }
             .count
         let totalUnits = max(1, recentCommits.reduce(0) { $0 + max(1, $1.count) })
         let mixedCount = recentCommits.filter { text in
-            text.range(of: #"\p{Han}"#, options: .regularExpression) != nil
-                && text.range(of: #"[A-Za-z0-9_]"#, options: .regularExpression) != nil
+            Self.hanRegex.matches(text)
+                && Self.asciiWordRegex.matches(text)
         }.count
         let punctuationStyle = joined.contains("，") || joined.contains("。") || joined.contains("、")
             ? "zh"
@@ -383,14 +406,14 @@ public struct LexicalContextBuilder: Sendable {
         if TextProtection.requiresNoCorrection(clean) {
             return nil
         }
-        if clean.range(of: #"^\d+$"#, options: .regularExpression) != nil {
+        if Self.numericRegex.matches(clean) {
             return nil
         }
-        if clean.range(of: #"^(https?://|[A-Za-z]:/|/|~\/)"#, options: .regularExpression) != nil {
+        if Self.protectedPrefixRegex.matches(clean) {
             return nil
         }
-        let hasHan = clean.range(of: #"\p{Han}"#, options: .regularExpression) != nil
-        let isTechnicalToken = clean.range(of: #"^[A-Za-z0-9_./:-]{2,}$"#, options: .regularExpression) != nil
+        let hasHan = Self.hanRegex.matches(clean)
+        let isTechnicalToken = Self.technicalTokenRegex.matches(clean)
         guard hasHan || !isTechnicalToken else {
             return nil
         }
@@ -405,20 +428,20 @@ public struct LexicalContextBuilder: Sendable {
         if TextProtection.containsSecretLikeContent(clean) {
             return nil
         }
-        if clean.range(of: #"^\d+$"#, options: .regularExpression) != nil {
+        if Self.numericRegex.matches(clean) {
             return nil
         }
-        if clean.range(of: #"(?i)^(https?://|www\.|[A-Za-z]:[\\/]|/|~/|\./|\.\./)"#, options: .regularExpression) != nil {
+        if Self.acceptedProtectedPrefixRegex.matches(clean) {
             return nil
         }
-        if clean.range(of: #"(?i)^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$"#, options: .regularExpression) != nil {
+        if Self.acceptedEmailRegex.matches(clean) {
             return nil
         }
-        if clean.range(of: #"(?i)^[A-Z0-9.-]+\.[A-Z]{2,}([/?#].*)?$"#, options: .regularExpression) != nil {
+        if Self.acceptedHostRegex.matches(clean) {
             return nil
         }
-        let hasHan = clean.range(of: #"\p{Han}"#, options: .regularExpression) != nil
-        let hasWord = clean.range(of: #"[A-Za-z_]"#, options: .regularExpression) != nil
+        let hasHan = Self.hanRegex.matches(clean)
+        let hasWord = Self.wordRegex.matches(clean)
         guard hasHan || hasWord else {
             return nil
         }

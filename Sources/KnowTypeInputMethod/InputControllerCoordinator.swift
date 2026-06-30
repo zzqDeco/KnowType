@@ -30,6 +30,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let asyncSuggestionDelayNanoseconds: UInt64
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
     private let aiRecommendationRuntime: InputAIRecommendationRuntime
+    private let aiRecommendationSchedulePolicy = InputAIRecommendationSchedulePolicy.default
     private let aiAcceptanceRuntime: InputAIAcceptanceRuntime
     private var aiRecommendationState: AIRecommendationState = .idle
     private let inputClientCompositionWriter: InputClientCompositionWriter
@@ -826,6 +827,23 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
         let currentAppBundleID = appBundleIdentifier(client: client)
         let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
+        let scheduleDecision = aiRecommendationSchedulePolicy.decision(
+            for: InputAIRecommendationScheduleContext(
+                rawInput: rawBuffer,
+                hasResolvedSegments: compositionBuffer.hasResolvedSegments,
+                isFullyResolved: compositionBuffer.isFullyResolved,
+                lockedPrefix: lockedPrefixText,
+                cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
+                canRequestAIRecommendations: canRequestAIRecommendations,
+                hasRecommendationProvider: aiRecommendationRuntime.hasProvider
+            )
+        )
+        let shouldBuildRecommendationContext: Bool
+        if case .schedule = scheduleDecision {
+            shouldBuildRecommendationContext = true
+        } else {
+            shouldBuildRecommendationContext = false
+        }
         let context = InputAIRecommendationRuntimeContext(
             rawInput: rawBuffer,
             hasResolvedSegments: compositionBuffer.hasResolvedSegments,
@@ -837,8 +855,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: locale,
             compositionID: compositionID,
             rawRevision: rawRevision,
-            lexicalContext: lexicalContextSnapshot(for: suggestion),
-            feedbackContext: aiAcceptedFeedbackProvider?.snapshot(schemaID: conversionEngine.activeSchemaID)
+            lexicalContext: shouldBuildRecommendationContext ? lexicalContextSnapshot(for: suggestion) : nil,
+            feedbackContext: shouldBuildRecommendationContext
+                ? aiAcceptedFeedbackProvider?.snapshot(schemaID: conversionEngine.activeSchemaID)
+                : nil
         )
         aiRecommendationState = aiRecommendationRuntime.schedule(
             context: context,

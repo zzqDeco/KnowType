@@ -60,6 +60,7 @@ required for every test file.
 - [Overview](Sources/KnowTypeAI/README.plan.md)
 - [AIAcceptedLearning](Sources/KnowTypeAI/AIAcceptedLearning.plan.md)
 - [AIDocumentStores](Sources/KnowTypeAI/AIDocumentStores.plan.md)
+- [LexicalContext](Sources/KnowTypeAI/LexicalContext.plan.md)
 - [RimeUserDBLexicalProfile](Sources/KnowTypeAI/RimeUserDBLexicalProfile.plan.md)
 
 ## Sources/KnowTypeInputMethod

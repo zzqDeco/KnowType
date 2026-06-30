@@ -22,6 +22,29 @@ enum InputMethodLexicalProfileRuntime {
     )
 }
 
+private final class InputMethodRimePrewarmer: @unchecked Sendable {
+    static let shared = InputMethodRimePrewarmer()
+
+    private let lock = NSLock()
+    private var didSchedule = false
+
+    private init() {}
+
+    func scheduleOnce() {
+        lock.lock()
+        guard !didSchedule else {
+            lock.unlock()
+            return
+        }
+        didSchedule = true
+        lock.unlock()
+
+        Task.detached(priority: .utility) {
+            _ = RimeConversionEngine.prewarmNativeSession()
+        }
+    }
+}
+
 @objc(KnowTypeInputController)
 public final class KnowTypeInputController: IMKInputController, CandidatePanelInteractionHandling, @unchecked Sendable {
     private let coordinator: InputControllerCoordinator
@@ -73,6 +96,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         )
         super.init(server: server, delegate: delegate, client: inputClient)
         hostAdapter.controller = self
+        InputMethodRimePrewarmer.shared.scheduleOnce()
         inputControllerLogger.notice("KnowTypeInputController initialized client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)")
         if ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" {
             let elapsedMs = Date().timeIntervalSince(startupDebugStartedAt) * 1_000
@@ -349,7 +373,7 @@ private final class IMKInputControllerHostAdapter: InputControllerHost, @uncheck
     }
 
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
             operation()
         }
     }

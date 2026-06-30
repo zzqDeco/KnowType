@@ -116,6 +116,10 @@ Current behavior:
   to the candidate panel, while request lifecycle, active request ids,
   generation checks, task cancellation, and stale-result diagnostics live in
   `InputAIRecommendationRuntime`
+- runs a lightweight AI schedule eligibility check before building lexical
+  context or accepted-feedback snapshots; raw-too-short, cloud-disabled,
+  partial-composition, and no-provider skip paths do not pay the lexical
+  profile construction cost
 - applies AI publications only to the AI slot after
   `InputAIRecommendationRuntime` validates request id, generation, composition
   id, raw revision, and raw input through `AIRecommendationPatch`
