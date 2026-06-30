@@ -10,7 +10,9 @@ AI continuation/provider profiles, privacy, and diagnostics.
 
 ## Boundaries
 
-- Validation and persistence behavior belong to `ProviderProfilesViewModel`.
+- UI state and persistence sequencing belong to `ProviderProfilesViewModel`.
+- Draft validation, credential reuse, save-plan, and connection-test
+  configuration rules belong to `ProviderProfileEditingPolicy`.
 - Provider adapter behavior belongs to `KnowTypeProviders`.
 
 ## Behavior Notes

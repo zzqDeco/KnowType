@@ -129,6 +129,7 @@ required for every test file.
 - [KnowTypeSettingsRootView](Sources/KnowTypeSettingsUI/KnowTypeSettingsRootView.plan.md)
 - [LexiconSettingsPresentation](Sources/KnowTypeSettingsUI/LexiconSettingsPresentation.plan.md)
 - [LexiconSettingsViewModel](Sources/KnowTypeSettingsUI/LexiconSettingsViewModel.plan.md)
+- [ProviderProfileEditingPolicy](Sources/KnowTypeSettingsUI/ProviderProfileEditingPolicy.plan.md)
 - [ProviderProfilesPresentation](Sources/KnowTypeSettingsUI/ProviderProfilesPresentation.plan.md)
 - [ProviderProfilesView](Sources/KnowTypeSettingsUI/ProviderProfilesView.plan.md)
 - [ProviderProfilesViewModel](Sources/KnowTypeSettingsUI/ProviderProfilesViewModel.plan.md)

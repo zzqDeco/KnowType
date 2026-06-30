@@ -10,4 +10,4 @@
 - Map `ProviderConnectionStatus` into progress, success, and failure display state.
 - Keep validation and persistent error section visibility out of the SwiftUI view body.
 
-The presenters do not mutate settings state, perform validation, call providers, or touch `SecretStore`. Those responsibilities remain in `ProviderProfilesViewModel`.
+The presenters do not mutate settings state, perform validation, call providers, or touch `SecretStore`. UI state belongs to `ProviderProfilesViewModel`; validation and credential editing policy belong to `ProviderProfileEditingPolicy`.
