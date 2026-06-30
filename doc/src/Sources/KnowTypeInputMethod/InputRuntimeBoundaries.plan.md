@@ -51,6 +51,11 @@ input, candidate-panel presentation, AI slot patches, and background events.
   identity, commit suggestion snapshots, and narrow no-provider fallback cleanup.
   It must not call Rime, host clients, AI providers, candidate-panel presenters,
   or runtime preferences.
+- `InputCommitDecisionRuntime` owns pure commit-choice planning for `Space`,
+  `Tab`, `Option-number`, selected rows, AI acceptance, and prefix-learning
+  candidate selection. It may return executable plans that ask the coordinator
+  to process Rime Space, apply a segment, select a native candidate, or apply an
+  `InputCommitResult`, but it must not perform those side effects itself.
 - `InputCommitApplicationRuntime` owns commit-result plan mapping, accepted
   feedback context construction, and commit side-effect context construction. It
   returns values only; lifecycle planning, host writes, marked-text cleanup,
@@ -82,6 +87,9 @@ input, candidate-panel presentation, AI slot patches, and background events.
   recent commits and in-process recent selection history.
 - Suggestion commit snapshots retain `usesPendingFallback = false`; the retired
   async local-candidate path remains disabled.
+- Commit decision plans are values. Rime conversion, segment mutation,
+  candidate-panel publication, accepted-AI tracking, and prefix-learning writes
+  remain in the coordinator or their dedicated runtimes.
 - Commit side-effect contexts and lifecycle finish plans must be built from the
   finishing composition snapshot before composition state is reset.
 - Background consumers may observe events, but they must not call back into the
@@ -96,6 +104,7 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `InputNativeCandidateNavigationRuntimeTests`
 - `InputLexicalCommitRuntimeTests`
 - `InputSuggestionStateRuntimeTests`
+- `InputCommitDecisionRuntimeTests`
 - `InputCommitApplicationRuntimeTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`

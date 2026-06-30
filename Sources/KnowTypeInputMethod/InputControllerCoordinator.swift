@@ -25,6 +25,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let nativeCandidateNavigationRuntime = InputNativeCandidateNavigationRuntime()
     private let lexicalCommitRuntime: InputLexicalCommitRuntime
     private let commitApplicationRuntime = InputCommitApplicationRuntime()
+    private let commitDecisionRuntime = InputCommitDecisionRuntime()
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
@@ -485,7 +486,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
         }
 
-        let baseResult = commitResult(for: .space, client: client)
+        let baseResult = executeCommitDecisionResultPlan(
+            commitDecisionRuntime.resultPlan(context: commitDecisionContext(action: .space, client: client)),
+            client: client
+        )
         if case .noAction = baseResult,
            compositionBuffer.hasResolvedSegments {
             return applyCommitResult(
@@ -570,47 +574,89 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ selection: InputCandidateSelection,
         client: InputControllerClient?
     ) -> InputCommitResult {
-        switch selection.kind {
-        case .segmentCandidate(let index):
-            return applySegmentCandidate(at: index, commitIfFullyResolved: false, client: client)
-        case .aiRecommendation:
-            return aiRecommendationCommitResult()
-        case .rawInput:
-            return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
-        case .prefixCandidate, .fullCandidate, .continuationCandidate:
-            if conversionEngine.isNativeActive,
-               InputNativeCandidateNavigationRuntime.isNativeSelectablePrefixOrFull(selection) {
-                guard let conversionResult = nativeCandidateNavigationRuntime.selectNativeCandidateForCommit(
-                    selection,
-                    engine: &conversionEngine
-                ) else {
-                    return .noAction
-                }
-                if let commitText = conversionResult.commitText,
-                   !commitText.isEmpty {
-                    return .commit(commitText)
-                }
-                if conversionResult.handled {
-                    publishLocalSuggestion(client: client)
-                    return .noAction
-                }
-                return .noAction
-            }
-            guard let selectedCandidate = sessionSelection(from: selection) else {
-                return .noAction
-            }
-            let suggestionSnapshot = suggestionStateRuntime.currentSnapshot()
-            return InputSessionCommitPolicy.result(
-                for: .space,
-                rawInput: rawBuffer,
-                suggestion: suggestionSnapshot.suggestion,
-                suggestionRawInput: suggestionSnapshot.rawInput,
-                selectedCandidate: selectedCandidate,
-                appBundleID: appBundleIdentifier(client: client),
-                locale: locale,
-                allowsSynchronousFallback: false
+        executeCommitDecisionResultPlan(
+            commitDecisionRuntime.numberSelectionPlan(
+                selection: selection,
+                context: commitDecisionContext(action: .space, client: client)
+            ),
+            client: client
+        )
+    }
+
+    @discardableResult
+    private func applyCommitDecisionResultPlan(
+        _ plan: InputCommitDecisionResultPlan,
+        action: InputAction,
+        client: InputControllerClient?
+    ) -> Bool {
+        let result = executeCommitDecisionResultPlan(
+            plan,
+            client: client
+        )
+        learnSelectedPrefix(action: action, result: result, client: client)
+        return applyCommitResult(
+            result,
+            client: client,
+            acceptedAIRecommendation: acceptedAIRecommendationCandidate(for: action, result: result)
+        )
+    }
+
+    @discardableResult
+    private func executeCommitDecisionResultPlan(
+        _ plan: InputCommitDecisionResultPlan,
+        client: InputControllerClient?
+    ) -> InputCommitResult {
+        switch plan {
+        case .result(let result):
+            return result
+        case .applySegmentCandidate(let index, let commitIfFullyResolved):
+            return applySegmentCandidate(
+                at: index,
+                commitIfFullyResolved: commitIfFullyResolved,
+                client: client
             )
+        case .selectNativeCandidateForCommit(let selection):
+            return nativeCandidateCommitResult(selection, client: client)
+        case .processNativeSpace:
+            return nativeSpaceCommitResult(client: client)
         }
+    }
+
+    private func nativeCandidateCommitResult(
+        _ selection: InputCandidateSelection,
+        client: InputControllerClient?
+    ) -> InputCommitResult {
+        guard let conversionResult = nativeCandidateNavigationRuntime.selectNativeCandidateForCommit(
+            selection,
+            engine: &conversionEngine
+        ) else {
+            return .noAction
+        }
+        if let commitText = conversionResult.commitText,
+           !commitText.isEmpty {
+            return .commit(commitText)
+        }
+        if conversionResult.handled {
+            publishLocalSuggestion(client: client)
+            return .noAction
+        }
+        return .noAction
+    }
+
+    private func nativeSpaceCommitResult(client: InputControllerClient?) -> InputCommitResult {
+        let conversionResult = conversionEngine.process(.space)
+        if let commitText = conversionResult.commitText,
+           !commitText.isEmpty {
+            return .commit(commitText)
+        }
+        if conversionResult.handled {
+            publishLocalSuggestion(client: client)
+            return .noAction
+        }
+        if !rawBuffer.isEmpty {
+            return .commit(rawBuffer)
+        }
+        return .noAction
     }
 
     private func selectNativeCandidateOnCurrentPage(_ index: Int, client: InputControllerClient?) -> Bool {
@@ -653,13 +699,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         nativeCandidateNavigationRuntime.shouldSelectBeforeSpace(selection, engine: conversionEngine)
     }
 
-    private func aiRecommendationCommitResult() -> InputCommitResult {
-        guard case .ready(let candidate) = aiRecommendationState else {
-            return .noAction
-        }
-        return candidate.displayText.isEmpty ? .noAction : .commit(candidate.displayText)
-    }
-
     private func appBundleIdentifier(client: InputControllerClient?) -> String? {
         client?.bundleIdentifier
     }
@@ -674,6 +713,39 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawLength: rawBuffer.count,
             inputModeState: inputModeRuntime.state,
             hasActiveComposition: hasActiveComposition ?? hasActiveTextComposition()
+        )
+    }
+
+    private func commitDecisionContext(
+        action: InputAction,
+        client: InputControllerClient?
+    ) -> InputCommitDecisionContext {
+        let selectedCandidate = nativeCandidateNavigationRuntime.selectedCandidate
+        let selectedCandidateHasNativeIndex = selectedCandidate.map {
+            nativeCandidateNavigationRuntime.nativeCandidateIndex(for: $0, engine: conversionEngine) != nil
+        } ?? false
+        return InputCommitDecisionContext(
+            action: action,
+            rawInput: rawBuffer,
+            compositionBuffer: compositionBuffer,
+            suggestionSnapshot: suggestionStateRuntime.currentSnapshot(),
+            commitSuggestionSnapshot: suggestionStateRuntime.commitSnapshot(
+                action: action,
+                rawInput: rawBuffer,
+                asyncEnabled: enablesAsyncSuggestionRefresh
+            ),
+            selectedCandidate: selectedCandidate,
+            panelSelection: candidatePanelPublicationRuntime.state.windowState.selection,
+            panelIsVisible: candidatePanelPublicationRuntime.state.windowState.isVisible,
+            aiRecommendationState: aiRecommendationState,
+            hasActiveTextComposition: hasActiveTextComposition(),
+            enablesAsyncSuggestionRefresh: enablesAsyncSuggestionRefresh,
+            isNativeActive: conversionEngine.isNativeActive,
+            selectedCandidateShouldSelectBeforeSpace: selectedCandidate.map(shouldSelectNativeCandidateBeforeSpace) ?? false,
+            selectedCandidateHasNativeIndex: selectedCandidateHasNativeIndex,
+            appBundleID: appBundleIdentifier(client: client),
+            locale: locale,
+            runtimePreferences: runtimePreferences
         )
     }
 
@@ -874,25 +946,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
     }
 
-    private func shouldSuppressTabCommitForPartialComposition() -> Bool {
-        if compositionBuffer.hasResolvedSegments && !compositionBuffer.isFullyResolved {
-            return true
-        }
-        guard suggestionStateRuntime.hasCurrentSuggestion(rawInput: rawBuffer) else {
-            return false
-        }
-        return shouldSuppressContinuations(
-            prefixCandidates: suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates ?? []
-        )
-    }
-
-    private func hasVisibleContinuationForCurrentSuggestion() -> Bool {
-        guard suggestionStateRuntime.hasCurrentSuggestion(rawInput: rawBuffer) else {
-            return false
-        }
-        return suggestionStateRuntime.currentSnapshot().suggestion?.continuationCandidates.isEmpty == false
-    }
-
     private static func shouldSuppressContinuations(
         prefixCandidates: [CorrectionCandidate],
         compositionBuffer: CompositionBuffer
@@ -907,10 +960,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return isPartialSegmentCandidate(firstPrefix, compositionBuffer: compositionBuffer)
     }
 
-    private func isPartialSegmentCandidate(_ candidate: CorrectionCandidate) -> Bool {
-        Self.isPartialSegmentCandidate(candidate, compositionBuffer: compositionBuffer)
-    }
-
     private static func isPartialSegmentCandidate(
         _ candidate: CorrectionCandidate,
         compositionBuffer: CompositionBuffer
@@ -923,65 +972,50 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     @discardableResult
     private func commit(action: InputAction, client: InputControllerClient?) -> Bool {
-        if action == .space,
-           !hasActiveTextComposition() {
-            return insertDirectPassthroughText(" ", client: client)
-        }
-        if action == .commitRaw,
-           !hasActiveTextComposition() {
-            _ = finishCompositionLifecycle(reason: .commit, client: client, commitPolicy: .none)
-            return false
-        }
-        if action == .space,
-           conversionEngine.isNativeActive,
-           rawBuffer.isEmpty == false {
-            if let selectedNativeCandidate = nativeCandidateNavigationRuntime.selectedCandidate,
-               shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(selectedNativeCandidate) {
-                let result = commitResult(for: action, client: client)
-                learnSelectedPrefix(action: action, result: result, client: client)
-                return applyCommitResult(
-                    result,
-                    client: client,
-                    acceptedAIRecommendation: acceptedAIRecommendationCandidate(for: action, result: result)
-                )
-            }
-            if let selectedNativeCandidate = nativeCandidateNavigationRuntime.selectedCandidate,
-               shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate) {
-                if applyNativeNavigationResult(
-                    nativeCandidateNavigationRuntime.selectNativeCandidateIfNeeded(
-                        selectedNativeCandidate,
-                        engine: &conversionEngine
-                    ),
-                    client: client
-                ) {
-                    return true
-                }
-            }
-            let result = conversionEngine.process(.space)
-            learnNativeCommitIfFinal(result, client: client)
-            if handleNativeConversionResult(result, client: client) {
-                return true
-            }
-            return applyCommitResult(rawBuffer.isEmpty ? .noAction : .commit(rawBuffer), client: client)
-        }
-        let result = commitResult(for: action, client: client)
-        learnSelectedPrefix(action: action, result: result, client: client)
-        return applyCommitResult(
-            result,
-            client: client,
-            acceptedAIRecommendation: acceptedAIRecommendationCandidate(for: action, result: result)
+        executeCommitDecisionPlan(
+            commitDecisionRuntime.commitPlan(context: commitDecisionContext(action: action, client: client)),
+            action: action,
+            client: client
         )
     }
 
-    private func shouldCommitSelectedNonNativeCandidateBeforeNativeSpace(
-        _ selection: InputCandidateSelection
+    @discardableResult
+    private func executeCommitDecisionPlan(
+        _ plan: InputCommitDecisionPlan,
+        action: InputAction,
+        client: InputControllerClient?
     ) -> Bool {
-        switch selection.kind {
-        case .prefixCandidate, .fullCandidate:
+        switch plan {
+        case .directPassthroughSpace:
+            return insertDirectPassthroughText(" ", client: client)
+        case .finishEmptyRawCommit:
+            _ = finishCompositionLifecycle(reason: .commit, client: client, commitPolicy: .none)
             return false
-        case .rawInput, .segmentCandidate, .aiRecommendation, .continuationCandidate:
+        case .selectNativeCandidateBeforeSpace(let selectedNativeCandidate):
+            if applyNativeNavigationResult(
+                nativeCandidateNavigationRuntime.selectNativeCandidateIfNeeded(
+                    selectedNativeCandidate,
+                    engine: &conversionEngine
+                ),
+                client: client
+            ) {
+                return true
+            }
+            return processNativeSpace(client: client)
+        case .processNativeSpace:
+            return processNativeSpace(client: client)
+        case .resolve(let resultPlan):
+            return applyCommitDecisionResultPlan(resultPlan, action: action, client: client)
+        }
+    }
+
+    private func processNativeSpace(client: InputControllerClient?) -> Bool {
+        let result = conversionEngine.process(.space)
+        learnNativeCommitIfFinal(result, client: client)
+        if handleNativeConversionResult(result, client: client) {
             return true
         }
+        return applyCommitResult(rawBuffer.isEmpty ? .noAction : .commit(rawBuffer), client: client)
     }
 
     @discardableResult
@@ -1117,59 +1151,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func learnSelectedPrefix(action: InputAction, result: InputCommitResult, client: InputControllerClient?) {
         guard case .commit(let committedText) = result,
               !committedText.isEmpty,
-              !shouldSkipPrefixLearning(action: action),
-              let prefix = selectedPrefixTextForLearning(),
+              !commitDecisionRuntime.shouldSkipPrefixLearning(
+                action: action,
+                aiRecommendationState: aiRecommendationState
+              ),
+              let prefix = commitDecisionRuntime.selectedPrefixTextForLearning(
+                selectedCandidate: nativeCandidateNavigationRuntime.selectedCandidate,
+                panelSelection: candidatePanelPublicationRuntime.state.windowState.selection,
+                suggestion: suggestionStateRuntime.currentSnapshot().suggestion
+              ),
               prefix != rawBuffer,
               committedText.hasPrefix(prefix) else {
             return
         }
         recordUserSelection(prefix, client: client)
-    }
-
-    private func shouldSkipPrefixLearning(action: InputAction) -> Bool {
-        if action == .optionR {
-            return true
-        }
-        if action == .tab,
-           aiRecommendationState.isSelectableRecommendation {
-            return true
-        }
-        if case .optionNumber(1) = action,
-           aiRecommendationState.isSelectableRecommendation {
-            return true
-        }
-        return false
-    }
-
-    private func selectedPrefixTextForLearning() -> String? {
-        let suggestion = suggestionStateRuntime.currentSnapshot().suggestion
-        if let selectedNativeCandidate = nativeCandidateNavigationRuntime.selectedCandidate {
-            switch selectedNativeCandidate.kind {
-            case .rawInput:
-                return nil
-            case .prefixCandidate(let index), .fullCandidate(let index):
-                return suggestion?.prefixCandidates[inputControllerSafe: index]?.text
-            case .segmentCandidate:
-                return nil
-            case .aiRecommendation:
-                return nil
-            case .continuationCandidate:
-                return suggestion?.prefixCandidates.first?.text
-            }
-        }
-
-        switch candidatePanelPublicationRuntime.state.windowState.selection {
-        case .prefixCandidate(let index), .fullCandidate(let index):
-            return suggestion?.prefixCandidates[inputControllerSafe: index]?.text
-        case .segmentCandidate:
-            return nil
-        case .aiRecommendation:
-            return nil
-        case .continuationCandidate:
-            return suggestion?.prefixCandidates.first?.text
-        case .rawInput, .none:
-            return suggestion?.prefixCandidates.first?.text
-        }
     }
 
     private func recordUserSelection(_ text: String, client: InputControllerClient?) {
@@ -1194,157 +1189,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func flushUserSelectionHistory() {
         lexicalCommitRuntime.flushSelectionHistory()
-    }
-
-    private func commitResult(for action: InputAction, client: InputControllerClient?) -> InputCommitResult {
-        if action == .commitRaw {
-            return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
-        }
-        if let aiShortcutResult = InputCommitResultPolicy.aiShortcutResult(
-            for: action,
-            aiRecommendationState: aiRecommendationState
-        ) {
-            return aiShortcutResult
-        }
-        let selectedNativeCandidate = nativeCandidateNavigationRuntime.selectedCandidate
-        if action == .tab,
-           let selectedNativeCandidate,
-           case .segmentCandidate = selectedNativeCandidate.kind {
-            return .noAction
-        }
-        if action == .tab,
-           shouldSuppressTabCommitForPartialComposition() {
-            return .noAction
-        }
-        if action == .tab,
-           enablesAsyncSuggestionRefresh,
-           !hasVisibleContinuationForCurrentSuggestion() {
-            return .noAction
-        }
-        if action == .space,
-           let selectedNativeCandidate,
-           case .aiRecommendation = selectedNativeCandidate.kind {
-            return aiRecommendationCommitResult()
-        }
-        if action == .space,
-           let selectedNativeCandidate,
-           case .segmentCandidate(let index) = selectedNativeCandidate.kind {
-            return applySegmentCandidate(at: index, commitIfFullyResolved: true, client: client)
-        }
-        if action == .space,
-           let selectedNativeCandidate,
-           case .continuationCandidate = selectedNativeCandidate.kind {
-            let commitSuggestion = commitSuggestionSnapshot(for: action)
-            return InputSessionCommitPolicy.result(
-                for: action,
-                rawInput: rawBuffer,
-                suggestion: commitSuggestion.suggestion,
-                suggestionRawInput: commitSuggestion.rawInput,
-                selectedCandidate: sessionSelection(from: selectedNativeCandidate),
-                appBundleID: appBundleIdentifier(client: client),
-                locale: locale,
-                runtimePreferences: runtimePreferences,
-                allowsSynchronousFallback: false
-            )
-        }
-        if compositionBuffer.hasResolvedSegments,
-           compositionBuffer.isFullyResolved {
-            let suggestion = suggestionStateRuntime.currentSnapshot().suggestion
-            if let selectedNativeCandidate,
-               case .continuationCandidate(let index) = selectedNativeCandidate.kind,
-               action == .space,
-               suggestion?.continuationCandidates.indices.contains(index) == true {
-                return InputCompositionController().handle(
-                    action: .optionNumber(index + 1),
-                    prefixCandidates: [resolvedCompositionCandidate()],
-                    continuationCandidates: suggestion?.continuationCandidates ?? [],
-                    originalText: rawBuffer
-                )
-            }
-            switch action {
-            case .space:
-                return .commit(compositionBuffer.commitText)
-            case .tab:
-                guard suggestion?.continuationCandidates.isEmpty == false else {
-                    return .noAction
-                }
-                return InputCompositionController().handle(
-                    action: .tab,
-                    prefixCandidates: [resolvedCompositionCandidate()],
-                    continuationCandidates: suggestion?.continuationCandidates ?? [],
-                    originalText: rawBuffer
-                )
-            case .optionR:
-                return .polishRequested(compositionBuffer.commitText)
-            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .commitRaw:
-                break
-            }
-        }
-        if action == .space,
-           conversionEngine.isNativeActive,
-           let selectedNativeCandidate,
-           shouldSelectNativeCandidateBeforeSpace(selectedNativeCandidate) {
-            return resultForNumberSelection(selectedNativeCandidate, client: client)
-        }
-        if action == .space,
-           conversionEngine.isNativeActive,
-           let selectedNativeCandidate,
-           InputNativeCandidateNavigationRuntime.isNativeSelectablePrefixOrFull(selectedNativeCandidate),
-           nativeCandidateNavigationRuntime.nativeCandidateIndex(
-               for: selectedNativeCandidate,
-               engine: conversionEngine
-           ) == nil {
-            return resultForNumberSelection(selectedNativeCandidate, client: client)
-        }
-        if action == .space,
-           conversionEngine.isNativeActive {
-            let conversionResult = conversionEngine.process(.space)
-            if let commitText = conversionResult.commitText,
-               !commitText.isEmpty {
-                return .commit(commitText)
-            }
-            if conversionResult.handled {
-                publishLocalSuggestion(client: client)
-                return .noAction
-            }
-            if !rawBuffer.isEmpty {
-                return .commit(rawBuffer)
-            }
-        }
-        if action == .space,
-           !conversionEngine.isNativeActive {
-            return rawBuffer.isEmpty ? .noAction : .commit(rawBuffer)
-        }
-        if case .optionNumber = action,
-           !candidatePanelPublicationRuntime.state.windowState.isVisible {
-            return .noAction
-        }
-
-        let commitSuggestion = commitSuggestionSnapshot(for: action)
-        return InputSessionCommitPolicy.result(
-            for: action,
-            rawInput: rawBuffer,
-            suggestion: commitSuggestion.suggestion,
-            suggestionRawInput: commitSuggestion.rawInput,
-            selectedCandidate: commitSuggestion.usesPendingFallback
-                ? nil
-                : sessionSelection(from: selectedNativeCandidate),
-            appBundleID: appBundleIdentifier(client: client),
-            locale: locale,
-            runtimePreferences: runtimePreferences,
-            allowsSynchronousFallback: false
-        )
-    }
-
-    private func commitSuggestionSnapshot(
-        for action: InputAction
-    ) -> (suggestion: SuggestionResponse?, rawInput: String?, usesPendingFallback: Bool) {
-        let snapshot = suggestionStateRuntime.commitSnapshot(
-            action: action,
-            rawInput: rawBuffer,
-            asyncEnabled: enablesAsyncSuggestionRefresh
-        )
-        return (snapshot.suggestion, snapshot.rawInput, snapshot.usesPendingFallback)
     }
 
     private func applySegmentCandidate(
@@ -1431,23 +1275,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         for action: InputAction,
         result: InputCommitResult
     ) -> AIRecommendationCandidate? {
-        guard case .commit(let text) = result,
-              case .ready(let candidate) = aiRecommendationState,
-              candidate.displayText == text else {
-            return nil
-        }
-        if action == .tab {
-            return candidate
-        }
-        if case .optionNumber(1) = action {
-            return candidate
-        }
-        if action == .space,
-           let selectedNativeCandidate = nativeCandidateNavigationRuntime.selectedCandidate,
-           case .aiRecommendation = selectedNativeCandidate.kind {
-            return candidate
-        }
-        return nil
+        commitDecisionRuntime.acceptedAIRecommendationCandidate(
+            action: action,
+            result: result,
+            selectedCandidate: nativeCandidateNavigationRuntime.selectedCandidate,
+            aiRecommendationState: aiRecommendationState
+        )
     }
 
     private func resetComposition(client: InputControllerClient? = nil) {
@@ -1791,24 +1624,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 appBundleID: appBundleIdentifier(client: client)
             )
         )
-    }
-
-    private func sessionSelection(from selection: InputCandidateSelection?) -> InputSessionCandidateSelection? {
-        guard let selection else {
-            return nil
-        }
-        switch selection.kind {
-        case .rawInput:
-            return .rawInput
-        case .prefixCandidate(let index), .fullCandidate(let index):
-            return .prefixCandidate(index: index)
-        case .segmentCandidate:
-            return nil
-        case .aiRecommendation:
-            return nil
-        case .continuationCandidate(let index):
-            return .continuationCandidate(index: index)
-        }
     }
 
     private func refreshComposition(client: InputControllerClient?) {

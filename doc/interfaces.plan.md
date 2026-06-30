@@ -383,7 +383,8 @@ Current write contract:
 - The hot path emits `InputFrame`/`CandidatePanelFrame`-style state and side-effect events. It must not call AI providers,
   lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly. Lexical commit/selection facts go through
   `InputLexicalCommitRuntime`, which may schedule refresh from bounded local snapshots but does not run userdb sync. Composition lifecycle plans go through
-  `InputCompositionLifecycleRuntime`, and commit side-effect contexts go through
+  `InputCompositionLifecycleRuntime`, commit choices go through
+  `InputCommitDecisionRuntime`, and commit side-effect contexts go through
   `InputCommitApplicationRuntime` before the coordinator executes order-sensitive host writes and lifecycle cleanup. Real-time AI provider calls go through
   `InputAIRecommendationRuntime`, which publishes only AI slot state after stale-result guards pass.
 
