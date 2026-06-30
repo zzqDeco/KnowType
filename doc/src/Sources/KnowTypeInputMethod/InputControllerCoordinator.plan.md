@@ -5,8 +5,10 @@
 Current behavior:
 
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
-- owns the composing raw buffer, `CompositionBuffer`, composition id, input
-  mode runtime, Rime snapshots, and native candidate navigation orchestration
+- delegates raw input, `CompositionBuffer`, composition id, raw revision, and
+  delete-count state to `InputCompositionStateRuntime`
+- owns input-mode runtime, Rime snapshots, and native candidate navigation
+  orchestration
 - selects a host compatibility write mode before writing or passing through
   printable input through `InputClientCompositionWriter`
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
@@ -28,6 +30,9 @@ Current behavior:
   stale host marked ranges
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
+- reads composition snapshots from `InputCompositionStateRuntime` when building
+  write state, AI request context, candidate-panel publication snapshots, and
+  commit/selection learning context
 - delegates current suggestion storage, raw-input freshness checks, commit
   suggestion snapshots, and no-provider fallback continuation cleanup to
   `InputSuggestionStateRuntime`
@@ -128,7 +133,9 @@ Current behavior:
   staging, stale-write gates, and userdb parse diagnostics live outside the
   coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
-- clears composition state for cancel and commit while hiding the candidate panel through `InputControllerHost`
+- clears composition state for cancel and commit through
+  `InputCompositionStateRuntime` while the coordinator keeps candidate-panel
+  hide, Rime reset, marked-text cleanup, and runtime-event publication in order
 - receives candidate-panel publication results from
   `InputCandidatePanelPublicationRuntime` and asks
   `InputNativeCandidateNavigationRuntime` to map visible panel selection back

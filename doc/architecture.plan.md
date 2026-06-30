@@ -209,6 +209,10 @@ LevelDB state.
 - `InputNativeCandidateNavigationRuntime` owns displayed native selection
   state, panel selection mapping, Rime highlight, current-page select, paging,
   and boundary paging decisions.
+- `InputCompositionStateRuntime` owns raw input, `CompositionBuffer`,
+  composition id/revision, and delete-count state. The coordinator still owns
+  Rime calls, host insertion, marked text, panel publication, and lifecycle
+  side effects.
 - `InputSuggestionStateRuntime` owns current suggestion/raw-input snapshots,
   commit suggestion reads, and narrow no-provider fallback cleanup.
 - `CandidatePanelPresenter` consumes `CandidatePanelFrame` values with
