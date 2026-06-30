@@ -1,6 +1,6 @@
 # Input Composition Lifecycle Runtime Refactor
 
-Status: Active
+Status: Delivered
 
 ## Summary
 

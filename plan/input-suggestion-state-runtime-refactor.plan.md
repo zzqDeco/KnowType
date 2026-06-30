@@ -1,5 +1,7 @@
 # Input Suggestion State Runtime Refactor
 
+Status: Delivered
+
 ## Summary
 
 - Extract current suggestion state from `InputControllerCoordinator` into

@@ -1,5 +1,7 @@
 # Input Native Candidate Navigation Runtime Refactor
 
+Status: Delivered
+
 ## Summary
 
 - Extract Rime/native candidate navigation from `InputControllerCoordinator`

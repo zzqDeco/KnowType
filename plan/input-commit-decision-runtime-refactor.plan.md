@@ -1,6 +1,6 @@
 # Input Commit Decision Runtime Refactor
 
-Status: Active
+Status: Delivered
 
 ## Summary
 
