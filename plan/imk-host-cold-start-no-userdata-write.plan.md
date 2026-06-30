@@ -29,8 +29,11 @@
 - `RimeConversionEngine.snapshot`, `activeSchemaID`, `isNativeActive`, and
   `reset()` are cold-start read-only operations and must not create Rime
   user/log directories.
-- `NativeRimeSession` creation remains unchanged once reached; only the timing
-  moves from engine init to first ASCII/native conversion operation.
+- `NativeRimeSession` creation remains unchanged once reached. Engine
+  construction and read-only access still do not create a session; later
+  first-key performance work may explicitly prewarm a temporary native session
+  after `KnowTypeInputController` is live, but install/register scripts and
+  read-only diagnostics still do not perform that prewarm.
 - `ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)`
   opens the default provider path without creating `Application Support/KnowType`
   when no provider profile exists.
@@ -71,7 +74,8 @@
 
 ## Assumptions
 
-- First real user input may initialize Rime and learning data as normal product
+- First real user input, or a post-controller-init explicit Rime prewarm in the
+  performance path, may initialize Rime runtime directories as normal product
   behavior.
 - This slice did not change candidate UI, provider prompts, Rime dictionaries,
   or release packaging. Later input-source work may change the registration

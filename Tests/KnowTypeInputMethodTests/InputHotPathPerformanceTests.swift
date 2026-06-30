@@ -43,6 +43,9 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(rimeEngine.contains("InputMethodLexiconRuntime.defaultEngine"))
         XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
         XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
+        XCTAssertTrue(inputController.contains("DispatchQueue.main.asyncAfter"))
+        XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext ? lexicalContextSnapshot"))
+        XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext\n                ? aiAcceptedFeedbackProvider?.snapshot"))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {

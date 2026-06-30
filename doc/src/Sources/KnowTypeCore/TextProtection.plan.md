@@ -22,6 +22,9 @@ credential detection for cloud AI hard blocks.
   app contexts do not directly produce `AI 已禁用`.
 - Secret-like detection covers credential-shaped tokens, bearer headers, JWTs,
   PEM private keys, credential assignments, and sensitive URL query values.
+- Protection and secret-like pattern matching uses cached
+  `NSRegularExpression` objects so hot-path privacy gates do not repeatedly
+  compile the same expressions.
 - Technical-token preservation is separate from Level 0 routing; mixed prose may
   preserve tokens while still being provider-eligible.
 

@@ -54,6 +54,10 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         hasEagerProvider || providerAvailability?.providerAvailability == .available
     }
 
+    var hasProvider: Bool {
+        provider != nil
+    }
+
     @discardableResult
     func schedule(
         context: InputAIRecommendationRuntimeContext,

@@ -152,6 +152,26 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         self.currentSnapshot = Self.unavailableSnapshot(rawInput: "")
     }
 
+    @discardableResult
+    static func prewarmNativeSession(
+        configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration()
+    ) -> Bool {
+        guard let configuration else {
+            traceStartupEvent("rime_prewarm_done", elapsed: 0, details: "schema=<none> success=false")
+            return false
+        }
+        traceStartupEvent("rime_prewarm_start", details: "schema=\(configuration.schemaID)")
+        let startedAt = Date()
+        let session = NativeRimeSession(configuration: configuration)
+        let success = session != nil
+        traceStartupEvent(
+            "rime_prewarm_done",
+            elapsed: Date().timeIntervalSince(startedAt),
+            details: "schema=\(configuration.schemaID) success=\(success)"
+        )
+        return success
+    }
+
     public mutating func reset() {
         nativeBypassUntilReset = false
         nativeRawInputMirror = ""
@@ -209,13 +229,15 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     private static func traceStartupEvent(_ event: String, elapsed: TimeInterval, details: String = "") {
+        traceStartupEvent(event, details: "elapsedMs=\(String(format: "%.1f", elapsed * 1_000))\(details.isEmpty ? "" : " \(details)")")
+    }
+
+    private static func traceStartupEvent(_ event: String, details: String = "") {
         guard ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" else {
             return
         }
-        let elapsedMs = elapsed * 1_000
-        let formattedElapsed = String(format: "%.1f", elapsedMs)
         let suffix = details.isEmpty ? "" : " \(details)"
-        fputs("KnowType startup: event=\(event) elapsedMs=\(formattedElapsed)\(suffix)\n", stderr)
+        fputs("KnowType startup: event=\(event)\(suffix)\n", stderr)
     }
 
     private mutating func processRawBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
@@ -494,9 +516,16 @@ protocol RimeUserDBMaintenanceSession: RimeUserDBSnapshotSession {
 }
 
 final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable {
+    private static let creationLock = NSLock()
+
     private let session: OpaquePointer
 
     init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
+        Self.creationLock.lock()
+        defer {
+            Self.creationLock.unlock()
+        }
+
         do {
             try fileManager.createDirectory(at: configuration.userDataURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: configuration.logURL, withIntermediateDirectories: true)

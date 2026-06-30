@@ -1,5 +1,15 @@
 import Foundation
 
+private struct TextProtectionRegexPattern: @unchecked Sendable {
+    let regex: NSRegularExpression
+    let reason: String
+
+    init(_ pattern: String, reason: String) {
+        self.regex = try! NSRegularExpression(pattern: pattern, options: [])
+        self.reason = reason
+    }
+}
+
 public enum TextProtection {
     private static let protectedAppBundleIDs: Set<String> = [
         "com.apple.Terminal",
@@ -52,6 +62,31 @@ public enum TextProtection {
         "ssh": "SSH",
         "inputmethodkit": "InputMethodKit"
     ]
+    private static let protectedRangePatterns: [TextProtectionRegexPattern] = [
+        TextProtectionRegexPattern(#"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s]+"#, reason: "url"),
+        TextProtectionRegexPattern(#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
+        TextProtectionRegexPattern(#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
+        TextProtectionRegexPattern(#"(?i)\blocalhost(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
+        TextProtectionRegexPattern(#"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
+        TextProtectionRegexPattern(#"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, reason: "email"),
+        TextProtectionRegexPattern(#"(?<!\S)(?:~?/|\./|\.\./)[^\s]+"#, reason: "file_path"),
+        TextProtectionRegexPattern(#"\b[A-Za-z]:[\\/][^\s]+"#, reason: "file_path"),
+        TextProtectionRegexPattern(#"\b[A-Z]{2,}\b"#, reason: "acronym"),
+        TextProtectionRegexPattern(#"\b[a-z]+_[a-zA-Z0-9_]+\b"#, reason: "snake_case"),
+        TextProtectionRegexPattern(#"\b[a-z]+[A-Z][a-zA-Z0-9]*\b"#, reason: "camelCase"),
+        TextProtectionRegexPattern(#"\b(?:FastAPI|InputMethodKit|macOS|iOS)\b"#, reason: "technical_term")
+    ]
+    private static let secretLikePatterns: [TextProtectionRegexPattern] = [
+        TextProtectionRegexPattern(#"-----BEGIN [A-Z ]*PRIVATE KEY-----"#, reason: "secret_private_key"),
+        TextProtectionRegexPattern(#"(?i)(?:^|[^A-Za-z0-9_])['"]?Authorization['"]?\s*:\s*['"]?\s*(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}"#, reason: "secret_authorization_header"),
+        TextProtectionRegexPattern(#"\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{16,}\b"#, reason: "secret_openai_key"),
+        TextProtectionRegexPattern(#"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b"#, reason: "secret_github_token"),
+        TextProtectionRegexPattern(#"\bgithub_pat_[A-Za-z0-9_]{20,}\b"#, reason: "secret_github_token"),
+        TextProtectionRegexPattern(#"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#, reason: "secret_aws_key"),
+        TextProtectionRegexPattern(#"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"#, reason: "secret_jwt"),
+        TextProtectionRegexPattern(#"(?i)(?:^|[^A-Za-z0-9_])['"]?(?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|auth[_-]?token|password|passwd|secret|client[_-]?secret|private[_-]?key)['"]?\s*[:=]\s*['"]?[^'"\s]{4,}"#, reason: "secret_assignment"),
+        TextProtectionRegexPattern(#"(?i)[?&](?:api[_-]?key|key|token|access[_-]?token|password|secret|client[_-]?secret)=[^&#\s]{4,}"#, reason: "secret_url_query")
+    ]
 
     public static func canonicalTechnicalToken(_ token: String) -> String? {
         protectedTokens[token.lowercased()]
@@ -87,23 +122,8 @@ public enum TextProtection {
     }
 
     public static func detectProtectedRanges(in text: String) -> [ProtectedRange] {
-        let patterns: [(String, String)] = [
-            (#"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s]+"#, "url"),
-            (#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?"#, "url"),
-            (#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?"#, "url"),
-            (#"(?i)\blocalhost(?::\d+)?(?:/[^\s]*)?"#, "url"),
-            (#"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?"#, "url"),
-            (#"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, "email"),
-            (#"(?<!\S)(?:~?/|\./|\.\./)[^\s]+"#, "file_path"),
-            (#"\b[A-Za-z]:[\\/][^\s]+"#, "file_path"),
-            (#"\b[A-Z]{2,}\b"#, "acronym"),
-            (#"\b[a-z]+_[a-zA-Z0-9_]+\b"#, "snake_case"),
-            (#"\b[a-z]+[A-Z][a-zA-Z0-9]*\b"#, "camelCase"),
-            (#"\b(?:FastAPI|InputMethodKit|macOS|iOS)\b"#, "technical_term")
-        ]
-
-        return patterns.flatMap { pattern, reason in
-            ranges(matching: pattern, in: text, reason: reason)
+        protectedRangePatterns.flatMap { pattern in
+            ranges(matching: pattern, in: text)
         }.sorted { $0.start < $1.start }
     }
 
@@ -112,20 +132,8 @@ public enum TextProtection {
     }
 
     public static func detectSecretLikeRanges(in text: String) -> [ProtectedRange] {
-        let patterns: [(String, String)] = [
-            (#"-----BEGIN [A-Z ]*PRIVATE KEY-----"#, "secret_private_key"),
-            (#"(?i)(?:^|[^A-Za-z0-9_])['"]?Authorization['"]?\s*:\s*['"]?\s*(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}"#, "secret_authorization_header"),
-            (#"\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{16,}\b"#, "secret_openai_key"),
-            (#"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b"#, "secret_github_token"),
-            (#"\bgithub_pat_[A-Za-z0-9_]{20,}\b"#, "secret_github_token"),
-            (#"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#, "secret_aws_key"),
-            (#"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"#, "secret_jwt"),
-            (#"(?i)(?:^|[^A-Za-z0-9_])['"]?(?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|auth[_-]?token|password|passwd|secret|client[_-]?secret|private[_-]?key)['"]?\s*[:=]\s*['"]?[^'"\s]{4,}"#, "secret_assignment"),
-            (#"(?i)[?&](?:api[_-]?key|key|token|access[_-]?token|password|secret|client[_-]?secret)=[^&#\s]{4,}"#, "secret_url_query")
-        ]
-
-        return patterns.flatMap { pattern, reason in
-            ranges(matching: pattern, in: text, reason: reason)
+        secretLikePatterns.flatMap { pattern in
+            ranges(matching: pattern, in: text)
         }.sorted { lhs, rhs in
             if lhs.start == rhs.start {
                 return lhs.length > rhs.length
@@ -453,18 +461,15 @@ public enum TextProtection {
         return trimmed.range(of: #"^(?:(?:~|\.|\.\.)/)?\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$"#, options: .regularExpression) != nil
     }
 
-    private static func ranges(matching pattern: String, in text: String, reason: String) -> [ProtectedRange] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return []
-        }
+    private static func ranges(matching pattern: TextProtectionRegexPattern, in text: String) -> [ProtectedRange] {
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        return regex.matches(in: text, options: [], range: nsRange).compactMap { match in
+        return pattern.regex.matches(in: text, options: [], range: nsRange).compactMap { match in
             guard let range = Range(match.range, in: text) else {
                 return nil
             }
             let start = text.distance(from: text.startIndex, to: range.lowerBound)
             let length = text.distance(from: range.lowerBound, to: range.upperBound)
-            return ProtectedRange(start: start, length: length, reason: reason)
+            return ProtectedRange(start: start, length: length, reason: pattern.reason)
         }
     }
 }

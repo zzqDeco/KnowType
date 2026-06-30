@@ -13,6 +13,11 @@ implementation plans.
   hot path should produce marked text, commit commands, panel frame intents, and
   side-effect events without performing disk IO, AI requests, or AppKit panel
   operations directly.
+- First-key performance belongs at the existing boundaries: the IMK wrapper may
+  schedule a one-time native Rime prewarm after controller initialization, the
+  host adapter may delay re-anchor callbacks to avoid same-runloop caret XPC,
+  and the coordinator may run cheap AI eligibility before building lexical
+  context.
 - `CandidatePanelFrame` is the only shape passed to `CandidatePanelPresenter`.
   It carries composition id, raw revision, raw length, anchor source, panel
   model, and `CandidatePanelVisibilityReason`.
@@ -76,6 +81,9 @@ implementation plans.
 - Candidate-panel publication may hide for raw-empty or stale-suggestion
   snapshots, but anchor source `.none` remains an undisplayable published frame
   so layout-impossible behavior stays diagnosable.
+- Production delayed re-anchor callbacks intentionally run after a short delay;
+  stale raw/composition gates in `InputCandidatePanelPublicationRuntime` remain
+  the correctness boundary that prevents old anchors from reviving the panel.
 - Composition state reset must happen only after the coordinator has read any
   commit text and recorded side-effect contexts for the finishing composition.
 - Native navigation preserves Rime as the source of truth for highlighted and
