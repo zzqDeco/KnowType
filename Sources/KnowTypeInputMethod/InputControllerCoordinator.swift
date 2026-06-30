@@ -14,10 +14,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let anchorResolver: CandidateAnchorResolver
     private weak var host: InputControllerHost?
     private let inputEventBus = InputEventBus()
-    private var rawBuffer = ""
-    private var compositionBuffer = CompositionBuffer()
-    private var compositionID = 0
-    private var rawRevision = 0
+    private let compositionStateRuntime = InputCompositionStateRuntime()
     private let suggestionStateRuntime = InputSuggestionStateRuntime()
     private var locale: KnowTypeLocale = .mixed
     private let inputModePreferenceStore: any InputModePreferenceStore
@@ -32,7 +29,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let aiRecommendationRuntime: InputAIRecommendationRuntime
     private let aiAcceptanceRuntime: InputAIAcceptanceRuntime
     private var aiRecommendationState: AIRecommendationState = .idle
-    private var deleteCountBeforeCommit = 0
     private let inputClientCompositionWriter: InputClientCompositionWriter
     private let taskSupervisor = InputTaskSupervisor()
     private let candidatePanelPublicationRuntime: InputCandidatePanelPublicationRuntime
@@ -41,6 +37,26 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var lastRuntimePreferenceReload = Date.distantPast
     private let startupDebugStartedAt: Date
     private var didTraceFirstCompositionBegin = false
+
+    private var compositionState: InputCompositionStateSnapshot {
+        compositionStateRuntime.currentSnapshot()
+    }
+
+    private var rawBuffer: String {
+        compositionState.rawInput
+    }
+
+    private var compositionBuffer: CompositionBuffer {
+        compositionState.compositionBuffer
+    }
+
+    private var compositionID: Int {
+        compositionState.compositionID
+    }
+
+    private var rawRevision: Int {
+        compositionState.rawRevision
+    }
 
     init(
         provider: (any LLMProvider)?,
@@ -350,14 +366,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 aiAcceptanceRuntime.recordExternalDelete(appBundleID: appBundleIdentifier(client: client))
                 return false
             }
-            deleteCountBeforeCommit += 1
-            if !compositionBuffer.undoLastResolvedSegment() {
-                rawBuffer.removeLast()
+            let deleteResult = compositionStateRuntime.deleteBackward()
+            if deleteResult.removedRawCharacter {
                 _ = conversionEngine.process(.deleteBackward)
-                rawRevision += 1
-                compositionBuffer.updateRawInput(rawBuffer)
-                if rawBuffer.isEmpty {
-                    deleteCountBeforeCommit = 0
+                if deleteResult.becameEmpty {
                     conversionEngine.reset()
                     resetAnchorState()
                 }
@@ -450,10 +462,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func appendComposition(_ text: String, client: InputControllerClient?) -> Bool {
         beginCompositionIfNeeded(client: client)
-        rawBuffer.append(text)
+        compositionStateRuntime.appendText(text)
         _ = conversionEngine.process(.text(text))
-        rawRevision += 1
-        compositionBuffer.updateRawInput(rawBuffer)
         aiRecommendationState = .idle
         invalidateSuggestion()
         publishLocalSuggestion(client: client)
@@ -994,7 +1004,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 text,
                 client: client,
                 acceptedAIRecommendation: acceptedAIRecommendation,
-                acceptID: acceptID
+                acceptID: acceptID,
+                compositionSnapshot: compositionState
             )
             insert(text, client: client)
             if acceptID != nil {
@@ -1026,7 +1037,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if let commitText = result.commitText,
            !commitText.isEmpty {
             if result.snapshot.hasComposition {
-                recordCommitSideEffects(commitText, client: client)
+                recordCommitSideEffects(
+                    commitText,
+                    client: client,
+                    compositionSnapshot: compositionState
+                )
                 insert(commitText, client: client)
                 syncRawBufferToNativeSnapshot(result.snapshot)
                 publishLocalSuggestion(client: client)
@@ -1072,9 +1087,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func hasActiveTextComposition() -> Bool {
-        !rawBuffer.isEmpty
-            || compositionBuffer.hasResolvedSegments
+        hasActiveTextComposition(snapshot: compositionState)
             || conversionEngine.snapshot.hasComposition
+    }
+
+    private func hasActiveTextComposition(snapshot: InputCompositionStateSnapshot) -> Bool {
+        snapshot.hasActiveTextComposition
     }
 
     private func learnNativeCommitIfFinal(_ result: ConversionEngineResult, client: InputControllerClient?) {
@@ -1088,12 +1106,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func syncRawBufferToNativeSnapshot(_ snapshot: ConversionEngineSnapshot) {
-        guard rawBuffer != snapshot.rawInput else {
-            return
-        }
-        rawBuffer = snapshot.rawInput
-        rawRevision += 1
-        compositionBuffer.updateRawInput(rawBuffer)
+        compositionStateRuntime.syncRawInputFromNativeSnapshot(snapshot)
     }
 
     private func learnSelectedPrefix(action: InputAction, result: InputCommitResult, client: InputControllerClient?) {
@@ -1338,7 +1351,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
               candidate.rawRange != compositionBuffer.rawRange else {
             return .noAction
         }
-        guard compositionBuffer.apply(candidate) else {
+        guard compositionStateRuntime.applySegmentCandidate(candidate) else {
             return .noAction
         }
         let isFullyResolvedAfterApply = compositionBuffer.isFullyResolved
@@ -1382,19 +1395,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ text: String,
         client: InputControllerClient?,
         acceptedAIRecommendation: AIRecommendationCandidate? = nil,
-        acceptID: UUID? = nil
+        acceptID: UUID? = nil,
+        compositionSnapshot: InputCompositionStateSnapshot
     ) {
         let effects = aiAcceptanceRuntime.recordCommit(
             context: InputAIAcceptanceCommitContext(
                 text: text,
-                rawInput: rawBuffer,
+                rawInput: compositionSnapshot.rawInput,
                 schemaID: conversionEngine.activeSchemaID,
                 appBundleID: appBundleIdentifier(client: client),
                 acceptedAIRecommendation: acceptedAIRecommendation,
                 acceptID: acceptID,
                 selectedNativeCandidateSource: nativeCandidateNavigationRuntime.selectedCandidate?.kind.analyticsSource,
                 prefixCandidateSource: suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates.first?.source,
-                deleteCountBeforeCommit: deleteCountBeforeCommit,
+                deleteCountBeforeCommit: compositionSnapshot.deleteCountBeforeCommit,
                 client: client
             )
         )
@@ -1402,7 +1416,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             let context = InputLexicalCommitContext(
                 text: text,
                 schemaID: conversionEngine.activeSchemaID,
-                compositionID: compositionID
+                compositionID: compositionSnapshot.compositionID
             )
             if let event = lexicalCommitRuntime.recordCommit(context: context) {
                 publishRuntimeEvent(event)
@@ -1441,19 +1455,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func finishCompositionLifecycle(
         reason: CompositionLifecycleFinishReason,
         client: InputControllerClient?,
-        commitPolicy: CompositionLifecycleCommitPolicy
+        commitPolicy: InputCompositionLifecycleCommitPolicy
     ) -> Bool {
         traceCompositionLifecycleFinish(reason: reason)
-        let finishedCompositionID = compositionID
+        let finishingSnapshot = compositionState
+        let finishedCompositionID = finishingSnapshot.compositionID
         hideCandidatePanel(reason: reason.panelVisibilityReason)
 
         let lifecycleClient = client ?? host?.currentClient
         let shouldClearOwnedMarkedText = reason.shouldClearMarkedTextWhenEndingWithoutCommit
-            && hasActiveTextComposition()
-        let commitText = lifecycleCommitText(for: commitPolicy)
+            && (hasActiveTextComposition(snapshot: finishingSnapshot) || conversionEngine.snapshot.hasComposition)
+        let commitText = compositionStateRuntime.lifecycleCommitText(policy: commitPolicy)
         if let commitText,
            !commitText.isEmpty {
-            recordCommitSideEffects(commitText, client: lifecycleClient)
+            recordCommitSideEffects(commitText, client: lifecycleClient, compositionSnapshot: finishingSnapshot)
             insert(commitText, client: lifecycleClient)
         } else if shouldClearOwnedMarkedText {
             inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
@@ -1462,11 +1477,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
         }
 
-        rawBuffer = ""
         conversionEngine.reset()
-        compositionBuffer = CompositionBuffer()
-        rawRevision += 1
-        deleteCountBeforeCommit = 0
+        compositionStateRuntime.resetAfterLifecycleFinish()
         resetAnchorState()
         invalidateSuggestion()
         inputClientCompositionWriter.finishLifecycle(
@@ -1476,18 +1488,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
             .compositionEnded(reason: reason.panelVisibilityReason, compositionID: finishedCompositionID)
         )
         return commitText?.isEmpty == false
-    }
-
-    private func lifecycleCommitText(for policy: CompositionLifecycleCommitPolicy) -> String? {
-        switch policy {
-        case .none:
-            return nil
-        case .commitRawIfNeeded:
-            if compositionBuffer.hasResolvedSegments {
-                return compositionBuffer.commitText
-            }
-            return rawBuffer.isEmpty ? nil : rawBuffer
-        }
     }
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
@@ -1505,10 +1505,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reloadInputModeDefaultsIfNeeded(client: client)
             reloadRuntimePreferencesIfNeeded()
             reloadRuntimeLexiconEngineIfNeeded()
-            compositionBuffer = CompositionBuffer()
-            compositionID += 1
+            let beginResult = compositionStateRuntime.beginCompositionIfNeeded()
             publishRuntimeEvent(
-                .compositionStarted(compositionID: compositionID, rawRevision: rawRevision)
+                .compositionStarted(
+                    compositionID: beginResult.snapshot.compositionID,
+                    rawRevision: beginResult.snapshot.rawRevision
+                )
             )
             anchorResolver.reset()
         }
@@ -1552,7 +1554,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func resetAnchorState() {
-        compositionID += 1
+        compositionStateRuntime.incrementCompositionIDForAnchorReset()
         anchorResolver.reset()
     }
 
@@ -1906,11 +1908,6 @@ private enum CompositionLifecycleFinishReason: String {
             return .nativeEnded
         }
     }
-}
-
-private enum CompositionLifecycleCommitPolicy {
-    case none
-    case commitRawIfNeeded
 }
 
 final class LexicalProfileRefreshGate: @unchecked Sendable {

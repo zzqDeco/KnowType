@@ -14,6 +14,11 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - `CandidatePanelFrame` is the only shape passed to `CandidatePanelPresenter`.
   It carries composition id, raw revision, raw length, anchor source, panel
   model, and `CandidatePanelVisibilityReason`.
+- `InputCompositionStateRuntime` owns pure composition state: raw input,
+  `CompositionBuffer`, composition id, raw revision, and delete count. It may
+  return snapshots and mutation results, but Rime processing, host writes,
+  candidate-panel publication, AI, lexical side effects, and anchor reset stay
+  outside this runtime.
 - `InputCandidatePanelPublicationRuntime` owns candidate-panel publication
   state, frame emission, async stale-snapshot gating, hide reasons, delayed
   re-anchor generation, and panel diagnostics. It must receive Rime/native
@@ -53,6 +58,8 @@ input, candidate-panel presentation, AI slot patches, and background events.
 - Candidate-panel publication may hide for raw-empty or stale-suggestion
   snapshots, but anchor source `.none` remains an undisplayable published frame
   so layout-impossible behavior stays diagnosable.
+- Composition state reset must happen only after the coordinator has read any
+  commit text and recorded side-effect contexts for the finishing composition.
 - Native navigation preserves Rime as the source of truth for highlighted and
   current-page candidates. Duplicate native candidate text must match by
   encoded native index before selection; otherwise generic Rime Space remains
@@ -70,6 +77,7 @@ input, candidate-panel presentation, AI slot patches, and background events.
 ## Tests
 
 - `InputControllerCoordinatorTests`
+- `InputCompositionStateRuntimeTests`
 - `InputCandidatePanelPublicationRuntimeTests`
 - `InputNativeCandidateNavigationRuntimeTests`
 - `InputLexicalCommitRuntimeTests`

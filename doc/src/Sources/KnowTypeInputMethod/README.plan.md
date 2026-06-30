@@ -17,6 +17,8 @@ Current package-level implementation covers:
   async publication gating, delayed re-anchor, and panel diagnostics
 - native candidate navigation runtime for Rime current-page selection,
   highlight, paging, boundary paging, and panel selection mapping
+- composition state runtime for raw input, `CompositionBuffer`, composition id,
+  raw revision, and delete-count state
 - suggestion state runtime for current suggestion/raw-input snapshots, commit
   suggestion reads, and narrow no-provider fallback continuation cleanup
 - candidate panel mouse hover, click commit, scroll paging, row accessibility, and PNG snapshot regression tests
@@ -73,6 +75,10 @@ recent commits, protected selection-history recording, lexical profile refresh
 scheduling, and commit/selection event payload construction. The coordinator
 still owns host insertion, composition lifecycle, and asynchronous event-bus
 publication.
+`InputCompositionStateRuntime` owns pure raw composition state and returns
+snapshots for coordinator side effects. The coordinator still decides the order
+of Rime calls, marked text, candidate-panel publication, AI/lexical recording,
+and host insertion.
 `InputSuggestionStateRuntime` owns the current `SuggestionResponse` and
 associated raw input. It keeps suggestion commit snapshots and stale checks out
 of the coordinator while preserving the Rime-only product path: it does not

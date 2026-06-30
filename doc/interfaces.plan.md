@@ -243,6 +243,9 @@ Core candidate types:
   `SuggestionResponse`, the raw input that produced it, commit suggestion
   snapshots, current-suggestion checks, and resolved-composition no-provider
   fallback cleanup.
+- `InputCompositionStateRuntime`: input-method runtime that owns raw input,
+  `CompositionBuffer`, composition id, raw revision, delete count, and pure
+  composition-state mutation results.
 - `InputSelectionHistoryRuntime`: input-method session owner for protected-input
   filtering, recent selection history, `candidateSelected` event payloads, and
   persistence delegation for prefix candidate choices.
@@ -264,6 +267,9 @@ Raw input is tracked outside `SuggestionResponse` by
 focused on candidates and latency rather than identity. Protection metadata
 lives on correction candidates, locked prefixes, and protected ranges rather
 than on the top-level suggestion response.
+The active composition raw input itself is owned by
+`InputCompositionStateRuntime`; suggestion state stores only the raw identity of
+the suggestion currently being published or committed.
 
 Core correction and traditional-input candidates may carry `rawRange` and `segments` for offline/session tests. The production IMK coordinator no longer generates segment candidates from `TraditionalInputEngine`; Rime candidates are treated as whole-prefix candidates over the current raw input.
 
