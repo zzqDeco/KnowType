@@ -38,6 +38,9 @@ Current package-level implementation covers:
 - lexical commit runtime for bounded recent commit tracking, selection-history
   orchestration, lexical profile refresh scheduling, and commit/selection event
   payloads
+- commit application runtime for mapping commit results to coordinator plans,
+  constructing AI/lexical side-effect contexts, and planning lifecycle finish
+  state without performing host writes
 - AI recommendation schedule policy for pure schedule/skip decisions before
   asynchronous provider requests are started
 - AI recommendation runtime for IMK-side request construction, cancellation,
@@ -84,6 +87,11 @@ associated raw input. It keeps suggestion commit snapshots and stale checks out
 of the coordinator while preserving the Rime-only product path: it does not
 create pending fallback continuations or restart the retired async local
 candidate pipeline.
+`InputCommitApplicationRuntime` owns commit-result plan and context
+construction. The coordinator still executes the order-sensitive work:
+accepted-feedback preparation, AI/lexical recording, KnowType-owned marked-text
+cleanup, host insertion, Rime reset, candidate-panel hide, anchor reset, and
+lifecycle event publication.
 
 The IMK controller marks composing text with `IMKTextInput.setMarkedText`. Inline-compatible hosts, including browsers, text editors, IDEs, Electron shells, and JetBrains-style clients by default, receive Rime preedit as attributed marked text. Terminal-style or explicit override commit-only hosts receive a full-width-space attributed placeholder so IMK composition ownership and candidate anchoring stay stable without exposing raw pinyin in the host field. `InputClientCompositionWriter` owns that carrier choice, idle ASCII passthrough decisions, and KnowType-owned marked-text cleanup, while `InputClientWriteCoordinator` owns the low-level `setMarkedText`/`insertText` calls and privacy-safe diagnostics. Their real preedit is shown in the candidate panel instead. Candidate anchor lookup is delegated to `CandidateAnchorResolver`, which prefers fresh IMK text rects, then line-height rects, then Accessibility focused-range bounds if permission is already granted, then a same-composition scoped last usable anchor, and finally a stable safe point inside the screen visible frame. The panel no longer follows the mouse pointer when host text geometry is temporarily unavailable.
 

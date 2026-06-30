@@ -80,6 +80,7 @@ required for every test file.
 - [InputActions](Sources/KnowTypeInputMethod/InputActions.plan.md)
 - [InputCandidatePanelPublicationRuntime](Sources/KnowTypeInputMethod/InputCandidatePanelPublicationRuntime.plan.md)
 - [InputCandidateListBuilder](Sources/KnowTypeInputMethod/InputCandidateListBuilder.plan.md)
+- [InputCommitApplicationRuntime](Sources/KnowTypeInputMethod/InputCommitApplicationRuntime.plan.md)
 - [InputCommitResultPolicy](Sources/KnowTypeInputMethod/InputCommitResultPolicy.plan.md)
 - [InputClientCompatibilityPolicy](Sources/KnowTypeInputMethod/InputClientCompatibilityPolicy.plan.md)
 - [InputClientCompositionWriter](Sources/KnowTypeInputMethod/InputClientCompositionWriter.plan.md)

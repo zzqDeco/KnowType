@@ -23,6 +23,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var runtimePreferences: InputMethodRuntimePreferences
     private let nativeCandidateNavigationRuntime = InputNativeCandidateNavigationRuntime()
     private let lexicalCommitRuntime: InputLexicalCommitRuntime
+    private let commitApplicationRuntime = InputCommitApplicationRuntime()
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
@@ -989,10 +990,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         acceptedAIRecommendation: AIRecommendationCandidate? = nil
     ) -> Bool {
-        switch InputCommitResultPolicy.directive(for: result) {
+        switch commitApplicationRuntime.plan(for: result, hasComposition: !rawBuffer.isEmpty) {
         case .insertAndReset(let text):
             let acceptID = aiAcceptanceRuntime.prepareAcceptedFeedbackTracking(
-                context: InputAIAcceptanceFeedbackContext(
+                context: commitApplicationRuntime.acceptedFeedbackContext(
                     text: text,
                     schemaID: conversionEngine.activeSchemaID,
                     appBundleID: appBundleIdentifier(client: client),
@@ -1001,11 +1002,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 )
             )
             recordCommitSideEffects(
-                text,
-                client: client,
-                acceptedAIRecommendation: acceptedAIRecommendation,
-                acceptID: acceptID,
-                compositionSnapshot: compositionState
+                commitSideEffectContexts(
+                    text,
+                    client: client,
+                    acceptedAIRecommendation: acceptedAIRecommendation,
+                    acceptID: acceptID,
+                    compositionSnapshot: compositionState
+                )
             )
             insert(text, client: client)
             if acceptID != nil {
@@ -1024,8 +1027,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .keepComposition:
             refreshComposition(client: client)
             return true
-        case .noAction:
-            return InputCommitResultPolicy.shouldConsumeNoAction(hasComposition: !rawBuffer.isEmpty)
+        case .noAction(let consume):
+            return consume
         }
     }
 
@@ -1038,9 +1041,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
            !commitText.isEmpty {
             if result.snapshot.hasComposition {
                 recordCommitSideEffects(
-                    commitText,
-                    client: client,
-                    compositionSnapshot: compositionState
+                    commitSideEffectContexts(
+                        commitText,
+                        client: client,
+                        compositionSnapshot: compositionState
+                    )
                 )
                 insert(commitText, client: client)
                 syncRawBufferToNativeSnapshot(result.snapshot)
@@ -1391,34 +1396,32 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return true
     }
 
-    private func recordCommitSideEffects(
+    private func commitSideEffectContexts(
         _ text: String,
         client: InputControllerClient?,
         acceptedAIRecommendation: AIRecommendationCandidate? = nil,
         acceptID: UUID? = nil,
         compositionSnapshot: InputCompositionStateSnapshot
-    ) {
+    ) -> InputCommitApplicationSideEffectContexts {
+        commitApplicationRuntime.sideEffectContexts(
+            text: text,
+            schemaID: conversionEngine.activeSchemaID,
+            appBundleID: appBundleIdentifier(client: client),
+            acceptedAIRecommendation: acceptedAIRecommendation,
+            acceptID: acceptID,
+            selectedNativeCandidateSource: nativeCandidateNavigationRuntime.selectedCandidate?.kind.analyticsSource,
+            prefixCandidateSource: suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates.first?.source,
+            compositionSnapshot: compositionSnapshot,
+            client: client
+        )
+    }
+
+    private func recordCommitSideEffects(_ contexts: InputCommitApplicationSideEffectContexts) {
         let effects = aiAcceptanceRuntime.recordCommit(
-            context: InputAIAcceptanceCommitContext(
-                text: text,
-                rawInput: compositionSnapshot.rawInput,
-                schemaID: conversionEngine.activeSchemaID,
-                appBundleID: appBundleIdentifier(client: client),
-                acceptedAIRecommendation: acceptedAIRecommendation,
-                acceptID: acceptID,
-                selectedNativeCandidateSource: nativeCandidateNavigationRuntime.selectedCandidate?.kind.analyticsSource,
-                prefixCandidateSource: suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates.first?.source,
-                deleteCountBeforeCommit: compositionSnapshot.deleteCountBeforeCommit,
-                client: client
-            )
+            context: contexts.aiAcceptance
         )
         if effects.shouldRecordLexicalCommit {
-            let context = InputLexicalCommitContext(
-                text: text,
-                schemaID: conversionEngine.activeSchemaID,
-                compositionID: compositionSnapshot.compositionID
-            )
-            if let event = lexicalCommitRuntime.recordCommit(context: context) {
+            if let event = lexicalCommitRuntime.recordCommit(context: contexts.lexicalCommit) {
                 publishRuntimeEvent(event)
             }
         }
@@ -1459,18 +1462,27 @@ final class InputControllerCoordinator: @unchecked Sendable {
     ) -> Bool {
         traceCompositionLifecycleFinish(reason: reason)
         let finishingSnapshot = compositionState
-        let finishedCompositionID = finishingSnapshot.compositionID
         hideCandidatePanel(reason: reason.panelVisibilityReason)
 
         let lifecycleClient = client ?? host?.currentClient
-        let shouldClearOwnedMarkedText = reason.shouldClearMarkedTextWhenEndingWithoutCommit
-            && (hasActiveTextComposition(snapshot: finishingSnapshot) || conversionEngine.snapshot.hasComposition)
-        let commitText = compositionStateRuntime.lifecycleCommitText(policy: commitPolicy)
-        if let commitText,
+        let finishPlan = commitApplicationRuntime.lifecycleFinishPlan(
+            panelVisibilityReason: reason.panelVisibilityReason,
+            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: reason.shouldClearMarkedTextWhenEndingWithoutCommit,
+            compositionSnapshot: finishingSnapshot,
+            hasNativeComposition: conversionEngine.snapshot.hasComposition,
+            commitText: compositionStateRuntime.lifecycleCommitText(policy: commitPolicy)
+        )
+        if let commitText = finishPlan.commitText,
            !commitText.isEmpty {
-            recordCommitSideEffects(commitText, client: lifecycleClient, compositionSnapshot: finishingSnapshot)
+            recordCommitSideEffects(
+                commitSideEffectContexts(
+                    commitText,
+                    client: lifecycleClient,
+                    compositionSnapshot: finishingSnapshot
+                )
+            )
             insert(commitText, client: lifecycleClient)
-        } else if shouldClearOwnedMarkedText {
+        } else if finishPlan.shouldClearOwnedMarkedText {
             inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
                 client: lifecycleClient,
                 state: writeState()
@@ -1482,12 +1494,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         resetAnchorState()
         invalidateSuggestion()
         inputClientCompositionWriter.finishLifecycle(
-            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: shouldClearOwnedMarkedText
+            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: finishPlan.shouldClearOwnedMarkedText
         )
         publishRuntimeEvent(
-            .compositionEnded(reason: reason.panelVisibilityReason, compositionID: finishedCompositionID)
+            .compositionEnded(
+                reason: finishPlan.panelVisibilityReason,
+                compositionID: finishPlan.finishedCompositionID
+            )
         )
-        return commitText?.isEmpty == false
+        return finishPlan.commitText?.isEmpty == false
     }
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
