@@ -13,13 +13,6 @@ struct InputCommitApplicationSideEffectContexts {
     var lexicalCommit: InputLexicalCommitContext
 }
 
-struct InputCommitApplicationLifecycleFinishPlan: Sendable, Equatable {
-    var panelVisibilityReason: CandidatePanelVisibilityReason
-    var finishedCompositionID: Int
-    var commitText: String?
-    var shouldClearOwnedMarkedText: Bool
-}
-
 final class InputCommitApplicationRuntime: @unchecked Sendable {
     func plan(for result: InputCommitResult, hasComposition: Bool) -> InputCommitApplicationPlan {
         switch InputCommitResultPolicy.directive(for: result) {
@@ -82,19 +75,4 @@ final class InputCommitApplicationRuntime: @unchecked Sendable {
         )
     }
 
-    func lifecycleFinishPlan(
-        panelVisibilityReason: CandidatePanelVisibilityReason,
-        shouldClearOwnedMarkedTextWhenEndingWithoutCommit: Bool,
-        compositionSnapshot: InputCompositionStateSnapshot,
-        hasNativeComposition: Bool,
-        commitText: String?
-    ) -> InputCommitApplicationLifecycleFinishPlan {
-        InputCommitApplicationLifecycleFinishPlan(
-            panelVisibilityReason: panelVisibilityReason,
-            finishedCompositionID: compositionSnapshot.compositionID,
-            commitText: commitText,
-            shouldClearOwnedMarkedText: shouldClearOwnedMarkedTextWhenEndingWithoutCommit
-                && (compositionSnapshot.hasActiveTextComposition || hasNativeComposition)
-        )
-    }
 }

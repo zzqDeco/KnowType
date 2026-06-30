@@ -2,8 +2,8 @@
 
 ## Summary
 
-- Extract commit-result planning, commit side-effect context construction, and
-  lifecycle finish planning from `InputControllerCoordinator`.
+- Extract commit-result planning and commit side-effect context construction
+  from `InputControllerCoordinator`.
 - Keep the change refactor-only: the coordinator remains responsible for all
   order-sensitive IMK, Rime, candidate-panel, AI, lexical, and lifecycle side
   effects.
@@ -23,8 +23,6 @@
 - Runtime constructs accepted-feedback, AI acceptance, and lexical commit
   contexts from a captured composition snapshot plus coordinator-supplied
   schema, app, candidate-source, and client facts.
-- Runtime constructs lifecycle finish plans from explicit reason fields instead
-  of depending on private lifecycle reason enums.
 - Coordinator consumes the returned plans and contexts while preserving the
   previous side-effect order.
 
@@ -45,5 +43,6 @@
 - This is a refactor-only PR.
 - Commit precedence, host carrier behavior, AI recommendation, Rime schema,
   Settings UI, install scripts, and provider prompts remain unchanged.
-- A later PR can split more lifecycle or write orchestration only after this
-  plan/context boundary is stable.
+- Composition lifecycle planning now lives in
+  `InputCompositionLifecycleRuntime`; future write orchestration splits should
+  keep that boundary stable.

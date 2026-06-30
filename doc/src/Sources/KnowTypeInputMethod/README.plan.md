@@ -38,9 +38,11 @@ Current package-level implementation covers:
 - lexical commit runtime for bounded recent commit tracking, selection-history
   orchestration, lexical profile refresh scheduling, and commit/selection event
   payloads
+- composition lifecycle runtime for begin/finish plans, first-begin trace-once
+  state, finish reason mapping, and owned marked-text clear intent
 - commit application runtime for mapping commit results to coordinator plans,
-  constructing AI/lexical side-effect contexts, and planning lifecycle finish
-  state without performing host writes
+  and constructing AI/lexical side-effect contexts without performing host
+  writes
 - AI recommendation schedule policy for pure schedule/skip decisions before
   asynchronous provider requests are started
 - AI recommendation runtime for IMK-side request construction, cancellation,
@@ -87,6 +89,7 @@ associated raw input. It keeps suggestion commit snapshots and stale checks out
 of the coordinator while preserving the Rime-only product path: it does not
 create pending fallback continuations or restart the retired async local
 candidate pipeline.
+`InputCompositionLifecycleRuntime` owns composition begin/finish plans.
 `InputCommitApplicationRuntime` owns commit-result plan and context
 construction. The coordinator still executes the order-sensitive work:
 accepted-feedback preparation, AI/lexical recording, KnowType-owned marked-text

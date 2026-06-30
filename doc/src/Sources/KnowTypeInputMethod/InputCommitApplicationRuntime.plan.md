@@ -6,9 +6,6 @@
   coordinator.
 - Builds accepted-feedback, AI acceptance, and lexical commit contexts from a
   captured `InputCompositionStateSnapshot`.
-- Builds lifecycle finish plans that preserve the finishing composition id,
-  optional commit text, panel visibility reason, and owned marked-text clear
-  decision.
 
 ## Boundaries
 
@@ -27,8 +24,8 @@
   `InputCommitResultPolicy`.
 - Commit side-effect contexts read raw input, composition id, and delete count
   from the snapshot captured before lifecycle reset.
-- Lifecycle finish plans use explicit reason fields instead of depending on the
-  private lifecycle-reason enum.
+- Composition lifecycle begin/finish planning belongs to
+  `InputCompositionLifecycleRuntime`.
 
 ## Tests
 
