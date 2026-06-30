@@ -1,5 +1,7 @@
 # Input Refactor Regression Audit
 
+Status: Delivered
+
 ## Summary
 
 This plan locks the input-method behavior after the coordinator extraction

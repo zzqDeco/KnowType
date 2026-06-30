@@ -1,5 +1,7 @@
 # Input Commit Application Runtime Refactor
 
+Status: Delivered
+
 ## Summary
 
 - Extract commit-result planning and commit side-effect context construction

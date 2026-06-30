@@ -1,5 +1,7 @@
 # Input Composition State Runtime Refactor
 
+Status: Delivered
+
 ## Summary
 
 - Extract pure composition state from `InputControllerCoordinator` into

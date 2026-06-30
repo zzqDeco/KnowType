@@ -4,6 +4,8 @@
 
 Defines the small value types that keep the IMK runtime split into hot-path
 input, candidate-panel presentation, AI slot patches, and background events.
+The runtime extractions listed here are current `dev` boundaries, not pending
+implementation plans.
 
 ## Boundaries
 

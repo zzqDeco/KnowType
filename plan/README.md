@@ -36,8 +36,6 @@ when converting a shipped plan into a short record.
 | [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | PageDown/PageUp offset-preserving candidate paging | Active |
 | [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive candidate panel layout | Active |
 | [candidate-panel-row-builder-refactor.plan.md](candidate-panel-row-builder-refactor.plan.md) | Share candidate-panel row ordering between state and renderer | Active |
-| [input-candidate-panel-publication-runtime-refactor.plan.md](input-candidate-panel-publication-runtime-refactor.plan.md) | Extract candidate-panel publication, visibility, async refresh, and delayed re-anchor lifecycle from the coordinator | Active |
-| [input-native-candidate-navigation-runtime-refactor.plan.md](input-native-candidate-navigation-runtime-refactor.plan.md) | Extract Rime/native candidate selection, highlight, paging, and panel-selection mapping from the coordinator | Active |
 | [native-candidate-panel-spotlight-ui.plan.md](native-candidate-panel-spotlight-ui.plan.md) | macOS-native compact candidate panel styling and Spotlight window-level fix | Active |
 | [candidate-panel-lifecycle-teardown.plan.md](candidate-panel-lifecycle-teardown.plan.md) | Hide and invalidate the AppKit candidate panel across commit, deactivate, close, and stale async updates | Active |
 | [candidate-panel-search-overlay-placement.plan.md](candidate-panel-search-overlay-placement.plan.md) | Place the candidate panel above Spotlight search overlays while preserving ordinary text-field placement | Active |
@@ -47,16 +45,6 @@ when converting a shipped plan into a short record.
 | [rime-conversion-lexical-ai.plan.md](rime-conversion-lexical-ai.plan.md) | Optional librime bridge, synchronous base candidate hot path, and AI lexical profile context | Active |
 | [rime-userdb-lexical-profile.plan.md](rime-userdb-lexical-profile.plan.md) | Persist AI lexical profile from Rime userdb frequency plus recent KnowType commits/selections | Active |
 | [input-runtime-boundaries.plan.md](input-runtime-boundaries.plan.md) | Separate Rime hot path, candidate panel presentation, AI patches, and Rime maintenance side effects | Active |
-| [input-ai-recommendation-schedule-policy-refactor.plan.md](input-ai-recommendation-schedule-policy-refactor.plan.md) | Extract real-time AI recommendation schedule eligibility from the coordinator | Active |
-| [input-ai-recommendation-runtime-refactor.plan.md](input-ai-recommendation-runtime-refactor.plan.md) | Extract real-time AI recommendation request lifecycle from the coordinator | Active |
-| [input-ai-acceptance-runtime-refactor.plan.md](input-ai-acceptance-runtime-refactor.plan.md) | Extract post-commit AI acceptance learning and feedback side effects from the coordinator | Active |
-| [input-lexical-commit-runtime-refactor.plan.md](input-lexical-commit-runtime-refactor.plan.md) | Extract local lexical commit, selection-history, refresh scheduling, and event payload orchestration from the coordinator | Active |
-| [input-suggestion-state-runtime-refactor.plan.md](input-suggestion-state-runtime-refactor.plan.md) | Extract current suggestion state, commit snapshots, and no-provider fallback cleanup from the coordinator | Active |
-| [input-composition-state-runtime-refactor.plan.md](input-composition-state-runtime-refactor.plan.md) | Extract raw input, composition buffer, composition id/revision, and delete-count state from the coordinator | Active |
-| [input-composition-lifecycle-runtime-refactor.plan.md](input-composition-lifecycle-runtime-refactor.plan.md) | Extract composition begin/finish lifecycle planning and trace-once state from the coordinator | Active |
-| [input-commit-application-runtime-refactor.plan.md](input-commit-application-runtime-refactor.plan.md) | Extract commit-result planning and side-effect context construction from the coordinator | Active |
-| [input-commit-decision-runtime-refactor.plan.md](input-commit-decision-runtime-refactor.plan.md) | Extract Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions from the coordinator | Active |
-| [input-refactor-regression-audit.plan.md](input-refactor-regression-audit.plan.md) | Lock coordinator-level behavior after the input-method runtime extraction sequence | Active |
 | [input-client-composition-writer-refactor.plan.md](input-client-composition-writer-refactor.plan.md) | Extract host composition write state and owned marked-text cleanup from the coordinator | Active |
 | [input-selection-history-runtime-refactor.plan.md](input-selection-history-runtime-refactor.plan.md) | Extract local prefix-selection history filtering, recent cache, event payload, and persistence delegation from the coordinator | Active |
 | [session-suggestion-pipeline-refactor.plan.md](session-suggestion-pipeline-refactor.plan.md) | Rename the session suggestion pipeline boundary and remove the obsolete InputMethodPipeline name without a compatibility alias | Active |
@@ -135,6 +123,18 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [input-commit-decision-runtime-refactor.plan.md](input-commit-decision-runtime-refactor.plan.md) | Extract Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions from the coordinator | Delivered |
+| [input-composition-lifecycle-runtime-refactor.plan.md](input-composition-lifecycle-runtime-refactor.plan.md) | Extract composition begin/finish lifecycle planning and trace-once state from the coordinator | Delivered |
+| [input-commit-application-runtime-refactor.plan.md](input-commit-application-runtime-refactor.plan.md) | Extract commit-result planning and side-effect context construction from the coordinator | Delivered |
+| [input-refactor-regression-audit.plan.md](input-refactor-regression-audit.plan.md) | Lock coordinator-level behavior after the input-method runtime extraction sequence | Delivered |
+| [input-composition-state-runtime-refactor.plan.md](input-composition-state-runtime-refactor.plan.md) | Extract raw input, composition buffer, composition id/revision, and delete-count state from the coordinator | Delivered |
+| [input-suggestion-state-runtime-refactor.plan.md](input-suggestion-state-runtime-refactor.plan.md) | Extract current suggestion state, commit snapshots, and no-provider fallback cleanup from the coordinator | Delivered |
+| [input-lexical-commit-runtime-refactor.plan.md](input-lexical-commit-runtime-refactor.plan.md) | Extract local lexical commit, selection-history, refresh scheduling, and event payload orchestration from the coordinator | Delivered |
+| [input-native-candidate-navigation-runtime-refactor.plan.md](input-native-candidate-navigation-runtime-refactor.plan.md) | Extract Rime/native candidate selection, highlight, paging, and panel-selection mapping from the coordinator | Delivered |
+| [input-candidate-panel-publication-runtime-refactor.plan.md](input-candidate-panel-publication-runtime-refactor.plan.md) | Extract candidate-panel publication, visibility, async refresh, and delayed re-anchor lifecycle from the coordinator | Delivered |
+| [input-ai-acceptance-runtime-refactor.plan.md](input-ai-acceptance-runtime-refactor.plan.md) | Extract post-commit AI acceptance learning and feedback side effects from the coordinator | Delivered |
+| [input-ai-recommendation-runtime-refactor.plan.md](input-ai-recommendation-runtime-refactor.plan.md) | Extract real-time AI recommendation request lifecycle from the coordinator | Delivered |
+| [input-ai-recommendation-schedule-policy-refactor.plan.md](input-ai-recommendation-schedule-policy-refactor.plan.md) | Extract real-time AI recommendation schedule eligibility from the coordinator | Delivered |
 | [input-method-decouple-host-carrier.plan.md](input-method-decouple-host-carrier.plan.md) | Decouple code-app input defaults from host marked-text carrier selection and remove Codex carrier remnants | Delivered |
 | [input-client-host-profile-preedit.plan.md](input-client-host-profile-preedit.plan.md) | Host profile carrier table and commit-only candidate-panel preedit row | Delivered |
 | [input-client-placeholder-composition.plan.md](input-client-placeholder-composition.plan.md) | Commit-only host placeholder composition and owned marked-text cleanup | Delivered |

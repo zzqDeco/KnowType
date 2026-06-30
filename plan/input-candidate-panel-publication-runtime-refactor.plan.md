@@ -1,5 +1,7 @@
 # Input Candidate Panel Publication Runtime Refactor
 
+Status: Delivered
+
 ## Summary
 
 - Extract candidate-panel publication lifecycle from

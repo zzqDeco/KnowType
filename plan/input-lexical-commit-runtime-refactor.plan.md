@@ -1,5 +1,7 @@
 # Input Lexical Commit Runtime Refactor
 
+Status: Delivered
+
 ## Summary
 
 - Extract local lexical commit and selection side-effect orchestration from

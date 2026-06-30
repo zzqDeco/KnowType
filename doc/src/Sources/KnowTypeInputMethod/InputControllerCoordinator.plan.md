@@ -1,6 +1,10 @@
 # InputControllerCoordinator
 
 `InputControllerCoordinator` owns the testable state machine behind `KnowTypeInputController`.
+After the input-runtime refactor sequence, it is primarily the IMK side-effect
+ordering owner: dedicated runtimes return state, plans, or contexts, while the
+coordinator still executes Rime, host write, panel, AI, lexical, lifecycle, and
+event publication side effects in the required order.
 
 Current behavior:
 

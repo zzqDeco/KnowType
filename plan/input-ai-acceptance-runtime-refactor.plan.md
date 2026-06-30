@@ -1,5 +1,7 @@
 # Input AI Acceptance Runtime Refactor
 
+Status: Delivered
+
 ## Summary
 
 - Extract post-commit AI accepted-learning, typing-context event recording, and
