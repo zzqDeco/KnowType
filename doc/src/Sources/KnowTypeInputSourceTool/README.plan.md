@@ -19,6 +19,8 @@ The helper owns explicit debug TIS calls for:
 - `register --path ... [--select]`: compatibility alias for the bootstrap path.
 - `select [--require-selected]`: debug-only helper-local selection.
 
+Low-level TIS source lookup, source property reads, source dedupe, activation/selection ordering, notification posting, wait helpers, and LaunchServices stale-record cleanup are delegated to `KnowTypeInputSourceSupport`. This executable owns command parsing, stdout/stderr key/value compatibility, scoped preference repair, and command exit semantics; it should not reimplement the shared TIS or LaunchServices primitives locally.
+
 Scripts should call this helper instead of inline `swift -` snippets for diagnostics and scoped preference cleanup. Default install/repair registration goes through the installed app CLI context, then uses this helper for preference repair and diagnostics. Manual selection still goes through `scripts/select-inputmethod.sh`. The helper deliberately labels selection verification as helper-local because another app or the menu bar can keep its own current input source until the user activates that app and selects KnowType.
 
 The implementation follows the mature IMK boundary that registration and enablement go through `TISRegisterInputSource` and `TISEnableInputSource`, while user-facing selection remains an explicit preflight before real typing. The helper reads protected input-source preference arrays for diagnostics, and only explicit repair commands write scoped KnowType rows.

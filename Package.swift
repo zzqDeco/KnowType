@@ -90,7 +90,10 @@ let package = Package(
         ),
         .target(
             name: "KnowTypeInputSourceSupport",
-            path: "Sources/KnowTypeInputSourceSupport"
+            path: "Sources/KnowTypeInputSourceSupport",
+            linkerSettings: [
+                .linkedFramework("Carbon", .when(platforms: [.macOS]))
+            ]
         ),
         .executableTarget(
             name: "KnowTypeInputMethodApp",
