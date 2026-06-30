@@ -125,6 +125,7 @@ when converting a shipped plan into a short record.
 | [local-input-source-system-policy.plan.md](local-input-source-system-policy.plan.md) | macOS 15 local SystemPolicyRule generation for Apple Development testing | Active |
 | [local-input-source-switching-repair.plan.md](local-input-source-switching-repair.plan.md) | Repair stale local TIS/LaunchServices state and authorization guidance | Active |
 | [install-script-deduplicate-local-bundles.plan.md](install-script-deduplicate-local-bundles.plan.md) | Deduplicate local KnowType IMK bundles and stale LaunchServices records | Active |
+| [input-source-support-shared-cleanup.plan.md](input-source-support-shared-cleanup.plan.md) | Share duplicated TIS and LaunchServices support helpers between the installed app and input-source CLI | Active |
 
 ## Delivered Or Recently Absorbed Work
 
