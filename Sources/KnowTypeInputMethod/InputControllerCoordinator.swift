@@ -827,6 +827,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
         let currentAppBundleID = appBundleIdentifier(client: client)
         let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
+        let shouldScheduleRecommendationRequest = aiRecommendationRuntime.shouldScheduleRecommendationRequest
+        let canBuildRecommendationContext = aiRecommendationRuntime.shouldBuildRecommendationContext
         let scheduleDecision = aiRecommendationSchedulePolicy.decision(
             for: InputAIRecommendationScheduleContext(
                 rawInput: rawBuffer,
@@ -835,14 +837,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 lockedPrefix: lockedPrefixText,
                 cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
                 canRequestAIRecommendations: canRequestAIRecommendations,
-                hasRecommendationProvider: aiRecommendationRuntime.hasProvider
+                hasRecommendationProvider: shouldScheduleRecommendationRequest
             )
         )
         let shouldBuildRecommendationContext: Bool
         if case .schedule = scheduleDecision {
-            shouldBuildRecommendationContext = true
+            shouldBuildRecommendationContext = canBuildRecommendationContext
         } else {
             shouldBuildRecommendationContext = false
+        }
+        let isProviderAvailabilityProbe: Bool
+        if case .schedule = scheduleDecision {
+            isProviderAvailabilityProbe = shouldScheduleRecommendationRequest && !canBuildRecommendationContext
+        } else {
+            isProviderAvailabilityProbe = false
         }
         let context = InputAIRecommendationRuntimeContext(
             rawInput: rawBuffer,
@@ -851,6 +859,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             lockedPrefix: lockedPrefixText,
             cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
             canRequestAIRecommendations: canRequestAIRecommendations,
+            hasRecommendationProvider: shouldScheduleRecommendationRequest,
+            isProviderAvailabilityProbe: isProviderAvailabilityProbe,
             appBundleID: currentAppBundleID,
             locale: locale,
             compositionID: compositionID,
@@ -1066,7 +1076,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
             insert(text, client: client)
             if acceptID != nil {
-                host?.scheduleDelayedReanchor { [weak self, client] in
+                host?.schedulePostInsertCaretVerification { [weak self, client] in
                     self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
                 }
             }

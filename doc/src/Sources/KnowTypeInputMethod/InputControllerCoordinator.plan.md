@@ -131,6 +131,9 @@ Current behavior:
   accepted-learning writes, feedback tracking, and typing-context events are
   asynchronous or tracker-local side effects owned by
   `InputAIAcceptanceRuntime`
+- schedules post-insert AI feedback caret verification through the dedicated
+  host post-insert seam, not through delayed candidate-panel re-anchor
+  scheduling
 - schedules AI recommendation from raw input and confirmed locked prefixes only;
   while Rime is merely composing, current-page Rime candidates are not sent as
   AI context and the first candidate is not treated as locked text
@@ -146,6 +149,11 @@ Current behavior:
 - preserves the original confirmed locked-prefix text in AI requests, including
   intentional leading/trailing whitespace, while using trimmed text only for
   empty-prefix eligibility checks
+- builds lexical profile and accepted-feedback snapshots for AI only when
+  `InputAIRecommendationRuntime.shouldBuildRecommendationContext` says the
+  provider state can use them; known-unavailable lazy providers keep the
+  lightweight availability-probe path without repeated heavy context
+  construction
 - merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; in-memory recent commits and selection history can participate, but current-page Rime candidates do not
 - requests lexical context and commit/selection refresh through
   `InputLexicalCommitRuntime`; underlying Rime userdb refresh reads existing

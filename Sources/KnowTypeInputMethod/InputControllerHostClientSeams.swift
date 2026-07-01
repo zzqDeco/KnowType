@@ -113,6 +113,7 @@ protocol InputControllerHost: AnyObject {
     func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale)
     func hideCandidatePanel()
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void)
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void)
 }
 
 protocol InputControllerUserSelectionHistoryPersisting: AnyObject, Sendable {

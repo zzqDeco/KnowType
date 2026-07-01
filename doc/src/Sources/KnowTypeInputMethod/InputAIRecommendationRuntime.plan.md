@@ -16,6 +16,16 @@ updates back to the coordinator.
 - It may record `AIRecommendationDiagnosticEvent` values.
 - It may read the provider-availability snapshot for no-provider fallback
   decisions.
+- It exposes `shouldBuildRecommendationContext` so the coordinator can skip
+  expensive lexical and accepted-feedback snapshots after a lazy provider is
+  known unavailable, while still building context for actual recommendation
+  runtimes in the unknown/available states.
+- It exposes `shouldScheduleRecommendationRequest` separately from the heavy
+  context gate. Scheduling remains tied to an actual
+  `AIRecommendationProviding`; legacy eager-provider flags only suppress
+  fallback rows through `hasKnownProvider`. Lazy providers remain schedulable
+  for a lightweight availability probe after a known-unavailable state, so
+  Settings changes can be discovered without restarting the IMK process.
 - It must not access host clients, marked text, candidate-panel presentation,
   Rime selection, commit/write paths, or settings persistence.
 
@@ -23,6 +33,11 @@ updates back to the coordinator.
 
 - Scheduling starts with `InputAIRecommendationSchedulePolicy`; skipped states
   do not start provider tasks.
+- Known-unavailable lazy providers run availability probes without lexical or
+  accepted-feedback context. A probe returns `.idle` synchronously and suppresses
+  unavailable async results, but still applies a recovered `.ready` result.
+- `hasKnownProvider` remains scoped to suppressing no-provider fallback rows; it
+  is not the heavy-context construction gate.
 - Provider requests never include real-time Rime candidate hints.
 - Async results apply only when request id, generation, composition id, raw
   revision, and raw input still match the current composition snapshot.

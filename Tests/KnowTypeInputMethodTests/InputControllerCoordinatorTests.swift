@@ -3198,6 +3198,65 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testAIAcceptedCommitUsesImmediatePostInsertVerificationSeam() async throws {
+        let client = FakeInputControllerClient()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedFeedback = AIAcceptedFeedbackStore.inMemory()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedFeedback: acceptedFeedback,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        host.runScheduledOperations()
+        XCTAssertTrue(host.scheduledOperations.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        let acceptedText = try XCTUnwrap(client.insertTextWrites.last?.text)
+        XCTAssertTrue(host.scheduledOperations.isEmpty)
+        XCTAssertEqual(host.postInsertVerificationOperations.count, 1)
+
+        client.selectedRangeValue = NSRange(
+            location: 10 + (acceptedText as NSString).length,
+            length: 0
+        )
+        host.runPostInsertVerificationOperations()
+        XCTAssertTrue(host.postInsertVerificationOperations.isEmpty)
+
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 51),
+                client: client
+            )
+        )
+        XCTAssertFalse(diagnosticSink.events.contains {
+            $0.stage == .acceptedFeedbackTrackingCancelled
+                && $0.reason == "delete_before_verified"
+        })
+    }
+
+    @MainActor
     func testProtectedAppAcceptedAIRecommendationDoesNotRecordAcceptedLearningHistory() async throws {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
@@ -3275,7 +3334,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         client.selectedRangeValue = NSRange(location: 10 + ("JSON Schema 可以继续" as NSString).length, length: 0)
-        host.runScheduledOperations()
+        host.runPostInsertVerificationOperations()
         XCTAssertFalse(
             coordinator.handle(
                 stroke: InputKeyStroke(text: "", keyCode: 51),
@@ -5174,6 +5233,7 @@ private final class FakeInputControllerHost: InputControllerHost {
     private(set) var panelStates: [CandidatePanelState] = []
     private(set) var hideCandidatePanelCount = 0
     private(set) var scheduledOperations: [@Sendable () -> Void] = []
+    private(set) var postInsertVerificationOperations: [@Sendable () -> Void] = []
 
     var currentClient: InputControllerClient? {
         currentClientValue
@@ -5195,9 +5255,19 @@ private final class FakeInputControllerHost: InputControllerHost {
         scheduledOperations.append(operation)
     }
 
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
+        postInsertVerificationOperations.append(operation)
+    }
+
     func runScheduledOperations() {
         let operations = scheduledOperations
         scheduledOperations.removeAll()
+        operations.forEach { $0() }
+    }
+
+    func runPostInsertVerificationOperations() {
+        let operations = postInsertVerificationOperations
+        postInsertVerificationOperations.removeAll()
         operations.forEach { $0() }
     }
 }

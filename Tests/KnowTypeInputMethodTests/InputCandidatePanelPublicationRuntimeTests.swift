@@ -374,6 +374,7 @@ private final class RecordingCandidatePanelHost: InputControllerHost {
     private(set) var panelStates: [CandidatePanelState] = []
     private(set) var hideCount = 0
     private var scheduledOperations: [@Sendable () -> Void] = []
+    private var postInsertVerificationOperations: [@Sendable () -> Void] = []
 
     func updateComposition() {}
 
@@ -387,6 +388,10 @@ private final class RecordingCandidatePanelHost: InputControllerHost {
 
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
         scheduledOperations.append(operation)
+    }
+
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
+        postInsertVerificationOperations.append(operation)
     }
 
     func runScheduledOperations() {

@@ -75,7 +75,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         let unavailableState = unavailableRuntime.schedule(
             context: context(
                 rawInput: "abc",
-                canRequestAIRecommendations: false
+                canRequestAIRecommendations: false,
+                hasRecommendationProvider: false
             ),
             currentSnapshot: { snapshot(rawInput: "abc") },
             onStateChange: { _ in XCTFail("skip paths must not publish async state") }
@@ -91,7 +92,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         let lazyMissingState = lazyMissingRuntime.schedule(
             context: context(
                 rawInput: "abc",
-                canRequestAIRecommendations: true
+                canRequestAIRecommendations: true,
+                hasRecommendationProvider: false
             ),
             currentSnapshot: { snapshot(rawInput: "abc") },
             onStateChange: { _ in XCTFail("skip paths must not publish async state") }
@@ -307,6 +309,132 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(eagerRuntime.hasKnownProvider)
     }
 
+    @MainActor
+    func testShouldBuildRecommendationContextTracksProviderAvailability() {
+        let availability = AIRecommendationProviderAvailabilityState(.unknown)
+        let lazyRuntime = InputAIRecommendationRuntime(
+            provider: RecordingRuntimeAIRecommendationProvider(),
+            providerAvailability: availability,
+            hasEagerProvider: false,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertTrue(lazyRuntime.shouldBuildRecommendationContext)
+
+        availability.update(.available)
+        XCTAssertTrue(lazyRuntime.shouldBuildRecommendationContext)
+
+        availability.update(.unavailable)
+        XCTAssertFalse(lazyRuntime.shouldBuildRecommendationContext)
+
+        let injectedProviderRuntime = InputAIRecommendationRuntime(
+            provider: RecordingRuntimeAIRecommendationProvider(),
+            providerAvailability: nil,
+            hasEagerProvider: false,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertTrue(injectedProviderRuntime.shouldBuildRecommendationContext)
+
+        let eagerRuntime = InputAIRecommendationRuntime(
+            provider: nil,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertFalse(eagerRuntime.shouldBuildRecommendationContext)
+        XCTAssertFalse(eagerRuntime.shouldScheduleRecommendationRequest)
+
+        let eagerRuntimeWithRecommendationProvider = InputAIRecommendationRuntime(
+            provider: RecordingRuntimeAIRecommendationProvider(),
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertTrue(eagerRuntimeWithRecommendationProvider.shouldBuildRecommendationContext)
+        XCTAssertTrue(eagerRuntimeWithRecommendationProvider.shouldScheduleRecommendationRequest)
+
+        let missingRuntime = InputAIRecommendationRuntime(
+            provider: nil,
+            providerAvailability: nil,
+            hasEagerProvider: false,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertFalse(missingRuntime.shouldBuildRecommendationContext)
+    }
+
+    @MainActor
+    func testUnavailableProviderProbeRetriesWithoutPublishingUnavailableState() async {
+        let provider = RecordingRuntimeAIRecommendationProvider(response: .unavailable(reason: "AI 未配置"))
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: AIRecommendationProviderAvailabilityState(.unavailable),
+            hasEagerProvider: false,
+            diagnosticSink: diagnosticSink
+        )
+
+        var publishedStates: [AIRecommendationState] = []
+        let state = runtime.schedule(
+            context: context(
+                rawInput: "abc",
+                hasRecommendationProvider: true,
+                isProviderAvailabilityProbe: true
+            ),
+            currentSnapshot: { snapshot(rawInput: "abc") },
+            onStateChange: { publishedStates.append($0) }
+        )
+
+        XCTAssertEqual(state, .idle)
+        let didCallProvider = await waitUntilAsync {
+            await provider.requests.count == 1
+        }
+        XCTAssertTrue(didCallProvider)
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertTrue(publishedStates.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .stateApplied
+                && ($0.reason?.hasPrefix("availability_probe_suppressed_") ?? false)
+        })
+    }
+
+    @MainActor
+    func testUnavailableProviderProbeCanPublishReadyStateAfterProviderRecovers() async {
+        let provider = RecordingRuntimeAIRecommendationProvider(response: readyState("恢复续写"))
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: AIRecommendationProviderAvailabilityState(.unavailable),
+            hasEagerProvider: false,
+            diagnosticSink: diagnosticSink
+        )
+
+        var publishedStates: [AIRecommendationState] = []
+        let state = runtime.schedule(
+            context: context(
+                rawInput: "abc",
+                hasRecommendationProvider: true,
+                isProviderAvailabilityProbe: true
+            ),
+            currentSnapshot: { snapshot(rawInput: "abc") },
+            onStateChange: { publishedStates.append($0) }
+        )
+
+        XCTAssertEqual(state, .idle)
+        let didPublishReady = await waitUntil {
+            publishedStates.contains { state in
+                if case .ready = state {
+                    return true
+                }
+                return false
+            }
+        }
+        XCTAssertTrue(didPublishReady)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .stateApplied
+                && $0.reason == "ready"
+        })
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil
@@ -320,6 +448,8 @@ private func context(
     lockedPrefix: String? = nil,
     cloudContinuationEnabled: Bool = true,
     canRequestAIRecommendations: Bool = true,
+    hasRecommendationProvider: Bool = true,
+    isProviderAvailabilityProbe: Bool = false,
     appBundleID: String? = nil,
     locale: KnowTypeLocale = .mixed,
     compositionID: Int = 1,
@@ -334,6 +464,8 @@ private func context(
         lockedPrefix: lockedPrefix,
         cloudContinuationEnabled: cloudContinuationEnabled,
         canRequestAIRecommendations: canRequestAIRecommendations,
+        hasRecommendationProvider: hasRecommendationProvider,
+        isProviderAvailabilityProbe: isProviderAvailabilityProbe,
         appBundleID: appBundleID,
         locale: locale,
         compositionID: compositionID,
@@ -380,6 +512,21 @@ private func waitUntil(
         try? await Task.sleep(nanoseconds: 20_000_000)
     }
     return await MainActor.run(body: condition)
+}
+
+@MainActor
+private func waitUntilAsync(
+    timeout: TimeInterval = 3,
+    condition: @MainActor () async -> Bool
+) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if await condition() {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    return await condition()
 }
 
 private actor RecordingRuntimeAIRecommendationProvider: AIRecommendationProviding {

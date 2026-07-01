@@ -37,18 +37,28 @@ Non-goals:
   from `KnowTypeInputController.init`. The prewarm creates and releases a
   temporary `NativeRimeSession`; if the user's first key arrives before prewarm
   completes, the existing synchronous lazy path remains authoritative.
-- `NativeRimeSession` creation is serialized by a narrow Swift lock so the
-  background prewarm and a very early first key cannot concurrently enter Rime
-  session creation.
+- Native-session prewarm is best-effort. Session creation serializes the
+  process-global librime bridge initialization state, but speculative prewarm
+  uses a foreground-aware creation slot. First text/delete keys do not wait
+  behind active prewarm; if both collide, the text key uses raw fallback. Commit
+  and navigation keys with existing raw input retry native creation instead of
+  committing fallback raw text while prewarm is still busy.
 - `RimeConversionEngine.prewarmNativeSession(configuration:)` emits
   `KNOWTYPE_STARTUP_DEBUG=1` timing for start/done events and logs schema and
   success state without logging user text.
 - `IMKInputControllerHostAdapter.scheduleDelayedReanchor` uses a short
   `asyncAfter` delay while retaining the existing raw/composition stale gates
   inside the candidate-panel publication runtime.
+- Post-insert AI feedback caret verification uses a separate next-main-queue
+  seam so quick Delete feedback is not delayed by candidate-panel re-anchor
+  throttling.
 - `InputControllerCoordinator.scheduleAIRecommendation` evaluates a lightweight
   `InputAIRecommendationSchedulePolicy` context first. Only schedule-eligible
-  requests build lexical context and accepted-feedback snapshots.
+  requests build lexical context and accepted-feedback snapshots. Known-
+  unavailable lazy providers still get a lightweight retry probe so later
+  Settings changes can be discovered without restarting the IMK process; legacy
+  eager-provider flags suppress fallback rows but are not treated as
+  schedulable recommendation runtimes without `AIRecommendationProviding`.
 - Regular expressions in `TextProtection` and `LexicalContextBuilder`
   sanitization paths are static cached objects.
 

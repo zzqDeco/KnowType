@@ -41,11 +41,26 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(inputController.contains("InputMethodLexiconRuntime.defaultRuntime"))
         XCTAssertFalse(inputController.contains("initialEngineState"))
         XCTAssertFalse(rimeEngine.contains("InputMethodLexiconRuntime.defaultEngine"))
+        XCTAssertFalse(rimeEngine.contains("creationLock"))
+        XCTAssertTrue(rimeEngine.contains("preemptedBySpeculativePrewarm"))
+        XCTAssertTrue(rimeEngine.contains("activeCreationMode == .speculative"))
+        XCTAssertTrue(rimeEngine.contains("shouldPreemptSpeculativePrewarm"))
+        XCTAssertTrue(rimeEngine.contains("case .space,"))
+        XCTAssertTrue(rimeEngine.contains("return rawInput.isEmpty"))
+        XCTAssertTrue(rimeEngine.contains("foregroundMayPreemptSpeculative: Self.shouldPreemptSpeculativePrewarm"))
+        XCTAssertTrue(rimeEngine.contains("NativeRimeSession.prewarm(configuration: configuration)"))
         XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
         XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
         XCTAssertTrue(inputController.contains("DispatchQueue.main.asyncAfter"))
+        XCTAssertTrue(inputController.contains("schedulePostInsertCaretVerification"))
+        XCTAssertTrue(coordinator.contains("shouldScheduleRecommendationRequest"))
+        XCTAssertTrue(coordinator.contains("let canBuildRecommendationContext"))
+        XCTAssertTrue(coordinator.contains("isProviderAvailabilityProbe"))
+        XCTAssertTrue(coordinator.contains("isProviderAvailabilityProbe = shouldScheduleRecommendationRequest && !canBuildRecommendationContext"))
         XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext ? lexicalContextSnapshot"))
         XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext\n                ? aiAcceptedFeedbackProvider?.snapshot"))
+        XCTAssertTrue(coordinator.contains("schedulePostInsertCaretVerification"))
+        XCTAssertFalse(coordinator.contains("scheduleDelayedReanchor { [weak self, client] in\n                    self?.aiAcceptanceRuntime.verifyPostInsertCaret"))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {
@@ -410,6 +425,9 @@ private final class PerfInputControllerHost: InputControllerHost {
     }
     func hideCandidatePanel() {}
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
+        operation()
+    }
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
         operation()
     }
 }
