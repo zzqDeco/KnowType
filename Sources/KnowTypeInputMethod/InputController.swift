@@ -377,5 +377,11 @@ private final class IMKInputControllerHostAdapter: InputControllerHost, @uncheck
             operation()
         }
     }
+
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
+        DispatchQueue.main.async {
+            operation()
+        }
+    }
 }
 #endif

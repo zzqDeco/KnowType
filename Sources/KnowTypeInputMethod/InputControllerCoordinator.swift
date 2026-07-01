@@ -835,7 +835,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 lockedPrefix: lockedPrefixText,
                 cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
                 canRequestAIRecommendations: canRequestAIRecommendations,
-                hasRecommendationProvider: aiRecommendationRuntime.hasProvider
+                hasRecommendationProvider: aiRecommendationRuntime.shouldBuildRecommendationContext
             )
         )
         let shouldBuildRecommendationContext: Bool
@@ -1066,7 +1066,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
             insert(text, client: client)
             if acceptID != nil {
-                host?.scheduleDelayedReanchor { [weak self, client] in
+                host?.schedulePostInsertCaretVerification { [weak self, client] in
                     self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
                 }
             }

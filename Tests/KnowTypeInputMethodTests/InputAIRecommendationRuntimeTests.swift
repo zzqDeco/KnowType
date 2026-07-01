@@ -307,6 +307,48 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(eagerRuntime.hasKnownProvider)
     }
 
+    @MainActor
+    func testShouldBuildRecommendationContextTracksProviderAvailability() {
+        let availability = AIRecommendationProviderAvailabilityState(.unknown)
+        let lazyRuntime = InputAIRecommendationRuntime(
+            provider: RecordingRuntimeAIRecommendationProvider(),
+            providerAvailability: availability,
+            hasEagerProvider: false,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertTrue(lazyRuntime.shouldBuildRecommendationContext)
+
+        availability.update(.available)
+        XCTAssertTrue(lazyRuntime.shouldBuildRecommendationContext)
+
+        availability.update(.unavailable)
+        XCTAssertFalse(lazyRuntime.shouldBuildRecommendationContext)
+
+        let injectedProviderRuntime = InputAIRecommendationRuntime(
+            provider: RecordingRuntimeAIRecommendationProvider(),
+            providerAvailability: nil,
+            hasEagerProvider: false,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertTrue(injectedProviderRuntime.shouldBuildRecommendationContext)
+
+        let eagerRuntime = InputAIRecommendationRuntime(
+            provider: nil,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertTrue(eagerRuntime.shouldBuildRecommendationContext)
+
+        let missingRuntime = InputAIRecommendationRuntime(
+            provider: nil,
+            providerAvailability: nil,
+            hasEagerProvider: false,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertFalse(missingRuntime.shouldBuildRecommendationContext)
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil

@@ -516,16 +516,9 @@ protocol RimeUserDBMaintenanceSession: RimeUserDBSnapshotSession {
 }
 
 final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable {
-    private static let creationLock = NSLock()
-
     private let session: OpaquePointer
 
     init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
-        Self.creationLock.lock()
-        defer {
-            Self.creationLock.unlock()
-        }
-
         do {
             try fileManager.createDirectory(at: configuration.userDataURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: configuration.logURL, withIntermediateDirectories: true)

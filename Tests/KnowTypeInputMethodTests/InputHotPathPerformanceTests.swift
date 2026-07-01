@@ -41,11 +41,15 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(inputController.contains("InputMethodLexiconRuntime.defaultRuntime"))
         XCTAssertFalse(inputController.contains("initialEngineState"))
         XCTAssertFalse(rimeEngine.contains("InputMethodLexiconRuntime.defaultEngine"))
+        XCTAssertFalse(rimeEngine.contains("creationLock"))
         XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
         XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
         XCTAssertTrue(inputController.contains("DispatchQueue.main.asyncAfter"))
+        XCTAssertTrue(inputController.contains("schedulePostInsertCaretVerification"))
         XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext ? lexicalContextSnapshot"))
         XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext\n                ? aiAcceptedFeedbackProvider?.snapshot"))
+        XCTAssertTrue(coordinator.contains("schedulePostInsertCaretVerification"))
+        XCTAssertFalse(coordinator.contains("scheduleDelayedReanchor { [weak self, client] in\n                    self?.aiAcceptanceRuntime.verifyPostInsertCaret"))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {
@@ -410,6 +414,9 @@ private final class PerfInputControllerHost: InputControllerHost {
     }
     func hideCandidatePanel() {}
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
+        operation()
+    }
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
         operation()
     }
 }

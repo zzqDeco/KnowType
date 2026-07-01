@@ -15,6 +15,9 @@ Current behavior:
 - forwards IMK text, key event, candidate, commit, palette, deactivate, and close callbacks into `InputControllerCoordinator`
 - keeps AppKit/InputMethodKit imports guarded by `canImport(InputMethodKit)`
 - owns the production `CandidatePanelWindowController` and exposes it through the host seam
+- implements delayed host scheduling only for candidate-panel re-anchor and a
+  separate next-main-queue scheduling path for post-insert AI feedback caret
+  verification
 - starts the coordinator without `InputMethodLexiconRuntime`; production Chinese conversion is Rime-only and must not build `TraditionalInputEngine` during controller startup
 - schedules a process-wide native Rime session prewarm on a utility task after
   controller initialization; this does not change `RimeConversionEngine`'s

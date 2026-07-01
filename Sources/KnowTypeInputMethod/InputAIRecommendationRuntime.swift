@@ -54,8 +54,22 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         hasEagerProvider || providerAvailability?.providerAvailability == .available
     }
 
-    var hasProvider: Bool {
-        provider != nil
+    var shouldBuildRecommendationContext: Bool {
+        if hasEagerProvider {
+            return true
+        }
+        guard provider != nil else {
+            return false
+        }
+        guard let providerAvailability else {
+            return true
+        }
+        switch providerAvailability.providerAvailability {
+        case .unknown, .available:
+            return true
+        case .unavailable:
+            return false
+        }
     }
 
     @discardableResult

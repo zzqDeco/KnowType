@@ -37,15 +37,19 @@ Non-goals:
   from `KnowTypeInputController.init`. The prewarm creates and releases a
   temporary `NativeRimeSession`; if the user's first key arrives before prewarm
   completes, the existing synchronous lazy path remains authoritative.
-- `NativeRimeSession` creation is serialized by a narrow Swift lock so the
-  background prewarm and a very early first key cannot concurrently enter Rime
-  session creation.
+- Native-session prewarm is best-effort and must not serialize foreground
+  session creation behind the speculative background path. If the first key
+  arrives before prewarm completes, the foreground lazy path creates its own
+  session without waiting on the prewarm.
 - `RimeConversionEngine.prewarmNativeSession(configuration:)` emits
   `KNOWTYPE_STARTUP_DEBUG=1` timing for start/done events and logs schema and
   success state without logging user text.
 - `IMKInputControllerHostAdapter.scheduleDelayedReanchor` uses a short
   `asyncAfter` delay while retaining the existing raw/composition stale gates
   inside the candidate-panel publication runtime.
+- Post-insert AI feedback caret verification uses a separate next-main-queue
+  seam so quick Delete feedback is not delayed by candidate-panel re-anchor
+  throttling.
 - `InputControllerCoordinator.scheduleAIRecommendation` evaluates a lightweight
   `InputAIRecommendationSchedulePolicy` context first. Only schedule-eligible
   requests build lexical context and accepted-feedback snapshots.
