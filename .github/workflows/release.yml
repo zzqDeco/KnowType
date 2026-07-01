@@ -152,6 +152,8 @@ jobs:
             "release-assets/KnowType-v${VERSION}-macos-local-mvp.zip" \
             "release-assets/KnowType-v${VERSION}-macos-local-mvp.zip.sha256" \
             "release-assets/release-manifest.json" \
-            --title "KnowType $TAG" \
+            --title "KnowType ${TAG} Developer Preview" \
             --target "$RELEASE_COMMIT" \
+            --prerelease \
+            --latest=false \
             --notes-file release-notes.md

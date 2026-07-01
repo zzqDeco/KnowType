@@ -24,6 +24,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [release-0.2.3.plan.md](release-0.2.3.plan.md) | Prepare and publish the KnowType v0.2.3 Developer Preview release | Active |
 | [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and workflow | Active |
 | [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active |
 | [chinese-lexicon-index.plan.md](chinese-lexicon-index.plan.md) | Larger-lexicon indexing path for `TraditionalInputEngine` | Active |
