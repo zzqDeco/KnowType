@@ -827,6 +827,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func scheduleAIRecommendation(for suggestion: SuggestionResponse, client: InputControllerClient?) {
         let currentAppBundleID = appBundleIdentifier(client: client)
         let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
+        let shouldScheduleRecommendationRequest = aiRecommendationRuntime.shouldScheduleRecommendationRequest
         let scheduleDecision = aiRecommendationSchedulePolicy.decision(
             for: InputAIRecommendationScheduleContext(
                 rawInput: rawBuffer,
@@ -835,7 +836,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 lockedPrefix: lockedPrefixText,
                 cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
                 canRequestAIRecommendations: canRequestAIRecommendations,
-                hasRecommendationProvider: aiRecommendationRuntime.shouldBuildRecommendationContext
+                hasRecommendationProvider: shouldScheduleRecommendationRequest
             )
         )
         let shouldBuildRecommendationContext: Bool
@@ -851,7 +852,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             lockedPrefix: lockedPrefixText,
             cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
             canRequestAIRecommendations: canRequestAIRecommendations,
-            hasRecommendationProvider: aiRecommendationRuntime.shouldBuildRecommendationContext,
+            hasRecommendationProvider: shouldScheduleRecommendationRequest,
+            isProviderAvailabilityProbe: shouldScheduleRecommendationRequest && !shouldBuildRecommendationContext,
             appBundleID: currentAppBundleID,
             locale: locale,
             compositionID: compositionID,

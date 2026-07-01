@@ -38,8 +38,11 @@ input.
   elapsed time, schema id, and success state without logging input text.
 - Native session creation serializes entry into the C bridge because librime
   setup and the cached API handle are process-global. The background prewarm
-  uses a speculative try-lock path and skips prewarm when foreground creation is
-  already in progress, while foreground lazy creation remains authoritative.
+  uses a speculative creation slot and skips prewarm when foreground creation is
+  already in progress. Foreground lazy creation does not wait behind an active
+  speculative prewarm; if it collides with prewarm it records `prewarm_busy`,
+  falls back to raw input for that key, and remains eligible to create and replay
+  native raw input on the next key.
 - Native sessions initially select the configured schema, but
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct

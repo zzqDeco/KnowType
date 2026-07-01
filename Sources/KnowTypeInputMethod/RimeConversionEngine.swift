@@ -216,16 +216,44 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
               let nativeConfiguration else {
             return nil
         }
-        nativeSessionCreationAttempted = true
         let startedAt = Date()
-        nativeSession = NativeRimeSession(configuration: nativeConfiguration)
-        currentSnapshot = nativeSession?.snapshot() ?? currentSnapshot
+        let creationResult = NativeRimeSession.createForeground(configuration: nativeConfiguration)
+        let success: Bool
+        let details: String
+        switch creationResult {
+        case .created(let session):
+            nativeSessionCreationAttempted = true
+            nativeSession = session
+            replayNativeRawInputMirrorIfNeeded(into: session)
+            currentSnapshot = nativeSession?.snapshot() ?? currentSnapshot
+            success = true
+            details = "schema=\(configuredSchemaID) success=true"
+        case .preemptedBySpeculativePrewarm:
+            success = false
+            details = "schema=\(configuredSchemaID) success=false reason=prewarm_busy"
+        case .failed:
+            nativeSessionCreationAttempted = true
+            success = false
+            details = "schema=\(configuredSchemaID) success=false"
+        }
         Self.traceStartupEvent(
             "first_rime_session_create",
             elapsed: Date().timeIntervalSince(startedAt),
-            details: "schema=\(configuredSchemaID) success=\(nativeSession != nil)"
+            details: details
         )
+        guard success else {
+            return nil
+        }
         return nativeSession
+    }
+
+    private mutating func replayNativeRawInputMirrorIfNeeded(into nativeSession: NativeRimeSession) {
+        guard !nativeRawInputMirror.isEmpty else {
+            return
+        }
+        for scalar in nativeRawInputMirror.unicodeScalars {
+            _ = nativeSession.process(.text(String(scalar)))
+        }
     }
 
     private static func traceStartupEvent(_ event: String, elapsed: TimeInterval, details: String = "") {
@@ -521,43 +549,113 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
         case speculative
     }
 
-    private static let nativeBridgeInitializationLock = NSLock()
+    enum ForegroundCreationResult {
+        case created(NativeRimeSession)
+        case preemptedBySpeculativePrewarm
+        case failed
+    }
+
+    private enum SessionPointerCreationResult {
+        case created(OpaquePointer)
+        case preemptedBySpeculativePrewarm
+        case failed
+    }
+
+    private enum CreationSlotAcquireResult {
+        case acquired
+        case preemptedBySpeculativePrewarm
+        case unavailable
+    }
+
+    private final class CreationState: @unchecked Sendable {
+        let condition = NSCondition()
+        var activeCreationMode: CreationLockMode?
+        var foregroundCreationRequested = false
+    }
+
+    private static let creationState = CreationState()
 
     private let session: OpaquePointer
 
     convenience init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
-        self.init(configuration: configuration, fileManager: fileManager, lockMode: .blocking)
+        switch Self.makeSessionPointer(
+            configuration: configuration,
+            fileManager: fileManager,
+            lockMode: .blocking,
+            foregroundMayPreemptSpeculative: false
+        ) {
+        case .created(let session):
+            self.init(session: session)
+        case .preemptedBySpeculativePrewarm,
+             .failed:
+            return nil
+        }
+    }
+
+    static func createForeground(
+        configuration: NativeRimeConfiguration,
+        fileManager: FileManager = .default
+    ) -> ForegroundCreationResult {
+        switch makeSessionPointer(
+            configuration: configuration,
+            fileManager: fileManager,
+            lockMode: .blocking,
+            foregroundMayPreemptSpeculative: true
+        ) {
+        case .created(let session):
+            return .created(NativeRimeSession(session: session))
+        case .preemptedBySpeculativePrewarm:
+            return .preemptedBySpeculativePrewarm
+        case .failed:
+            return .failed
+        }
     }
 
     static func prewarm(
         configuration: NativeRimeConfiguration,
         fileManager: FileManager = .default
     ) -> NativeRimeSession? {
-        NativeRimeSession(configuration: configuration, fileManager: fileManager, lockMode: .speculative)
+        switch makeSessionPointer(
+            configuration: configuration,
+            fileManager: fileManager,
+            lockMode: .speculative,
+            foregroundMayPreemptSpeculative: false
+        ) {
+        case .created(let session):
+            return NativeRimeSession(session: session)
+        case .preemptedBySpeculativePrewarm,
+             .failed:
+            return nil
+        }
     }
 
-    private init?(
+    private init(session: OpaquePointer) {
+        self.session = session
+    }
+
+    private static func makeSessionPointer(
         configuration: NativeRimeConfiguration,
         fileManager: FileManager,
-        lockMode: CreationLockMode
-    ) {
+        lockMode: CreationLockMode,
+        foregroundMayPreemptSpeculative: Bool
+    ) -> SessionPointerCreationResult {
         do {
             try fileManager.createDirectory(at: configuration.userDataURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: configuration.logURL, withIntermediateDirectories: true)
         } catch {
-            return nil
+            return .failed
         }
 
-        switch lockMode {
-        case .blocking:
-            Self.nativeBridgeInitializationLock.lock()
-        case .speculative:
-            guard Self.nativeBridgeInitializationLock.try() else {
-                return nil
-            }
+        switch acquireCreationSlot(lockMode, foregroundMayPreemptSpeculative: foregroundMayPreemptSpeculative) {
+        case .acquired:
+            break
+        case .preemptedBySpeculativePrewarm:
+            return .preemptedBySpeculativePrewarm
+        case .unavailable:
+            return .failed
         }
         defer {
-            Self.nativeBridgeInitializationLock.unlock()
+            releaseCreationSlot(lockMode)
         }
 
         guard let session = ktb_rime_session_create(
@@ -569,9 +667,51 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
             configuration.appName,
             configuration.schemaID
         ) else {
-            return nil
+            return .failed
         }
-        self.session = session
+        return .created(session)
+    }
+
+    private static func acquireCreationSlot(
+        _ mode: CreationLockMode,
+        foregroundMayPreemptSpeculative: Bool
+    ) -> CreationSlotAcquireResult {
+        creationState.condition.lock()
+        defer {
+            creationState.condition.unlock()
+        }
+
+        switch mode {
+        case .speculative:
+            guard creationState.activeCreationMode == nil,
+                  !creationState.foregroundCreationRequested else {
+                return .unavailable
+            }
+            creationState.activeCreationMode = .speculative
+            return .acquired
+        case .blocking:
+            if foregroundMayPreemptSpeculative,
+               creationState.activeCreationMode == .speculative {
+                creationState.foregroundCreationRequested = true
+                return .preemptedBySpeculativePrewarm
+            }
+            while creationState.activeCreationMode != nil {
+                creationState.condition.wait()
+            }
+            creationState.foregroundCreationRequested = false
+            creationState.activeCreationMode = .blocking
+            return .acquired
+        }
+    }
+
+    private static func releaseCreationSlot(_ mode: CreationLockMode) {
+        creationState.condition.lock()
+        creationState.activeCreationMode = nil
+        if mode == .blocking {
+            creationState.foregroundCreationRequested = false
+        }
+        creationState.condition.broadcast()
+        creationState.condition.unlock()
     }
 
     deinit {

@@ -152,7 +152,8 @@ Current behavior:
 - builds lexical profile and accepted-feedback snapshots for AI only when
   `InputAIRecommendationRuntime.shouldBuildRecommendationContext` says the
   provider state can use them; known-unavailable lazy providers keep the
-  lightweight skip path without repeated heavy context construction
+  lightweight availability-probe path without repeated heavy context
+  construction
 - merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; in-memory recent commits and selection history can participate, but current-page Rime candidates do not
 - requests lexical context and commit/selection refresh through
   `InputLexicalCommitRuntime`; underlying Rime userdb refresh reads existing

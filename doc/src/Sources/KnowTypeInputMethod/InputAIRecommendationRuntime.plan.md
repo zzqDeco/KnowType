@@ -20,6 +20,10 @@ updates back to the coordinator.
   expensive lexical and accepted-feedback snapshots after a lazy provider is
   known unavailable, while still building context for eager providers, injected
   providers, and lazy providers in the unknown/available states.
+- It exposes `shouldScheduleRecommendationRequest` separately from the heavy
+  context gate. Lazy providers remain schedulable for a lightweight
+  availability probe after a known-unavailable state, so Settings changes can
+  be discovered without restarting the IMK process.
 - It must not access host clients, marked text, candidate-panel presentation,
   Rime selection, commit/write paths, or settings persistence.
 
@@ -27,9 +31,9 @@ updates back to the coordinator.
 
 - Scheduling starts with `InputAIRecommendationSchedulePolicy`; skipped states
   do not start provider tasks.
-- The coordinator-provided provider availability gate is part of the runtime
-  schedule context, so a lazy provider that is already known unavailable does
-  not launch another request just because the lazy provider object exists.
+- Known-unavailable lazy providers run availability probes without lexical or
+  accepted-feedback context. A probe returns `.idle` synchronously and suppresses
+  unavailable async results, but still applies a recovered `.ready` result.
 - `hasKnownProvider` remains scoped to suppressing no-provider fallback rows; it
   is not the heavy-context construction gate.
 - Provider requests never include real-time Rime candidate hints.

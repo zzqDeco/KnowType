@@ -10,6 +10,7 @@ struct InputAIRecommendationRuntimeContext: Sendable {
     var cloudContinuationEnabled: Bool
     var canRequestAIRecommendations: Bool
     var hasRecommendationProvider: Bool
+    var isProviderAvailabilityProbe: Bool
     var appBundleID: String?
     var locale: KnowTypeLocale
     var compositionID: Int
@@ -71,6 +72,10 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         case .unavailable:
             return false
         }
+    }
+
+    var shouldScheduleRecommendationRequest: Bool {
+        hasEagerProvider || provider != nil
     }
 
     @discardableResult
@@ -225,6 +230,21 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                     self.activeRequestID = nil
                     self.activeTask = nil
                 }
+                if context.isProviderAvailabilityProbe,
+                   !Self.shouldApplyProviderAvailabilityProbeState(patch.state) {
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .stateApplied,
+                            requestID: requestID,
+                            compositionID: context.compositionID,
+                            rawLength: context.rawInput.count,
+                            prefixLength: context.lockedPrefix?.count,
+                            appBundleID: context.appBundleID,
+                            reason: "availability_probe_suppressed_\(Self.diagnosticReason(for: patch.state))"
+                        )
+                    )
+                    return
+                }
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(
                         stage: .stateApplied,
@@ -240,7 +260,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             }
         }
         activeTask = task
-        return .pending(requestID: requestID)
+        return context.isProviderAvailabilityProbe ? .idle : .pending(requestID: requestID)
     }
 
     @discardableResult
@@ -309,5 +329,12 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         case .unavailable(let reason):
             return "unavailable:\(reason)"
         }
+    }
+
+    private static func shouldApplyProviderAvailabilityProbeState(_ state: AIRecommendationState) -> Bool {
+        if case .ready = state {
+            return true
+        }
+        return false
     }
 }
