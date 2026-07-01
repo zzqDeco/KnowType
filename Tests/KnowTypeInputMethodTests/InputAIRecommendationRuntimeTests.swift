@@ -340,7 +340,17 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             hasEagerProvider: true,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
-        XCTAssertTrue(eagerRuntime.shouldBuildRecommendationContext)
+        XCTAssertFalse(eagerRuntime.shouldBuildRecommendationContext)
+        XCTAssertFalse(eagerRuntime.shouldScheduleRecommendationRequest)
+
+        let eagerRuntimeWithRecommendationProvider = InputAIRecommendationRuntime(
+            provider: RecordingRuntimeAIRecommendationProvider(),
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            diagnosticSink: RecordingRuntimeDiagnosticSink()
+        )
+        XCTAssertTrue(eagerRuntimeWithRecommendationProvider.shouldBuildRecommendationContext)
+        XCTAssertTrue(eagerRuntimeWithRecommendationProvider.shouldScheduleRecommendationRequest)
 
         let missingRuntime = InputAIRecommendationRuntime(
             provider: nil,

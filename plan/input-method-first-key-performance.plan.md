@@ -39,9 +39,10 @@ Non-goals:
   completes, the existing synchronous lazy path remains authoritative.
 - Native-session prewarm is best-effort. Session creation serializes the
   process-global librime bridge initialization state, but speculative prewarm
-  uses a foreground-aware creation slot. Foreground lazy creation does not wait
-  behind active prewarm; if both collide, foreground uses the raw fallback for
-  that key and can retry native creation on the next key.
+  uses a foreground-aware creation slot. First text/delete keys do not wait
+  behind active prewarm; if both collide, the text key uses raw fallback. Commit
+  and navigation keys with existing raw input retry native creation instead of
+  committing fallback raw text while prewarm is still busy.
 - `RimeConversionEngine.prewarmNativeSession(configuration:)` emits
   `KNOWTYPE_STARTUP_DEBUG=1` timing for start/done events and logs schema and
   success state without logging user text.
@@ -55,7 +56,9 @@ Non-goals:
   `InputAIRecommendationSchedulePolicy` context first. Only schedule-eligible
   requests build lexical context and accepted-feedback snapshots. Known-
   unavailable lazy providers still get a lightweight retry probe so later
-  Settings changes can be discovered without restarting the IMK process.
+  Settings changes can be discovered without restarting the IMK process; legacy
+  eager-provider flags suppress fallback rows but are not treated as
+  schedulable recommendation runtimes without `AIRecommendationProviding`.
 - Regular expressions in `TextProtection` and `LexicalContextBuilder`
   sanitization paths are static cached objects.
 

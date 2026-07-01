@@ -57,11 +57,11 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
     }
 
     var shouldBuildRecommendationContext: Bool {
-        if hasEagerProvider {
-            return true
-        }
         guard provider != nil else {
             return false
+        }
+        if hasEagerProvider {
+            return true
         }
         guard let providerAvailability else {
             return true
@@ -75,7 +75,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
     }
 
     var shouldScheduleRecommendationRequest: Bool {
-        hasEagerProvider || provider != nil
+        provider != nil
     }
 
     @discardableResult

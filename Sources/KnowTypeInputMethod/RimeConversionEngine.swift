@@ -188,7 +188,7 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return processUnavailable(key, engineName: "rime-raw-bypass")
         }
 
-        let nativeSession = ensureNativeSession()
+        let nativeSession = ensureNativeSession(for: key)
         guard let nativeSession else {
             return processUnavailable(key)
         }
@@ -208,7 +208,7 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         return result
     }
 
-    private mutating func ensureNativeSession() -> NativeRimeSession? {
+    private mutating func ensureNativeSession(for key: ConversionEngineKey) -> NativeRimeSession? {
         if let nativeSession {
             return nativeSession
         }
@@ -217,7 +217,13 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return nil
         }
         let startedAt = Date()
-        let creationResult = NativeRimeSession.createForeground(configuration: nativeConfiguration)
+        let creationResult = NativeRimeSession.createForeground(
+            configuration: nativeConfiguration,
+            foregroundMayPreemptSpeculative: Self.shouldPreemptSpeculativePrewarm(
+                for: key,
+                rawInput: rawMirrorOrSnapshotInput()
+            )
+        )
         let success: Bool
         let details: String
         switch creationResult {
@@ -245,6 +251,25 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return nil
         }
         return nativeSession
+    }
+
+    private static func shouldPreemptSpeculativePrewarm(
+        for key: ConversionEngineKey,
+        rawInput: String
+    ) -> Bool {
+        switch key {
+        case .text,
+             .deleteBackward:
+            return true
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
+            return rawInput.isEmpty
+        }
     }
 
     private mutating func replayNativeRawInputMirrorIfNeeded(into nativeSession: NativeRimeSession) {
@@ -594,13 +619,14 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
 
     static func createForeground(
         configuration: NativeRimeConfiguration,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        foregroundMayPreemptSpeculative: Bool = true
     ) -> ForegroundCreationResult {
         switch makeSessionPointer(
             configuration: configuration,
             fileManager: fileManager,
             lockMode: .blocking,
-            foregroundMayPreemptSpeculative: true
+            foregroundMayPreemptSpeculative: foregroundMayPreemptSpeculative
         ) {
         case .created(let session):
             return .created(NativeRimeSession(session: session))

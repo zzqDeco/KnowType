@@ -828,6 +828,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let currentAppBundleID = appBundleIdentifier(client: client)
         let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
         let shouldScheduleRecommendationRequest = aiRecommendationRuntime.shouldScheduleRecommendationRequest
+        let canBuildRecommendationContext = aiRecommendationRuntime.shouldBuildRecommendationContext
         let scheduleDecision = aiRecommendationSchedulePolicy.decision(
             for: InputAIRecommendationScheduleContext(
                 rawInput: rawBuffer,
@@ -841,9 +842,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
         let shouldBuildRecommendationContext: Bool
         if case .schedule = scheduleDecision {
-            shouldBuildRecommendationContext = true
+            shouldBuildRecommendationContext = canBuildRecommendationContext
         } else {
             shouldBuildRecommendationContext = false
+        }
+        let isProviderAvailabilityProbe: Bool
+        if case .schedule = scheduleDecision {
+            isProviderAvailabilityProbe = shouldScheduleRecommendationRequest && !canBuildRecommendationContext
+        } else {
+            isProviderAvailabilityProbe = false
         }
         let context = InputAIRecommendationRuntimeContext(
             rawInput: rawBuffer,
@@ -853,7 +860,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
             canRequestAIRecommendations: canRequestAIRecommendations,
             hasRecommendationProvider: shouldScheduleRecommendationRequest,
-            isProviderAvailabilityProbe: shouldScheduleRecommendationRequest && !shouldBuildRecommendationContext,
+            isProviderAvailabilityProbe: isProviderAvailabilityProbe,
             appBundleID: currentAppBundleID,
             locale: locale,
             compositionID: compositionID,

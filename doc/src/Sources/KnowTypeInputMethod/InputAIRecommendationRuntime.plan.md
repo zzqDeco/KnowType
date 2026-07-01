@@ -18,12 +18,14 @@ updates back to the coordinator.
   decisions.
 - It exposes `shouldBuildRecommendationContext` so the coordinator can skip
   expensive lexical and accepted-feedback snapshots after a lazy provider is
-  known unavailable, while still building context for eager providers, injected
-  providers, and lazy providers in the unknown/available states.
+  known unavailable, while still building context for actual recommendation
+  runtimes in the unknown/available states.
 - It exposes `shouldScheduleRecommendationRequest` separately from the heavy
-  context gate. Lazy providers remain schedulable for a lightweight
-  availability probe after a known-unavailable state, so Settings changes can
-  be discovered without restarting the IMK process.
+  context gate. Scheduling remains tied to an actual
+  `AIRecommendationProviding`; legacy eager-provider flags only suppress
+  fallback rows through `hasKnownProvider`. Lazy providers remain schedulable
+  for a lightweight availability probe after a known-unavailable state, so
+  Settings changes can be discovered without restarting the IMK process.
 - It must not access host clients, marked text, candidate-panel presentation,
   Rime selection, commit/write paths, or settings persistence.
 

@@ -14,12 +14,13 @@
   turn.
 - Gate heavy AI recommendation context construction on provider availability
   semantics that distinguish unknown/available providers from known-unavailable
-  lazy providers, without disabling lightweight lazy-provider retry probes.
+  lazy providers, without disabling lightweight lazy-provider retry probes or
+  treating legacy eager-provider flags as schedulable recommendation runtimes.
 - Keep native Rime prewarm best-effort by making speculative prewarm use a
   foreground-aware creation slot around the process-global librime bridge
-  initialization path. Foreground creation must not wait behind speculative
-  prewarm; if it collides with prewarm it uses the raw fallback for that key and
-  can retry native creation on the next key.
+  initialization path. First text/delete keys must not wait behind speculative
+  prewarm; commit and navigation keys with existing raw input retry native
+  creation instead of committing raw fallback text while prewarm is busy.
 
 ## Non-Goals
 
