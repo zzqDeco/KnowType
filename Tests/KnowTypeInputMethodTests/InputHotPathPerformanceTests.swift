@@ -42,6 +42,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(inputController.contains("initialEngineState"))
         XCTAssertFalse(rimeEngine.contains("InputMethodLexiconRuntime.defaultEngine"))
         XCTAssertFalse(rimeEngine.contains("creationLock"))
+        XCTAssertTrue(rimeEngine.contains("nativeBridgeInitializationLock.try()"))
+        XCTAssertTrue(rimeEngine.contains("NativeRimeSession.prewarm(configuration: configuration)"))
         XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
         XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
         XCTAssertTrue(inputController.contains("DispatchQueue.main.asyncAfter"))

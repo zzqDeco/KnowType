@@ -162,7 +162,7 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         }
         traceStartupEvent("rime_prewarm_start", details: "schema=\(configuration.schemaID)")
         let startedAt = Date()
-        let session = NativeRimeSession(configuration: configuration)
+        let session = NativeRimeSession.prewarm(configuration: configuration)
         let success = session != nil
         traceStartupEvent(
             "rime_prewarm_done",
@@ -516,14 +516,48 @@ protocol RimeUserDBMaintenanceSession: RimeUserDBSnapshotSession {
 }
 
 final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable {
+    private enum CreationLockMode {
+        case blocking
+        case speculative
+    }
+
+    private static let nativeBridgeInitializationLock = NSLock()
+
     private let session: OpaquePointer
 
-    init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
+    convenience init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
+        self.init(configuration: configuration, fileManager: fileManager, lockMode: .blocking)
+    }
+
+    static func prewarm(
+        configuration: NativeRimeConfiguration,
+        fileManager: FileManager = .default
+    ) -> NativeRimeSession? {
+        NativeRimeSession(configuration: configuration, fileManager: fileManager, lockMode: .speculative)
+    }
+
+    private init?(
+        configuration: NativeRimeConfiguration,
+        fileManager: FileManager,
+        lockMode: CreationLockMode
+    ) {
         do {
             try fileManager.createDirectory(at: configuration.userDataURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: configuration.logURL, withIntermediateDirectories: true)
         } catch {
             return nil
+        }
+
+        switch lockMode {
+        case .blocking:
+            Self.nativeBridgeInitializationLock.lock()
+        case .speculative:
+            guard Self.nativeBridgeInitializationLock.try() else {
+                return nil
+            }
+        }
+        defer {
+            Self.nativeBridgeInitializationLock.unlock()
         }
 
         guard let session = ktb_rime_session_create(

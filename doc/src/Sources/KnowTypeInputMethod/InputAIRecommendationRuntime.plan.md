@@ -27,6 +27,9 @@ updates back to the coordinator.
 
 - Scheduling starts with `InputAIRecommendationSchedulePolicy`; skipped states
   do not start provider tasks.
+- The coordinator-provided provider availability gate is part of the runtime
+  schedule context, so a lazy provider that is already known unavailable does
+  not launch another request just because the lazy provider object exists.
 - `hasKnownProvider` remains scoped to suppressing no-provider fallback rows; it
   is not the heavy-context construction gate.
 - Provider requests never include real-time Rime candidate hints.

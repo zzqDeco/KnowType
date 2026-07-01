@@ -36,10 +36,10 @@ input.
   time, schema id, and success state without logging input text.
 - With `KNOWTYPE_STARTUP_DEBUG=1`, native prewarm logs start/done events with
   elapsed time, schema id, and success state without logging input text.
-- Native prewarm is speculative and does not hold a global Swift session
-  creation lock. If the first real key arrives while prewarm is still running,
-  the foreground lazy path creates its own session instead of waiting behind
-  the background prewarm.
+- Native session creation serializes entry into the C bridge because librime
+  setup and the cached API handle are process-global. The background prewarm
+  uses a speculative try-lock path and skips prewarm when foreground creation is
+  already in progress, while foreground lazy creation remains authoritative.
 - Native sessions initially select the configured schema, but
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct

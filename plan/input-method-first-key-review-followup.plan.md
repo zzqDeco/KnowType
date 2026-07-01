@@ -15,8 +15,9 @@
 - Gate heavy AI recommendation context construction on provider availability
   semantics that distinguish unknown/available providers from known-unavailable
   lazy providers.
-- Keep native Rime prewarm best-effort by removing global session-creation
-  serialization that can make a quick first key wait behind speculative prewarm.
+- Keep native Rime prewarm best-effort by making speculative prewarm use a
+  try-lock around the process-global librime bridge initialization path, so it
+  skips instead of racing foreground session creation when the bridge is busy.
 
 ## Non-Goals
 

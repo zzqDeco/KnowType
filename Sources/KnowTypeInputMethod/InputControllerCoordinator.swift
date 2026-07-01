@@ -851,6 +851,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             lockedPrefix: lockedPrefixText,
             cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
             canRequestAIRecommendations: canRequestAIRecommendations,
+            hasRecommendationProvider: aiRecommendationRuntime.shouldBuildRecommendationContext,
             appBundleID: currentAppBundleID,
             locale: locale,
             compositionID: compositionID,

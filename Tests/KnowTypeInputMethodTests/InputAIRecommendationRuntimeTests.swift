@@ -75,7 +75,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         let unavailableState = unavailableRuntime.schedule(
             context: context(
                 rawInput: "abc",
-                canRequestAIRecommendations: false
+                canRequestAIRecommendations: false,
+                hasRecommendationProvider: false
             ),
             currentSnapshot: { snapshot(rawInput: "abc") },
             onStateChange: { _ in XCTFail("skip paths must not publish async state") }
@@ -91,7 +92,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         let lazyMissingState = lazyMissingRuntime.schedule(
             context: context(
                 rawInput: "abc",
-                canRequestAIRecommendations: true
+                canRequestAIRecommendations: true,
+                hasRecommendationProvider: false
             ),
             currentSnapshot: { snapshot(rawInput: "abc") },
             onStateChange: { _ in XCTFail("skip paths must not publish async state") }
@@ -349,6 +351,32 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertFalse(missingRuntime.shouldBuildRecommendationContext)
     }
 
+    @MainActor
+    func testUnavailableProviderGateSkipsSchedulingEvenWhenProviderIsInjected() async {
+        let provider = RecordingRuntimeAIRecommendationProvider()
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: AIRecommendationProviderAvailabilityState(.unavailable),
+            hasEagerProvider: false,
+            diagnosticSink: diagnosticSink
+        )
+
+        let state = runtime.schedule(
+            context: context(rawInput: "abc", hasRecommendationProvider: false),
+            currentSnapshot: { snapshot(rawInput: "abc") },
+            onStateChange: { _ in XCTFail("known-unavailable providers must not publish async state") }
+        )
+
+        XCTAssertEqual(state, .idle)
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 0)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedNoProvider
+                && $0.reason == "recommendation_provider_missing"
+        })
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil
@@ -362,6 +390,7 @@ private func context(
     lockedPrefix: String? = nil,
     cloudContinuationEnabled: Bool = true,
     canRequestAIRecommendations: Bool = true,
+    hasRecommendationProvider: Bool = true,
     appBundleID: String? = nil,
     locale: KnowTypeLocale = .mixed,
     compositionID: Int = 1,
@@ -376,6 +405,7 @@ private func context(
         lockedPrefix: lockedPrefix,
         cloudContinuationEnabled: cloudContinuationEnabled,
         canRequestAIRecommendations: canRequestAIRecommendations,
+        hasRecommendationProvider: hasRecommendationProvider,
         appBundleID: appBundleID,
         locale: locale,
         compositionID: compositionID,

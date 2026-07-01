@@ -9,6 +9,7 @@ struct InputAIRecommendationRuntimeContext: Sendable {
     var lockedPrefix: String?
     var cloudContinuationEnabled: Bool
     var canRequestAIRecommendations: Bool
+    var hasRecommendationProvider: Bool
     var appBundleID: String?
     var locale: KnowTypeLocale
     var compositionID: Int
@@ -103,7 +104,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 lockedPrefix: context.lockedPrefix,
                 cloudContinuationEnabled: context.cloudContinuationEnabled,
                 canRequestAIRecommendations: context.canRequestAIRecommendations,
-                hasRecommendationProvider: provider != nil
+                hasRecommendationProvider: context.hasRecommendationProvider
             )
         )
         if case .skip(let skip) = scheduleDecision {

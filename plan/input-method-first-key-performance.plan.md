@@ -37,10 +37,10 @@ Non-goals:
   from `KnowTypeInputController.init`. The prewarm creates and releases a
   temporary `NativeRimeSession`; if the user's first key arrives before prewarm
   completes, the existing synchronous lazy path remains authoritative.
-- Native-session prewarm is best-effort and must not serialize foreground
-  session creation behind the speculative background path. If the first key
-  arrives before prewarm completes, the foreground lazy path creates its own
-  session without waiting on the prewarm.
+- Native-session prewarm is best-effort. Session creation serializes the
+  process-global librime bridge initialization state, but the speculative
+  prewarm path uses a try-lock and skips when foreground creation is already in
+  progress.
 - `RimeConversionEngine.prewarmNativeSession(configuration:)` emits
   `KNOWTYPE_STARTUP_DEBUG=1` timing for start/done events and logs schema and
   success state without logging user text.
