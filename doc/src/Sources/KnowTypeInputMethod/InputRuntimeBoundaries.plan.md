@@ -70,6 +70,11 @@ implementation plans.
   returns values only; lifecycle planning, host writes, marked-text cleanup,
   Rime reset, candidate-panel hide, AI/lexical runtime calls, and lifecycle
   event publication remain outside this runtime.
+- `InputTurnSequencingRuntime` owns value-only side-effect ordering after a
+  commit/native/lifecycle/passthrough decision has already been made. It returns
+  ordered effects for panel hide, commit side effects, host insert, post-insert
+  verification, Rime reset, composition reset, writer lifecycle finish, and
+  runtime-event publication; the coordinator executes those effects.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method
@@ -108,6 +113,8 @@ implementation plans.
   remain in the coordinator or their dedicated runtimes.
 - Commit side-effect contexts and lifecycle finish plans must be built from the
   finishing composition snapshot before composition state is reset.
+- Input turn effect sequences make this ordering explicit for tests; they do
+  not replace the coordinator as the owner of IMK/AppKit side effects.
 - Background consumers may observe events, but they must not call back into the
   active Rime session or AppKit panel.
 
@@ -122,6 +129,7 @@ implementation plans.
 - `InputSuggestionStateRuntimeTests`
 - `InputCommitDecisionRuntimeTests`
 - `InputCommitApplicationRuntimeTests`
+- `InputTurnSequencingRuntimeTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`

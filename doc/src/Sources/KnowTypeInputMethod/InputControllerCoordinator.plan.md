@@ -89,6 +89,10 @@ Current behavior:
   to `InputCommitApplicationRuntime`; the coordinator still executes host
   insertion, marked-text cleanup, Rime reset, panel hide, anchor reset,
   AI/lexical runtime calls, and lifecycle event publication in order
+- delegates input-turn side-effect sequencing to `InputTurnSequencingRuntime`;
+  the coordinator executes ordered effects returned by the runtime instead of
+  embedding commit, native conversion, lifecycle finish, and direct passthrough
+  ordering inline
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - delegates explicit AI accepted-learning records, typing-context events, and
   accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the
