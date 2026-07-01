@@ -7,6 +7,17 @@ enum CandidatePanelLayoutOrientation: Sendable, Equatable {
     case vertical
 }
 
+public enum CandidatePanelPlacementPreference: String, Sendable, Equatable {
+    case automatic
+    case preferVisualBelow
+    case preferVisualAbove
+}
+
+enum CandidatePanelVerticalPlacement: String, Sendable, Equatable {
+    case visualBelowCaret
+    case visualAboveCaret
+}
+
 struct CandidatePanelLayoutInsets: Sendable, Equatable {
     var top: CGFloat
     var left: CGFloat
@@ -85,6 +96,7 @@ struct CandidatePanelLayoutItem: Sendable, Equatable {
 
 struct CandidatePanelLayoutPlan: Sendable, Equatable {
     var orientation: CandidatePanelLayoutOrientation
+    var verticalPlacement: CandidatePanelVerticalPlacement
     var panelSize: CGSize
     var panelOrigin: CGPoint
     var contentInsets: CandidatePanelLayoutInsets
@@ -112,6 +124,11 @@ struct CandidatePanelLayoutEngine {
         var sharedShortcutLabelWidth: CGFloat?
     }
 
+    private struct PlacementOrigin {
+        var origin: CGPoint
+        var verticalPlacement: CandidatePanelVerticalPlacement
+    }
+
     var configuration: CandidatePanelLayoutConfiguration
     var textMeasurer: CandidatePanelTextMeasuring
 
@@ -126,7 +143,8 @@ struct CandidatePanelLayoutEngine {
     func layout(
         model: CandidatePanelRenderModel,
         anchorRect: CGRect,
-        screenProvider: ScreenGeometryProviding
+        screenProvider: ScreenGeometryProviding,
+        placementPreference: CandidatePanelPlacementPreference = .automatic
     ) -> CandidatePanelLayoutPlan? {
         guard !model.rows.isEmpty,
               CandidateAnchorValidation.isUsable(anchorRect, screenProvider: screenProvider) else {
@@ -157,10 +175,11 @@ struct CandidatePanelLayoutEngine {
         ) else {
             return nil
         }
-        guard let origin = origin(
+        guard let placementOrigin = origin(
             for: anchor,
             panelSize: measurement.panelSize,
-            visibleFrame: visibleFrame
+            visibleFrame: visibleFrame,
+            placementPreference: placementPreference
         ) else {
             return nil
         }
@@ -175,8 +194,9 @@ struct CandidatePanelLayoutEngine {
 
         return CandidatePanelLayoutPlan(
             orientation: orientation,
+            verticalPlacement: placementOrigin.verticalPlacement,
             panelSize: measurement.panelSize,
-            panelOrigin: origin,
+            panelOrigin: placementOrigin.origin,
             contentInsets: configuration.contentInsets,
             itemSpacing: measurement.itemSpacing,
             items: items
@@ -187,6 +207,9 @@ struct CandidatePanelLayoutEngine {
         for rows: [MeasuredRow],
         availableWidth: CGFloat
     ) -> CandidatePanelLayoutOrientation {
+        if rows.contains(where: { $0.row.kind == .preedit }) {
+            return .vertical
+        }
         guard rows.count >= configuration.minimumHorizontalCandidateCount else {
             return .vertical
         }
@@ -388,8 +411,9 @@ struct CandidatePanelLayoutEngine {
     private func origin(
         for anchor: CGRect,
         panelSize: CGSize,
-        visibleFrame: CGRect
-    ) -> CGPoint? {
+        visibleFrame: CGRect,
+        placementPreference: CandidatePanelPlacementPreference
+    ) -> PlacementOrigin? {
         guard panelSize.width > 0,
               panelSize.height > 0 else {
             return nil
@@ -399,13 +423,44 @@ struct CandidatePanelLayoutEngine {
         let maxX = visibleFrame.maxX - panelSize.width - configuration.visibleFrameInset
         let minY = visibleFrame.minY + configuration.visibleFrameInset
         let maxY = visibleFrame.maxY - panelSize.height - configuration.visibleFrameInset
-        let preferredY = anchor.minY - panelSize.height - configuration.verticalAnchorSpacing
-        let fallbackY = anchor.maxY + configuration.verticalAnchorSpacing
-
-        return CGPoint(
-            x: clamp(anchor.minX, minimum: minX, maximum: maxX),
-            y: clamp(preferredY < minY ? fallbackY : preferredY, minimum: minY, maximum: maxY)
+        let visualBelowY = anchor.minY - panelSize.height - configuration.verticalAnchorSpacing
+        let visualAboveY = anchor.maxY + configuration.verticalAnchorSpacing
+        let verticalOrder: [CandidatePanelVerticalPlacement] = switch placementPreference {
+        case .automatic, .preferVisualBelow:
+            [.visualBelowCaret, .visualAboveCaret]
+        case .preferVisualAbove:
+            [.visualAboveCaret, .visualBelowCaret]
+        }
+        let chosenPlacement = verticalOrder.first { placement in
+            let y = proposedY(for: placement, visualBelowY: visualBelowY, visualAboveY: visualAboveY)
+            return y >= minY && y <= maxY
+        } ?? verticalOrder[0]
+        let chosenY = proposedY(
+            for: chosenPlacement,
+            visualBelowY: visualBelowY,
+            visualAboveY: visualAboveY
         )
+
+        return PlacementOrigin(
+            origin: CGPoint(
+                x: clamp(anchor.minX, minimum: minX, maximum: maxX),
+                y: clamp(chosenY, minimum: minY, maximum: maxY)
+            ),
+            verticalPlacement: chosenPlacement
+        )
+    }
+
+    private func proposedY(
+        for placement: CandidatePanelVerticalPlacement,
+        visualBelowY: CGFloat,
+        visualAboveY: CGFloat
+    ) -> CGFloat {
+        switch placement {
+        case .visualBelowCaret:
+            visualBelowY
+        case .visualAboveCaret:
+            visualAboveY
+        }
     }
 
     private func horizontalNaturalWidth(for rows: [MeasuredRow]) -> CGFloat {

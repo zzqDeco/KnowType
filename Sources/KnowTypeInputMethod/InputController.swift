@@ -1,7 +1,6 @@
 import Foundation
 import KnowTypeAI
 import KnowTypeCore
-import KnowTypeProviders
 import OSLog
 
 #if canImport(InputMethodKit)
@@ -16,9 +15,34 @@ private let inputControllerLogger = Logger(
 enum InputMethodLexicalProfileRuntime {
     static let store = LexicalProfileStore()
     static let refreshGate = LexicalProfileRefreshGate()
+    static let acceptedLearningStore = AIAcceptedLearningStore()
+    static let acceptedFeedbackStore = AIAcceptedFeedbackStore()
     static let rimeMaintenanceService = RimeMaintenanceService(
         snapshotProvider: RimeUserDBTextSnapshotProvider()
     )
+}
+
+private final class InputMethodRimePrewarmer: @unchecked Sendable {
+    static let shared = InputMethodRimePrewarmer()
+
+    private let lock = NSLock()
+    private var didSchedule = false
+
+    private init() {}
+
+    func scheduleOnce() {
+        lock.lock()
+        guard !didSchedule else {
+            lock.unlock()
+            return
+        }
+        didSchedule = true
+        lock.unlock()
+
+        Task.detached(priority: .utility) {
+            _ = RimeConversionEngine.prewarmNativeSession()
+        }
+    }
 }
 
 @objc(KnowTypeInputController)
@@ -30,15 +54,18 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     @MainActor private var preferencesWindowController: KnowTypePreferencesWindowController?
 
     public override init!(server: IMKServer!, delegate: Any!, client inputClient: Any!) {
-        let provider = ProviderRuntimeLoader.loadDefaultProvider()
-        let aiRecommendationRuntime = AIRecommendationRuntime(provider: provider)
-        let aiContextEventRecorder: (any AIContextEventRecording)? = provider.map {
-            AIContextMemoryRuntime(provider: $0)
-        }
+        let startupDebugStartedAt = Date()
+        let aiDiagnosticSink = OSLogAIRecommendationDiagnosticSink()
+        let aiProviderAvailability = AIRecommendationProviderAvailabilityState()
+        let aiRecommendationRuntime = LazyDefaultAIRecommendationRuntime(
+            diagnosticSink: aiDiagnosticSink,
+            providerAvailability: aiProviderAvailability
+        )
+        let aiContextEventRecorder: any AIContextEventRecording = LazyDefaultAIContextMemoryRuntime()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
-        let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore())
+        let historyPersistence = (try? FileUserSelectionHistoryStore.defaultStore(createDirectory: false))
             .map(UserSelectionHistoryPersistence.init(store:))
         let hostAdapter = IMKInputControllerHostAdapter()
         let initialClient = Self.inputControllerClient(from: inputClient)
@@ -46,14 +73,18 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         self.hostAdapter = hostAdapter
         self.runtimePreferenceStore = runtimePreferenceStore
         self.coordinator = InputControllerCoordinator(
-            provider: provider,
+            provider: nil,
             inputModePreferenceStore: inputModePreferenceStore,
             runtimePreferenceStore: runtimePreferenceStore,
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: initialClient?.bundleIdentifier,
             userSelectionHistoryPersistence: historyPersistence,
             aiRecommendationProvider: aiRecommendationRuntime,
+            aiRecommendationProviderAvailability: aiProviderAvailability,
             aiContextEventRecorder: aiContextEventRecorder,
+            aiAcceptedLearning: InputMethodLexicalProfileRuntime.acceptedLearningStore,
+            aiAcceptedFeedback: InputMethodLexicalProfileRuntime.acceptedFeedbackStore,
+            aiDiagnosticSink: aiDiagnosticSink,
             lexicalProfileStore: InputMethodLexicalProfileRuntime.store,
             lexicalProfileRefreshGate: InputMethodLexicalProfileRuntime.refreshGate,
             rimeUserDBTextProvider: InputMethodLexicalProfileRuntime.rimeMaintenanceService,
@@ -65,7 +96,15 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         )
         super.init(server: server, delegate: delegate, client: inputClient)
         hostAdapter.controller = self
+        InputMethodRimePrewarmer.shared.scheduleOnce()
         inputControllerLogger.notice("KnowTypeInputController initialized client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)")
+        if ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" {
+            let elapsedMs = Date().timeIntervalSince(startupDebugStartedAt) * 1_000
+            let formattedElapsed = String(format: "%.1f", elapsedMs)
+            inputControllerLogger.notice(
+                "KnowType cold start lazy runtime event=controller_init elapsedMs=\(formattedElapsed, privacy: .public) rime=deferred provider=deferred learning=read_only client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)"
+            )
+        }
     }
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {
@@ -103,7 +142,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     public override func candidateSelected(_ candidateString: NSAttributedString!) {
         coordinator.candidateSelected(
             candidateString?.string,
-            client: Self.inputControllerClient(from: client())
+            client: effectiveInputControllerClient(from: client())
         )
     }
 
@@ -188,7 +227,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     }
 
     public override func commitComposition(_ sender: Any!) {
-        coordinator.commitComposition(client: Self.inputControllerClient(from: sender))
+        coordinator.commitComposition(client: effectiveInputControllerClient(from: sender))
     }
 
     public override func hidePalettes() {
@@ -226,15 +265,9 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         super.updateComposition()
     }
 
-    fileprivate func updateCandidatePanelWindow(state: CandidatePanelState, locale: KnowTypeLocale) {
+    fileprivate func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale: KnowTypeLocale) {
         MainActor.assumeIsolated {
-            candidatePanelController.update(state: state, locale: locale)
-        }
-    }
-
-    fileprivate func hideCandidatePanelWindow() {
-        MainActor.assumeIsolated {
-            candidatePanelController.hide()
+            candidatePanelController.apply(frame: frame, locale: locale)
         }
     }
 
@@ -245,7 +278,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     func candidatePanelDidCommit(_ selection: CandidatePanelSelection) {
         coordinator.commitCandidatePanelSelection(
             selection,
-            client: Self.inputControllerClient(from: client())
+            client: effectiveInputControllerClient(from: client())
         )
     }
 
@@ -258,6 +291,10 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             return nil
         }
         return IMKInputControllerClientAdapter(client: client)
+    }
+
+    private func effectiveInputControllerClient(from sender: Any!) -> InputControllerClient? {
+        Self.inputControllerClient(from: sender) ?? currentInputControllerClient
     }
 
     private func modifierSet(from flags: Int) -> Set<InputModifier> {
@@ -321,15 +358,17 @@ private final class IMKInputControllerHostAdapter: InputControllerHost, @uncheck
         controller?.performSuperUpdateComposition()
     }
 
-    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale) {
-        controller?.updateCandidatePanelWindow(state: state, locale: locale)
-    }
-
-    func hideCandidatePanel() {
-        controller?.hideCandidatePanelWindow()
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale: KnowTypeLocale) {
+        controller?.applyCandidatePanelFrame(frame, locale: locale)
     }
 
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
+            operation()
+        }
+    }
+
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
         DispatchQueue.main.async {
             operation()
         }

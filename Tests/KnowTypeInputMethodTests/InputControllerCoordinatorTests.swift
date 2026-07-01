@@ -66,6 +66,26 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
     }
 
+    func testSpotlightClientPrefersVisualAboveCandidatePanelPlacement() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Spotlight"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.placementPreference, .preferVisualAbove)
+    }
+
+    func testNonSpotlightClientUsesAutomaticCandidatePanelPlacement() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.placementPreference, .automatic)
+    }
+
     func testTextOnlySpaceCommitIgnoresStaleHostMarkedRange() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -264,6 +284,24 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(host.hideCandidatePanelCount, 2)
     }
 
+    func testSingleLetterFastSpacePublishesOrderedHiddenFrameAfterVisibleFrame() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("d", client: client))
+        let visibleFrame = try XCTUnwrap(host.candidatePanelFrames.last)
+        XCTAssertTrue(visibleFrame.isVisible)
+        XCTAssertEqual(visibleFrame.panelModel.windowState.viewModel.rawInput, "d")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        let hiddenFrame = try XCTUnwrap(host.candidatePanelFrames.last)
+
+        XCTAssertFalse(hiddenFrame.isVisible)
+        XCTAssertEqual(hiddenFrame.visibilityReason, .reset)
+        XCTAssertGreaterThan(hiddenFrame.presentationGeneration, visibleFrame.presentationGeneration)
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["候选d"])
+    }
+
     func testCommitCompositionPreservesResolvedSegments() throws {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -414,7 +452,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let firstCandidate = host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text
@@ -433,7 +471,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let viewModel = try XCTUnwrap(host.panelStates.last?.windowState.viewModel)
@@ -914,6 +952,64 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(hasFallbackContinuation)
     }
 
+    func testLazyAIRecommendationRuntimeDoesNotSuppressNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let aiProvider = UnavailableAIRecommendationProvider()
+        let providerAvailability = AIRecommendationProviderAvailabilityState(.unknown)
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiRecommendationProvider: aiProvider,
+            aiRecommendationProviderAvailability: providerAvailability,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.contains { $0.text == "还有进一步优化空间" })
+    }
+
+    func testLoadedLazyProviderSuppressesNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let aiProvider = UnavailableAIRecommendationProvider()
+        let providerAvailability = AIRecommendationProviderAvailabilityState(.available)
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiRecommendationProvider: aiProvider,
+            aiRecommendationProviderAvailability: providerAvailability,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
+    }
+
+    func testEagerProviderSuppressesNoProviderFallbackContinuations() {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        let continuations = coordinator.resolvedCompositionFallbackContinuations(
+            lockedPrefixText: "我觉得这个方案",
+            rawInput: "wo jue de zhege fagnan",
+            client: client
+        )
+
+        XCTAssertTrue(continuations.isEmpty)
+    }
+
     @MainActor
     func testTabCommitsVisibleNoProviderFallbackContinuation() async throws {
         let client = FakeInputControllerClient()
@@ -963,7 +1059,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasPendingAI = await waitUntilOnMainActor {
@@ -982,7 +1078,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertEqual(client.insertTextWrites.count, 0)
-        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+        XCTAssertEqual(coordinator.composedString() as? String, "zhegeapi")
     }
 
     @MainActor
@@ -999,7 +1095,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1008,7 +1104,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(hasScheduled)
         let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
 
-        XCTAssertTrue(coordinator.handleText("h", client: client))
+        XCTAssertTrue(coordinator.handleText("x", client: client))
         let hasCancellation = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
                 $0.stage == .cancelPrevious && $0.requestID == cancelledRequestID
@@ -1034,7 +1130,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         ).0
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator?.handleText(String(character), client: client) == true)
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1066,7 +1162,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasApplied = await waitUntilOnMainActor {
@@ -1077,7 +1173,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             $0.stage == .cancelPrevious
         }.count
 
-        XCTAssertTrue(coordinator.handleText("h", client: client))
+        XCTAssertTrue(coordinator.handleText("x", client: client))
         let hasLaterSchedule = await waitUntilOnMainActor {
             diagnosticSink.events.filter { $0.stage == .scheduled }.count >= 2
         }
@@ -1103,7 +1199,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1143,7 +1239,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1186,7 +1282,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasScheduled = await waitUntilOnMainActor {
@@ -1244,14 +1340,140 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testCodeAppDefaultsToChinesePunctuation() {
+    func testTerminalAppDefaultsToAsciiPassthroughWithoutComposition() {
         let client = FakeInputControllerClient()
-        client.bundleIdentifier = "com.openai.codex"
+        client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, _, _) = makeCoordinator(client: client)
 
-        XCTAssertTrue(coordinator.handleText(".", client: client))
+        XCTAssertFalse(coordinator.handleText("a", client: client))
+        XCTAssertFalse(coordinator.handleText("1", client: client))
+        XCTAssertFalse(coordinator.handleText(" ", client: client))
+        XCTAssertFalse(coordinator.handleText(".", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCodexDefaultsToChineseInlineComposition() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "n")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
+        XCTAssertEqual(
+            client.markedTextWrites.last?.attributeKeyNames,
+            Set([
+                InputClientMarkedText.tsmUnderlineAttribute.rawValue,
+                InputClientMarkedText.tsmMarkedClauseSegmentAttribute.rawValue
+            ])
+        )
+        XCTAssertEqual(client.markedTextWrites.last?.selectionRange, NSRange(location: 1, length: 0))
+        XCTAssertEqual(
+            client.markedTextWrites.last?.replacementRange,
+            NSRange(location: NSNotFound, length: NSNotFound)
+        )
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        let windowState = host.panelStates.last?.windowState
+        XCTAssertNil(windowState?.viewModel.preeditDisplayText)
+        let rendered = windowState.map {
+            CandidatePanelRenderer(locale: .zhCN).render(
+                $0.viewModel,
+                selected: $0.selection,
+                paging: $0.paging
+            )
+        }
+        XCTAssertFalse(rendered?.rows.contains(where: { $0.kind == .preedit }) ?? true)
+        XCTAssertEqual(rendered?.rows.first?.shortcutLabel, "1")
+        let firstCandidate = windowState?.viewModel.prefixCandidates.first?.text
+        XCTAssertNotNil(firstCandidate)
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n", "ni"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+        XCTAssertGreaterThan(host.scheduledOperations.count, 0)
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testTerminalOptionSlashEntersChineseCommitOnlyComposition() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        let windowState = host.panelStates.last?.windowState
+        XCTAssertEqual(windowState?.viewModel.preeditDisplayText, "ni")
+        let firstRenderedKind = windowState.flatMap {
+            CandidatePanelRenderer(locale: .zhCN).render(
+                $0.viewModel,
+                selected: $0.selection,
+                paging: $0.paging
+            ).rows.first?.kind
+        }
+        XCTAssertEqual(firstRenderedKind, .preedit)
+        let firstCandidate = windowState?.viewModel.prefixCandidates.first?.text
+        XCTAssertNotNil(firstCandidate)
+
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+        XCTAssertGreaterThan(host.scheduledOperations.count, 0)
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testInputModeReloadsImmediatelyWhenFocusedBundleChanges() {
+        let codeClient = FakeInputControllerClient()
+        codeClient.bundleIdentifier = "com.apple.Terminal"
+        let textClient = FakeInputControllerClient()
+        textClient.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, _, _) = makeCoordinator(client: codeClient)
+
+        XCTAssertFalse(coordinator.handleText("a", client: codeClient))
+        XCTAssertTrue(coordinator.handleText("n", client: textClient))
+
+        XCTAssertEqual(coordinator.composedString() as? String, "n")
+        XCTAssertTrue(codeClient.insertTextWrites.isEmpty)
+        XCTAssertTrue(textClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(textClient.markedTextWrites.last?.text, "n")
+    }
+
+    func testTextEditInlineCompositionUsesAttributedMarkedTextCarrier() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "n")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertEqual(
+            client.markedTextWrites.last?.attributeKeyNames,
+            Set([
+                InputClientMarkedText.tsmUnderlineAttribute.rawValue,
+                InputClientMarkedText.tsmMarkedClauseSegmentAttribute.rawValue
+            ])
+        )
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
     }
 
     func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {
@@ -1268,6 +1490,117 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+    }
+
+    func testMissingClientPrintableInputPassesThroughWithoutComposition() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+        host.currentClientValue = nil
+
+        XCTAssertFalse(coordinator.handleText("a", client: nil))
+
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testIdleMissingSenderDoesNotUseStaleHostClient() {
+        let staleClient = FakeInputControllerClient()
+        staleClient.bundleIdentifier = "com.openai.codex"
+        let (coordinator, host, _) = makeCoordinator(client: staleClient)
+        host.currentClientValue = staleClient
+
+        XCTAssertFalse(coordinator.handleText("a", client: nil))
+
+        XCTAssertTrue(staleClient.markedTextWrites.isEmpty)
+        XCTAssertTrue(staleClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelClearsOwnedPlaceholderAndHidesPanel() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+
+        let handled = coordinator.handle(
+            stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+            client: client
+        )
+
+        XCTAssertTrue(handled)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelUsesCallbackClientWhenCurrentHostClientIsMissing() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        host.currentClientValue = nil
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCommitOnlyCancelDoesNotDropOwnedMarkWhenCurrentHostClientIsStale() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let staleClient = FakeInputControllerClient()
+        staleClient.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        host.currentClientValue = staleClient
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertTrue(staleClient.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
     func testOptionPeriodTogglesCurrentSessionPunctuationMode() {
@@ -1584,7 +1917,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAIRecommendationRequestCarriesLexicalProfile() async throws {
+    func testAIRecommendationRequestDropsRealtimeCandidateHints() async throws {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let aiProvider = RecordingAIRecommendationProvider()
@@ -1595,7 +1928,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
@@ -1606,10 +1939,37 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let request = try XCTUnwrap(requests.last)
 
         XCTAssertNil(request.lockedPrefix)
-        XCTAssertTrue(request.candidateHints.contains { $0.text == "你" })
-        XCTAssertEqual(request.candidateHints.first?.pageNumber, 0)
-        XCTAssertTrue(request.lexicalContext?.markdown.contains("你") == true)
-        XCTAssertTrue(request.lexicalContext?.sourceSummary.contains { $0.hasPrefix("rime-candidates: ") } == true)
+        XCTAssertEqual(request.rawInput, "zhegeapi")
+        XCTAssertEqual(request.candidateHints, [])
+        XCTAssertFalse(request.lexicalContext?.markdown.contains("这个 API") == true)
+        XCTAssertFalse(request.lexicalContext?.sourceSummary.contains { $0.hasPrefix("rime-candidates: ") } == true)
+    }
+
+    @MainActor
+    func testAIRecommendationSchedulesForThreeCharacterRawInputWithoutHints() async throws {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "api" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        let requests = await aiProvider.requests
+        let request = try XCTUnwrap(requests.last)
+
+        XCTAssertNil(request.lockedPrefix)
+        XCTAssertEqual(request.rawInput, "api")
+        XCTAssertEqual(request.candidateHints, [])
     }
 
     @MainActor
@@ -1640,7 +2000,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             enablesAsyncSuggestionRefresh: true
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
@@ -1650,6 +2010,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let requests = await aiProvider.requests
         let request = try XCTUnwrap(requests.last)
 
+        XCTAssertEqual(request.candidateHints, [])
         XCTAssertTrue(request.lexicalContext?.markdown.contains("长期高频") == true)
         XCTAssertTrue(request.lexicalContext?.sourceSummary.contains("rime-userdb: 1") == true)
     }
@@ -1683,7 +2044,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             conversionEngine: FixtureNativeConversionEngine(activeSchemaID: "pinyin_simp")
         )
 
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRecommendation = await waitUntilOnMainActor {
@@ -1765,7 +2126,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
             client: client,
             provider: provider,
             aiRecommendationProvider: aiProvider,
-            enablesAsyncSuggestionRefresh: true
+            enablesAsyncSuggestionRefresh: true,
+            inputModePreferences: InputModePreferences(
+                codeAppState: InputModeState(textMode: .chinese)
+            )
         )
 
         for character in "secretphrase" {
@@ -1790,14 +2154,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(requestsAfterProtectedSelection.isEmpty)
 
         client.bundleIdentifier = "com.example.host"
-        for character in "ni" {
+        for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
 
         var unprotectedRequest: AIRecommendationRequest?
         for _ in 0..<60 {
             let requests = await aiProvider.requests
-            unprotectedRequest = requests.last { $0.rawInput == "ni" }
+            unprotectedRequest = requests.last { $0.rawInput == "zhegeapi" }
             if unprotectedRequest != nil {
                 break
             }
@@ -1883,7 +2247,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             runtimePreferenceStore: runtimeStore
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         let hasReadyAI = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
         }
@@ -1892,7 +2258,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         runtimeStore.preferences = InputMethodRuntimePreferences(cloudContinuationEnabled: false)
         coordinator.reloadRuntimePreferencesForExternalChange()
 
-        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text, "你")
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty == true)
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText, "AI 已关闭")
         XCTAssertTrue(host.panelStates.last?.windowState.viewModel.continuationCandidates.isEmpty == true)
     }
@@ -2297,7 +2663,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
     func testDelayedReanchorAppliesOnlyForCurrentComposition() {
         let client = FakeInputControllerClient()
         client.firstRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
-        let (coordinator, host, _) = makeCoordinator(client: client)
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            enablesAsyncSuggestionRefresh: true
+        )
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         let initialUpdateCount = host.panelStates.count
@@ -2412,7 +2781,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let adapter = IMKInputControllerClientAdapter(client: imkClient)
 
         adapter.setMarkedText(
-            "你",
+            .placeholder("你"),
             selectionRange: NSRange(location: 1, length: 0),
             replacementRange: NSRange(location: 5, length: 1)
         )
@@ -2428,6 +2797,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(adapter.lineHeightRect(forCharacterIndex: 0), imkClient.lineHeightRectValue)
         XCTAssertEqual(imkClient.markedTextWrites.count, 1)
         XCTAssertEqual(imkClient.markedTextWrites[0].text, "你")
+        XCTAssertEqual(imkClient.markedTextWrites[0].isAttributed, true)
+        XCTAssertEqual(
+            imkClient.markedTextWrites[0].attributeKeyNames,
+            Set([
+                InputClientMarkedText.tsmUnderlineAttribute.rawValue,
+                InputClientMarkedText.tsmMarkedClauseSegmentAttribute.rawValue
+            ])
+        )
         XCTAssertEqual(imkClient.insertTextWrites.count, 1)
         XCTAssertEqual(imkClient.insertTextWrites[0].text, "你")
     }
@@ -2681,7 +3058,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         try? await Task.sleep(nanoseconds: 100_000_000)
         let requests = await aiProvider.requests
         XCTAssertFalse(requests.isEmpty)
@@ -2747,11 +3126,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let client = FakeInputControllerClient()
         let persistence = FakeUserSelectionHistoryPersistence()
         let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
         let (coordinator, host, persistenceSpy) = makeCoordinator(
             client: client,
             persistence: persistence,
             provider: RecordingContinuationProvider(),
             aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
             enablesAsyncSuggestionRefresh: true,
             conversionEngine: RecordingNativeConversionEngine(
                 candidates: ["你"],
@@ -2759,7 +3140,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         let hasAIRecommendation = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
         }
@@ -2777,7 +3160,302 @@ final class InputControllerCoordinatorTests: XCTestCase {
             client.insertTextWrites.last?.replacementRange,
             NSRange(location: NSNotFound, length: NSNotFound)
         )
-        XCTAssertEqual(persistenceSpy.recordedSelections, [])
+        XCTAssertTrue(persistenceSpy.recordedSelections.isEmpty)
+        let recorded = await waitUntilOnMainActor {
+            acceptedLearning.allRecords().count == 1
+        }
+        XCTAssertTrue(recorded)
+        XCTAssertEqual(acceptedLearning.allRecords().first?.acceptedText, "AI 续写")
+    }
+
+    @MainActor
+    func testTabAcceptedAIRecommendationRecordsAcceptedLearningHistory() async throws {
+        let client = FakeInputControllerClient()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        let recorded = await waitUntilOnMainActor {
+            acceptedLearning.allRecords().count == 1
+                && acceptedLearning.snapshot()?.termProfile.contains { $0.text == "JSON" } == true
+        }
+        XCTAssertTrue(recorded)
+        let record = try XCTUnwrap(acceptedLearning.allRecords().first)
+        XCTAssertEqual(record.rawInput, "zhegeapi")
+        XCTAssertEqual(record.acceptedText, "JSON Schema 可以继续")
+        XCTAssertEqual(record.provider, "ai-test")
+        XCTAssertEqual(record.commitKind, "ai")
+        XCTAssertEqual(record.candidateSource, "ai:ai-test")
+        XCTAssertTrue(record.extractedTerms.contains { $0.text == "JSON" })
+        XCTAssertTrue(acceptedLearning.snapshot()?.termProfile.contains { $0.text == "JSON" } == true)
+    }
+
+    @MainActor
+    func testAIAcceptedCommitUsesImmediatePostInsertVerificationSeam() async throws {
+        let client = FakeInputControllerClient()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedFeedback = AIAcceptedFeedbackStore.inMemory()
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedFeedback: acceptedFeedback,
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+        host.runScheduledOperations()
+        XCTAssertTrue(host.scheduledOperations.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        let acceptedText = try XCTUnwrap(client.insertTextWrites.last?.text)
+        XCTAssertTrue(host.scheduledOperations.isEmpty)
+        XCTAssertEqual(host.postInsertVerificationOperations.count, 1)
+
+        client.selectedRangeValue = NSRange(
+            location: 10 + (acceptedText as NSString).length,
+            length: 0
+        )
+        host.runPostInsertVerificationOperations()
+        XCTAssertTrue(host.postInsertVerificationOperations.isEmpty)
+
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 51),
+                client: client
+            )
+        )
+        XCTAssertFalse(diagnosticSink.events.contains {
+            $0.stage == .acceptedFeedbackTrackingCancelled
+                && $0.reason == "delete_before_verified"
+        })
+    }
+
+    @MainActor
+    func testProtectedAppAcceptedAIRecommendationDoesNotRecordAcceptedLearningHistory() async throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            inputModePreferences: InputModePreferences(
+                codeAppState: InputModeState(textMode: .chinese)
+            ),
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "JSON Schema 可以继续")
+        XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
+        XCTAssertNil(acceptedLearning.snapshot())
+    }
+
+    @MainActor
+    func testProtectedAppAcceptedAIRecommendationDoesNotRecordAcceptedFeedback() async throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "JSON Schema 可以继续")
+        let acceptedFeedback = AIAcceptedFeedbackStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedFeedback: acceptedFeedback,
+            enablesAsyncSuggestionRefresh: true,
+            inputModePreferences: InputModePreferences(
+                codeAppState: InputModeState(textMode: .chinese)
+            ),
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个API"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "JSON Schema 可以继续"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\t", keyCode: 48),
+                client: client
+            )
+        )
+        client.selectedRangeValue = NSRange(location: 10 + ("JSON Schema 可以继续" as NSString).length, length: 0)
+        host.runPostInsertVerificationOperations()
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 51),
+                client: client
+            )
+        )
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(acceptedFeedback.allRecords().isEmpty)
+        XCTAssertNil(acceptedFeedback.snapshot())
+    }
+
+    @MainActor
+    func testPanelClickAcceptedAIRecommendationRecordsAcceptedLearningHistory() async throws {
+        let client = FakeInputControllerClient()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "AI 续写")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["这个方案"],
+                recorder: NativeSelectionRecorder()
+            )
+        )
+
+        for character in "zhegefangan" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        coordinator.commitCandidatePanelSelection(.aiRecommendation, client: client)
+
+        let recorded = await waitUntilOnMainActor {
+            acceptedLearning.allRecords().count == 1
+        }
+        XCTAssertTrue(recorded)
+        XCTAssertEqual(client.insertTextWrites.last?.text, "AI 续写")
+        XCTAssertEqual(acceptedLearning.allRecords().first?.acceptedText, "AI 续写")
+        XCTAssertEqual(acceptedLearning.allRecords().first?.candidateSource, "ai:ai-test")
+    }
+
+    @MainActor
+    func testNativeCommitDoesNotRecordAcceptedLearningHistory() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            aiAcceptedLearning: acceptedLearning,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder,
+                spaceCommit: "你"
+            )
+        )
+
+        for character in "ni" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
+    }
+
+    @MainActor
+    func testNativeCommitMatchingReadyAITextDoesNotRecordAcceptedLearningHistory() async {
+        let client = FakeInputControllerClient()
+        let recorder = NativeSelectionRecorder()
+        let aiProvider = RecordingAIRecommendationProvider(continuation: "你")
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            aiAcceptedLearning: acceptedLearning,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: RecordingNativeConversionEngine(
+                candidates: ["你"],
+                recorder: recorder,
+                spaceCommit: "你"
+            )
+        )
+
+        for character in "nihao" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "你"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
     }
 
     @MainActor
@@ -2796,12 +3474,12 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        for character in "hou" {
+        for character in "houhou" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
         let hasAIRequest = await waitForAIRecommendationRequest(aiProvider)
         XCTAssertTrue(hasAIRequest)
-        let requestCountBeforeHighlight = (await aiProvider.requests).count
+        let requestCountBeforeHighlight = await waitForStableAIRecommendationRequestCount(aiProvider)
 
         XCTAssertTrue(
             coordinator.handle(
@@ -2813,7 +3491,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .fullCandidate(1))
         XCTAssertEqual(recorder.highlightedIndices, [1])
-        let requestCountAfterHighlight = (await aiProvider.requests).count
+        let requestCountAfterHighlight = await waitForStableAIRecommendationRequestCount(aiProvider)
         XCTAssertEqual(requestCountAfterHighlight, requestCountBeforeHighlight)
     }
 
@@ -2857,7 +3535,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(coordinator.handleText("n", client: client))
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
         let hasAIRecommendation = await waitUntilOnMainActor {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "AI 续写"
         }
@@ -3031,7 +3711,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence(),
         provider: (any LLMProvider)? = nil,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
+        aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
+        aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
         lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
@@ -3065,7 +3748,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
             initialAppBundleID: client.bundleIdentifier,
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
+            aiRecommendationProviderAvailability: aiRecommendationProviderAvailability,
             aiContextEventRecorder: aiContextEventRecorder,
+            aiAcceptedLearning: aiAcceptedLearning,
+            aiAcceptedFeedback: aiAcceptedFeedback,
             aiDiagnosticSink: aiDiagnosticSink,
             lexicalProfileStore: lexicalProfileStore,
             lexicalProfileRefreshGate: lexicalProfileRefreshGate,
@@ -3195,6 +3881,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let requests = await provider.requests
         return !requests.isEmpty
+    }
+
+    @MainActor
+    private func waitForStableAIRecommendationRequestCount(
+        _ provider: RecordingAIRecommendationProvider,
+        timeout: TimeInterval = 3,
+        quietInterval: TimeInterval = 0.15
+    ) async -> Int {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCount = -1
+        var lastChange = Date()
+        while Date() < deadline {
+            let count = (await provider.requests).count
+            if count != lastCount {
+                lastCount = count
+                lastChange = Date()
+            } else if count > 0,
+                      Date().timeIntervalSince(lastChange) >= quietInterval {
+                return count
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return (await provider.requests).count
     }
 }
 
@@ -4211,6 +4920,12 @@ private actor PendingAIRecommendationProvider: AIRecommendationProviding {
     }
 }
 
+private actor UnavailableAIRecommendationProvider: AIRecommendationProviding {
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        .unavailable(reason: "AI 未配置")
+    }
+}
+
 private actor DelayedAIRecommendationProvider: AIRecommendationProviding {
     private let delayNanoseconds: UInt64
 
@@ -4242,6 +4957,272 @@ private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @un
     }
 }
 
+final class InputControllerCoordinatorRefactorRegressionTests: XCTestCase {
+    func testInlineHostCompositionKeepsMarkedPanelCommitAndResetOrder() throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+
+        let windowState = try XCTUnwrap(host.panelStates.last?.windowState)
+        let firstCandidate = try XCTUnwrap(windowState.viewModel.prefixCandidates.first?.text)
+        XCTAssertEqual(windowState.viewModel.rawInput, "ni")
+        XCTAssertNil(windowState.viewModel.preeditDisplayText)
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n", "ni"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testTerminalHostKeepsIdlePassthroughAndActivePlaceholderCommitPath() throws {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertFalse(coordinator.handleText("a", client: client))
+        XCTAssertFalse(coordinator.handleText("1", client: client))
+        XCTAssertFalse(coordinator.handleText(" ", client: client))
+        XCTAssertFalse(coordinator.handleText(".", client: client))
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertTrue(host.panelStates.isEmpty)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+
+        let windowState = try XCTUnwrap(host.panelStates.last?.windowState)
+        let firstCandidate = try XCTUnwrap(windowState.viewModel.prefixCandidates.first?.text)
+        XCTAssertEqual(windowState.viewModel.preeditDisplayText, "ni")
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertTrue(client.markedTextWrites.allSatisfy(\.isAttributed))
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(Array(client.writeEventKinds.suffix(2)), ["markedText", "insertText"])
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    @MainActor
+    func testDeactivateLifecycleCommitsRawUsingPreResetSnapshotAndResetsNativeState() async {
+        let client = FakeInputControllerClient()
+        let contextRecorder = RecordingAIContextEventRecorder()
+        let conversionRecorder = RefactorRegressionConversionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiContextEventRecorder: contextRecorder,
+            conversionEngine: ResetRecordingNativeConversionEngine(recorder: conversionRecorder)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        coordinator.deactivateServer(client: client)
+
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "n")
+        XCTAssertEqual(conversionRecorder.resetCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+
+        let recorded = await waitUntil {
+            await contextRecorder.events.contains {
+                $0.rawInput == "n"
+                    && $0.committedText == "n"
+                    && $0.commitKind == .raw
+                    && $0.deleteCountBeforeCommit == 0
+            }
+        }
+        XCTAssertTrue(recorded)
+    }
+
+    func testCloseLifecycleClearsOwnedMarkedTextWithoutCommittingRawText() {
+        let client = FakeInputControllerClient()
+        let conversionRecorder = RefactorRegressionConversionRecorder()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: ResetRecordingNativeConversionEngine(recorder: conversionRecorder)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        coordinator.inputControllerWillClose()
+
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(conversionRecorder.resetCount, 1)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testNativeEndedLifecycleClearsOwnedMarkedTextWithoutPanelRevival() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: NativeEndedNoCommitConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        let panelUpdateCountBeforeCommit = host.panelStates.count
+
+        coordinator.commitComposition(client: client)
+        host.runScheduledOperations()
+
+        XCTAssertEqual(client.insertTextWrites.count, 0)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "")
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+        XCTAssertEqual(host.panelStates.count, panelUpdateCountBeforeCommit)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testDelayedReanchorDoesNotRevivePanelAfterCompositionCommit() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertFalse(host.scheduledOperations.isEmpty)
+        let firstCandidate = try XCTUnwrap(host.panelStates.last?.windowState.viewModel.prefixCandidates.first?.text)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        let panelUpdateCountAfterCommit = host.panelStates.count
+        let hideCountAfterCommit = host.hideCandidatePanelCount
+
+        host.runScheduledOperations()
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, firstCandidate)
+        XCTAssertEqual(host.panelStates.count, panelUpdateCountAfterCommit)
+        XCTAssertEqual(host.hideCandidatePanelCount, hideCountAfterCommit)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    private func makeCoordinator(
+        client: FakeInputControllerClient,
+        provider: (any LLMProvider)? = nil,
+        aiContextEventRecorder: (any AIContextEventRecording)? = nil,
+        inputModePreferences: InputModePreferences = .standard,
+        runtimePreferences: InputMethodRuntimePreferences = .standard,
+        conversionEngine: (any KnowTypeConversionEngine)? = nil,
+        enablesAsyncSuggestionRefresh: Bool = false
+    ) -> (
+        InputControllerCoordinator,
+        FakeInputControllerHost,
+        FakeUserSelectionHistoryPersistence
+    ) {
+        let host = FakeInputControllerHost()
+        host.currentClientValue = client
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let coordinator = InputControllerCoordinator(
+            provider: provider,
+            traditionalInputEngine: nil,
+            inputModePreferenceStore: FixedInputModePreferenceStore(preferences: inputModePreferences),
+            runtimePreferenceStore: FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
+            initialRuntimePreferences: runtimePreferences,
+            initialAppBundleID: client.bundleIdentifier,
+            userSelectionHistoryPersistence: persistence,
+            aiContextEventRecorder: aiContextEventRecorder,
+            conversionEngine: conversionEngine ?? FixtureNativeConversionEngine(),
+            host: host,
+            anchorResolver: CandidateAnchorResolver(
+                screenProvider: FixedInputControllerScreenProvider(),
+                accessibilityProvider: NoopAccessibilityAnchorProvider(),
+                traceEnabled: false
+            ),
+            enablesAsyncSuggestionRefresh: enablesAsyncSuggestionRefresh
+        )
+        return (coordinator, host, persistence)
+    }
+
+    @MainActor
+    private func waitUntil(
+        timeout: TimeInterval = 3,
+        condition: @escaping () async -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await condition() {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return await condition()
+    }
+}
+
+private final class RefactorRegressionConversionRecorder: @unchecked Sendable {
+    var resetCount = 0
+}
+
+private struct ResetRecordingNativeConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = true
+    let recorder: RefactorRegressionConversionRecorder
+    private var rawInput = ""
+
+    var activeSchemaID = "pinyin_simp"
+
+    init(recorder: RefactorRegressionConversionRecorder) {
+        self.recorder = recorder
+    }
+
+    var snapshot: ConversionEngineSnapshot {
+        guard !rawInput.isEmpty else {
+            return ConversionEngineSnapshot(engineName: "native-reset-recording")
+        }
+        return ConversionEngineSnapshot(
+            rawInput: rawInput,
+            preedit: rawInput,
+            candidates: [ConversionEngineCandidate(text: "候选\(rawInput)", index: 0, source: "native-reset-recording")],
+            highlightedIndex: 0,
+            pageSize: 1,
+            pageNumber: 0,
+            isLastPage: true,
+            engineName: "native-reset-recording"
+        )
+    }
+
+    mutating func reset() {
+        recorder.resetCount += 1
+        rawInput = ""
+    }
+
+    mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        switch key {
+        case .text(let text):
+            rawInput += text
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .deleteBackward:
+            if !rawInput.isEmpty {
+                rawInput.removeLast()
+            }
+            return ConversionEngineResult(handled: true, snapshot: snapshot)
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
+            return ConversionEngineResult(handled: false, snapshot: snapshot)
+        }
+    }
+}
+
 private actor RecordingAIContextEventRecorder: AIContextEventRecording {
     private var recordedEvents: [AITypingEvent] = []
 
@@ -4268,8 +5249,10 @@ private final class FakeInputControllerHost: InputControllerHost {
     var currentClientValue: InputControllerClient?
     private(set) var updateCompositionCount = 0
     private(set) var panelStates: [CandidatePanelState] = []
+    private(set) var candidatePanelFrames: [CandidatePanelFrame] = []
     private(set) var hideCandidatePanelCount = 0
     private(set) var scheduledOperations: [@Sendable () -> Void] = []
+    private(set) var postInsertVerificationOperations: [@Sendable () -> Void] = []
 
     var currentClient: InputControllerClient? {
         currentClientValue
@@ -4279,16 +5262,22 @@ private final class FakeInputControllerHost: InputControllerHost {
         updateCompositionCount += 1
     }
 
-    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale) {
-        panelStates.append(state)
-    }
-
-    func hideCandidatePanel() {
-        hideCandidatePanelCount += 1
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale _: KnowTypeLocale) {
+        candidatePanelFrames.append(frame)
+        if frame.isVisible || frame.visibilityReason == .layoutImpossible {
+            panelStates.append(frame.panelModel)
+        }
+        if !frame.isVisible {
+            hideCandidatePanelCount += 1
+        }
     }
 
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
         scheduledOperations.append(operation)
+    }
+
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
+        postInsertVerificationOperations.append(operation)
     }
 
     func runScheduledOperations() {
@@ -4296,11 +5285,19 @@ private final class FakeInputControllerHost: InputControllerHost {
         scheduledOperations.removeAll()
         operations.forEach { $0() }
     }
+
+    func runPostInsertVerificationOperations() {
+        let operations = postInsertVerificationOperations
+        postInsertVerificationOperations.removeAll()
+        operations.forEach { $0() }
+    }
 }
 
 private final class FakeInputControllerClient: InputControllerClient, @unchecked Sendable {
     struct MarkedTextWrite: Equatable {
         var text: String
+        var isAttributed: Bool
+        var attributeKeyNames: Set<String>
         var selectionRange: NSRange
         var replacementRange: NSRange
     }
@@ -4317,6 +5314,7 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
     var lineHeightRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
     private(set) var markedTextWrites: [MarkedTextWrite] = []
     private(set) var insertTextWrites: [InsertTextWrite] = []
+    private(set) var writeEventKinds: [String] = []
 
     var selectedRange: NSRange {
         selectedRangeValue
@@ -4335,28 +5333,32 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
     }
 
     func setMarkedText(
-        _ text: String,
+        _ text: InputClientMarkedText,
         selectionRange: NSRange,
         replacementRange: NSRange
     ) {
+        writeEventKinds.append("markedText")
         markedTextWrites.append(
             MarkedTextWrite(
-                text: text,
+                text: text.string,
+                isAttributed: text.isAttributed,
+                attributeKeyNames: text.attributeKeyNames,
                 selectionRange: selectionRange,
                 replacementRange: replacementRange
             )
         )
-        if text.isEmpty {
+        if text.string.isEmpty {
             markedRangeValue = nil
         } else {
             let location = replacementRange.location == NSNotFound
                 ? selectedRangeValue.location
                 : replacementRange.location
-            markedRangeValue = NSRange(location: location, length: (text as NSString).length)
+            markedRangeValue = NSRange(location: location, length: (text.string as NSString).length)
         }
     }
 
     func insertText(_ text: String, replacementRange: NSRange) {
+        writeEventKinds.append("insertText")
         insertTextWrites.append(
             InsertTextWrite(
                 text: text,
@@ -4435,13 +5437,32 @@ private final class FakeIMKTextInput: NSObject, IMKTextInput {
         selectionRange: NSRange,
         replacementRange: NSRange
     ) {
+        let attributed = string as? NSAttributedString
+        let plain = string as? String
         markedTextWrites.append(
             FakeInputControllerClient.MarkedTextWrite(
-                text: string as? String ?? "",
+                text: attributed?.string ?? plain ?? "",
+                isAttributed: attributed != nil,
+                attributeKeyNames: Self.attributeKeyNames(in: attributed),
                 selectionRange: selectionRange,
                 replacementRange: replacementRange
             )
         )
+    }
+
+    private static func attributeKeyNames(in text: NSAttributedString?) -> Set<String> {
+        guard let text,
+              text.length > 0 else {
+            return []
+        }
+        var names: Set<String> = []
+        text.enumerateAttributes(
+            in: NSRange(location: 0, length: text.length),
+            options: []
+        ) { attributes, _, _ in
+            attributes.keys.forEach { names.insert($0.rawValue) }
+        }
+        return names
     }
 
     func selectedRange() -> NSRange {

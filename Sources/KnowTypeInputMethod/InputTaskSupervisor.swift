@@ -1,16 +1,8 @@
 import Foundation
 
 enum InputTaskKind: Hashable, Sendable {
-    case localCandidates
     case panelRender
-    case aiRecommendation
     case runtimeLexiconReload
-}
-
-struct InputGeneration: Sendable, Equatable {
-    var compositionID: Int
-    var rawRevision: Int
-    var candidateRevision: Int
 }
 
 final class InputTaskSupervisor: @unchecked Sendable {

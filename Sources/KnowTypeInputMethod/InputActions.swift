@@ -8,6 +8,7 @@ public enum InputAction: Sendable, Equatable {
     case optionNumber(Int)
     case optionR
     case toggleSymbolMode
+    case toggleTextMode
     case commitRaw
 }
 
@@ -20,6 +21,7 @@ public enum InputCommitResult: Sendable, Equatable {
 public struct CandidatePanelViewModel: Sendable, Equatable {
     public var title: String
     public var rawInput: String
+    public var preeditDisplayText: String?
     public var prefixCandidates: [CorrectionCandidate]
     public var continuationCandidates: [ContinuationCandidate]
     public var aiRecommendation: AIRecommendationState
@@ -27,12 +29,14 @@ public struct CandidatePanelViewModel: Sendable, Equatable {
     public init(
         title: String = "KnowType",
         rawInput: String,
+        preeditDisplayText: String? = nil,
         prefixCandidates: [CorrectionCandidate],
         continuationCandidates: [ContinuationCandidate],
         aiRecommendation: AIRecommendationState = .idle
     ) {
         self.title = title
         self.rawInput = rawInput
+        self.preeditDisplayText = preeditDisplayText
         self.prefixCandidates = prefixCandidates
         self.continuationCandidates = continuationCandidates
         self.aiRecommendation = aiRecommendation
@@ -85,6 +89,8 @@ public struct InputCompositionController: Sendable {
         case .optionR:
             return .polishRequested(originalText)
         case .toggleSymbolMode:
+            return .noAction
+        case .toggleTextMode:
             return .noAction
         case .commitRaw:
             return .commit(originalText)

@@ -16,6 +16,9 @@ provider used by the input method.
 
 - Missing or empty profile storage falls back to `ProviderProfileTemplates`.
 - `secretName` values resolve through `SecretStore`.
+- IMK cold-start paths use `loadDefaultProvider(createProfileDirectory: false)`
+  through lazy AI runtimes. This reads an existing profile when present but does
+  not create `Application Support/KnowType` only because the host was launched.
 - Runtime loading should fail transparently enough for diagnostics without
   leaking secret values.
 

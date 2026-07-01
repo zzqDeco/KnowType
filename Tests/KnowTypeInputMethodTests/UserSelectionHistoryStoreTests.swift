@@ -2,6 +2,23 @@ import XCTest
 @testable import KnowTypeInputMethod
 
 final class UserSelectionHistoryStoreTests: XCTestCase {
+    func testDefaultStoreCanOpenWithoutCreatingKnowTypeDirectory() throws {
+        let applicationSupportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let knowTypeDirectory = applicationSupportDirectory.appendingPathComponent("KnowType", isDirectory: true)
+
+        let store = try FileUserSelectionHistoryStore.defaultStore(
+            applicationSupportDirectory: applicationSupportDirectory,
+            createDirectory: false
+        )
+
+        XCTAssertEqual(store.fileURL, knowTypeDirectory.appendingPathComponent("user-selection-history.json"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: knowTypeDirectory.path))
+
+        try store.saveHistory(["方案"], maxEntries: 64)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: knowTypeDirectory.path))
+    }
+
     func testMissingHistoryFileLoadsEmptyHistory() throws {
         let store = FileUserSelectionHistoryStore(fileURL: temporaryHistoryURL())
 

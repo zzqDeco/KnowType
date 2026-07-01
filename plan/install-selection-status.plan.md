@@ -6,10 +6,10 @@ Make the local input-method install script stop implying KnowType is globally se
 
 ## Behavior
 
-- `scripts/install-inputmethod.sh` copies the signed bundle into `~/Library/Input Methods`, runs `lsregister -f`, then executes `KnowTypeInputMethodApp --knowtype-purge-legacy` and `KnowTypeInputMethodApp --knowtype-install-activate` so the installed app purges stale `.Mode` development state and activates the visible `.Hans` input mode before starting `IMKServer`.
-- The installed app registers the missing parent/mode pair, enables the active mode from its own signed bundle context when needed, and logs the app-local `TISSelectInputSource` result. This follows the component-mode shape used by Squirrel, McBopomofo, and macSKK.
-- The repair path mirrors System Settings on this macOS build: HIToolbox enabled/history rows point at `.Hans`, while `com.apple.inputsources` keeps the third-party parent anchor plus `.Hans`. Diagnostics still read the protected lists so stale `.Mode` rows and missing anchors are visible.
-- The command-line helper remains available for status, dump, compatibility bootstrap, debug legacy purge, and scoped preference repair, but install and selection paths no longer use helper-side TIS mutation requests.
+- `scripts/install-inputmethod.sh` copies the signed bundle into `~/Library/Input Methods`, runs `lsregister -f`, then uses installed app CLI registration plus helper `purge-legacy` and `repair-preferences` so registration and enablement happen without launching the input-method host run loop.
+- Registration enables the parent `com.knowtype.inputmethod.KnowType` input method and visible `com.knowtype.inputmethod.KnowType.Hans` input mode.
+- The repair path keeps enabled rows on parent plus `.Hans`, selected/history rows on `.Hans`, and removes legacy `.Mode` rows. Diagnostics still read the protected lists so stale legacy rows remain visible.
+- The command-line helper remains available for status, dump, compatibility bootstrap, debug legacy purge, and scoped preference repair. Host CLI flags remain compatibility/debug entry points, not the default install path.
 - If app-local `TISSelectInputSource` returns `noErr`, that still proves only the app context; diagnostics remain the source of truth for persisted system selected input source.
 - Diagnostics report both helper-local TIS state and persisted HIToolbox preferences; `AppleSelectedInputSources` can still point at another input source even when TIS reports KnowType as enabled.
 - The final script output directs developers to `scripts/diagnose-inputmethod.sh --strict` as the read-only install status check.
@@ -28,4 +28,4 @@ git diff --check
 
 Before manual typing acceptance, activate the target text app, run `./scripts/select-inputmethod.sh --require-selected` as a preflight, then type a real probe in that app. Treat preflight failure as "macOS has not switched KnowType into that active TIS context yet" rather than as an install-script failure.
 
-If the input menu does not visibly show `KnowType` / `知键`, inspect the diagnostic's localized-name and third-party preference lines. A raw `com.knowtype.inputmethod.KnowType` name indicates missing or stale `InfoPlist.strings`; stale `.Mode` registrations or missing third-party parent anchors should be fixed by removing/re-adding KnowType in System Settings and may still require logout or reboot.
+If the input menu does not visibly show a single `KnowType` / `知键`, inspect the diagnostic's localized-name and third-party preference lines. A raw `com.knowtype.inputmethod.KnowType` name indicates missing or stale `InfoPlist.strings`; duplicate visible rows or stale `.Hans` / `.Mode` registrations should be fixed by repair or removing/re-adding KnowType in System Settings and may still require logout or reboot.

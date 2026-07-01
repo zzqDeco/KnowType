@@ -66,6 +66,7 @@ public struct AIRecommendationRequest: Sendable, Equatable {
     public var locale: KnowTypeLocale
     public var compositionID: Int
     public var lexicalContext: LexicalContextSnapshot?
+    public var feedbackContext: AIAcceptedFeedbackContextSnapshot?
 
     public init(
         rawInput: String,
@@ -76,7 +77,8 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         locale: KnowTypeLocale = .mixed,
         compositionID: Int,
         requestID: UUID = UUID(),
-        lexicalContext: LexicalContextSnapshot? = nil
+        lexicalContext: LexicalContextSnapshot? = nil,
+        feedbackContext: AIAcceptedFeedbackContextSnapshot? = nil
     ) {
         self.requestID = requestID
         self.rawInput = rawInput
@@ -89,6 +91,7 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         self.locale = locale
         self.compositionID = compositionID
         self.lexicalContext = lexicalContext
+        self.feedbackContext = feedbackContext
     }
 
     public init(
@@ -99,7 +102,8 @@ public struct AIRecommendationRequest: Sendable, Equatable {
         locale: KnowTypeLocale = .mixed,
         compositionID: Int,
         requestID: UUID = UUID(),
-        lexicalContext: LexicalContextSnapshot? = nil
+        lexicalContext: LexicalContextSnapshot? = nil,
+        feedbackContext: AIAcceptedFeedbackContextSnapshot? = nil
     ) {
         self.init(
             rawInput: rawInput,
@@ -110,14 +114,15 @@ public struct AIRecommendationRequest: Sendable, Equatable {
             locale: locale,
             compositionID: compositionID,
             requestID: requestID,
-            lexicalContext: lexicalContext
+            lexicalContext: lexicalContext,
+            feedbackContext: feedbackContext
         )
     }
 
     public var traditionalCandidate: CorrectionCandidate {
         CorrectionCandidate(
-            text: lockedPrefix ?? candidateHints.first?.text ?? "",
-            source: lockedPrefix == nil ? "candidate-hint" : "locked-prefix",
+            text: lockedPrefix ?? "",
+            source: lockedPrefix == nil ? "raw-input" : "locked-prefix",
             confidence: 1,
             correctionLevel: .contextual
         )
@@ -158,6 +163,40 @@ public struct AICandidateHint: Codable, Sendable, Equatable, Hashable {
 
 public protocol AIRecommendationProviding: Sendable {
     func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState
+}
+
+public enum AIRecommendationProviderAvailability: Sendable, Equatable {
+    case unknown
+    case available
+    case unavailable
+}
+
+public protocol AIRecommendationProviderAvailabilitySnapshotting: Sendable {
+    var providerAvailability: AIRecommendationProviderAvailability { get }
+}
+
+public final class AIRecommendationProviderAvailabilityState:
+    AIRecommendationProviderAvailabilitySnapshotting,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var state: AIRecommendationProviderAvailability
+
+    public init(_ state: AIRecommendationProviderAvailability = .unknown) {
+        self.state = state
+    }
+
+    public var providerAvailability: AIRecommendationProviderAvailability {
+        lock.lock()
+        defer { lock.unlock() }
+        return state
+    }
+
+    public func update(_ state: AIRecommendationProviderAvailability) {
+        lock.lock()
+        self.state = state
+        lock.unlock()
+    }
 }
 
 public enum AITypingCommitKind: String, Codable, Sendable, Equatable {

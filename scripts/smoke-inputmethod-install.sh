@@ -60,6 +60,15 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local label="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    die "$label unexpectedly contained '$needle'"
+  fi
+}
+
 assert_file() {
   local path="$1"
   [[ -f "$path" ]] || die "missing file: $path"
@@ -132,6 +141,48 @@ while IFS= read -r script_path; do
   bash -n "$script_path"
 done < <(find "$ROOT_DIR/scripts" -type f -name '*.sh' | sort)
 
+install_script_contents="$(cat "$ROOT_DIR/scripts/install-inputmethod.sh")"
+rollback_script_contents="$(cat "$ROOT_DIR/scripts/rollback-inputmethod.sh")"
+repair_script_contents="$(cat "$ROOT_DIR/scripts/repair-inputmethod-selection.sh")"
+
+assert_contains "$install_script_contents" "purge_legacy_best_effort" "install script"
+assert_contains "$install_script_contents" "bootstrap_input_source_best_effort" "install script"
+assert_contains "$install_script_contents" '"$tool" purge-legacy' "install script"
+assert_contains "$install_script_contents" '"$tool" bootstrap' "install script"
+assert_contains "$install_script_contents" "launching the input method host" "install script"
+assert_contains "$install_script_contents" "process shutdown can flush Rime user data" "install script"
+assert_contains "$install_script_contents" "knowtype_input_method_host_is_running" "install script"
+assert_contains "$install_script_contents" "ps -axo command=" "install script"
+assert_contains "$install_script_contents" '*/KnowTypeInputMethodApp\ *' "install script"
+assert_not_contains "$install_script_contents" '${command%% *}' "install script"
+assert_not_contains "$install_script_contents" '"$INSTALLED_EXECUTABLE" --knowtype-install-activate' "install script"
+assert_not_contains "$install_script_contents" '"$INSTALLED_EXECUTABLE" --knowtype-purge-legacy' "install script"
+assert_not_contains "$install_script_contents" "killall KnowTypeInputMethodApp" "install script"
+assert_not_contains "$install_script_contents" "pgrep -x KnowTypeInputMethodApp" "install script"
+assert_not_contains "$install_script_contents" 'open -g "$TARGET_PATH"' "install script"
+
+assert_contains "$rollback_script_contents" "purge_args=(" "rollback script"
+assert_contains "$rollback_script_contents" "bootstrap_args=(" "rollback script"
+assert_contains "$rollback_script_contents" '"$inputsource_tool" "${purge_args[@]}"' "rollback script"
+assert_contains "$rollback_script_contents" '"$inputsource_tool" "${bootstrap_args[@]}"' "rollback script"
+assert_contains "$rollback_script_contents" "process shutdown can flush Rime user data" "rollback script"
+assert_contains "$rollback_script_contents" "knowtype_input_method_host_is_running" "rollback script"
+assert_contains "$rollback_script_contents" "ps -axo command=" "rollback script"
+assert_contains "$rollback_script_contents" '*/KnowTypeInputMethodApp\ *' "rollback script"
+assert_not_contains "$rollback_script_contents" '${command%% *}' "rollback script"
+assert_not_contains "$rollback_script_contents" 'KnowTypeInputMethodApp" --knowtype-purge-legacy' "rollback script"
+assert_not_contains "$rollback_script_contents" "killall KnowTypeInputMethodApp" "rollback script"
+assert_not_contains "$rollback_script_contents" "pgrep -x KnowTypeInputMethodApp" "rollback script"
+assert_not_contains "$rollback_script_contents" 'open -g "$target_path"' "rollback script"
+
+assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" purge-legacy' "repair script"
+assert_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-register-input-source --knowtype-enable-input-source' "repair script"
+assert_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-select-input-source' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-install-activate' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-purge-legacy' "repair script"
+assert_not_contains "$repair_script_contents" "killall KnowTypeInputMethodApp" "repair script"
+assert_not_contains "$repair_script_contents" 'open -g "$BUNDLE_PATH"' "repair script"
+
 help_scripts=(
   "$ROOT_DIR/scripts/accept-inputmethod-local.sh"
   "$ROOT_DIR/scripts/build-inputmethod-bundle.sh"
@@ -140,16 +191,17 @@ help_scripts=(
   "$ROOT_DIR/scripts/diagnose-inputmethod.sh"
   "$ROOT_DIR/scripts/install-inputmethod.sh"
   "$ROOT_DIR/scripts/install-lexicon-pack.sh"
+  "$ROOT_DIR/scripts/package-dmg.sh"
   "$ROOT_DIR/scripts/package-release.sh"
   "$ROOT_DIR/scripts/perf-input-hotpath.sh"
   "$ROOT_DIR/scripts/repair-inputmethod-selection.sh"
+  "$ROOT_DIR/scripts/rollback-inputmethod.sh"
   "$ROOT_DIR/scripts/select-inputmethod.sh"
-  "$ROOT_DIR/scripts/smoke-inputmethod-install.sh"
   "$ROOT_DIR/scripts/uninstall-inputmethod.sh"
 )
 
 for script_path in "${help_scripts[@]}"; do
-  "$script_path" --help >/dev/null
+  bash "$script_path" --help >/dev/null
 done
 
 source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
@@ -162,6 +214,19 @@ declare -F knowtype_remove_local_inputmethod_bundle_if_safe >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load safe removal helpers"
 declare -F knowtype_clean_preferencepane_caches >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
+
+manifest_smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-manifest-smoke.XXXXXX")"
+mkdir -p "$manifest_smoke_root/one" "$manifest_smoke_root/two"
+printf '{}\n' >"$manifest_smoke_root/one/release-manifest.json"
+printf '{}\n' >"$manifest_smoke_root/two/release-manifest.json"
+if manifest_error="$(knowtype_discover_release_manifest "$manifest_smoke_root/release.zip" "$manifest_smoke_root" 2>&1 >/dev/null)"; then
+  die "release manifest discovery accepted multiple manifests"
+fi
+assert_contains "$manifest_error" "exactly one release-manifest.json" "release manifest ambiguity output"
+rm -rf "$manifest_smoke_root/two"
+manifest_path="$(knowtype_discover_release_manifest "$manifest_smoke_root/release.zip" "$manifest_smoke_root")"
+assert_equals "$manifest_smoke_root/one/release-manifest.json" "$manifest_path" "single release manifest discovery"
+rm -rf "$manifest_smoke_root"
 
 cache_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-prefpane-cache-smoke.XXXXXX")"
 cache_stale="$cache_tmp_dir/com.apple.systemsettings.menucache"
@@ -205,7 +270,7 @@ if grep -Fq 'bundle.load()' "$ROOT_DIR/scripts/diagnose-inputmethod.sh"; then
   die "diagnostics must not execute PreferencePane bundle code while inspecting install state"
 fi
 
-bundle_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
+bundle_path="$(bash "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"
 assert_dir "$bundle_path"
 assert_file "$bundle_path/Contents/Info.plist"
@@ -225,27 +290,208 @@ assert_equals "com.knowtype.inputmethod.KnowType" \
 assert_equals "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
   "$(plist_read ":TISInputSourceID" "$bundle_path/Contents/Info.plist")" \
   "parent TISInputSourceID"
-assert_equals "com.knowtype.inputmethod.KnowType.Hans" "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" "active input mode id"
+assert_equals "com.knowtype.inputmethod.KnowType.Hans" "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" "visible active input mode id"
 assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
   "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:TISInputSourceID" "$bundle_path/Contents/Info.plist")" \
-  "active component mode TISInputSourceID"
+  "visible mode TISInputSourceID"
+assert_equals "zh-Hans" \
+  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:TISIntendedLanguage" "$bundle_path/Contents/Info.plist")" \
+  "visible mode intended language"
+assert_equals "true" \
+  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:tsInputModeIsVisibleKey" "$bundle_path/Contents/Info.plist")" \
+  "visible mode is visible"
 assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
   "$(plist_read ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$bundle_path/Contents/Info.plist")" \
-  "visible component mode order"
-assert_equals "K" \
-  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:tsInputModeKeyEquivalentKey" "$bundle_path/Contents/Info.plist")" \
-  "component mode shortcut key"
-assert_equals "4608" \
-  "$(plist_read ":ComponentInputModeDict:tsInputModeListKey:$KNOWTYPE_ACTIVE_INPUT_MODE_ID:tsInputModeKeyEquivalentModifiersKey" "$bundle_path/Contents/Info.plist")" \
-  "component mode shortcut modifiers"
+  "visible input mode order"
 assert_equals "KnowTypeInputMethodApp" \
   "$(plist_read ":CFBundleExecutable" "$bundle_path/Contents/Info.plist")" \
   "CFBundleExecutable"
-"$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rime-smoke >/dev/null ||
-  die "bundled Rime runtime smoke failed"
+# Run the Rime runtime check from the repository SwiftPM executable, not the
+# packaged app bundle. macOS may SIGKILL a second IMK app process with the same
+# bundle id while the installed input-method host is already running.
+(
+  cd "$ROOT_DIR"
+  swift run --package-path "$ROOT_DIR" --quiet KnowTypeInputMethodApp --knowtype-rime-smoke
+) >/dev/null ||
+  die "Rime runtime smoke failed"
+
+install_state_tmp="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-install-state-smoke.XXXXXX")"
+fake_input_dir="$install_state_tmp/Input Methods"
+fake_prefpane_dir="$install_state_tmp/PreferencePanes"
+fake_support_dir="$install_state_tmp/Application Support/KnowType"
+mkdir -p "$fake_input_dir" "$fake_prefpane_dir" "$fake_support_dir"
+cp -R "$bundle_path" "$fake_input_dir/KnowType.app"
+
+install_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-bundle "$bundle_path" --keep-backups 2
+)"
+assert_contains "$install_dry_run_output" "Source mode: bundle" "install dry run output"
+assert_contains "$install_dry_run_output" "Install state: $fake_support_dir/install-state.json" "install dry run output"
+assert_contains "$install_dry_run_output" "Backup root: $fake_support_dir/Backups" "install dry run output"
+assert_contains "$install_dry_run_output" "Would create install backup" "install dry run output"
+
+release_zip_path="$install_state_tmp/KnowType-test-release.zip"
+release_zip_checksum_path="$install_state_tmp/KnowType-test-release.zip.sha256"
+release_stage_root="$install_state_tmp/release-stage"
+release_stage="$release_stage_root/KnowType-test-release"
+mkdir -p "$release_stage"
+cp -R "$bundle_path" "$release_stage/KnowType.app"
+cat >"$release_stage/release-manifest.json" <<EOF
+{
+  "tag": "v0.2.0",
+  "releaseCommit": "fixture-commit",
+  "artifacts": {
+    "archive": "$(basename "$release_zip_path")",
+    "checksum": "$(basename "$release_zip_checksum_path")"
+  },
+  "bundles": [
+    {
+      "path": "KnowType.app",
+      "bundleIdentifier": "$(plist_read ":CFBundleIdentifier" "$bundle_path/Contents/Info.plist")",
+      "shortVersion": "$(plist_read ":CFBundleShortVersionString" "$bundle_path/Contents/Info.plist")",
+      "buildVersion": "$(plist_read ":CFBundleVersion" "$bundle_path/Contents/Info.plist")"
+    }
+  ]
+}
+EOF
+ditto -c -k --keepParent "$release_stage" "$release_zip_path"
+(cd "$install_state_tmp" && shasum -a 256 "$(basename "$release_zip_path")" >"$(basename "$release_zip_checksum_path")")
+release_zip_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-release-zip "$release_zip_path" --no-backup
+)"
+assert_contains "$release_zip_dry_run_output" "Source mode: release-zip" "release zip install dry run output"
+assert_contains "$release_zip_dry_run_output" "Source release zip: $release_zip_path" "release zip install dry run output"
+assert_contains "$release_zip_dry_run_output" "Release commit: fixture-commit" "release zip install dry run output"
+
+dmg_payload_root="$install_state_tmp/dmg-payload"
+mkdir -p "$dmg_payload_root/Payload" "$dmg_payload_root/Resources"
+cp -R "$bundle_path" "$dmg_payload_root/Payload/KnowType.app"
+cp "$release_stage/release-manifest.json" "$dmg_payload_root/Resources/release-manifest.json"
+dmg_payload_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-dmg-payload "$dmg_payload_root" --no-backup
+)"
+assert_contains "$dmg_payload_dry_run_output" "Source mode: dmg-dev-preview" "DMG payload install dry run output"
+assert_contains "$dmg_payload_dry_run_output" "Source DMG payload: $dmg_payload_root" "DMG payload install dry run output"
+assert_contains "$dmg_payload_dry_run_output" "Release commit: fixture-commit" "DMG payload install dry run output"
+
+assert_equals "0.2.0+build-bad-value" \
+  "$(knowtype_sanitize_backup_component "0.2.0+build bad/value")" \
+  "backup component sanitization"
+knowtype_is_valid_backup_id "20260524T100000Z-0.2.0-123.ABCdef" ||
+  die "expected safe backup ID to validate"
+if knowtype_is_valid_backup_id "../../outside"; then
+  die "traversal backup ID unexpectedly validated"
+fi
+
+KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null
+backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
+[[ -n "$backup_id" ]] || die "install backup helper did not record a backup id"
+assert_file "$fake_support_dir/Backups/$backup_id/manifest.json"
+KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null
+second_backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
+[[ -n "$second_backup_id" ]] || die "second install backup helper did not record a backup id"
+if [[ "$second_backup_id" == "$backup_id" ]]; then
+  die "rapid repeated backups reused ID: $backup_id"
+fi
+assert_file "$fake_support_dir/Backups/$second_backup_id/manifest.json"
+mkdir -p "$fake_support_dir/Backups/zzzz-unmanaged"
+latest_backup_dir="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    knowtype_latest_backup_dir
+)"
+assert_equals "$second_backup_id" "$(basename "$latest_backup_dir")" "latest backup id"
+backup_manifest_id="$(
+  KNOWTYPE_BACKUP_MANIFEST_PATH="$fake_support_dir/Backups/$backup_id/manifest.json" "$KNOWTYPE_PYTHON3" - <<'PY'
+import json, os
+with open(os.environ["KNOWTYPE_BACKUP_MANIFEST_PATH"], encoding="utf-8") as handle:
+    print(json.load(handle)["backupID"])
+PY
+)"
+assert_equals "$backup_id" "$backup_manifest_id" "backup manifest id"
+
+rollback_list_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --list
+)"
+assert_contains "$rollback_list_output" "$backup_id" "rollback list output"
+assert_not_contains "$rollback_list_output" "zzzz-unmanaged" "rollback list output"
+
+rollback_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$backup_id" --dry-run
+)"
+assert_contains "$rollback_dry_run_output" "KnowType rollback dry run" "rollback dry run output"
+assert_contains "$rollback_dry_run_output" "$backup_id" "rollback dry run output"
+rollback_latest_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --latest --dry-run
+)"
+assert_contains "$rollback_latest_dry_run_output" "$second_backup_id" "rollback latest dry run output"
+if KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "../../outside" --dry-run >/dev/null 2>&1; then
+  die "rollback accepted traversal backup ID"
+fi
+missing_backup_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "missing-backup" --dry-run 2>&1 || true
+)"
+assert_contains "$missing_backup_output" "requested KnowType backup was not found" "rollback missing backup output"
+corrupt_backup_id="20260524T010000Z-0000-corrupt-1"
+corrupt_backup_dir="$fake_support_dir/Backups/$corrupt_backup_id"
+mkdir -p "$corrupt_backup_dir/KnowType.app/Contents"
+cp "$fake_input_dir/KnowType.app/Contents/Info.plist" "$corrupt_backup_dir/KnowType.app/Contents/Info.plist"
+printf '{"schemaVersion":1,"backupID":"%s"}\n' "$corrupt_backup_id" >"$corrupt_backup_dir/manifest.json"
+corrupt_rollback_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$corrupt_backup_id" --dry-run 2>&1 || true
+)"
+assert_contains "$corrupt_rollback_output" "input-method executable is missing" "rollback corrupt backup output"
+
+printf '{"schemaVersion":1,"source":"bundle"}\n' >"$fake_support_dir/install-state.json"
+uninstall_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/uninstall-inputmethod.sh" --dry-run
+)"
+assert_contains "$uninstall_dry_run_output" "Would create install backup" "uninstall dry run output"
+assert_contains "$uninstall_dry_run_output" "Would remove KnowType install state" "uninstall dry run output"
+assert_contains "$uninstall_dry_run_output" "Preserved KnowType install backups" "uninstall dry run output"
+assert_not_contains "$uninstall_dry_run_output" "Would prune old install backup" "uninstall dry run output"
+uninstall_purge_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/uninstall-inputmethod.sh" --dry-run --purge-backups
+)"
+assert_not_contains "$uninstall_purge_dry_run_output" "Would create install backup" "uninstall purge dry run output"
+assert_contains "$uninstall_purge_dry_run_output" "Would delete KnowType install backups" "uninstall purge dry run output"
+
+diagnose_json_output="$(
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$ROOT_DIR/scripts/diagnose-inputmethod.sh" --json --path "$fake_input_dir/KnowType.app"
+)"
+assert_contains "$diagnose_json_output" '"schemaVersion": 1' "diagnostics json output"
+assert_contains "$diagnose_json_output" '"backups"' "diagnostics json output"
+rm -rf "$install_state_tmp"
 
 if (( WITH_PREFPANE == 1 )); then
-  prefpane_path="$(CODESIGN_IDENTITY=- "$ROOT_DIR/scripts/build-preference-pane.sh")"
+  prefpane_path="$(CODESIGN_IDENTITY=- bash "$ROOT_DIR/scripts/build-preference-pane.sh")"
   assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"
   assert_dir "$prefpane_path"
   assert_file "$prefpane_path/Contents/Info.plist"
@@ -283,7 +529,7 @@ fi
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-profile-smoke.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 profile_path="$tmp_dir/KnowTypeLocalSystemPolicy.mobileconfig"
-profile_output="$("$ROOT_DIR/scripts/create-local-system-policy-profile.sh" --path "$bundle_path" --output "$profile_path")"
+profile_output="$(bash "$ROOT_DIR/scripts/create-local-system-policy-profile.sh" --path "$bundle_path" --output "$profile_path")"
 
 assert_file "$profile_path"
 plutil -lint "$profile_path" >/dev/null

@@ -4,7 +4,9 @@
 
 Builds the local MVP GitHub Release artifact set: a zip containing
 `KnowType.app` and the compatibility `KnowType.prefPane`, a SHA256 file, and
-`release-manifest.json`.
+`release-manifest.json`. The user-facing GitHub Release download is the
+Developer Preview DMG from `scripts/package-dmg.sh`; this zip remains a
+developer/debug asset.
 
 ## Boundaries
 
@@ -23,6 +25,11 @@ Builds the local MVP GitHub Release artifact set: a zip containing
 - The zip is named `KnowType-vX.Y.Z-macos-local-mvp.zip`.
 - The manifest records tag, commit, Swift version, artifact names, bundle
   identifiers, short versions, and build versions.
+- `release-manifest.json` is written beside the archive and copied into the zip
+  staging directory so `scripts/install-inputmethod.sh --from-release-zip` can
+  record release source metadata after download.
+- The checksum file uses the archive basename so direct download-directory
+  verification works with `shasum -a 256 -c`.
 
 ## Tests
 

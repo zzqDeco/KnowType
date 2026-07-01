@@ -5,14 +5,19 @@ DEFAULT_BUNDLE_PATH="$HOME/Library/Input Methods/KnowType.app"
 BUNDLE_PATH="${KNOWTYPE_BUNDLE_PATH:-$DEFAULT_BUNDLE_PATH}"
 DEFAULT_PREFPANE_PATH="$HOME/Library/PreferencePanes/KnowType.prefPane"
 PREFPANE_PATH="${KNOWTYPE_PREFPANE_PATH:-$DEFAULT_PREFPANE_PATH}"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
-source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
-source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR"
 STRICT=0
 REQUIRE_SELECTED=0
 SHOW_LOGS=0
+JSON_OUTPUT=0
+ALLOW_LEGACY_PARENT_ANCHOR=0
 LOG_LOOKBACK="${KNOWTYPE_LOG_LOOKBACK:-30m}"
+KNOWTYPE_PYTHON3="${KNOWTYPE_PYTHON3:-/usr/bin/python3}"
+if [[ ! -x "$KNOWTYPE_PYTHON3" ]]; then
+  KNOWTYPE_PYTHON3="$(command -v python3 2>/dev/null || true)"
+fi
 
 usage() {
   cat <<'EOF'
@@ -27,6 +32,9 @@ Options:
   --logs              Include recent KnowType, Gatekeeper, and input-source sandbox log hints.
   --log-lookback      Time window for --logs, such as 10m, 1h, or 2h. Defaults to 30m.
   --path              Inspect a specific KnowType.app bundle path.
+  --json              Print a stable machine-readable install snapshot and exit.
+  --legacy-parent-anchor
+                      Deprecated compatibility flag. The parent anchor is enabled automatically for the visible input mode.
   -h, --help          Show this help.
 EOF
 }
@@ -43,6 +51,14 @@ while (($# > 0)); do
       ;;
     --logs)
       SHOW_LOGS=1
+      shift
+      ;;
+    --json)
+      JSON_OUTPUT=1
+      shift
+      ;;
+    --legacy-parent-anchor)
+      ALLOW_LEGACY_PARENT_ANCHOR=1
       shift
       ;;
     --log-lookback)
@@ -73,6 +89,10 @@ while (($# > 0)); do
   esac
 done
 
+source "$SCRIPTS_DIR/lib/inputsource-ids.sh"
+source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
+source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
+
 failures=0
 warnings=0
 gatekeeper_rejected=0
@@ -100,6 +120,370 @@ fail() {
 info() {
   printf '[info] %s\n' "$1"
 }
+
+print_json_snapshot() {
+  KNOWTYPE_DIAG_BUNDLE_PATH="$BUNDLE_PATH" \
+  KNOWTYPE_DIAG_PREFPANE_PATH="$PREFPANE_PATH" \
+  KNOWTYPE_DIAG_INSTALL_STATE_PATH="$(knowtype_install_state_path)" \
+  KNOWTYPE_DIAG_BACKUP_ROOT="$(knowtype_backup_root_dir)" \
+  KNOWTYPE_DIAG_APP_SUPPORT="$(knowtype_app_support_dir)" \
+  KNOWTYPE_DIAG_RIME_USER_DATA="${KNOWTYPE_RIME_USER_DATA_DIR:-$(knowtype_app_support_dir)/Rime}" \
+  "$KNOWTYPE_PYTHON3" - <<'PY'
+import json
+import hashlib
+import os
+import plistlib
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+def file_mtime(path):
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return None
+
+def file_mtime_iso(path):
+    value = file_mtime(path)
+    if value is None:
+        return None
+    return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
+
+def load_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        return None
+
+def bundle_info(bundle_path):
+    bundle = Path(bundle_path)
+    info_path = bundle / "Contents" / "Info.plist"
+    payload = {
+        "path": str(bundle),
+        "exists": bundle.is_dir(),
+        "version": None,
+        "build": None,
+        "bundleIdentifier": None,
+        "executableExists": (bundle / "Contents" / "MacOS" / "KnowTypeInputMethodApp").is_file(),
+    }
+    if info_path.is_file():
+        try:
+            with info_path.open("rb") as handle:
+                plist = plistlib.load(handle)
+            payload["version"] = plist.get("CFBundleShortVersionString")
+            payload["build"] = plist.get("CFBundleVersion")
+            payload["bundleIdentifier"] = plist.get("CFBundleIdentifier")
+        except Exception as error:
+            payload["plistError"] = type(error).__name__
+    return payload
+
+def default_provider(app_support):
+    provider_path = Path(app_support) / "providers.json"
+    provider_file = load_json(provider_path)
+    result = {"path": str(provider_path), "exists": provider_path.is_file(), "defaultProfile": None}
+    profiles = []
+    if isinstance(provider_file, dict):
+        profiles = provider_file.get("profiles") or []
+    default = next((profile for profile in profiles if profile.get("isDefault")), None)
+    if default:
+        result["defaultProfile"] = {
+            "displayName": default.get("displayName"),
+            "kind": default.get("kind"),
+            "model": default.get("model"),
+            "baseURL": default.get("baseURL"),
+        }
+    return result
+
+def backup_summary(root):
+    root_path = Path(root)
+    backups = []
+    managed_id_pattern = re.compile(r"^\d{8}T\d{6}Z-\d{4}-")
+    if root_path.is_dir():
+        for directory in sorted([p for p in root_path.iterdir() if p.is_dir()], reverse=True):
+            manifest = load_json(directory / "manifest.json") or {}
+            if not managed_id_pattern.match(directory.name):
+                continue
+            if manifest.get("backupID") != directory.name:
+                continue
+            if not (directory / "KnowType.app").is_dir():
+                continue
+            backups.append({
+                "backupID": directory.name,
+                "createdAt": manifest.get("createdAt"),
+                "sourceVersion": manifest.get("sourceVersion"),
+                "sourceBuild": manifest.get("sourceBuild"),
+                "includedPrefPane": manifest.get("includedPrefPane"),
+            })
+    return {
+        "root": str(root_path),
+        "count": len(backups),
+        "latest": backups[0] if backups else None,
+    }
+
+def accepted_learning_status(app_support, home):
+    history_path = Path(app_support) / "AI" / "accepted-ai-learning.jsonl"
+    summary_path = Path(app_support) / "AI" / "accepted-ai-summary.json"
+    feedback_history_path = Path(app_support) / "AI" / "accepted-ai-feedback.jsonl"
+    feedback_summary_path = Path(app_support) / "AI" / "accepted-ai-feedback-summary.json"
+    mirror_path = Path(home) / ".knowtype" / "ACCEPTED_AI_LEARNING.md"
+    feedback_mirror_path = Path(home) / ".knowtype" / "ACCEPTED_AI_FEEDBACK.md"
+    lexical_json_path = Path(app_support) / "AI" / "lexical-profile.json"
+    lexical_markdown_path = Path(home) / ".knowtype" / "LEXICAL_PROFILE.md"
+
+    def load_jsonl(path):
+        rows = []
+        invalid = 0
+        if not path.is_file():
+            return rows, invalid
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rows.append(json.loads(line))
+                    except Exception:
+                        invalid += 1
+        except Exception:
+            invalid += 1
+        return rows, invalid
+
+    records, invalid_lines = load_jsonl(history_path)
+    feedback_records, invalid_feedback_lines = load_jsonl(feedback_history_path)
+
+    def valid_feedback_record(record):
+        if not isinstance(record, dict):
+            return False
+        ranges = record.get("deletedRanges", [])
+        if not isinstance(ranges, list):
+            return False
+        if any(not isinstance(item, dict) for item in ranges):
+            return False
+        texts = record.get("deletedTexts", [])
+        if not isinstance(texts, list):
+            return False
+        try:
+            float(record.get("deletedRatio", 0))
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    valid_feedback_records = []
+    for record in feedback_records:
+        if valid_feedback_record(record):
+            valid_feedback_records.append(record)
+        else:
+            invalid_feedback_lines += 1
+    feedback_records = valid_feedback_records
+
+    def feedback_hash_fragment(record):
+        return "|".join([
+            str(record.get("acceptID", "")),
+            str(record.get("acceptedTextHash", "")),
+            ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
+            "\u001f".join(str(item) for item in record.get("deletedTexts", [])),
+            str(record.get("replacementText", "")),
+            f"{float(record.get('deletedRatio', 0)):.4f}",
+            str(record.get("strength", "")),
+        ])
+
+    history_hash = None
+    if records:
+        joined = "\n".join(str(record.get("textHash", "")) for record in records)
+        history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+    summary = load_json(summary_path)
+    if not isinstance(summary, dict):
+        summary = None
+    summary_exists = summary_path.is_file()
+    if records:
+        is_current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash") == history_hash
+    else:
+        is_current = summary is None and not summary_exists
+
+    feedback_history_hash = None
+    if feedback_records:
+        joined = "\n".join(feedback_hash_fragment(record) for record in feedback_records)
+        feedback_history_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+    feedback_summary = load_json(feedback_summary_path)
+    if not isinstance(feedback_summary, dict):
+        feedback_summary = None
+    feedback_summary_exists = feedback_summary_path.is_file()
+    if feedback_records:
+        feedback_is_current = bool(feedback_summary) and feedback_summary.get("feedbackCount") == len(feedback_records) and feedback_summary.get("historyHash") == feedback_history_hash
+    else:
+        feedback_is_current = feedback_summary is None and not feedback_summary_exists
+
+    try:
+        lexical_markdown = lexical_markdown_path.read_text(encoding="utf-8")
+    except Exception:
+        lexical_markdown = ""
+
+    warnings = []
+    if invalid_lines:
+        warnings.append(f"invalid_history_lines:{invalid_lines}")
+    if invalid_feedback_lines:
+        warnings.append(f"invalid_feedback_history_lines:{invalid_feedback_lines}")
+    if summary_exists and summary is None:
+        warnings.append("summary_unreadable")
+    elif records and not summary:
+        warnings.append("summary_missing")
+    elif not is_current:
+        warnings.append("summary_stale")
+    if feedback_summary_exists and feedback_summary is None:
+        warnings.append("feedback_summary_unreadable")
+    elif feedback_records and not feedback_summary:
+        warnings.append("feedback_summary_missing")
+    elif not feedback_is_current:
+        warnings.append("feedback_summary_stale")
+
+    return {
+        "schemaVersion": 1,
+        "history": {
+            "path": str(history_path),
+            "exists": history_path.is_file(),
+            "recordCount": len(records),
+            "historyHash": history_hash,
+            "mtime": file_mtime_iso(history_path),
+        },
+        "summary": {
+            "path": str(summary_path),
+            "exists": summary_path.is_file(),
+            "acceptedCount": summary.get("acceptedCount", 0) if isinstance(summary, dict) else 0,
+            "historyHash": summary.get("historyHash") if isinstance(summary, dict) else None,
+            "termCount": len(summary.get("termProfile", [])) if isinstance(summary, dict) else 0,
+            "recentCommitCount": len(summary.get("recentAcceptedCommits", [])) if isinstance(summary, dict) else 0,
+            "generatedAt": summary.get("generatedAt") if isinstance(summary, dict) else None,
+            "mtime": file_mtime_iso(summary_path),
+            "isCurrentWithHistory": is_current,
+        },
+        "mirror": {
+            "path": str(mirror_path),
+            "exists": mirror_path.is_file(),
+            "mtime": file_mtime_iso(mirror_path),
+        },
+        "feedback": {
+            "history": {
+                "path": str(feedback_history_path),
+                "exists": feedback_history_path.is_file(),
+                "recordCount": len(feedback_records),
+                "historyHash": feedback_history_hash,
+                "mtime": file_mtime_iso(feedback_history_path),
+            },
+            "summary": {
+                "path": str(feedback_summary_path),
+                "exists": feedback_summary_path.is_file(),
+                "feedbackCount": feedback_summary.get("feedbackCount", 0) if isinstance(feedback_summary, dict) else 0,
+                "strongCount": feedback_summary.get("strongCount", 0) if isinstance(feedback_summary, dict) else 0,
+                "avoidTermCount": len(feedback_summary.get("avoidTerms", [])) if isinstance(feedback_summary, dict) else 0,
+                "historyHash": feedback_summary.get("historyHash") if isinstance(feedback_summary, dict) else None,
+                "generatedAt": feedback_summary.get("generatedAt") if isinstance(feedback_summary, dict) else None,
+                "mtime": file_mtime_iso(feedback_summary_path),
+                "isCurrentWithHistory": feedback_is_current,
+            },
+            "mirror": {
+                "path": str(feedback_mirror_path),
+                "exists": feedback_mirror_path.is_file(),
+                "mtime": file_mtime_iso(feedback_mirror_path),
+            },
+        },
+        "lexicalProfile": {
+            "jsonPath": str(lexical_json_path),
+            "markdownPath": str(lexical_markdown_path),
+            "jsonExists": lexical_json_path.is_file(),
+            "markdownExists": lexical_markdown_path.is_file(),
+            "containsAcceptedAISummary": "accepted-ai-summary:" in lexical_markdown,
+            "mtime": file_mtime_iso(lexical_markdown_path),
+        },
+        "warnings": warnings,
+    }
+
+bundle_path = os.environ["KNOWTYPE_DIAG_BUNDLE_PATH"]
+prefpane_path = os.environ["KNOWTYPE_DIAG_PREFPANE_PATH"]
+install_state_path = os.environ["KNOWTYPE_DIAG_INSTALL_STATE_PATH"]
+backup_root = os.environ["KNOWTYPE_DIAG_BACKUP_ROOT"]
+app_support = os.environ["KNOWTYPE_DIAG_APP_SUPPORT"]
+home = Path.home()
+warnings = []
+failures = []
+
+bundle = bundle_info(bundle_path)
+if not bundle["exists"]:
+    failures.append("bundle_missing")
+if not bundle["executableExists"]:
+    failures.append("executable_missing")
+
+install_state = load_json(install_state_path)
+if install_state is None:
+    warnings.append("install_state_missing")
+elif bundle.get("version") and install_state.get("version") and bundle["version"] != install_state["version"]:
+    warnings.append("install_state_version_mismatch")
+
+rime_dylib = Path(bundle_path) / "Contents" / "Frameworks" / "librime.1.dylib"
+rime_data = Path(bundle_path) / "Contents" / "Resources" / "rime-data"
+user_data = {
+    "appSupport": app_support,
+    "providerProfiles": default_provider(app_support),
+    "selectionHistoryExists": (Path(app_support) / "user-selection-history.json").is_file(),
+    "lexicalProfile": {
+        "path": str(Path(app_support) / "AI" / "lexical-profile.json"),
+        "exists": (Path(app_support) / "AI" / "lexical-profile.json").is_file(),
+        "mtime": file_mtime(Path(app_support) / "AI" / "lexical-profile.json"),
+    },
+    "environmentDocument": {
+        "path": str(home / ".knowtype" / "ENV.md"),
+        "exists": (home / ".knowtype" / "ENV.md").is_file(),
+        "mtime": file_mtime(home / ".knowtype" / "ENV.md"),
+    },
+    "correctionDocument": {
+        "path": str(home / ".knowtype" / "CORRECTION.md"),
+        "exists": (home / ".knowtype" / "CORRECTION.md").is_file(),
+        "mtime": file_mtime(home / ".knowtype" / "CORRECTION.md"),
+    },
+    "lexicalProfileMirror": {
+        "path": str(home / ".knowtype" / "LEXICAL_PROFILE.md"),
+        "exists": (home / ".knowtype" / "LEXICAL_PROFILE.md").is_file(),
+        "mtime": file_mtime(home / ".knowtype" / "LEXICAL_PROFILE.md"),
+    },
+    "acceptedLearning": accepted_learning_status(app_support, home),
+}
+
+snapshot = {
+    "schemaVersion": 1,
+    "install": {
+        "statePath": install_state_path,
+        "state": install_state,
+    },
+    "bundle": bundle,
+    "preferencePane": {
+        "path": prefpane_path,
+        "exists": Path(prefpane_path).is_dir(),
+    },
+    "rime": {
+        "dylibPath": str(rime_dylib),
+        "dylibExists": rime_dylib.is_file(),
+        "dataPath": str(rime_data),
+        "dataExists": rime_data.is_dir(),
+        "userDataPath": os.environ["KNOWTYPE_DIAG_RIME_USER_DATA"],
+        "userDataExists": Path(os.environ["KNOWTYPE_DIAG_RIME_USER_DATA"]).is_dir(),
+    },
+    "ai": user_data["providerProfiles"],
+    "userData": user_data,
+    "backups": backup_summary(backup_root),
+    "warnings": warnings,
+    "failures": failures,
+}
+print(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True))
+PY
+}
+
+if (( JSON_OUTPUT == 1 )); then
+  print_json_snapshot
+  exit 0
+fi
 
 strip_lsregister_suffix() {
   local value="$1"
@@ -191,6 +575,10 @@ SETTINGS_UI_RESOURCE_BUNDLE="$BUNDLE_PATH/Contents/Resources/KnowType_KnowTypeSe
 ICON_RESOURCE="$BUNDLE_PATH/Contents/Resources/KnowTypeInputMethodIcon.tiff"
 PARENT_ID="$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
 MODE_ID="$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+SINGLE_INPUT_SOURCE=0
+if [[ "$MODE_ID" == "$PARENT_ID" ]]; then
+  SINGLE_INPUT_SOURCE=1
+fi
 
 if [[ -f "$INFO_PLIST" ]]; then
   ok "Info.plist exists"
@@ -206,13 +594,13 @@ if [[ -f "$INFO_PLIST" ]]; then
   if [[ -n "$(plist_value "TISIconIsTemplate" "$INFO_PLIST")" ]]; then
     warn "Info.plist contains private/undocumented TISIconIsTemplate; rebuild from current sources"
   fi
-  if [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
-    ok "Info.plist declares the single visible component input mode"
+  if (( SINGLE_INPUT_SOURCE == 1 )); then
+    fail "KnowType is configured as a parent-only input source; rebuild with the visible .Hans input mode model"
+  elif [[ -n "$(plist_value "ComponentInputModeDict" "$INFO_PLIST")" ]]; then
+    ok "Info.plist declares the visible component input mode"
     expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:TISInputSourceID" "$MODE_ID" "$INFO_PLIST"
     expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:TISIntendedLanguage" "zh-Hans" "$INFO_PLIST"
     expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeIsVisibleKey" "true" "$INFO_PLIST"
-    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeKeyEquivalentKey" "K" "$INFO_PLIST"
-    expect_plist_buddy_value ":ComponentInputModeDict:tsInputModeListKey:$MODE_ID:tsInputModeKeyEquivalentModifiersKey" "4608" "$INFO_PLIST"
     expect_plist_buddy_value ":ComponentInputModeDict:tsVisibleInputModeOrderedArrayKey:0" "$MODE_ID" "$INFO_PLIST"
   else
     fail "Info.plist is missing ComponentInputModeDict; this macOS System Settings build does not expose parent-only third-party IMK apps as addable input sources"
@@ -322,6 +710,43 @@ else
 fi
 
 echo
+echo "Install state and rollback"
+
+INSTALL_STATE_PATH="$(knowtype_install_state_path)"
+BACKUP_ROOT="$(knowtype_backup_root_dir)"
+if [[ -f "$INSTALL_STATE_PATH" ]]; then
+  ok "install-state.json exists: $INSTALL_STATE_PATH"
+  install_source="$(knowtype_read_install_state_field "source")"
+  install_version="$(knowtype_read_install_state_field "version")"
+  install_build="$(knowtype_read_install_state_field "build")"
+  install_commit="$(knowtype_read_install_state_field "gitCommit")"
+  install_tag="$(knowtype_read_install_state_field "gitTag")"
+  install_backup="$(knowtype_read_install_state_field "previousBackupID")"
+  [[ -n "$install_source" ]] && info "install source: $install_source"
+  [[ -n "$install_version" || -n "$install_build" ]] && info "install-state version/build: ${install_version:-<unknown>} (${install_build:-<unknown>})"
+  [[ -n "$install_commit" ]] && info "install-state commit: $install_commit"
+  [[ -n "$install_tag" ]] && info "install-state tag: $install_tag"
+  [[ -n "$install_backup" ]] && info "previous backup id: $install_backup"
+else
+  warn "install-state.json is missing; reinstall with ./scripts/install-inputmethod.sh to record version/source metadata"
+fi
+
+if [[ -d "$BACKUP_ROOT" ]]; then
+  backup_count="$(knowtype_list_managed_backup_dirs | wc -l | tr -d ' ')"
+  latest_backup="$(knowtype_latest_backup_dir)"
+  ok "install backup root exists with $backup_count managed backup(s): $BACKUP_ROOT"
+  if [[ -n "$latest_backup" ]]; then
+    latest_manifest="$latest_backup/manifest.json"
+    latest_version="$(knowtype_backup_manifest_field "$latest_manifest" "sourceVersion")"
+    latest_build="$(knowtype_backup_manifest_field "$latest_manifest" "sourceBuild")"
+    info "latest backup: $(basename "$latest_backup") version=${latest_version:-<unknown>} build=${latest_build:-<unknown>}"
+    info "rollback command: ./scripts/rollback-inputmethod.sh --to $(basename "$latest_backup")"
+  fi
+else
+  info "no install backups yet; the next overwrite install will create one by default"
+fi
+
+echo
 echo "Compatibility PreferencePane"
 
 PREFPANE_INFO_PLIST="$PREFPANE_PATH/Contents/Info.plist"
@@ -414,42 +839,109 @@ else
           warn "current input source id is unavailable"
         fi
         ;;
+      inputSource.found)
+        [[ "$value" == "true" ]] && ok "KnowType input source is registered" || fail "KnowType input source is not registered"
+        ;;
+      inputSource.enabled)
+        [[ "$value" == "true" ]] && ok "KnowType input source is enabled" || fail "KnowType input source is not enabled"
+        ;;
+      inputSource.selectCapable)
+        [[ "$value" == "true" ]] && ok "KnowType input source is select-capable" || fail "KnowType input source is not select-capable"
+        ;;
+      inputSource.selected)
+        if [[ "$value" == "true" ]]; then
+          ok "KnowType input source is selected in this diagnostic context"
+        elif (( REQUIRE_SELECTED == 1 )); then
+          fail "KnowType input source is not selected in this diagnostic context; select KnowType from the target app's input menu and type a real probe"
+        else
+          warn "KnowType input source is not selected in this diagnostic context"
+        fi
+        ;;
+      inputSource.type)
+        [[ -n "$value" ]] && info "KnowType input source TIS type: $value"
+        ;;
+      inputSource.name)
+        mode_name="$value"
+        if [[ -z "$value" ]]; then
+          warn "KnowType input source localized name is unavailable"
+        elif [[ "$value" == "$MODE_ID" ]]; then
+          warn "KnowType input source localized name is unresolved; reinstall after packaging InfoPlist.strings"
+        else
+          ok "KnowType input source localized name = $value"
+        fi
+        ;;
+      inputSource.raw.count)
+        if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
+          warn "TIS raw list reports $value KnowType input source records before de-duplication; logout/reboot may still clear stale session cache"
+        else
+          ok "TIS raw list reports one KnowType input source record"
+        fi
+        ;;
+      inputSource.count)
+        if [[ "$value" == "1" ]]; then
+          ok "TIS reports exactly one active KnowType input source registration"
+        else
+          fail "TIS reports $value active KnowType input source registrations; run ./scripts/repair-inputmethod-selection.sh"
+        fi
+        ;;
+      inputSource.singleSource)
+        [[ "$value" == "true" ]] && fail "KnowType is using the parent-only input source model; rebuild with the visible .Hans mode model"
+        ;;
       parent.found)
-        [[ "$value" == "true" ]] && ok "KnowType parent input source is registered" || fail "KnowType parent input source is not registered"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType non-selectable parent record is registered" || fail "KnowType non-selectable parent record is not registered"
+        fi
         ;;
       parent.enabled)
-        if [[ "$value" == "true" ]]; then
-          ok "KnowType parent input source is enabled"
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          :
+        elif [[ "$value" == "true" ]]; then
+          ok "KnowType component-mode parent is enabled by TIS"
+        elif (( STRICT == 1 )); then
+          fail "KnowType component-mode parent is not enabled; TIS may reject selecting the visible mode with paramErr/-50"
         else
-          info "KnowType parent input source is not enabled; the visible component mode is the selection target"
+          warn "KnowType component-mode parent is not enabled; run ./scripts/repair-inputmethod-selection.sh if KnowType is missing from the input menu"
         fi
         ;;
       parent.selectCapable)
         parent_select_capable="$value"
-        if [[ "$value" != "true" ]]; then
+        if (( SINGLE_INPUT_SOURCE == 0 )) && [[ "$value" != "true" ]]; then
           info "KnowType parent record is not directly selectable; macOS should select the visible input mode instead"
         fi
         ;;
       parent.type)
-        [[ -n "$value" ]] && info "KnowType parent TIS type: $value"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ -n "$value" ]] && info "KnowType parent TIS type: $value"
+        fi
         ;;
       parent.name)
         parent_name="$value"
-        [[ -n "$value" ]] && info "KnowType parent localized name = $value"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ -n "$value" ]] && info "KnowType parent localized name = $value"
+        fi
         ;;
       mode.found)
-        [[ "$value" == "true" ]] && ok "KnowType input mode is registered" || fail "KnowType input mode is not registered"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType input mode is registered" || fail "KnowType input mode is not registered"
+        fi
         ;;
       mode.enabled)
-        [[ "$value" == "true" ]] && ok "KnowType input mode is enabled" || fail "KnowType input mode is not enabled"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType input mode is enabled" || fail "KnowType input mode is not enabled"
+        fi
         ;;
       mode.selectCapable)
-        [[ "$value" == "true" ]] && ok "KnowType input mode is select-capable" || fail "KnowType input mode is not select-capable"
+        if (( SINGLE_INPUT_SOURCE == 0 )); then
+          [[ "$value" == "true" ]] && ok "KnowType input mode is select-capable" || fail "KnowType input mode is not select-capable"
+        fi
         ;;
       mode.type)
         [[ -n "$value" ]] && info "KnowType mode TIS type: $value"
         ;;
       mode.selected)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
         if [[ "$value" == "true" ]]; then
           ok "KnowType input mode is selected in this diagnostic context"
         elif (( REQUIRE_SELECTED == 1 )); then
@@ -459,6 +951,9 @@ else
         fi
         ;;
       mode.name)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
         mode_name="$value"
         if [[ -z "$value" ]]; then
           warn "KnowType input mode localized name is unavailable"
@@ -471,6 +966,13 @@ else
       mode.count)
         if [[ "$value" =~ ^[0-9]+$ && "$value" -gt 1 ]]; then
           warn "TIS reports $value KnowType input mode registrations; log out or reboot if the input menu shows stale duplicates"
+        fi
+        ;;
+      user.visible.mode.count)
+        if [[ "$value" == "1" ]]; then
+          ok "TIS reports exactly one user-selectable KnowType mode"
+        else
+          fail "TIS reports $value user-selectable KnowType modes; run ./scripts/repair-inputmethod-selection.sh and clear stale LaunchServices records"
         fi
         ;;
       active.mode.count)
@@ -510,12 +1012,24 @@ else
           info "If macOS shows an authorization prompt to allow 知键/KnowType as an input method, click Allow; until it is allowed, the menu can list KnowType while normal switching still falls back to another source"
         fi
         ;;
+      preference.selected.parent.knowtype)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
+        if [[ "$value" == "true" ]]; then
+          if (( STRICT == 1 )); then
+            fail "HIToolbox selected preferences still contain the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "HIToolbox selected preferences still contain the non-selectable KnowType parent row"
+          fi
+        fi
+        ;;
       preference.enabled.knowtype)
         hitoolbox_enabled_knowtype="$value"
         if [[ "$value" == "true" ]]; then
           ok "HIToolbox enabled preferences include KnowType"
         elif (( STRICT == 1 )); then
-          fail "HIToolbox enabled preferences do not include active KnowType mode; run ./scripts/repair-inputmethod-selection.sh"
+          fail "HIToolbox enabled preferences do not include active KnowType input source; run ./scripts/repair-inputmethod-selection.sh"
         else
           warn "HIToolbox enabled preferences do not include KnowType; relying on TIS enabled state and third-party input-source preferences"
         fi
@@ -532,21 +1046,21 @@ else
         fi
         ;;
       preference.enabled.parent.knowtype)
-        if [[ "$value" == "true" ]]; then
-          if (( STRICT == 1 )); then
-            fail "HIToolbox enabled preferences still include the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
-          else
-            warn "HIToolbox enabled preferences still include the non-selectable KnowType parent row"
-          fi
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          :
+        elif [[ "$value" == "true" ]]; then
+          ok "HIToolbox enabled preferences include the component-mode KnowType parent"
+        elif (( STRICT == 1 )); then
+          fail "HIToolbox enabled preferences are missing the component-mode KnowType parent; run ./scripts/repair-inputmethod-selection.sh"
         else
-          ok "HIToolbox enabled preferences do not include the non-selectable KnowType parent row"
+          warn "HIToolbox enabled preferences are missing the component-mode KnowType parent"
         fi
         ;;
       preference.thirdparty.enabled.knowtype)
         if [[ "$value" == "true" ]]; then
           ok "Third-party input source preferences include KnowType"
         elif (( STRICT == 1 )); then
-          fail "Third-party input source preferences do not include active KnowType mode; enable KnowType in System Settings > Keyboard > Input Sources"
+          fail "Third-party input source preferences do not include active KnowType input source; enable KnowType in System Settings > Keyboard > Input Sources"
         else
           warn "Third-party input source preferences do not include KnowType; enable KnowType in System Settings > Keyboard > Input Sources"
         fi
@@ -564,12 +1078,14 @@ else
         fi
         ;;
       preference.thirdparty.enabled.parent.knowtype)
-        if [[ "$value" == "true" ]]; then
-          ok "Third-party input source preferences include the KnowType parent anchor"
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          :
+        elif [[ "$value" == "true" ]]; then
+          ok "Third-party input source preferences include the component-mode KnowType parent"
         elif (( STRICT == 1 )); then
-          fail "Third-party input source preferences are missing the KnowType parent anchor; run ./scripts/repair-inputmethod-selection.sh"
+          fail "Third-party input source preferences are missing the component-mode KnowType parent; run ./scripts/repair-inputmethod-selection.sh"
         else
-          warn "Third-party input source preferences are missing the KnowType parent anchor; System Settings may hide KnowType"
+          warn "Third-party input source preferences are missing the component-mode KnowType parent"
         fi
         ;;
       preference.history.knowtype)
@@ -580,8 +1096,15 @@ else
         fi
         ;;
       preference.history.parent.knowtype)
+        if (( SINGLE_INPUT_SOURCE == 1 )); then
+          continue
+        fi
         if [[ "$value" == "true" ]]; then
-          warn "HIToolbox input-source history still contains the non-selectable KnowType parent row"
+          if (( STRICT == 1 )); then
+            fail "HIToolbox input-source history still contains the non-selectable KnowType parent row; run ./scripts/repair-inputmethod-selection.sh"
+          else
+            warn "HIToolbox input-source history still contains the non-selectable KnowType parent row"
+          fi
         fi
         ;;
       preference.history.index.knowtype)
@@ -647,6 +1170,16 @@ APP_SUPPORT="$HOME/Library/Application Support/KnowType"
 PROVIDER_JSON="$APP_SUPPORT/providers.json"
 HISTORY_JSON="$APP_SUPPORT/user-selection-history.json"
 LEXICON_DIR="$APP_SUPPORT/Lexicons"
+AI_PROFILE_JSON="$APP_SUPPORT/AI/lexical-profile.json"
+ACCEPTED_HISTORY_JSONL="$APP_SUPPORT/AI/accepted-ai-learning.jsonl"
+ACCEPTED_SUMMARY_JSON="$APP_SUPPORT/AI/accepted-ai-summary.json"
+ACCEPTED_MIRROR_MD="$HOME/.knowtype/ACCEPTED_AI_LEARNING.md"
+ACCEPTED_FEEDBACK_JSONL="$APP_SUPPORT/AI/accepted-ai-feedback.jsonl"
+ACCEPTED_FEEDBACK_SUMMARY_JSON="$APP_SUPPORT/AI/accepted-ai-feedback-summary.json"
+ACCEPTED_FEEDBACK_MIRROR_MD="$HOME/.knowtype/ACCEPTED_AI_FEEDBACK.md"
+ENV_MD="$HOME/.knowtype/ENV.md"
+CORRECTION_MD="$HOME/.knowtype/CORRECTION.md"
+LEXICAL_PROFILE_MD="$HOME/.knowtype/LEXICAL_PROFILE.md"
 
 if [[ -f "$PROVIDER_JSON" ]]; then
   ok "provider profile file exists: $PROVIDER_JSON"
@@ -665,6 +1198,200 @@ if [[ -d "$LEXICON_DIR" ]]; then
   ok "local lexicon directory exists with $LEXICON_COUNT JSON/TSV resource(s)"
 else
   warn "local lexicon directory is missing; bundled seed lexicon will be used"
+fi
+
+if [[ -f "$PROVIDER_JSON" ]]; then
+  default_provider_summary="$(
+    KNOWTYPE_PROVIDER_JSON="$PROVIDER_JSON" "$KNOWTYPE_PYTHON3" - <<'PY'
+import json
+import os
+try:
+    with open(os.environ["KNOWTYPE_PROVIDER_JSON"], encoding="utf-8") as handle:
+        profiles = json.load(handle).get("profiles", [])
+    profile = next((item for item in profiles if item.get("isDefault")), None)
+    if profile:
+        print(f"{profile.get('displayName', '<unnamed>')} · {profile.get('kind', '<kind>')} · {profile.get('model', '<model>')} · {profile.get('baseURL', '<baseURL>')}")
+except Exception:
+    pass
+PY
+  )"
+  if [[ -n "$default_provider_summary" ]]; then
+    ok "default AI provider: $default_provider_summary"
+  else
+    warn "provider profile file exists but no default provider is configured"
+  fi
+fi
+
+for profile_path in "$AI_PROFILE_JSON" "$ENV_MD" "$CORRECTION_MD" "$LEXICAL_PROFILE_MD"; do
+  if [[ -f "$profile_path" ]]; then
+    info "user data file exists: $profile_path"
+  else
+    info "user data file has not been created yet: $profile_path"
+  fi
+done
+
+accepted_learning_summary="$(
+  KNOWTYPE_ACCEPTED_HISTORY="$ACCEPTED_HISTORY_JSONL" \
+  KNOWTYPE_ACCEPTED_SUMMARY="$ACCEPTED_SUMMARY_JSON" \
+  KNOWTYPE_ACCEPTED_MIRROR="$ACCEPTED_MIRROR_MD" \
+  KNOWTYPE_ACCEPTED_FEEDBACK="$ACCEPTED_FEEDBACK_JSONL" \
+  KNOWTYPE_ACCEPTED_FEEDBACK_SUMMARY="$ACCEPTED_FEEDBACK_SUMMARY_JSON" \
+  KNOWTYPE_ACCEPTED_FEEDBACK_MIRROR="$ACCEPTED_FEEDBACK_MIRROR_MD" \
+  KNOWTYPE_LEXICAL_PROFILE="$LEXICAL_PROFILE_MD" \
+  "$KNOWTYPE_PYTHON3" - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+
+history = Path(os.environ["KNOWTYPE_ACCEPTED_HISTORY"])
+summary_path = Path(os.environ["KNOWTYPE_ACCEPTED_SUMMARY"])
+mirror = Path(os.environ["KNOWTYPE_ACCEPTED_MIRROR"])
+feedback_history = Path(os.environ["KNOWTYPE_ACCEPTED_FEEDBACK"])
+feedback_summary_path = Path(os.environ["KNOWTYPE_ACCEPTED_FEEDBACK_SUMMARY"])
+feedback_mirror = Path(os.environ["KNOWTYPE_ACCEPTED_FEEDBACK_MIRROR"])
+lexical = Path(os.environ["KNOWTYPE_LEXICAL_PROFILE"])
+
+def load_jsonl(path):
+    rows = []
+    invalid = 0
+    read_failed = False
+    if not path.is_file():
+        return rows, invalid, read_failed
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    invalid += 1
+    except Exception:
+        read_failed = True
+    return rows, invalid, read_failed
+
+records, invalid, history_read_failed = load_jsonl(history)
+feedback_records, feedback_invalid, feedback_read_failed = load_jsonl(feedback_history)
+
+def feedback_hash_fragment(record):
+    return "|".join([
+        str(record.get("acceptID", "")),
+        str(record.get("acceptedTextHash", "")),
+        ",".join(f"{item.get('location', '')}:{item.get('length', '')}" for item in record.get("deletedRanges", [])),
+        "\u001f".join(str(item) for item in record.get("deletedTexts", [])),
+        str(record.get("replacementText", "")),
+        f"{float(record.get('deletedRatio', 0)):.4f}",
+        str(record.get("strength", "")),
+    ])
+
+history_hash = ""
+if records:
+    history_hash = hashlib.sha256("\n".join(str(record.get("textHash", "")) for record in records).encode("utf-8")).hexdigest()[:8]
+
+summary = None
+summary_exists = summary_path.is_file()
+if summary_exists:
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        summary = None
+if not isinstance(summary, dict):
+    summary = None
+
+if records:
+    current = bool(summary) and summary.get("acceptedCount") == len(records) and summary.get("historyHash", "").startswith(history_hash)
+else:
+    current = summary is None and not summary_exists
+
+feedback_hash = ""
+if feedback_records:
+    joined = "\n".join(feedback_hash_fragment(record) for record in feedback_records)
+    feedback_hash = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:8]
+
+feedback_summary = None
+feedback_summary_exists = feedback_summary_path.is_file()
+if feedback_summary_exists:
+    try:
+        feedback_summary = json.loads(feedback_summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        feedback_summary = None
+if not isinstance(feedback_summary, dict):
+    feedback_summary = None
+
+if feedback_records:
+    feedback_current = bool(feedback_summary) and feedback_summary.get("feedbackCount") == len(feedback_records) and feedback_summary.get("historyHash", "").startswith(feedback_hash)
+else:
+    feedback_current = feedback_summary is None and not feedback_summary_exists
+
+try:
+    lexical_has_accepted = "accepted-ai-summary:" in lexical.read_text(encoding="utf-8")
+except Exception:
+    lexical_has_accepted = False
+
+print(f"records={len(records)}")
+print(f"historyHash={history_hash or 'none'}")
+print(f"summaryExists={'yes' if summary_exists else 'no'}")
+print(f"summaryCurrent={'yes' if current else 'no'}")
+print(f"acceptedCount={summary.get('acceptedCount', 0) if summary else 0}")
+print(f"termCount={len(summary.get('termProfile', [])) if summary else 0}")
+print(f"recentCommitCount={len(summary.get('recentAcceptedCommits', [])) if summary else 0}")
+print(f"lexicalInjected={'yes' if lexical_has_accepted else 'no'}")
+print(f"mirrorExists={'yes' if mirror.is_file() else 'no'}")
+print(f"invalidLines={invalid}")
+print(f"historyReadFailed={'yes' if history_read_failed else 'no'}")
+print(f"feedbackRecords={len(feedback_records)}")
+print(f"feedbackHash={feedback_hash or 'none'}")
+print(f"feedbackSummaryExists={'yes' if feedback_summary_exists else 'no'}")
+print(f"feedbackSummaryCurrent={'yes' if feedback_current else 'no'}")
+print(f"feedbackStrongCount={feedback_summary.get('strongCount', 0) if feedback_summary else 0}")
+print(f"feedbackAvoidTermCount={len(feedback_summary.get('avoidTerms', [])) if feedback_summary else 0}")
+print(f"feedbackMirrorExists={'yes' if feedback_mirror.is_file() else 'no'}")
+print(f"feedbackInvalidLines={feedback_invalid}")
+print(f"feedbackReadFailed={'yes' if feedback_read_failed else 'no'}")
+PY
+)"
+
+accepted_records="$(awk -F= '/^records=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_history_hash="$(awk -F= '/^historyHash=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_summary_exists="$(awk -F= '/^summaryExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_summary_current="$(awk -F= '/^summaryCurrent=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_terms="$(awk -F= '/^termCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_commits="$(awk -F= '/^recentCommitCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_lexical_injected="$(awk -F= '/^lexicalInjected=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_mirror_exists="$(awk -F= '/^mirrorExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_invalid_lines="$(awk -F= '/^invalidLines=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_history_read_failed="$(awk -F= '/^historyReadFailed=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_records="$(awk -F= '/^feedbackRecords=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_hash="$(awk -F= '/^feedbackHash=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_summary_exists="$(awk -F= '/^feedbackSummaryExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_summary_current="$(awk -F= '/^feedbackSummaryCurrent=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_strong_count="$(awk -F= '/^feedbackStrongCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_avoid_terms="$(awk -F= '/^feedbackAvoidTermCount=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_mirror_exists="$(awk -F= '/^feedbackMirrorExists=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_invalid_lines="$(awk -F= '/^feedbackInvalidLines=/{print $2}' <<<"$accepted_learning_summary")"
+accepted_feedback_read_failed="$(awk -F= '/^feedbackReadFailed=/{print $2}' <<<"$accepted_learning_summary")"
+
+info "accepted AI learning: records=$accepted_records hash=$accepted_history_hash summary=$accepted_summary_exists terms=$accepted_terms commits=$accepted_commits lexicalInjected=$accepted_lexical_injected mirror=$accepted_mirror_exists"
+info "accepted AI feedback: records=$accepted_feedback_records hash=$accepted_feedback_hash summary=$accepted_feedback_summary_exists strong=$accepted_feedback_strong_count avoidTerms=$accepted_feedback_avoid_terms mirror=$accepted_feedback_mirror_exists"
+if [[ "$accepted_summary_current" != "yes" ]]; then
+  warn "accepted AI learning summary is stale or missing; run ./scripts/accepted-learning.sh rebuild"
+fi
+if [[ "$accepted_feedback_summary_current" != "yes" ]]; then
+  warn "accepted AI feedback summary is stale or missing; run ./scripts/accepted-learning.sh rebuild"
+fi
+if [[ "${accepted_invalid_lines:-0}" != "0" ]]; then
+  warn "accepted AI learning history has $accepted_invalid_lines invalid line(s)"
+fi
+if [[ "$accepted_history_read_failed" == "yes" ]]; then
+  warn "accepted AI learning history could not be read"
+fi
+if [[ "${accepted_feedback_invalid_lines:-0}" != "0" ]]; then
+  warn "accepted AI feedback history has $accepted_feedback_invalid_lines invalid line(s)"
+fi
+if [[ "$accepted_feedback_read_failed" == "yes" ]]; then
+  warn "accepted AI feedback history could not be read"
 fi
 
 if (( SHOW_LOGS == 1 )); then

@@ -58,6 +58,20 @@ final class LexicalProfileStoreTests: XCTestCase {
         XCTAssertTrue(markdown.contains("rime-userdb"))
     }
 
+    func testLexicalProfileStoreInitDoesNotCreateMissingDirectory() {
+        let directory = temporaryDirectory().appendingPathComponent("missing-profile", isDirectory: true)
+        let jsonURL = directory.appendingPathComponent("lexical-profile.json")
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        defer {
+            try? FileManager.default.removeItem(at: directory.deletingLastPathComponent())
+        }
+
+        let store = LexicalProfileStore(jsonURL: jsonURL, markdownURL: markdownURL)
+
+        XCTAssertNil(store.currentProfile())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
     func testLexicalProfileStoreSkipsConditionalSaveWhenGenerationIsStale() throws {
         let directory = temporaryDirectory()
         let jsonURL = directory.appendingPathComponent("lexical-profile.json")
@@ -185,7 +199,7 @@ final class LexicalProfileStoreTests: XCTestCase {
         XCTAssertFalse(try String(contentsOf: markdownURL, encoding: .utf8).contains("发布中断"))
     }
 
-    func testLexicalMergeKeepsCurrentRimeCandidatesAheadOfUserDBTerms() throws {
+    func testLexicalMergeIgnoresRealtimeRimeCandidates() throws {
         let snapshot = try XCTUnwrap(
             LexicalContextBuilder().snapshot(
                 rimeCandidates: ["当前候选"],
@@ -197,9 +211,10 @@ final class LexicalProfileStoreTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(snapshot.terms.first?.text, "当前候选")
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "当前候选" })
         XCTAssertTrue(snapshot.terms.contains { $0.text == "长期高频" })
         XCTAssertTrue(snapshot.sourceSummary.contains("rime-userdb: 1"))
+        XCTAssertFalse(snapshot.sourceSummary.contains { $0.hasPrefix("rime-candidates:") })
     }
 }
 

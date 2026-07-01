@@ -68,13 +68,14 @@ includes a Swift package, unit tests, a local InputMethodKit app bundle,
 SwiftUI settings hosts, provider profile storage, Keychain-backed API keys, and
 local dictionary tooling.
 
-It is not yet a signed installer, notarized release, auto-updater, or App Store
-package.
+It is not yet a notarized installer, auto-updater, or App Store package.
 
-GitHub Releases may provide a local MVP zip named
-`KnowType-vX.Y.Z-macos-local-mvp.zip`. That archive contains the ad-hoc signed
-`KnowType.app` input method bundle and `KnowType.prefPane`, plus a SHA256 file
-and release manifest. It is still local MVP packaging, not a notarized installer.
+GitHub Releases provide a Developer Preview DMG named
+`KnowType-vX.Y.Z-macos-dev-preview.dmg`. It contains `KnowType.app`, a
+command-file installer, a release manifest, and a SHA256 file. The DMG is not
+Developer ID signed or notarized; macOS may require Control-click > Open or
+Privacy & Security > Open Anyway before installation. The local MVP zip remains
+available as a developer/debug asset.
 
 ## Quick Start
 
@@ -109,19 +110,40 @@ Build and install the local development bundle:
 ```
 
 The local installer refreshes the traditional InputMethodKit app registration,
-purges stale `.Mode` development state, restores the System Settings
-third-party parent anchor plus the visible `.Hans` mode, and launches the
-installed app so registration and best-effort selection run from the app
-context macOS uses for input switching. KnowType follows the mature component
-mode shape used by Squirrel, McBopomofo, and macSKK: the parent id is
-`com.knowtype.inputmethod.KnowType`, and the visible input source is
-`com.knowtype.inputmethod.KnowType.Hans`.
+purges stale `.Mode` development state, registers and enables the KnowType
+parent input method plus the visible `.Hans` input mode from the installed app
+context, and repairs history without moving KnowType ahead of the retained
+current source. It does not rewrite selected preferences during install.
+It does not launch the installed input-method host, does not auto-select
+KnowType, and does not initialize Rime user data during install.
+If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
+controller cold start still keeps Rime sessions, provider profiles, AI learning
+and profile files, `ENV.md`, and `CORRECTION.md` lazy until real input, an AI
+request, or explicit maintenance.
+If an existing `KnowTypeInputMethodApp` process is running, the installer stops
+before replacing files instead of killing it, because host shutdown can flush
+Rime user data.
+KnowType uses the mature macOS IMK shape: `com.knowtype.inputmethod.KnowType`
+is the non-selectable parent input method, and
+`com.knowtype.inputmethod.KnowType.Hans` is the only user-selectable visible
+mode. Old `.Mode` records and parent-only selected/history rows are treated as
+legacy cache entries and cleaned by the repair scripts. System Settings and the
+menu bar should show exactly one user-selectable `KnowType` item.
 
 `scripts/install-inputmethod.sh` defaults to a release build so local typing
 tests exercise the optimized hot path. Rime runtime files are packaged inside
 `KnowType.app`; if they are missing or fail to load, KnowType keeps raw input
 usable and reports degraded conversion state instead of falling back to the
 retired clean-room converter.
+
+Overwrite installs create an app-level rollback backup under
+`~/Library/Application Support/KnowType/Backups/` and record the active install
+in `~/Library/Application Support/KnowType/install-state.json`. The backup
+contains install artifacts only: `KnowType.app` and optional `KnowType.prefPane`.
+It does not copy, restore, or mutate Rime userdb, provider profiles, Keychain
+secrets, AI context documents, `~/.knowtype`, or local lexicons. First real
+typing after manually selecting KnowType may initialize Rime as normal product
+use; that is intentionally outside the install step.
 
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
@@ -145,7 +167,8 @@ used by mature IMK input methods: installation uses TIS registration and
 enablement, while System Settings writes the protected third-party input-source
 approval rows.
 
-Select KnowType in the active target app when needed:
+After install, activate the target app, select KnowType from the macOS input
+menu, or run the selection helper while that target app is active:
 
 ```bash
 ./scripts/select-inputmethod.sh --require-selected
@@ -157,20 +180,39 @@ Remove the local bundle:
 ./scripts/uninstall-inputmethod.sh
 ```
 
+List or restore local rollback points:
+
+```bash
+./scripts/rollback-inputmethod.sh --list
+./scripts/rollback-inputmethod.sh --latest
+```
+
 Local IME behavior must still be verified by typing in real host apps. See
 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md) and
 [MVP Acceptance](doc/mvp-acceptance.plan.md) for the macOS policy, selection,
 and manual acceptance flow.
 
-For a GitHub Release zip, verify the downloaded archive with the published
-`.sha256` file first. Then expand it, copy `KnowType.app` to
-`~/Library/Input Methods/`, and use the input menu's `KnowType Settings...`
-entry for configuration. `KnowType.prefPane` is a compatibility settings host
-and may be copied to `~/Library/PreferencePanes/` when that fallback is needed.
-Do not use a stale System Settings sidebar entry unless the matching pane is
-installed.
-Run the same local diagnostics/manual typing acceptance from a source checkout
-when available.
+For a GitHub Release DMG, verify the downloaded image with the published
+`.sha256` file first:
+
+```bash
+cd ~/Downloads
+shasum -a 256 -c KnowType-v0.2.3-macos-dev-preview.dmg.sha256
+```
+
+Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
+Control-click > Open, or open System Settings > Privacy & Security and choose
+Open Anyway. The command records `source=dmg-dev-preview`, release commit/tag,
+and manifest digest in diagnostics, but it does not launch the input method host
+or perform a typing probe. Pass `--with-prefpane` only when the optional
+compatibility System Settings pane is needed. Do not use a stale System Settings
+sidebar entry unless the matching pane is installed.
+
+The older local MVP zip can still be installed for developer debugging:
+
+```bash
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.3-macos-local-mvp.zip
+```
 
 ## Configuration
 
@@ -215,16 +257,27 @@ AI context files live under `~/.knowtype/`. `ENV.md` stores local context
 memory for the AI recommendation slot, `CORRECTION.md` stores user-editable AI
 correction instructions, and `LEXICAL_PROFILE.md` mirrors the local top-K
 lexical profile built from Rime userdb frequency plus recent KnowType commits
-and selections. The canonical lexical profile JSON lives under
+and selections plus bounded summaries of AI recommendations the user explicitly
+accepted. Verified edits made immediately after accepting AI recommendations
+are summarized separately as local AI feedback; ordinary Backspace is ignored
+unless the cursor range proves the edit is inside the just-accepted AI span.
+The full accepted-AI and feedback history is stored locally under Application
+Support and is not injected directly into provider requests. The canonical
+lexical profile JSON lives under
 `~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
-on these files.
+on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
+`clear --yes` to inspect, rebuild, or delete accepted-AI learning and feedback
+data. Clear removes accepted-learning/feedback history, summary, and mirror
+files and scrubs accepted-AI context from the lexical profile without deleting
+Rime, provider, Keychain, ENV, or CORRECTION data.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS
 unified logging. While Rime is composing, the current page of Rime candidates is
-sent as contextual hints only; unselected candidates are not treated as the
-locked prefix. If no locked prefix exists yet, the AI response is a full
-commit-ready recommendation rather than a suffix attached to the first Rime
+not sent to the realtime AI request and unselected candidates are not treated as
+the locked prefix. If no locked prefix exists yet, the AI response is a full
+commit-ready recommendation based on raw input, context documents, and the
+persistent lexical profile rather than a suffix attached to the first Rime
 candidate. The logs distinguish schema fallback, structured decode failures,
 prefix-lock sanitizer rejections, and too-short prefixes without recording raw
 text. To inspect them, run
@@ -234,25 +287,43 @@ text. To inspect them, run
 
 | Shortcut | Behavior |
 |---|---|
-| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, insert a normal space. |
-| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, insert ordinary digits. |
+| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, produce a normal space or pass it through in compatibility hosts. |
+| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, produce ordinary digits or pass them through in compatibility hosts. |
 | Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the current Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. Left/up from the first row lands on the previous page's last row. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
-| `0` | Commit the raw composition when correction candidates are visible; with no active composition, insert `0`. |
-| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation or insert punctuation directly when Rime declines. |
+| `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
+| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
 | `Option + .` | Toggle Chinese/English punctuation for the active input session. |
+| `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in terminal-style compatibility hosts, it switches between Chinese placeholder composition and idle ASCII passthrough. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
+Host compatibility is conservative. Standard AppKit-style text fields, browsers,
+editors, IDEs, Electron shells, and unknown clients use inline composition with
+attributed marked text by default, so raw preedit appears in the focused text
+field. Terminal, iTerm, MacVim, and Emacs-style hosts default to idle ASCII
+passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
+the shell or editor until the session is switched with `Option + /`. In those
+terminal-style hosts, Chinese composition uses a full-width-space attributed
+marked-text placeholder to keep the host composition and candidate anchor alive;
+the real raw/preedit string is shown in KnowType's candidate panel above the
+candidates, then committed with `insertText`. A UserDefaults override can force
+any bundle back to `commitOnlyComposition` when a host proves incompatible with
+inline marked text.
+
 The candidate panel shows Rime prefix candidates, a fixed AI recommendation
-state row, and raw input only when no suggestion is available. It is a compact
-AppKit panel using macOS material, system highlight colors, mouse hover/click
-selection, scroll paging, and row accessibility labels. When a provider is
-configured, Rime prefix candidates appear immediately and provider-backed AI
-recommendations update asynchronously. Provider failures do not show fixed
-local fallback text as if it were AI output.
+state row, terminal/override commit-only preedit when the host receives a
+placeholder carrier, and raw input only when no suggestion is available. The
+preedit row has no shortcut, selection, or commit action, and inline hosts do
+not render it because the focused text field already shows preedit. The panel is
+a compact AppKit panel using macOS material, system highlight colors,
+mouse hover/click selection, scroll paging, and row accessibility labels. When a
+provider is configured, Rime prefix candidates appear immediately and
+provider-backed AI recommendations update
+asynchronously. Provider failures do not show fixed local fallback text as if it
+were AI output.
 
 The first candidate slot is reserved for Rime conversion. The second slot is
 reserved for AI recommendation state, so async provider results update that slot
@@ -281,6 +352,10 @@ appears only when raw input or confirmed prefix looks like a credential, such as
 API keys, bearer tokens, JWTs, private keys, or password/token assignments.
 Secret-like Rime candidate hints are filtered without disabling the whole
 request.
+Accepted AI learning uses the same secret-like hard block: credential-shaped
+accepted text is not recorded, while ordinary technical text can be summarized
+locally for future recommendations. AI feedback learning follows the same
+secret-only block and records only verified post-accept edits.
 
 Technical tokens such as `API`, `JSON`, `FastAPI`, `iOS`, `macOS`,
 `InputMethodKit`, `snake_case`, and `camelCase` are preserved or canonicalized.

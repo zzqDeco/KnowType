@@ -21,7 +21,7 @@ enum LLMOutputContract {
         case .contextDigest:
             return "A local KnowType context digest markdown document."
         case .continuation:
-            return "KnowType continuation candidates. With a locked prefix, text is suffix-only; without one, text is a full commit-ready recommendation informed by candidate hints."
+            return "KnowType continuation candidates. With a locked prefix, text is suffix-only; without one, text is a full commit-ready recommendation informed by raw input and context."
         case .correction:
             return "KnowType correction candidates."
         case .polish:
@@ -56,7 +56,7 @@ enum LLMOutputContract {
                             "properties": [
                                 "text": [
                                     "type": "string",
-                                    "description": "If lockedPrefix is present, only the suffix after lockedPrefix. If lockedPrefix is absent, a full commit-ready recommendation informed by rawInput and candidateHints."
+                                    "description": "If lockedPrefix is present, only the suffix after lockedPrefix. If lockedPrefix is absent, a full commit-ready recommendation informed by rawInput and context."
                                 ],
                                 "confidence": [
                                     "type": "number",

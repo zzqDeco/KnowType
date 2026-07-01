@@ -10,7 +10,9 @@ runtime lexicon refresh, and context-memory logging are cancellable asynchronous
 
 ## Key Changes
 
-- Added `InputTaskSupervisor` and `InputGeneration` as the shared task/generation model for cancellable input work.
+- Added `InputTaskSupervisor` as the shared cancellation registry for
+  cancellable input work; the later Rime-only path retired the old local
+  candidate generation model.
 - Changed async suggestion refresh so `append`/`delete` publish raw marked text first and compute local candidates off the synchronous key path.
 - Coalesced candidate panel updates and delayed re-anchor work so rapid typing cancels stale layout/anchor tasks.
 - Moved AI recommendation, runtime lexicon refresh, and context event logging onto background/utility tasks.

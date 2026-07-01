@@ -1,27 +1,28 @@
 # KnowTypeInputSourceTool
 
-`KnowTypeInputSourceTool` builds the `knowtype-inputsource-tool` executable used by diagnostics and manual Text Input Source registration checks.
+`KnowTypeInputSourceTool` builds the `knowtype-inputsource-tool` executable used by diagnostics, install/rollback registration, and scoped Text Input Source cleanup.
+
+The current registration model is a mode-enabled input method with one visible user mode:
+
+- parent input method / IMK server identity: `com.knowtype.inputmethod.KnowType`
+- active user-selectable input mode: `com.knowtype.inputmethod.KnowType.Hans`
+- legacy cleanup mode: `com.knowtype.inputmethod.KnowType.Mode`
 
 The helper owns explicit debug TIS calls for:
 
-- `status`: emit read-only key/value TIS status and persisted HIToolbox selected/enabled preference status for diagnostics.
-- `switch-away`: debug-only fallback for moving the active input source away from KnowType; install scripts use the installed app path instead.
+- `status`: emit read-only key/value TIS status and persisted HIToolbox selected/enabled preference status for diagnostics. `inputSource.*` describes the visible `.Hans` mode; parent fields describe the non-selectable anchor, and `legacy.mode.count` reports stale `.Mode` session-cache rows separately.
+- `switch-away`: moves the active input source away from KnowType before app bundle replacement without starting the installed host. It also removes KnowType rows from HIToolbox `AppleSelectedInputSources` so stale selected preferences do not relaunch the host after install tooling refreshes TIS state.
 - `inspect-preferences` / compatibility `dedupe-preferences`: read local Text Input Source preference arrays and report duplicate KnowType rows without mutating protected system preference domains.
-- `repair-preferences`: explicit local development fallback used by `scripts/repair-inputmethod-selection.sh`; removes stale parent rows from HIToolbox, removes stale `.Mode` rows from all tracked input-source preferences, restores the `.Hans` mode in HIToolbox/history, and restores the System Settings-compatible third-party parent anchor plus `.Hans` mode when `--add-active` is used.
-- `bootstrap --path ... [--select]`: compatibility/debug command that registers the installed bundle only when the parent or active mode is missing, enables the active mode through TIS, skips direct enabled-preference writes, and optionally requests helper-local selection.
-- `purge-legacy --path ...`: debug-only fallback for disabling stale `.Mode` TIS modes and unregistering stale LaunchServices records outside the installed path. User-facing install and repair scripts use `KnowTypeInputMethodApp --knowtype-purge-legacy`.
+- `repair-preferences`: explicit local development fallback used by install, rollback, uninstall, and `scripts/repair-inputmethod-selection.sh`. It removes stale `.Mode` and parent-only selected/history rows, restores enabled parent anchor plus `.Hans` mode when `--add-active` is used, and keeps selected/history pointed only at `.Hans`. `--remove-parent-anchor` is retained for uninstall cleanup after the bundle has been removed. `--legacy-parent-anchor` is accepted as a deprecated compatibility no-op.
+- `bootstrap --path ... [--select]`: registers the installed bundle URL, enables the parent anchor and visible `.Hans` mode through TIS, skips direct enabled-preference writes, and optionally requests helper-local selection of `.Hans`.
+- `purge-legacy --path ...`: disables stale `.Mode` TIS records and unregisters stale LaunchServices records outside the installed path.
 - `register --path ... [--select]`: compatibility alias for the bootstrap path.
-- `select [--require-selected]`: debug-only helper-local selection. User-facing scripts should use the installed app's command-line selection path so macOS authorization prompts name `KnowTypeInputMethodApp`.
+- `select [--require-selected]`: debug-only helper-local selection.
 
-Scripts should call this helper instead of inline `swift -` snippets for diagnostics. Installation and normal selection still go through the installed app for TIS registration, enablement, and selection. The helper's `repair-preferences --add-active` path mirrors the rows System Settings writes on this macOS build: active `.Hans` in HIToolbox/history, and parent anchor plus `.Hans` in `com.apple.inputsources`.
+Low-level TIS source lookup, source property reads, source dedupe, activation/selection ordering, notification posting, wait helpers, and LaunchServices stale-record cleanup are delegated to `KnowTypeInputSourceSupport`. This executable owns command parsing, stdout/stderr key/value compatibility, scoped preference repair, and command exit semantics; it should not reimplement the shared TIS or LaunchServices primitives locally.
 
-The active public input-source id is `com.knowtype.inputmethod.KnowType.Hans`.
-`com.knowtype.inputmethod.KnowType.Mode` is a cleanup input only and must not
-appear in the packaged `Info.plist`. Activation runs from the installed app so
-macOS attributes the authorization prompt to KnowType instead of the helper.
+Scripts should call this helper instead of inline `swift -` snippets for diagnostics and scoped preference cleanup. Default install/repair registration goes through the installed app CLI context, then uses this helper for preference repair and diagnostics. Manual selection still goes through `scripts/select-inputmethod.sh`. The helper deliberately labels selection verification as helper-local because another app or the menu bar can keep its own current input source until the user activates that app and selects KnowType.
 
-The helper deliberately labels `select` verification as helper-local. `TISSelectInputSource` can succeed inside the helper process while another app or the menu bar remains on Apple Pinyin; diagnostics therefore also read HIToolbox and `com.apple.inputsources` preferences so local acceptance does not confuse Apple Pinyin output with KnowType output.
-
-The implementation intentionally follows mature IMK input methods such as Squirrel, OpenVanilla, and McBopomofo: registration and enablement go through `TISRegisterInputSource`, `TISEnableInputSource`, and `TISSelectInputSource`; user-facing selection is attributed to the installed app. The helper reads protected input-source preference arrays for diagnostics, and only the explicit repair command writes scoped KnowType rows.
+The implementation follows the mature IMK boundary that registration and enablement go through `TISRegisterInputSource` and `TISEnableInputSource`, while user-facing selection remains an explicit preflight before real typing. The helper reads protected input-source preference arrays for diagnostics, and only explicit repair commands write scoped KnowType rows.
 
 This executable is install/debug plumbing only. It must not contain correction, candidate ranking, provider, or AI continuation logic.

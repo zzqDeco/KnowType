@@ -19,10 +19,10 @@
 
 - `InputRuntimeBoundaries.swift` defines:
   - `InputHotPathContext` / `InputFrame` for key-event frame boundaries.
-  - `CandidatePanelFrame` and `CandidatePanelVisibilityReason` for panel update/hide intents.
+  - `CandidatePanelFrame` and `CandidatePanelVisibilityReason` for ordered panel update/hide intents.
   - `InputEventBus` and `InputRuntimeEvent` for commit/selection/lifecycle side effects.
   - `AIRecommendationPatch` for generation-checked AI slot updates.
-- `CandidatePanelPresenter` consumes `CandidatePanelFrame`, updates or hides through `InputControllerHost`, and emits `KNOWTYPE_PANEL_DEBUG=1` logs with reason, composition id, raw revision, raw length, anchor source, and layout state.
+- `CandidatePanelPresenter` consumes `CandidatePanelFrame`, applies the frame through `InputControllerHost`, and emits `KNOWTYPE_PANEL_DEBUG=1` logs with presentation generation, reason, composition id, raw revision, raw length, anchor source, and layout state.
 - `RimeUserDBTextSnapshotProvider.userDBTextSnapshot` now reads an already exported `*.userdb.txt` snapshot only. `syncedUserDBTextSnapshot` is the explicit sync path.
 - `RimeMaintenanceService` owns explicit sync policy. Commit/selection profile refresh uses the existing-snapshot path; `sync_user_data` is reserved for manual/idle maintenance follow-up.
 - `LexicalProfileRuntime` owns delayed lexical refresh, Rime userdb snapshot parsing, profile store staging/publish, request-local lexical context merging, and AI diagnostic logging for profile refresh.

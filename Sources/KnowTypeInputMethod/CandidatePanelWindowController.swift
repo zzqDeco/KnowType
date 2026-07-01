@@ -78,6 +78,8 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     private let panelAppearance: CandidatePanelAppearance
     private weak var interactionHandler: CandidatePanelInteractionHandling?
     private var lastPresentationSignature: CandidatePanelPresentationSignature?
+    private var isPanelOrderedVisible = false
+    private var latestAppliedPresentationGeneration = 0
 
     convenience init(interactionHandler: CandidatePanelInteractionHandling? = nil) {
         self.init(
@@ -115,9 +117,11 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         }
         let presentationSignature = CandidatePanelPresentationSignature(
             windowState: windowState,
-            locale: locale
+            locale: locale,
+            screens: screenProvider.screens
         )
-        if presentationSignature == lastPresentationSignature,
+        if isPanelOrderedVisible,
+           presentationSignature == lastPresentationSignature,
            let panel {
             panel.orderFrontRegardless()
             return
@@ -137,9 +141,10 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         guard let layoutPlan = effectiveLayoutEngine.layout(
             model: renderModel,
             anchorRect: windowState.anchorRect,
-            screenProvider: screenProvider
+            screenProvider: screenProvider,
+            placementPreference: windowState.placementPreference
         ) else {
-            panel.orderOut(nil)
+            orderOutPanel(panel)
             return
         }
         traceLayout(windowState: windowState, renderModel: renderModel, layoutPlan: layoutPlan)
@@ -147,7 +152,20 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         panel.setFrameOrigin(layoutPlan.panelOrigin)
         contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.orderFrontRegardless()
-        lastPresentationSignature = presentationSignature
+        markPanelVisible(presentationSignature: presentationSignature)
+    }
+
+    func apply(frame: CandidatePanelFrame, locale: KnowTypeLocale) {
+        guard frame.presentationGeneration >= latestAppliedPresentationGeneration else {
+            traceDroppedFrame(frame)
+            return
+        }
+        latestAppliedPresentationGeneration = frame.presentationGeneration
+        if frame.isVisible {
+            update(state: frame.panelModel, locale: locale)
+        } else {
+            hide()
+        }
     }
 
     func candidatePanelContentDidHover(_ selection: CandidatePanelSelection) {
@@ -163,8 +181,18 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     }
 
     func hide() {
+        orderOutPanel(panel)
+    }
+
+    private func orderOutPanel(_ panel: CandidatePanelWindowOperating?) {
         panel?.orderOut(nil)
+        isPanelOrderedVisible = false
         lastPresentationSignature = nil
+    }
+
+    private func markPanelVisible(presentationSignature: CandidatePanelPresentationSignature) {
+        isPanelOrderedVisible = true
+        lastPresentationSignature = presentationSignature
     }
 
     private func candidatePanel() -> CandidatePanelWindowOperating {
@@ -186,7 +214,17 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
             return
         }
         fputs(
-            "KnowType panel layout: layoutMode=\(windowState.layoutMode.rawValue) pageSize=\(windowState.paging.pageSize) renderRows=\(renderModel.rows.count) orientation=\(layoutPlan.orientation)\n",
+            "KnowType panel layout: layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue) verticalPlacement=\(layoutPlan.verticalPlacement.rawValue) pageSize=\(windowState.paging.pageSize) renderRows=\(renderModel.rows.count) orientation=\(layoutPlan.orientation) anchorRect=\(windowState.anchorRect) origin=\(layoutPlan.panelOrigin)\n",
+            stderr
+        )
+    }
+
+    private func traceDroppedFrame(_ frame: CandidatePanelFrame) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+            return
+        }
+        fputs(
+            "KnowType panel drop: reason=stale_frame generation=\(frame.presentationGeneration) latestGeneration=\(latestAppliedPresentationGeneration) visibilityReason=\(frame.visibilityReason.rawValue) visible=\(frame.isVisible)\n",
             stderr
         )
     }
@@ -209,6 +247,7 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
 private struct CandidatePanelPresentationSignature: Equatable {
     var windowState: CandidatePanelWindowState
     var locale: KnowTypeLocale
+    var screens: [CandidateAnchorScreen]
 }
 
 private final class CachingCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
@@ -356,7 +395,7 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
                 CandidatePanelRowHitTarget(
                     frame: item.frame,
                     selection: row.selection,
-                    isEnabled: row.isEnabled,
+                    isEnabled: row.isEnabled && row.selection != nil,
                     accessibilityLabel: row.accessibilityLabel,
                     isSelected: row.isSelected
                 )

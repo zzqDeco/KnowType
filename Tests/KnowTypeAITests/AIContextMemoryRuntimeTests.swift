@@ -5,6 +5,33 @@ import KnowTypeCore
 import KnowTypeProviders
 
 final class AIContextMemoryRuntimeTests: XCTestCase {
+    func testLazyDefaultContextMemorySkipsMissingProviderWithoutCreatingEvents() async {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
+        let factory = ContextRuntimeFactoryProbe(
+            eventsDirectory: eventsDirectory,
+            environmentURL: directory.appendingPathComponent("ENV.md")
+        )
+        let runtime = LazyDefaultAIContextMemoryRuntime(
+            providerLoader: { nil },
+            runtimeFactory: { factory.make(provider: $0) }
+        )
+
+        await runtime.record(
+            AITypingEvent(
+                appBundleID: "com.apple.TextEdit",
+                appName: "TextEdit",
+                rawInput: "nihao",
+                committedText: "你好",
+                commitKind: .traditional,
+                candidateSource: "traditional"
+            )
+        )
+
+        XCTAssertFalse(factory.wasCalled)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: eventsDirectory.path))
+    }
+
     func testRecordProcessesBatchAndUpdatesEnvironmentGeneratedSection() async throws {
         let directory = makeTemporaryDirectory()
         let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
@@ -513,6 +540,37 @@ private func waitUntilProviderReceivesRequest(
         try await Task.sleep(nanoseconds: 20_000_000)
     }
     XCTFail("provider did not receive a digest request")
+}
+
+private final class ContextRuntimeFactoryProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let eventsDirectory: URL
+    private let environmentURL: URL
+    private var called = false
+
+    init(eventsDirectory: URL, environmentURL: URL) {
+        self.eventsDirectory = eventsDirectory
+        self.environmentURL = environmentURL
+    }
+
+    func make(provider: any LLMProvider) -> AIContextMemoryRuntime {
+        lock.lock()
+        called = true
+        lock.unlock()
+        return AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+    }
+
+    var wasCalled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return called
+    }
 }
 
 private func makeTemporaryDirectory() -> URL {

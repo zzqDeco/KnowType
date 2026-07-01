@@ -133,7 +133,51 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(bottomLeft?.panelOrigin, CGPoint(x: 58, y: 84))
+        XCTAssertEqual(bottomLeft?.verticalPlacement, .visualAboveCaret)
         XCTAssertEqual(topRight?.panelOrigin, CGPoint(x: 198, y: 298))
+        XCTAssertEqual(topRight?.verticalPlacement, .visualBelowCaret)
+    }
+
+    func testAutomaticPlacementPrefersVisualBelowWhenItFits() {
+        let engine = engine(defaultTextWidth: 32)
+
+        let plan = engine.layout(
+            model: renderModel(rowCount: 4),
+            anchorRect: CGRect(x: 100, y: 400, width: 0, height: 18),
+            screenProvider: screenProvider()
+        )
+
+        XCTAssertEqual(plan?.verticalPlacement, .visualBelowCaret)
+        XCTAssertEqual(plan?.panelOrigin.y, 360)
+    }
+
+    func testPreferVisualAboveUsesTopSideWhenItFits() {
+        let engine = engine(defaultTextWidth: 32)
+
+        let plan = engine.layout(
+            model: renderModel(rowCount: 4),
+            anchorRect: CGRect(x: 100, y: 400, width: 0, height: 18),
+            screenProvider: screenProvider(),
+            placementPreference: .preferVisualAbove
+        )
+
+        XCTAssertEqual(plan?.verticalPlacement, .visualAboveCaret)
+        XCTAssertEqual(plan?.panelOrigin.y, 424)
+    }
+
+    func testPreferVisualAboveFallsBackToBelowWhenTopSideCannotFit() {
+        let engine = engine(defaultTextWidth: 32)
+
+        let plan = engine.layout(
+            model: renderModel(rowCount: 4),
+            anchorRect: CGRect(x: 100, y: 735, width: 0, height: 18),
+            screenProvider: screenProvider(),
+            placementPreference: .preferVisualAbove
+        )
+
+        XCTAssertNotNil(plan)
+        XCTAssertEqual(plan?.verticalPlacement, .visualBelowCaret)
+        XCTAssertEqual(plan?.panelOrigin.y, 695)
     }
 
     func testHorizontalLayoutUsesMeasuredShortcutWidthWithoutReservedSlot() {
@@ -165,6 +209,31 @@ final class CandidatePanelLayoutEngineTests: XCTestCase {
         XCTAssertEqual(plan?.items.first?.frame.width, 44)
         XCTAssertEqual(plan?.items.first?.shortcutLabelWidth, 0)
         XCTAssertEqual(plan?.items.first?.textWidthLimit, 32)
+    }
+
+    func testPreeditRowForcesVerticalLayoutAboveCandidates() {
+        let engine = engine(defaultTextWidth: 32, defaultShortcutWidth: 8)
+        var model = renderModel(rowCount: 6)
+        model.rows.insert(
+            CandidatePanelRenderRow(
+                kind: .preedit,
+                shortcutLabel: nil,
+                text: "ni",
+                isSelected: false,
+                visualRole: .rawInput
+            ),
+            at: 0
+        )
+
+        let plan = engine.layout(
+            model: model,
+            anchorRect: CGRect(x: 100, y: 400, width: 0, height: 18),
+            screenProvider: screenProvider()
+        )
+
+        XCTAssertEqual(plan?.orientation, .vertical)
+        XCTAssertEqual(plan?.items.first?.rowIndex, 0)
+        XCTAssertEqual(plan?.items.dropFirst().map(\.rowIndex), [1, 2, 3, 4, 5, 6])
     }
 
     func testVerticalLayoutAlignsOnlyRowsWithShortcutToPageMaxShortcutWidth() {

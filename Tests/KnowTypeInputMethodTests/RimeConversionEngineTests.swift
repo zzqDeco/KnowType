@@ -54,6 +54,86 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(engine.activeSchemaID, "custom_schema")
     }
 
+    func testNativeRimeSessionIsNotCreatedDuringEngineInitializationOrReadOnlyAccess() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-lazy-cold-start")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("missing-rime-data", isDirectory: true),
+            userDataURL: userData,
+            logURL: logs,
+            schemaID: "custom_schema"
+        )
+
+        var engine = RimeConversionEngine(configuration: configuration)
+
+        XCTAssertFalse(fileManager.fileExists(atPath: userData.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: logs.path))
+        XCTAssertFalse(engine.isNativeActive)
+        XCTAssertEqual(engine.activeSchemaID, "custom_schema")
+        XCTAssertTrue(engine.snapshot.candidates.isEmpty)
+        engine.reset()
+        XCTAssertFalse(fileManager.fileExists(atPath: userData.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: logs.path))
+    }
+
+    func testNativeRimeSessionCreationIsDeferredUntilFirstProcessCall() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-lazy-first-process")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("missing-rime-data", isDirectory: true),
+            userDataURL: userData,
+            logURL: logs
+        )
+        var engine = RimeConversionEngine(configuration: configuration)
+
+        XCTAssertFalse(fileManager.fileExists(atPath: userData.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: logs.path))
+
+        _ = engine.process(.text("n"))
+
+        XCTAssertTrue(fileManager.fileExists(atPath: userData.path))
+        XCTAssertTrue(fileManager.fileExists(atPath: logs.path))
+    }
+
+    func testNativeRimeSessionCreationIsSkippedWhileRawBypassIsActive() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-lazy-raw-bypass")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("missing-rime-data", isDirectory: true),
+            userDataURL: userData,
+            logURL: logs
+        )
+        var engine = RimeConversionEngine(configuration: configuration)
+
+        XCTAssertTrue(engine.process(.text("\u{E9}")).handled)
+        XCTAssertTrue(engine.process(.text("n")).handled)
+        XCTAssertFalse(engine.process(.pageDown).handled)
+
+        XCTAssertFalse(fileManager.fileExists(atPath: userData.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: logs.path))
+        XCTAssertFalse(engine.isNativeActive)
+        XCTAssertEqual(engine.snapshot.rawInput, "\u{E9}n")
+        XCTAssertEqual(engine.snapshot.engineName, "rime-raw-bypass")
+    }
+
     func testUserDBSnapshotLocatorPrefersLocalInstallationSnapshot() throws {
         let fileManager = FileManager.default
         let root = temporaryDirectory(name: "rime-userdb-local-snapshot")
@@ -405,6 +485,36 @@ final class RimeConversionEngineTests: XCTestCase {
         )
     }
 
+    func testNativeRimePrewarmHandlesMissingConfiguration() {
+        XCTAssertFalse(RimeConversionEngine.prewarmNativeSession(configuration: nil))
+    }
+
+    func testNativeRimePrewarmKeepsFirstProcessUsableWhenArtifactsAreAvailable() throws {
+        let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
+            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-prewarm-\(UUID().uuidString)", isDirectory: true)
+        configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
+        configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
+        // librime keeps process-global state after a session is destroyed, so do
+        // not remove this sandbox before the test process exits.
+
+        XCTAssertTrue(RimeConversionEngine.prewarmNativeSession(configuration: configuration))
+
+        var engine = RimeConversionEngine(
+            traditionalInputEngine: TraditionalInputEngine(),
+            configuration: configuration
+        )
+        XCTAssertTrue(engine.process(.text("n")).handled)
+        guard engine.isNativeActive else {
+            throw XCTSkip("librime could not create a native session")
+        }
+        XCTAssertTrue(engine.process(.text("i")).handled)
+        XCTAssertFalse(engine.snapshot.candidates.isEmpty)
+    }
+
     func testNativeRimeSessionSmokeWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
@@ -421,11 +531,11 @@ final class RimeConversionEngineTests: XCTestCase {
             traditionalInputEngine: TraditionalInputEngine(),
             configuration: configuration
         )
+        XCTAssertTrue(engine.process(.text("w")).handled)
         guard engine.isNativeActive else {
             throw XCTSkip("librime could not create a native session")
         }
 
-        XCTAssertTrue(engine.process(.text("w")).handled)
         XCTAssertTrue(engine.process(.text("o")).handled)
         guard !engine.snapshot.candidates.isEmpty else {
             throw XCTSkip("Rime shared data is not installed")
@@ -453,11 +563,12 @@ final class RimeConversionEngineTests: XCTestCase {
             traditionalInputEngine: TraditionalInputEngine(),
             configuration: configuration
         )
+        XCTAssertTrue(engine.process(.text("s")).handled)
         guard engine.isNativeActive else {
             throw XCTSkip("librime could not create a native session")
         }
 
-        for character in "shi" {
+        for character in "hi" {
             XCTAssertTrue(engine.process(.text(String(character))).handled)
         }
         let firstPage = engine.snapshot.candidates.map(\.text)
@@ -488,11 +599,11 @@ final class RimeConversionEngineTests: XCTestCase {
             traditionalInputEngine: TraditionalInputEngine(),
             configuration: configuration
         )
+        XCTAssertTrue(engine.process(.text("n")).handled)
         guard engine.isNativeActive else {
             throw XCTSkip("librime could not create a native session")
         }
 
-        XCTAssertTrue(engine.process(.text("n")).handled)
         XCTAssertTrue(engine.process(.text("i")).handled)
         let existingComposition = engine.snapshot.rawInput.isEmpty
             ? engine.snapshot.preedit

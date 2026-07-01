@@ -2,6 +2,19 @@ import CryptoKit
 import Foundation
 import KnowTypeCore
 
+private struct LexicalContextRegex: @unchecked Sendable {
+    let regex: NSRegularExpression
+
+    init(_ pattern: String) {
+        self.regex = try! NSRegularExpression(pattern: pattern, options: [])
+    }
+
+    func matches(_ text: String) -> Bool {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.firstMatch(in: text, options: [], range: range) != nil
+    }
+}
+
 public struct LexicalContextTerm: Codable, Sendable, Equatable, Hashable {
     public var text: String
     public var score: Double
@@ -133,6 +146,16 @@ public protocol LexicalContextProviding: Sendable {
 }
 
 public struct LexicalContextBuilder: Sendable {
+    private static let wordRegex = LexicalContextRegex(#"[A-Za-z_]"#)
+    private static let asciiWordRegex = LexicalContextRegex(#"[A-Za-z0-9_]"#)
+    private static let hanRegex = LexicalContextRegex(#"\p{Han}"#)
+    private static let numericRegex = LexicalContextRegex(#"^\d+$"#)
+    private static let protectedPrefixRegex = LexicalContextRegex(#"^(https?://|[A-Za-z]:/|/|~/)"#)
+    private static let acceptedProtectedPrefixRegex = LexicalContextRegex(#"(?i)^(https?://|www\.|[A-Za-z]:[\\/]|/|~/|\./|\.\./)"#)
+    private static let acceptedEmailRegex = LexicalContextRegex(#"(?i)^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$"#)
+    private static let acceptedHostRegex = LexicalContextRegex(#"(?i)^[A-Z0-9.-]+\.[A-Z]{2,}([/?#].*)?$"#)
+    private static let technicalTokenRegex = LexicalContextRegex(#"^[A-Za-z0-9_./:-]{2,}$"#)
+
     public var maxTerms: Int
     public var maxRecentCommits: Int
 
@@ -145,15 +168,36 @@ public struct LexicalContextBuilder: Sendable {
         rimeCandidates: [String] = [],
         recentCommits: [String] = [],
         selectionHistory: [String] = [],
+        acceptedAITerms: [LexicalContextTerm] = [],
+        acceptedAIRecentCommits: [String] = [],
+        acceptedAISourceSummary: [String] = [],
         persistentTerms: [LexicalContextTerm] = [],
         persistentRecentCommits: [String] = [],
         persistentSourceSummary: [String] = []
     ) -> LexicalContextSnapshot? {
         var scores: [String: (score: Double, source: String)] = [:]
-        addTerms(persistentTerms, to: &scores)
-        addTerms(rimeCandidates, source: "rime-candidates", baseScore: 1.0, to: &scores)
+        let hasAcceptedContext = !acceptedAITerms.isEmpty
+            || !acceptedAIRecentCommits.isEmpty
+            || !acceptedAISourceSummary.isEmpty
+        let persistentTermsForMerge = hasAcceptedContext
+            ? persistentTerms.filter { $0.source != "accepted-ai" }
+            : persistentTerms
+        let acceptedRecentCommitsForMerge = acceptedAIRecentCommits.compactMap(Self.sanitizedAcceptedProfileText)
+        let acceptedCommitSet = Set(acceptedRecentCommitsForMerge)
+        let currentRecentCommitsForMerge = recentCommits
+            .compactMap(Self.sanitizedProfileText)
+            .filter { !acceptedCommitSet.contains($0) }
+        let persistentRecentCommitsForMerge = persistentRecentCommits
+            .compactMap(Self.sanitizedProfileText)
+            .filter { !acceptedCommitSet.contains($0) }
+        let persistentSourceSummaryForMerge = hasAcceptedContext
+            ? persistentSourceSummary.filter { !$0.hasPrefix("accepted-ai") }
+            : persistentSourceSummary
+
         addTerms(selectionHistory.reversed(), source: "selection-history", baseScore: 0.86, to: &scores)
-        addTerms(recentCommits.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
+        addAcceptedTerms(acceptedAITerms, to: &scores)
+        addTerms(currentRecentCommitsForMerge.reversed(), source: "recent-commits", baseScore: 0.72, to: &scores)
+        addTerms(persistentTermsForMerge, to: &scores)
 
         let terms = scores
             .map { text, value in
@@ -167,8 +211,11 @@ public struct LexicalContextBuilder: Sendable {
             }
             .prefix(maxTerms)
 
-        let commits = (persistentRecentCommits + recentCommits)
-            .compactMap(Self.sanitizedProfileText)
+        let commits = (
+            persistentRecentCommitsForMerge
+                + acceptedRecentCommitsForMerge
+                + currentRecentCommitsForMerge
+        )
             .suffix(maxRecentCommits)
 
         let snapshot = LexicalContextSnapshot(
@@ -176,11 +223,13 @@ public struct LexicalContextBuilder: Sendable {
             recentCommits: Array(commits),
             toneProfile: toneProfile(from: Array(commits)),
             sourceSummary: sourceSummary(
-                rimeCandidates: rimeCandidates,
-                recentCommits: recentCommits,
+                recentCommits: currentRecentCommitsForMerge,
                 selectionHistory: selectionHistory,
-                persistentTerms: persistentTerms,
-                persistentSourceSummary: persistentSourceSummary
+                acceptedAITerms: acceptedAITerms,
+                acceptedAIRecentCommits: acceptedAIRecentCommits,
+                acceptedAISourceSummary: acceptedAISourceSummary,
+                persistentTerms: persistentTermsForMerge,
+                persistentSourceSummary: persistentSourceSummaryForMerge
             )
         )
         return snapshot.isEmpty ? nil : snapshot
@@ -223,7 +272,28 @@ public struct LexicalContextBuilder: Sendable {
         }
     }
 
+    private func addAcceptedTerms(
+        _ terms: [LexicalContextTerm],
+        to scores: inout [String: (score: Double, source: String)]
+    ) {
+        for term in terms {
+            guard let clean = Self.sanitizedAcceptedProfileText(term.text) else {
+                continue
+            }
+            let nextScore = max(0, min(1, term.score)) * 0.82
+            if let existing = scores[clean] {
+                scores[clean] = (score: existing.score + nextScore * 0.25, source: existing.source)
+            } else {
+                scores[clean] = (score: nextScore, source: "accepted-ai")
+            }
+        }
+    }
+
     private func toneProfile(from recentCommits: [String]) -> ToneProfile {
+        acceptedStyleProfile(from: recentCommits)
+    }
+
+    public func acceptedStyleProfile(from recentCommits: [String]) -> ToneProfile {
         guard !recentCommits.isEmpty else {
             return ToneProfile()
         }
@@ -243,13 +313,13 @@ public struct LexicalContextBuilder: Sendable {
 
         let technicalTokenCount = joined.components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { token in
-                token.count >= 2 && token.range(of: #"[A-Za-z_]"#, options: .regularExpression) != nil
+                token.count >= 2 && Self.wordRegex.matches(token)
             }
             .count
         let totalUnits = max(1, recentCommits.reduce(0) { $0 + max(1, $1.count) })
         let mixedCount = recentCommits.filter { text in
-            text.range(of: #"\p{Han}"#, options: .regularExpression) != nil
-                && text.range(of: #"[A-Za-z0-9_]"#, options: .regularExpression) != nil
+            Self.hanRegex.matches(text)
+                && Self.asciiWordRegex.matches(text)
         }.count
         let punctuationStyle = joined.contains("，") || joined.contains("。") || joined.contains("、")
             ? "zh"
@@ -268,18 +338,21 @@ public struct LexicalContextBuilder: Sendable {
     }
 
     private func sourceSummary(
-        rimeCandidates: [String],
         recentCommits: [String],
         selectionHistory: [String],
+        acceptedAITerms: [LexicalContextTerm],
+        acceptedAIRecentCommits: [String],
+        acceptedAISourceSummary: [String],
         persistentTerms: [LexicalContextTerm],
         persistentSourceSummary: [String]
     ) -> [String] {
         var summary = [
-            "rime-candidates: \(rimeCandidates.count)",
             "recent-commits: \(recentCommits.count)",
             "selection-history: \(selectionHistory.count)",
+            "accepted-ai: terms=\(acceptedAITerms.count) commits=\(acceptedAIRecentCommits.count)",
             "rime-userdb: \(persistentTerms.count)"
         ]
+        summary.append(contentsOf: acceptedAISourceSummary)
         summary.append(contentsOf: persistentSourceSummary)
         return summary
     }
@@ -333,15 +406,43 @@ public struct LexicalContextBuilder: Sendable {
         if TextProtection.requiresNoCorrection(clean) {
             return nil
         }
-        if clean.range(of: #"^\d+$"#, options: .regularExpression) != nil {
+        if Self.numericRegex.matches(clean) {
             return nil
         }
-        if clean.range(of: #"^(https?://|[A-Za-z]:/|/|~\/)"#, options: .regularExpression) != nil {
+        if Self.protectedPrefixRegex.matches(clean) {
             return nil
         }
-        let hasHan = clean.range(of: #"\p{Han}"#, options: .regularExpression) != nil
-        let isTechnicalToken = clean.range(of: #"^[A-Za-z0-9_./:-]{2,}$"#, options: .regularExpression) != nil
+        let hasHan = Self.hanRegex.matches(clean)
+        let isTechnicalToken = Self.technicalTokenRegex.matches(clean)
         guard hasHan || !isTechnicalToken else {
+            return nil
+        }
+        return clean
+    }
+
+    public static func sanitizedAcceptedProfileText(_ text: String) -> String? {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 80 else {
+            return nil
+        }
+        if TextProtection.containsSecretLikeContent(clean) {
+            return nil
+        }
+        if Self.numericRegex.matches(clean) {
+            return nil
+        }
+        if Self.acceptedProtectedPrefixRegex.matches(clean) {
+            return nil
+        }
+        if Self.acceptedEmailRegex.matches(clean) {
+            return nil
+        }
+        if Self.acceptedHostRegex.matches(clean) {
+            return nil
+        }
+        let hasHan = Self.hanRegex.matches(clean)
+        let hasWord = Self.wordRegex.matches(clean)
+        guard hasHan || hasWord else {
             return nil
         }
         return clean

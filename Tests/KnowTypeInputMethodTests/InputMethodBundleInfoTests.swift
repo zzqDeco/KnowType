@@ -259,8 +259,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("com.apple.quarantine"))
         XCTAssertTrue(scripts.contains("Full Disk Access"))
         XCTAssertTrue(scripts.contains("lsregister"))
-        XCTAssertFalse(scripts.contains("bootstrap --path"))
-        XCTAssertTrue(scripts.contains("--knowtype-purge-legacy"))
+        XCTAssertTrue(scripts.contains("bootstrap"))
+        XCTAssertTrue(scripts.contains("purge-legacy"))
         XCTAssertTrue(scripts.contains("strip_lsregister_suffix"))
         XCTAssertTrue(scripts.contains("expand_home_path"))
         XCTAssertTrue(scripts.contains(#"sub(/[[:space:]]*\(0x[[:xdigit:]]+\)$/, "", value)"#))
@@ -277,7 +277,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("KNOWTYPE_LEGACY_INPUT_MODE_IDS=(\"com.knowtype.inputmethod.KnowType.Mode\")"))
         XCTAssertTrue(scripts.contains("repair-preferences"))
         XCTAssertTrue(scripts.contains("KNOWTYPE_BUNDLE_BUILD_VERSION"))
-        XCTAssertTrue(scripts.contains("open -g"))
+        XCTAssertTrue(scripts.contains("launching the input method host"))
         XCTAssertFalse(scripts.contains("swift - <<'SWIFT'"))
         XCTAssertFalse(scripts.contains("swift - <<"))
     }
@@ -323,6 +323,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("scripts/package-release.sh"),
             encoding: .utf8
         )
+        let dmgScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/package-dmg.sh"),
+            encoding: .utf8
+        )
         let releaseWorkflow = try String(
             contentsOf: rootURL.appendingPathComponent(".github/workflows/release.yml"),
             encoding: .utf8
@@ -330,6 +334,13 @@ final class InputMethodBundleInfoTests: XCTestCase {
 
         XCTAssertFalse(packageScript.contains("KnowType Settings.app"))
         XCTAssertTrue(packageScript.contains("compatibility KnowType.prefPane"))
+        XCTAssertTrue(packageScript.contains(#"shasum -a 256 "$(basename "$archive_path")""#))
+        XCTAssertTrue(dmgScript.contains("Developer Preview DMG"))
+        XCTAssertTrue(dmgScript.contains("Install KnowType.command"))
+        XCTAssertTrue(dmgScript.contains("--from-dmg-payload"))
+        XCTAssertTrue(dmgScript.contains(#"shasum -a 256 "$(basename "$dmg_path")""#))
+        XCTAssertTrue(releaseWorkflow.contains("./scripts/package-dmg.sh"))
+        XCTAssertTrue(releaseWorkflow.contains("macos-dev-preview.dmg"))
         XCTAssertTrue(releaseWorkflow.contains("./scripts/smoke-inputmethod-install.sh --with-prefpane"))
     }
 
@@ -353,7 +364,44 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("preference.history.knowtype"))
         XCTAssertTrue(helperSource.contains("preference.writes=skipped"))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool repair-preferences"#))
+        XCTAssertTrue(helperSource.contains("repairSelectedPreferenceAwayFromKnowType"))
+        XCTAssertTrue(helperSource.contains("switch-away.preference.selected.changed"))
+        XCTAssertTrue(helperSource.contains("kTISNotifySelectedKeyboardInputSourceChanged"))
         XCTAssertTrue(helperSource.contains("preference.repair.active.mode.id"))
+        XCTAssertTrue(helperSource.contains(#"key: "AppleSelectedInputSources""#))
+        XCTAssertTrue(helperSource.contains("bootstrap.parent.enabled"))
+        XCTAssertTrue(helperSource.contains("bootstrap.mode.enabled"))
+        XCTAssertTrue(helperSource.contains("if selectStatus != noErr"))
+        XCTAssertTrue(helperSource.contains("--include-selected"))
+        XCTAssertTrue(helperSource.contains("--remove-parent-anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.include.selected"))
+        XCTAssertTrue(helperSource.contains("preference.repair.remove.parent.anchor"))
+        XCTAssertTrue(helperSource.contains("activePlacement: .prepend"))
+        XCTAssertTrue(helperSource.contains("case .prepend:"))
+        XCTAssertTrue(helperSource.contains("removeEnabledParentAnchor = removeParentAnchor && !addActive"))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleEnabledInputSources"[\s\S]*?removeParent:\s*removeEnabledParentAnchor"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleEnabledThirdPartyInputSources"[\s\S]*?removeParent:\s*removeEnabledParentAnchor"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleInputSourceHistory"[\s\S]*?activePlacement:\s*includeSelected\s*\?\s*\.prepend\s*:\s*\.afterFirstRetained"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"key:\s*"AppleSelectedInputSources"[\s\S]*?activePlacement:\s*\.prepend"#,
+            options: .regularExpression
+        ))
+        XCTAssertNotNil(helperSource.range(
+            of: #"if\s+includeSelected\s*\{[\s\S]*?TISSupport\.postNotification\(kTISNotifySelectedKeyboardInputSourceChanged\)"#,
+            options: .regularExpression
+        ))
+        XCTAssertTrue(helperSource.contains("bootstrap.singleSource"))
+        XCTAssertTrue(helperSource.contains("if !parentEnabled || !modeEnabled"))
+        XCTAssertTrue(helperSource.contains("preference.selected.parent.knowtype"))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool inspect-preferences"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool dump"#))
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool disable"#))
@@ -362,10 +410,28 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains(#"knowtype-inputsource-tool purge-legacy"#))
         XCTAssertTrue(helperSource.contains("AppleEnabledThirdPartyInputSources"))
         XCTAssertTrue(helperSource.contains("mode.selectCapable"))
+        XCTAssertTrue(helperSource.contains("user.visible.mode.count"))
+        XCTAssertTrue(helperSource.contains("inputSource.singleSource"))
+        XCTAssertTrue(helperSource.contains("parentSources + modeSources + legacySourcesByID.flatMap"))
+        XCTAssertTrue(helperSource.contains("TISSupport.visibleUserModeCount"))
+        XCTAssertTrue(helperSource.contains("kTISPropertyInputSourceIsSelectCapable"))
         XCTAssertTrue(helperSource.contains("active.mode.count"))
         XCTAssertTrue(helperSource.contains("legacy.mode.count"))
         XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.knowtype"))
+        XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.parent.knowtype"))
         XCTAssertTrue(helperSource.contains("preference.thirdparty.enabled.legacy.knowtype"))
+        XCTAssertTrue(helperSource.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.add.parent.anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.add.legacy.parent.anchor"))
+        XCTAssertTrue(helperSource.contains("preference.repair.legacy.parent.anchor.option"))
+        XCTAssertTrue(helperSource.contains("enableInputSource(parent, label: \"parent\")"))
+        XCTAssertTrue(helperSource.contains("enableInputSource(mode, label: \"mode\")"))
+        XCTAssertTrue(helperSource.contains("exitOnFailure: false"))
+        XCTAssertTrue(helperSource.contains("requireSelected: true"))
+        XCTAssertTrue(helperSource.contains("return OSStatus(paramErr)"))
+        XCTAssertFalse(helperSource.contains("preferencesContainInputModeOrParent"))
+        XCTAssertFalse(helperSource.contains("removeParent: !addLegacyParentAnchor"))
+        XCTAssertFalse(helperSource.contains("addParent: addActive && addLegacyParentAnchor"))
         XCTAssertTrue(helperSource.contains("TISRegisterInputSource"))
     }
 
@@ -383,6 +449,26 @@ final class InputMethodBundleInfoTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("scripts/install-inputmethod.sh"),
             encoding: .utf8
         )
+        let diagnosticScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh"),
+            encoding: .utf8
+        )
+        let rollbackScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/rollback-inputmethod.sh"),
+            encoding: .utf8
+        )
+        let repairScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/repair-inputmethod-selection.sh"),
+            encoding: .utf8
+        )
+        let smokeScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/smoke-inputmethod-install.sh"),
+            encoding: .utf8
+        )
+        let installHelper = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/lib/inputmethod-installation.sh"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(appMain.contains("TextInputSourceActivation"))
         XCTAssertTrue(appMain.contains("TISRegisterInputSource"))
@@ -396,51 +482,137 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("|| explicitSelect"))
         XCTAssertTrue(appMain.contains("input-method-app"))
         XCTAssertTrue(appMain.contains("KnowTypeInputSourceIDs.activeMode"))
-        XCTAssertTrue(appMain.contains("sourceIsBetterActivationTarget"))
-        XCTAssertTrue(appMain.contains("bestActivationTarget"))
-        XCTAssertTrue(appMain.contains("sourceIsBetterSelectionTarget"))
-        XCTAssertTrue(appMain.contains("bestSelectionTarget"))
-        XCTAssertTrue(appMain.contains("bestSelectionTarget(inputSources(id: modeInputSourceID))"))
-        XCTAssertTrue(appMain.contains("waitForCurrentInputSourceID(modeInputSourceID, timeout: 2.0)"))
-        XCTAssertTrue(appMain.contains("inputSources(id: modeInputSourceID)"))
-        XCTAssertTrue(appMain.contains("disableModesBeforeParent"))
+        XCTAssertTrue(appMain.contains("private typealias LSSupport = KnowTypeLaunchServicesSupport"))
+        XCTAssertTrue(appMain.contains("private typealias TISSupport = KnowTypeTISSupport"))
+        XCTAssertTrue(appMain.contains("TISSupport.deduplicatedActivationSources"))
+        XCTAssertTrue(appMain.contains("TISSupport.bestSelectionTarget"))
+        XCTAssertTrue(appMain.contains("TISSupport.bestSelectionTarget(TISSupport.inputSources(id: activeInputSourceID))"))
+        XCTAssertTrue(appMain.contains("TISSupport.waitForCurrentInputSourceID(activeInputSourceID, timeout: 2.0)"))
+        XCTAssertTrue(appMain.contains("TISSupport.inputSources(id: activeInputSourceID)"))
+        XCTAssertTrue(appMain.contains("usesSingleInputSource"))
+        XCTAssertTrue(appMain.contains("TISSupport.disableModesBeforeParent"))
+        XCTAssertTrue(appMain.contains(".sorted(by: TISSupport.enableParentBeforeModes)"))
+        XCTAssertTrue(appMain.contains("LSSupport.unregisterStaleLaunchServices"))
+        XCTAssertFalse(appMain.contains("private static func inputSources("))
+        XCTAssertFalse(appMain.contains("private static func runProcess"))
+        XCTAssertTrue(appMain.contains("parentAnchorReady && modeReady"))
+        XCTAssertTrue(appMain.contains("enable.parent.ready"))
+        XCTAssertTrue(appMain.contains("enable.mode.ready"))
         XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsEnableCapable"))
         XCTAssertTrue(appMain.contains("kTISPropertyInputSourceIsSelectCapable"))
+        XCTAssertTrue(appMain.contains("return status == noErr"))
+        XCTAssertFalse(appMain.contains("return status == noErr && currentID == activeInputSourceID"))
         XCTAssertTrue(appMain.contains("enable.preference.writes=skipped"))
         XCTAssertTrue(appMain.contains("purge.legacy.preference.writes=skipped"))
         XCTAssertFalse(appMain.contains("CFPreferencesSetAppValue"))
         XCTAssertFalse(appMain.contains("AppleEnabledInputSources"))
         XCTAssertFalse(appMain.contains("AppleEnabledThirdPartyInputSources"))
-        XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-switch-away"#))
         XCTAssertTrue(installScript.contains("switch_away_before_replace"))
         XCTAssertTrue(installScript.contains("repair_preferences_best_effort"))
-        XCTAssertTrue(installScript.contains("falling back to helper"))
-        XCTAssertTrue(installScript.contains("continuing so installed app activation and diagnostics can run"))
-        XCTAssertTrue(installScript.contains("scripts/lib/inputmethod-installation.sh"))
+        XCTAssertTrue(installScript.contains("purge_legacy_best_effort"))
+        XCTAssertTrue(installScript.contains("bootstrap_input_source_best_effort"))
+        XCTAssertTrue(installScript.contains("switch-away"))
+        XCTAssertTrue(installScript.contains(#""$tool" "${args[@]}""#))
+        XCTAssertTrue(installScript.contains(#""$tool" purge-legacy"#))
+        XCTAssertTrue(installScript.contains(#""$tool" bootstrap"#))
+        XCTAssertTrue(installScript.contains(#"--path "$TARGET_PATH""#))
+        XCTAssertTrue(installScript.contains("launching the input method host"))
+        XCTAssertTrue(installScript.contains("continuing so diagnostics can run"))
+        XCTAssertFalse(installScript.contains("--include-selected"))
+        XCTAssertFalse(installScript.contains("--remove-parent-anchor"))
+        XCTAssertFalse(rollbackScript.contains("--include-selected"))
+        XCTAssertFalse(rollbackScript.contains("--remove-parent-anchor"))
+        XCTAssertTrue(repairScript.contains("--include-selected"))
+        XCTAssertTrue(repairScript.contains("repair_args+=(--include-selected)"))
+        XCTAssertTrue(repairScript.contains("selected_current_id="))
+        XCTAssertTrue(repairScript.contains(#"[[ "$selected_current_id" == "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" ]]"#))
+        XCTAssertTrue(repairScript.contains("verified_selected == 1"))
+        XCTAssertTrue(repairScript.contains("selected preferences were not rewritten"))
+        XCTAssertTrue(repairScript.contains("falling back to helper bootstrap"))
+        XCTAssertTrue(repairScript.contains("bootstrap_args=("))
+        XCTAssertTrue(repairScript.contains(#""$INPUTSOURCE_TOOL" "${bootstrap_args[@]}""#))
+        XCTAssertTrue(installScript.contains("SCRIPT_DIR="))
+        XCTAssertTrue(installScript.contains("SCRIPTS_DIR=\"$SCRIPT_DIR\""))
+        XCTAssertTrue(installScript.contains(#"source "$SCRIPTS_DIR/lib/inputmethod-installation.sh""#))
         XCTAssertTrue(installScript.contains("knowtype_remove_local_inputmethod_bundle_if_safe"))
         XCTAssertTrue(installScript.contains("knowtype_cleanup_local_duplicate_bundles_except"))
         XCTAssertTrue(installScript.contains("knowtype_unregister_launchservices_records_except"))
         XCTAssertTrue(installScript.contains("--dry-run"))
-        XCTAssertLessThan(
-            try XCTUnwrap(installScript.range(of: #"switch_away_before_replace"#, options: .backwards)?.lowerBound),
-            try XCTUnwrap(installScript.range(of: #"killall KnowTypeInputMethodApp"#)?.lowerBound)
-        )
-        XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-install-activate"#))
-        XCTAssertTrue(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-purge-legacy"#))
-        XCTAssertTrue(installScript.contains("pgrep -x KnowTypeInputMethodApp"))
+        XCTAssertTrue(installScript.contains("require_input_method_host_stopped"))
+        XCTAssertTrue(installScript.contains("process shutdown can flush Rime user data"))
+        XCTAssertFalse(installScript.contains("killall KnowTypeInputMethodApp"))
+        XCTAssertFalse(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-switch-away"#))
+        XCTAssertFalse(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-install-activate"#))
+        XCTAssertFalse(installScript.contains(#""$INSTALLED_EXECUTABLE" --knowtype-purge-legacy"#))
+        XCTAssertFalse(installScript.contains(#"open -g "$TARGET_PATH""#))
+        XCTAssertTrue(installScript.contains("knowtype_input_method_host_is_running"))
+        XCTAssertTrue(installScript.contains("ps -axo command="))
+        XCTAssertTrue(installScript.contains(#"*/KnowTypeInputMethodApp\ *"#))
+        XCTAssertFalse(installScript.contains(#"${command%% *}"#))
+        XCTAssertFalse(installScript.contains("pgrep -x KnowTypeInputMethodApp"))
         XCTAssertTrue(installScript.contains("knowtype_inputsource_tool"))
         XCTAssertTrue(installScript.contains("INPUTSOURCE_TOOL"))
         XCTAssertTrue(installScript.contains("--with-prefpane"))
         XCTAssertTrue(installScript.contains("KNOWTYPE_INSTALL_PREFPANE"))
         XCTAssertTrue(installScript.contains("KnowType settings are available from the input-method menu"))
+        XCTAssertTrue(installScript.contains(#""$SCRIPTS_DIR/diagnose-inputmethod.sh" --json --path "$TARGET_PATH""#))
+        XCTAssertFalse(installScript.contains(#""$SCRIPTS_DIR/diagnose-inputmethod.sh" --strict --path "$TARGET_PATH""#))
+        XCTAssertTrue(installHelper.contains("knowtype_bundle_visible_input_mode_id"))
+        XCTAssertTrue(installHelper.contains("knowtype_bundle_visible_input_mode_ids"))
+        XCTAssertTrue(installHelper.contains("input-method bundle does not declare a menu-visible input mode"))
+        XCTAssertTrue(installHelper.contains("menu-visible input modes (expected exactly one"))
+        XCTAssertTrue(installHelper.contains(#"[[ "$visible_mode_id" != "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" ]]"#))
+        XCTAssertTrue(installHelper.contains("input-method bundle declares unsupported menu-visible input mode"))
+        XCTAssertTrue(installScript.contains(#"data.get("failures")"#))
+        XCTAssertTrue(installScript.contains("Postflight uses the JSON install snapshot only"))
         XCTAssertTrue(installScript.contains("Stale compatibility PreferencePane that would be removed"))
         XCTAssertTrue(installScript.contains("REMOVED_STALE_PREFPANE=1"))
         XCTAssertTrue(installScript.contains("Removed stale KnowType compatibility PreferencePane"))
         XCTAssertTrue(installScript.contains("--add-active"))
-        XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" bootstrap --path "$TARGET_PATH""#))
+        XCTAssertFalse(installScript.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(diagnosticScript.contains("ALLOW_LEGACY_PARENT_ANCHOR=0"))
+        XCTAssertTrue(diagnosticScript.contains("--legacy-parent-anchor"))
+        XCTAssertTrue(diagnosticScript.contains("visible .Hans input mode model"))
+        XCTAssertTrue(diagnosticScript.contains("active KnowType input source"))
+        XCTAssertTrue(diagnosticScript.contains("component-mode KnowType parent"))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" register --path "$TARGET_PATH""#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" disable"#))
         XCTAssertFalse(installScript.contains(#""$INPUTSOURCE_TOOL" select"#))
+        XCTAssertTrue(installScript.contains(#""$executable" --knowtype-register-input-source --knowtype-enable-input-source"#))
+        XCTAssertTrue(rollbackScript.contains("purge_args=("))
+        XCTAssertTrue(rollbackScript.contains("bootstrap_args=("))
+        XCTAssertTrue(rollbackScript.contains(#""$inputsource_tool" "${purge_args[@]}""#))
+        XCTAssertTrue(rollbackScript.contains(#""$inputsource_tool" "${bootstrap_args[@]}""#))
+        XCTAssertTrue(rollbackScript.contains("knowtype_bundle_visible_input_mode_id"))
+        XCTAssertTrue(rollbackScript.contains("restored_active_mode_id"))
+        XCTAssertTrue(rollbackScript.contains("does not declare a menu-visible input mode"))
+        XCTAssertTrue(rollbackScript.contains(#"--mode-id "$restored_active_mode_id""#))
+        XCTAssertTrue(rollbackScript.contains("restored_legacy_args"))
+        XCTAssertTrue(rollbackScript.contains(#"--knowtype-register-input-source --knowtype-enable-input-source"#))
+        XCTAssertTrue(rollbackScript.contains("require_input_method_host_stopped"))
+        XCTAssertTrue(rollbackScript.contains("process shutdown can flush Rime user data"))
+        XCTAssertTrue(rollbackScript.contains("knowtype_input_method_host_is_running"))
+        XCTAssertTrue(rollbackScript.contains("ps -axo command="))
+        XCTAssertTrue(rollbackScript.contains(#"*/KnowTypeInputMethodApp\ *"#))
+        XCTAssertFalse(rollbackScript.contains(#"${command%% *}"#))
+        XCTAssertFalse(rollbackScript.contains("pgrep -x KnowTypeInputMethodApp"))
+        XCTAssertFalse(rollbackScript.contains(#"KnowTypeInputMethodApp" --knowtype-purge-legacy"#))
+        XCTAssertFalse(rollbackScript.contains("killall KnowTypeInputMethodApp"))
+        XCTAssertFalse(rollbackScript.contains(#"open -g "$target_path""#))
+        XCTAssertTrue(repairScript.contains(#""$INPUTSOURCE_TOOL" purge-legacy"#))
+        XCTAssertTrue(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-register-input-source --knowtype-enable-input-source"#))
+        XCTAssertTrue(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-select-input-source"#))
+        XCTAssertTrue(repairScript.contains("visible KnowType input mode"))
+        XCTAssertTrue(repairScript.contains("continuing with enabled/history repair, menu refresh, and diagnostics"))
+        XCTAssertTrue(repairScript.contains("selected preferences will not be rewritten"))
+        XCTAssertTrue(repairScript.contains("selected preferences were not rewritten because installed app selection was not verified"))
+        XCTAssertTrue(smokeScript.contains(#"cd "$ROOT_DIR""#))
+        XCTAssertTrue(smokeScript.contains(#"swift run --package-path "$ROOT_DIR" --quiet KnowTypeInputMethodApp --knowtype-rime-smoke"#))
+        XCTAssertFalse(repairScript.contains("--legacy-parent-anchor"))
+        XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-install-activate"#))
+        XCTAssertFalse(repairScript.contains(#""$BUNDLE_EXECUTABLE" --knowtype-purge-legacy"#))
+        XCTAssertFalse(repairScript.contains("killall KnowTypeInputMethodApp"))
+        XCTAssertFalse(repairScript.contains(#"open -g "$BUNDLE_PATH""#))
     }
 
     func testInstallHelperUsesCurrentInputSourceIDsAndSafeRemoval() throws {
@@ -465,12 +637,13 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("refusing to remove or replace"))
         XCTAssertTrue(helperSource.contains("return 1"))
         XCTAssertTrue(uninstallScript.contains("optional compatibility KnowType PreferencePane"))
+        XCTAssertTrue(uninstallScript.contains("--remove-parent-anchor"))
         XCTAssertTrue(uninstallScript.contains(#"elif (( DRY_RUN == 1 )); then"#))
         XCTAssertTrue(uninstallScript.contains("Would remove $bundle_count local KnowType input method bundle(s)."))
         XCTAssertTrue(uninstallScript.contains("Removed $bundle_count local KnowType input method bundle(s)."))
     }
 
-    func testInputMethodInfoDeclaresVisibleInputMode() throws {
+    func testInputMethodInfoDeclaresVisibleHansInputMode() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -498,20 +671,22 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "KnowTypeInputMethodIcon.icns")
         XCTAssertEqual(plist["tsInputMethodCharacterRepertoireKey"] as? [String], ["Hans", "Hant", "Hani", "Hanb", "Han"])
 
-        let component = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
-        let modeList = try XCTUnwrap(component["tsInputModeListKey"] as? [String: Any])
-        let mode = try XCTUnwrap(modeList[KnowTypeInputSourceIDs.activeMode] as? [String: Any])
-        XCTAssertEqual(mode["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.activeMode)
-        XCTAssertEqual(mode["TISIntendedLanguage"] as? String, "zh-Hans")
-        XCTAssertEqual(mode["tsInputModeCharacterRepertoireKey"] as? [String], ["Hans", "Hant", "Hani", "Hanb", "Han"])
-        XCTAssertEqual(mode["tsInputModeIsVisibleKey"] as? Bool, true)
-        XCTAssertEqual(mode["tsInputModeDefaultStateKey"] as? Bool, true)
-        XCTAssertEqual(mode["tsInputModeKeyEquivalentKey"] as? String, "K")
-        XCTAssertEqual(mode["tsInputModeKeyEquivalentModifiersKey"] as? Int, 4608)
-        XCTAssertEqual(mode["tsInputModeScriptKey"] as? String, "smUnicodeScript")
-        XCTAssertEqual(component["tsVisibleInputModeOrderedArrayKey"] as? [String], [KnowTypeInputSourceIDs.activeMode])
+        let componentInputModeDict = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
+        let modeList = try XCTUnwrap(componentInputModeDict["tsInputModeListKey"] as? [String: Any])
+        XCTAssertEqual(Set(modeList.keys), Set([KnowTypeInputSourceIDs.activeMode]))
+        let visibleMode = try XCTUnwrap(modeList[KnowTypeInputSourceIDs.activeMode] as? [String: Any])
+        XCTAssertEqual(visibleMode["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.activeMode)
+        XCTAssertEqual(visibleMode["TISIntendedLanguage"] as? String, "zh-Hans")
+        XCTAssertEqual(visibleMode["tsInputModeIsVisibleKey"] as? Bool, true)
+        XCTAssertEqual(visibleMode["tsInputModeDefaultStateKey"] as? Bool, true)
+        XCTAssertEqual(visibleMode["tsInputModePrimaryInScriptKey"] as? Bool, true)
+        XCTAssertEqual(visibleMode["tsInputModeCharacterRepertoireKey"] as? [String], ["Hans", "Hant", "Hani", "Hanb", "Han"])
+        XCTAssertEqual(componentInputModeDict["tsVisibleInputModeOrderedArrayKey"] as? [String], [KnowTypeInputSourceIDs.activeMode])
         XCTAssertEqual((plist["TISIconLabels"] as? [String: String])?["Primary"], "知")
-        XCTAssertNotEqual(KnowTypeInputSourceIDs.activeMode, KnowTypeInputSourceIDs.parent)
+        XCTAssertEqual(KnowTypeInputSourceIDs.activeMode, "com.knowtype.inputmethod.KnowType.Hans")
+        XCTAssertEqual(KnowTypeInputSourceIDs.connectionName, "com.knowtype.inputmethod.KnowType_Connection")
+        XCTAssertFalse(KnowTypeInputSourceIDs.legacyModes.contains("com.knowtype.inputmethod.KnowType.Hans"))
+        XCTAssertTrue(KnowTypeInputSourceIDs.legacyModes.contains("com.knowtype.inputmethod.KnowType.Mode"))
     }
 
     func testInputMethodProvidesLocalizedDisplayNames() throws {
@@ -530,10 +705,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType" = "KnowType";"#))
+        XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType" = "KnowType Input Method";"#))
         XCTAssertTrue(englishStrings.contains(#""com.knowtype.inputmethod.KnowType.Hans" = "KnowType";"#))
         XCTAssertFalse(englishStrings.contains("com.knowtype.inputmethod.KnowType.Mode"))
-        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType" = "知键";"#))
+        XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType" = "知键输入法容器";"#))
         XCTAssertTrue(chineseStrings.contains(#""com.knowtype.inputmethod.KnowType.Hans" = "知键";"#))
         XCTAssertFalse(chineseStrings.contains("com.knowtype.inputmethod.KnowType.Mode"))
         XCTAssertTrue(chineseStrings.contains(#""CFBundleDisplayName" = "知键";"#))
@@ -558,9 +733,120 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["CFBundleIdentifier"] as? String, KnowTypeInputSourceIDs.parent)
         XCTAssertEqual(plist["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.parent)
         XCTAssertEqual(plist["InputMethodConnectionName"] as? String, KnowTypeInputSourceIDs.connectionName)
-        let component = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
-        let modeList = try XCTUnwrap(component["tsInputModeListKey"] as? [String: Any])
-        let mode = try XCTUnwrap(modeList[KnowTypeInputSourceIDs.activeMode] as? [String: Any])
-        XCTAssertEqual(mode["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.activeMode)
+        let componentInputModeDict = try XCTUnwrap(plist["ComponentInputModeDict"] as? [String: Any])
+        let modeList = try XCTUnwrap(componentInputModeDict["tsInputModeListKey"] as? [String: Any])
+        XCTAssertEqual(modeList.keys.sorted(), [KnowTypeInputSourceIDs.activeMode])
+        XCTAssertEqual(componentInputModeDict["tsVisibleInputModeOrderedArrayKey"] as? [String], [KnowTypeInputSourceIDs.activeMode])
+        XCTAssertNotEqual(KnowTypeInputSourceIDs.activeMode, KnowTypeInputSourceIDs.parent)
+    }
+
+    func testDiagnoseJsonSkipsMalformedAcceptedFeedbackRows() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let testRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-feedback-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: testRoot)
+        }
+
+        let home = testRoot.appendingPathComponent("Home", isDirectory: true)
+        let bundle = testRoot.appendingPathComponent("KnowType.app", isDirectory: true)
+        let aiDirectory = home
+            .appendingPathComponent("Library/Application Support/KnowType/AI", isDirectory: true)
+        try FileManager.default.createDirectory(at: aiDirectory, withIntermediateDirectories: true)
+        try makeMinimalBundle(at: bundle)
+
+        try Data(
+            """
+            ["not", "a feedback record"]
+            {"acceptID":"22222222-2222-2222-2222-222222222222","acceptedTextHash":"abc","deletedRanges":[],"deletedTexts":[],"deletedRatio":"bad","strength":"strong"}
+            {"acceptID":"11111111-1111-1111-1111-111111111111","acceptedTextHash":"abc","deletedRanges":[{"location":1,"length":1}],"deletedTexts":["x"],"deletedVisibleCharacterCount":1,"deletedRatio":0.5,"strength":"strong","reason":"delete_idle"}
+
+            """.utf8
+        ).write(to: aiDirectory.appendingPathComponent("accepted-ai-feedback.jsonl"))
+
+        let output = try runDiagnoseJSON(
+            scriptURL: rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh"),
+            homeURL: home,
+            bundleURL: bundle
+        )
+        let snapshot = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: output) as? [String: Any]
+        )
+        let userData = try XCTUnwrap(snapshot["userData"] as? [String: Any])
+        let acceptedLearning = try XCTUnwrap(userData["acceptedLearning"] as? [String: Any])
+        let feedback = try XCTUnwrap(acceptedLearning["feedback"] as? [String: Any])
+        let feedbackHistory = try XCTUnwrap(feedback["history"] as? [String: Any])
+        let warnings = try XCTUnwrap(acceptedLearning["warnings"] as? [String])
+
+        XCTAssertEqual(feedbackHistory["recordCount"] as? Int, 1)
+        XCTAssertTrue(warnings.contains("invalid_feedback_history_lines:2"))
+    }
+
+    private func makeMinimalBundle(at bundle: URL) throws {
+        let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
+        let executable = contents.appendingPathComponent("MacOS/KnowTypeInputMethodApp", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: executable.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: contents.appendingPathComponent("Frameworks", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: contents.appendingPathComponent("Resources/rime-data", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: executable)
+        try Data().write(to: contents.appendingPathComponent("Frameworks/librime.1.dylib"))
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": "com.knowtype.inputmethod.KnowType",
+            "CFBundleShortVersionString": "0.0.0-test",
+            "CFBundleVersion": "1"
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
+    }
+
+    private func runDiagnoseJSON(
+        scriptURL: URL,
+        homeURL: URL,
+        bundleURL: URL
+    ) throws -> Data {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-stdout-\(UUID().uuidString).json")
+        let errorURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-stderr-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errorURL.path, contents: nil)
+        defer {
+            try? FileManager.default.removeItem(at: outputURL)
+            try? FileManager.default.removeItem(at: errorURL)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptURL.path, "--json", "--path", bundleURL.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = homeURL.path
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        process.environment = environment
+        let output = try FileHandle(forWritingTo: outputURL)
+        let error = try FileHandle(forWritingTo: errorURL)
+        process.standardOutput = output
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        try? output.close()
+        try? error.close()
+        let data = try Data(contentsOf: outputURL)
+        if process.terminationStatus != 0 {
+            let stderr = String(data: try Data(contentsOf: errorURL), encoding: .utf8) ?? ""
+            XCTFail("diagnose-inputmethod.sh --json failed: \(stderr)")
+        }
+        return data
     }
 }

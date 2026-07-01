@@ -9,7 +9,93 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds, 10_000)
     }
 
-    func testRecommendationWithoutLockedPrefixUsesCandidateHintsAsContextOnly() async {
+    func testDefaultDebounceIsThreeHundredFiftyMilliseconds() {
+        XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 350)
+    }
+
+    func testLazyDefaultRecommendationRetriesProviderLoadAfterMissingProvider() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案可以继续推进。", confidence: 0.8)
+        ]))
+        let loader = SequencedProviderLoader([nil, provider])
+        let providerAvailability = AIRecommendationProviderAvailabilityState()
+        let runtime = LazyDefaultAIRecommendationRuntime(
+            providerLoader: { loader.load() },
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            providerAvailability: providerAvailability
+        )
+        let request = AIRecommendationRequest(rawInput: "zhegefangan", compositionID: 1)
+
+        XCTAssertEqual(providerAvailability.providerAvailability, .unknown)
+        let first = await runtime.recommendation(for: request)
+        XCTAssertEqual(providerAvailability.providerAvailability, .unavailable)
+        let second = await runtime.recommendation(for: request)
+        XCTAssertEqual(providerAvailability.providerAvailability, .available)
+
+        guard case .unavailable(let reason) = first else {
+            return XCTFail("expected missing provider on first request")
+        }
+        XCTAssertEqual(reason, "AI 未配置")
+        guard case .ready(let candidate) = second else {
+            return XCTFail("expected provider to be loaded on second request")
+        }
+        XCTAssertEqual(candidate.displayText, "这个方案可以继续推进。")
+        XCTAssertEqual(loader.count, 2)
+        let providerRequestCount = await provider.requests.count
+        XCTAssertEqual(providerRequestCount, 1)
+    }
+
+    func testTriggerPolicyAllowsThreeCharacterRawInputWithoutLockedPrefix() {
+        let policy = AIRecommendationTriggerPolicy.default
+
+        XCTAssertTrue(policy.decision(rawInput: "api", lockedPrefix: nil).isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "json", lockedPrefix: nil).isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "zhege", lockedPrefix: nil).isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "nihao", lockedPrefix: nil).isEligible)
+    }
+
+    func testTriggerPolicyRejectsOneOrTwoCharacterRawInputWithoutLockedPrefix() {
+        let policy = AIRecommendationTriggerPolicy.default
+
+        XCTAssertEqual(
+            policy.decision(rawInput: "n", lockedPrefix: nil),
+            .rejected(.rawTooShort)
+        )
+        XCTAssertEqual(
+            policy.decision(rawInput: "ni", lockedPrefix: nil),
+            .rejected(.rawTooShort)
+        )
+        XCTAssertEqual(
+            policy.decision(rawInput: " \n", lockedPrefix: nil),
+            .rejected(.rawTooShort)
+        )
+    }
+
+    func testTriggerPolicyKeepsLockedPrefixThresholdStrict() {
+        let policy = AIRecommendationTriggerPolicy.default
+
+        XCTAssertEqual(
+            policy.decision(rawInput: "wo", lockedPrefix: "我"),
+            .rejected(.prefixTooShort)
+        )
+        XCTAssertTrue(policy.decision(rawInput: "nihao", lockedPrefix: "你好").isEligible)
+        XCTAssertTrue(policy.decision(rawInput: "approach", lockedPrefix: "prefix").isEligible)
+    }
+
+    func testLegacyTraditionalCandidateDoesNotUseFirstCandidateHint() {
+        let request = AIRecommendationRequest(
+            rawInput: "zhegefangan",
+            candidateHints: [
+                AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0)
+            ],
+            compositionID: 1
+        )
+
+        XCTAssertEqual(request.traditionalCandidate.text, "")
+        XCTAssertEqual(request.traditionalCandidate.source, "raw-input")
+    }
+
+    func testRecommendationWithoutLockedPrefixIgnoresCandidateHints() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
         ]))
@@ -35,10 +121,10 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertNil(candidate.continuationText)
         XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
         XCTAssertEqual(requests.first?.lockedPrefix, nil)
-        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案", "这个方向"])
+        XCTAssertEqual(requests.first?.candidateHints, [])
     }
 
-    func testRecommendationCacheIncludesCandidateHints() async {
+    func testRecommendationCacheIgnoresCandidateHints() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
         ]))
@@ -46,25 +132,25 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         _ = await runtime.recommendation(
             for: AIRecommendationRequest(
-                rawInput: "zhege",
+                rawInput: "zhegefangan",
                 candidateHints: [AICandidateHint(text: "这个方案", nativeIndex: 0, pageNumber: 0)],
                 compositionID: 1
             )
         )
         _ = await runtime.recommendation(
             for: AIRecommendationRequest(
-                rawInput: "zhege",
+                rawInput: "zhegefangan",
                 candidateHints: [AICandidateHint(text: "这个方向", nativeIndex: 0, pageNumber: 1)],
                 compositionID: 1
             )
         )
 
         let requests = await provider.requests
-        XCTAssertEqual(requests.count, 2)
-        XCTAssertEqual(requests.map { $0.candidateHints.first?.text }, ["这个方案", "这个方向"])
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.candidateHints, [])
     }
 
-    func testRecommendationFiltersSecretCandidateHintsWithoutDisablingRequest() async {
+    func testRecommendationDropsCandidateHintsBeforeProviderRequest() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
@@ -92,8 +178,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             return XCTFail("expected ready recommendation")
         }
         XCTAssertEqual(candidate.displayText, "这个方案还可以再细化一下。")
-        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["这个方案"])
-        XCTAssertTrue(diagnosticSink.events.contains {
+        XCTAssertEqual(requests.first?.candidateHints, [])
+        XCTAssertFalse(diagnosticSink.events.contains {
             $0.stage == .skippedProtectedText && $0.reason == "secret_hint_filtered"
         })
     }
@@ -104,7 +190,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         ]))
         let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
         let request = AIRecommendationRequest(
-            rawInput: "ijust",
+            rawInput: "ijustworks",
             lockedPrefix: nil,
             candidateHints: [
                 AICandidateHint(text: "InputMethodKit", nativeIndex: 0, pageNumber: 0),
@@ -122,8 +208,59 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(candidate.displayText, "can be handled naturally")
         XCTAssertEqual(requests.count, 1)
-        XCTAssertEqual(requests.first?.rawInput, "ijust")
-        XCTAssertEqual(requests.first?.candidateHints.map(\.text), ["InputMethodKit", "iOS"])
+        XCTAssertEqual(requests.first?.rawInput, "ijustworks")
+        XCTAssertEqual(requests.first?.candidateHints, [])
+    }
+
+    func testRecommendationCallsProviderForThreeCharacterRawInputWithoutLockedPrefix() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "API latency 可以继续优化。", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "api",
+            lockedPrefix: nil,
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected provider-backed recommendation")
+        }
+        XCTAssertEqual(candidate.displayText, "API latency 可以继续优化。")
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.rawInput, "api")
+        XCTAssertEqual(requests.first?.candidateHints, [])
+    }
+
+    func testRecommendationSkipsTwoCharacterRawInputWithRawTooShortReason() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "你好", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "ni",
+            lockedPrefix: nil,
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedPrefixTooShort && $0.reason == "raw_too_short"
+        })
     }
 
     func testShortLockedPrefixDoesNotUseCandidateHintsToBypassCloudThreshold() async {
@@ -151,7 +288,9 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
         XCTAssertTrue(requests.isEmpty)
-        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedPrefixTooShort && $0.reason == "prefix_too_short"
+        })
     }
 
     func testLockedPrefixWhitespaceIsPreservedInRecommendationDisplayText() async {
@@ -243,7 +382,45 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
         XCTAssertTrue(requests.isEmpty)
-        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .skippedPrefixTooShort })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .skippedPrefixTooShort && $0.reason == "prefix_too_short"
+        })
+    }
+
+    func testRecommendationCancellationDuringDebounceRecordsNewInputReason() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "API latency 可以继续优化。", confidence: 0.82)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 200,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "api",
+            lockedPrefix: nil,
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let task = Task {
+            await runtime.recommendation(for: request)
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        task.cancel()
+
+        let state = await task.value
+        let requests = await provider.requests
+
+        XCTAssertEqual(state, .idle)
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .debounceStart && $0.reason == "waiting_for_idle"
+        })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .cancelled && $0.reason == "debounce_cancelled_by_new_input"
+        })
     }
 
     func testRecommendationDiagnosticsRecordStructuredSchemaFallback() async {
@@ -478,16 +655,83 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertNotEqual(firstLexical.sha256, secondLexical.sha256)
     }
 
+    func testRecommendationIncludesFeedbackContextAndCacheKey() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "继续推进", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let candidate = CorrectionCandidate(
+            text: "你好",
+            source: "traditional",
+            confidence: 1,
+            correctionLevel: .contextual
+        )
+        let firstFeedback = AIAcceptedFeedbackContextSnapshot(
+            summary: AIAcceptedFeedbackSummary(
+                historyHash: "feedback-a",
+                feedbackCount: 1,
+                strongCount: 1,
+                avoidTerms: ["冗长表达"],
+                styleAdjustments: ["Prefer shorter AI continuations when context is ambiguous."],
+                replacementPatterns: [],
+                sourceSummary: ["accepted-ai-feedback-summary: records=1 strong=1 history=feedback"]
+            )
+        )
+        let secondFeedback = AIAcceptedFeedbackContextSnapshot(
+            summary: AIAcceptedFeedbackSummary(
+                historyHash: "feedback-b",
+                feedbackCount: 1,
+                strongCount: 1,
+                avoidTerms: ["机械复述"],
+                styleAdjustments: ["Avoid confidently completing with phrases the user tends to delete soon after accepting."],
+                replacementPatterns: [],
+                sourceSummary: ["accepted-ai-feedback-summary: records=1 strong=1 history=feedback"]
+            )
+        )
+
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                feedbackContext: firstFeedback
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                feedbackContext: firstFeedback
+            )
+        )
+        _ = await runtime.recommendation(
+            for: AIRecommendationRequest(
+                rawInput: "nihao",
+                traditionalCandidate: candidate,
+                compositionID: 1,
+                feedbackContext: secondFeedback
+            )
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests[0].contextDocuments["AI_FEEDBACK.md"]?.contains("冗长表达") == true)
+        XCTAssertTrue(requests[1].contextDocuments["AI_FEEDBACK.md"]?.contains("机械复述") == true)
+        XCTAssertNotEqual(firstFeedback.sha256, secondFeedback.sha256)
+    }
+
     func testLexicalProfileFiltersStandaloneProtectedTechnicalTokens() throws {
         let snapshot = try XCTUnwrap(
             LexicalContextBuilder().snapshot(
-                rimeCandidates: ["API", "JSON", "方案"],
+                rimeCandidates: ["当前候选", "API", "JSON"],
                 recentCommits: ["请同步这个方案"],
                 selectionHistory: ["snake_case"]
             )
         )
 
-        XCTAssertTrue(snapshot.markdown.contains("方案"))
+        XCTAssertTrue(snapshot.markdown.contains("请同步这个方案"))
+        XCTAssertFalse(snapshot.terms.contains { $0.text == "当前候选" })
         XCTAssertFalse(snapshot.terms.contains { $0.text == "API" })
         XCTAssertFalse(snapshot.terms.contains { $0.text == "JSON" })
         XCTAssertFalse(snapshot.terms.contains { $0.text == "snake_case" })
@@ -814,6 +1058,32 @@ private actor RecordingLLMProvider: LLMProvider {
 
     var requests: [LLMRequest] {
         recordedRequests
+    }
+}
+
+private final class SequencedProviderLoader: @unchecked Sendable {
+    private let lock = NSLock()
+    private var providers: [(any LLMProvider)?]
+    private var loadCount = 0
+
+    init(_ providers: [(any LLMProvider)?]) {
+        self.providers = providers
+    }
+
+    func load() -> (any LLMProvider)? {
+        lock.lock()
+        defer { lock.unlock() }
+        loadCount += 1
+        guard !providers.isEmpty else {
+            return nil
+        }
+        return providers.removeFirst()
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadCount
     }
 }
 

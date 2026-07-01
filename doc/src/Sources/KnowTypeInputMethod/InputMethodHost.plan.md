@@ -2,26 +2,23 @@
 
 ## Responsibility
 
-`InputMethodHost` contains host-facing types used by the input-method package to
-model app context and runtime integration.
+`InputMethodHost` contains the AppKit/InputMethodKit server bootstrap seam for
+the local input-method bundle.
 
 ## Boundaries
 
+- Suggestion generation belongs to `SessionSuggestionPipeline`.
 - Product correction and privacy rules stay in `KnowTypeCore`.
 - Concrete IMK callback handling stays in `InputController` and
   `InputControllerCoordinator`.
 
 ## Behavior Notes
 
-- Host app bundle identifiers help apply protected app policy and input-mode
-  defaults.
-- Provider-backed continuation uses the secret-only cloud AI gate; host app
-  identity such as Terminal, iTerm, or Xcode is not by itself a real-time AI
-  disabled condition.
-- Host state should be represented in testable value types before it reaches
-  core or session logic.
+- `KnowTypeIMKServerBootstrap` wraps IMK server creation behind a tiny type so
+  AppKit/InputMethodKit imports stay isolated.
+- This file should not grow input behavior, host policy, candidate state, or AI
+  runtime logic.
 
 ## Tests
 
-- `InputControllerCoordinatorTests`
-- `MVPAcceptanceTests`
+- `swift build`

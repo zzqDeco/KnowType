@@ -68,6 +68,29 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(modelCount, 2)
     }
 
+    @MainActor
+    func testUpdateHonorsVisualAbovePlacementPreference() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+
+        controller.update(
+            state: visibleState(
+                anchor: CGRect(x: 100, y: 400, width: 0, height: 18),
+                placementPreference: .preferVisualAbove
+            ),
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(window.frameOrigins, [NSPoint(x: 100, y: 424)])
+        XCTAssertEqual(contentView.layoutPlans.last?.verticalPlacement, .visualAboveCaret)
+    }
+
     func testPlacementAvoidsVisibleFrameEdges() {
         let engine = layoutEngine()
         let screenProvider = FakeCandidatePanelScreenProvider(
@@ -180,6 +203,149 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(factoryCallCount, 1)
         XCTAssertEqual(frontCount, 1)
         XCTAssertEqual(outCount, 1)
+    }
+
+    @MainActor
+    func testMatchingVisibleStateUsesFastPathWhileWindowIsOrderedVisible() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let state = visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+
+        controller.update(state: state, locale: .zhCN)
+        controller.update(state: state, locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 2)
+        XCTAssertEqual(window.orderOutCount, 0)
+        XCTAssertEqual(window.contentSizes.count, 1)
+        XCTAssertEqual(contentView.models.count, 1)
+    }
+
+    @MainActor
+    func testLayoutFailureClearsPresentationCacheBeforeMatchingStateReturns() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let screenProvider = MutableCandidatePanelScreenProvider(screens: fakeScreens())
+        let controller = CandidatePanelWindowController(
+            screenProvider: screenProvider,
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let state = visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+
+        controller.update(state: state, locale: .zhCN)
+        screenProvider.screens = []
+        controller.update(state: state, locale: .zhCN)
+        screenProvider.screens = fakeScreens()
+        controller.update(state: state, locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 2)
+        XCTAssertEqual(window.orderOutCount, 1)
+        XCTAssertEqual(window.contentSizes.count, 2)
+        XCTAssertEqual(contentView.models.count, 2)
+    }
+
+    @MainActor
+    func testHiddenStateClearsPresentationCacheBeforeMatchingStateReturns() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let state = visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+
+        controller.update(state: state, locale: .zhCN)
+        controller.update(state: CandidatePanelState(), locale: .zhCN)
+        controller.update(state: state, locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 2)
+        XCTAssertEqual(window.orderOutCount, 1)
+        XCTAssertEqual(window.contentSizes.count, 2)
+        XCTAssertEqual(contentView.models.count, 2)
+    }
+
+    @MainActor
+    func testStaleVisibleFrameAfterHiddenFrameDoesNotReopenPanel() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let visibleFrame = panelFrame(
+            generation: 1,
+            state: visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+        )
+        let hiddenFrame = panelFrame(generation: 2, state: CandidatePanelState(), reason: .compositionEnded)
+
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+        controller.apply(frame: hiddenFrame, locale: .zhCN)
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 1)
+        XCTAssertEqual(window.orderOutCount, 1)
+        XCTAssertEqual(window.contentSizes.count, 1)
+        XCTAssertEqual(contentView.models.count, 1)
+    }
+
+    @MainActor
+    func testNewVisibleFrameAfterHiddenFrameCanReopenPanel() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let visibleState = visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+
+        controller.apply(frame: panelFrame(generation: 1, state: visibleState), locale: .zhCN)
+        controller.apply(
+            frame: panelFrame(generation: 2, state: CandidatePanelState(), reason: .compositionEnded),
+            locale: .zhCN
+        )
+        controller.apply(frame: panelFrame(generation: 3, state: visibleState), locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 2)
+        XCTAssertEqual(window.orderOutCount, 1)
+        XCTAssertEqual(window.contentSizes.count, 2)
+        XCTAssertEqual(contentView.models.count, 2)
+    }
+
+    @MainActor
+    func testSameGenerationVisibleFrameUsesFastPathWhilePanelIsVisible() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let visibleFrame = panelFrame(
+            generation: 1,
+            state: visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+        )
+
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 2)
+        XCTAssertEqual(window.orderOutCount, 0)
+        XCTAssertEqual(window.contentSizes.count, 1)
+        XCTAssertEqual(contentView.models.count, 1)
     }
 
     @MainActor
@@ -354,22 +520,25 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
     }
 
     private func fakeScreenProvider() -> FakeCandidatePanelScreenProvider {
-        FakeCandidatePanelScreenProvider(
-            screens: [
-                CandidateAnchorScreen(
-                    identifier: "main",
-                    frame: CGRect(x: 0, y: 0, width: 800, height: 800),
-                    visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 760)
-                )
-            ]
-        )
+        FakeCandidatePanelScreenProvider(screens: fakeScreens())
+    }
+
+    private func fakeScreens() -> [CandidateAnchorScreen] {
+        [
+            CandidateAnchorScreen(
+                identifier: "main",
+                frame: CGRect(x: 0, y: 0, width: 800, height: 800),
+                visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 760)
+            )
+        ]
     }
 
     private func visibleState(
         anchor: CGRect,
         prefixTexts: [String] = [],
         paging: CandidatePanelPagingState = CandidatePanelPagingState(),
-        layoutMode: CandidatePanelLayoutMode = .adaptive
+        layoutMode: CandidatePanelLayoutMode = .adaptive,
+        placementPreference: CandidatePanelPlacementPreference = .automatic
     ) -> CandidatePanelState {
         CandidatePanelState(
             windowState: CandidatePanelWindowState(
@@ -388,7 +557,8 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                     continuationCandidates: []
                 ),
                 paging: paging,
-                layoutMode: layoutMode
+                layoutMode: layoutMode,
+                placementPreference: placementPreference
             )
         )
     }
@@ -409,6 +579,22 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         )
     }
 
+    private func panelFrame(
+        generation: Int,
+        state: CandidatePanelState,
+        reason: CandidatePanelVisibilityReason = .compositionActive
+    ) -> CandidatePanelFrame {
+        CandidatePanelFrame(
+            presentationGeneration: generation,
+            compositionID: 1,
+            rawRevision: 1,
+            rawLength: state.windowState.viewModel.rawInput.count,
+            panelModel: state,
+            anchorSource: state.windowState.anchorSource,
+            visibilityReason: reason
+        )
+    }
+
     private func layoutEngine(defaultTextWidth: CGFloat = 60) -> CandidatePanelLayoutEngine {
         CandidatePanelLayoutEngine(
             textMeasurer: WindowControllerCandidatePanelTextMeasurer(defaultTextWidth: defaultTextWidth)
@@ -418,6 +604,14 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
 
 private struct FakeCandidatePanelScreenProvider: ScreenGeometryProviding {
     var screens: [CandidateAnchorScreen]
+}
+
+private final class MutableCandidatePanelScreenProvider: ScreenGeometryProviding {
+    var screens: [CandidateAnchorScreen]
+
+    init(screens: [CandidateAnchorScreen]) {
+        self.screens = screens
+    }
 }
 
 @MainActor

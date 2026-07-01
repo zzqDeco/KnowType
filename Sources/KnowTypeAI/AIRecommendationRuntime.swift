@@ -2,20 +2,58 @@ import Foundation
 import KnowTypeCore
 import KnowTypeProviders
 
+public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
+    private let providerLoader: @Sendable () -> (any LLMProvider)?
+    private let diagnosticSink: any AIRecommendationDiagnosticSink
+    private let providerAvailability: AIRecommendationProviderAvailabilityState
+    private var runtime: AIRecommendationRuntime?
+
+    public init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)? = {
+            ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)
+        },
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState()
+    ) {
+        self.providerLoader = providerLoader
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+    }
+
+    public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        if let runtime {
+            return await runtime.recommendation(for: request)
+        }
+        let provider = providerLoader()
+        guard provider != nil else {
+            providerAvailability.update(.unavailable)
+            return await AIRecommendationRuntime(
+                provider: nil,
+                diagnosticSink: diagnosticSink
+            ).recommendation(for: request)
+        }
+        providerAvailability.update(.available)
+        let runtime = AIRecommendationRuntime(provider: provider, diagnosticSink: diagnosticSink)
+        self.runtime = runtime
+        return await runtime.recommendation(for: request)
+    }
+}
+
 public actor AIRecommendationRuntime: AIRecommendationProviding {
     public enum Defaults {
+        public static let debounceMilliseconds = 350
         public static let hardTimeoutMilliseconds = 10_000
     }
 
     private struct CacheKey: Hashable {
         var lockedPrefix: String?
-        var candidateHints: [AICandidateHint]
         var rawInput: String
         var appBundleID: String
         var localeRawValue: String
         var environmentHash: String
         var correctionHash: String
         var lexicalHash: String
+        var feedbackHash: String
     }
 
     private struct CacheEntry {
@@ -38,7 +76,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         environmentStore: EnvironmentDocumentStore = EnvironmentDocumentStore(),
         correctionStore: CorrectionInstructionStore = CorrectionInstructionStore(),
         healthMonitor: AIHealthMonitor = AIHealthMonitor(),
-        debounceMilliseconds: Int = 120,
+        debounceMilliseconds: Int = Defaults.debounceMilliseconds,
         hardTimeoutMilliseconds: Int = Defaults.hardTimeoutMilliseconds,
         diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         cacheTTL: TimeInterval = 300
@@ -74,6 +112,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: reason)
         }
+        var request = request
+        request.candidateHints = []
         guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               Self.hasUsableRecommendationContext(in: request) else {
             record(
@@ -85,7 +125,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .ineligible(reason: "AI 不适用")
         }
-        var request = request
         if Self.containsSecretLikeRecommendationText(request) {
             record(
                 .skippedProtectedText,
@@ -96,51 +135,34 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .ineligible(reason: "AI 已禁用")
         }
-        let unfilteredHintCount = request.candidateHints.count
-        request.candidateHints = Self.secretFilteredCandidateHints(request.candidateHints)
-        if request.candidateHints.count != unfilteredHintCount {
-            record(
-                .skippedProtectedText,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt,
-                candidateCount: unfilteredHintCount,
-                acceptedCount: request.candidateHints.count,
-                reason: "secret_hint_filtered"
-            )
-        }
-        guard Self.hasUsableRecommendationContext(in: request) else {
-            record(
-                .skippedIneligible,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt,
-                candidateCount: unfilteredHintCount,
-                acceptedCount: 0,
-                reason: "secret_hints_filtered_all"
-            )
-            return .ineligible(reason: "AI 无推荐")
-        }
-        guard Self.hasLongEnoughRecommendationContextForCloud(request) else {
+        let triggerDecision = AIRecommendationTriggerPolicy.default.decision(
+            rawInput: request.rawInput,
+            lockedPrefix: request.lockedPrefix
+        )
+        guard triggerDecision.isEligible else {
             record(
                 .skippedPrefixTooShort,
                 request: request,
                 providerName: provider.providerName,
                 elapsedSince: startedAt,
-                reason: "prefix_too_short"
+                reason: triggerDecision.rejectionReason?.rawValue ?? "prefix_too_short"
             )
             return .ineligible(reason: "AI 无推荐")
         }
 
+        var waitingForIdle = false
         do {
             if debounceNanoseconds > 0 {
+                waitingForIdle = true
                 record(
                     .debounceStart,
                     request: request,
                     providerName: provider.providerName,
-                    elapsedSince: startedAt
+                    elapsedSince: startedAt,
+                    reason: "waiting_for_idle"
                 )
                 try await Task.sleep(nanoseconds: debounceNanoseconds)
+                waitingForIdle = false
                 record(
                     .debounceEnd,
                     request: request,
@@ -159,13 +181,13 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             let key = CacheKey(
                 lockedPrefix: request.lockedPrefix,
-                candidateHints: request.candidateHints,
                 rawInput: request.rawInput,
                 appBundleID: request.appBundleID ?? "",
                 localeRawValue: request.locale.rawValue,
                 environmentHash: environment.sha256,
                 correctionHash: correction.sha256,
-                lexicalHash: request.lexicalContext?.sha256 ?? ""
+                lexicalHash: request.lexicalContext?.sha256 ?? "",
+                feedbackHash: request.feedbackContext?.sha256 ?? ""
             )
             if let cached = cache[key], cached.expiresAt > Date() {
                 record(
@@ -192,12 +214,15 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             if let lexicalContext = request.lexicalContext {
                 contextDocuments["LEXICAL_PROFILE.md"] = lexicalContext.markdown
             }
+            if let feedbackContext = request.feedbackContext {
+                contextDocuments["AI_FEEDBACK.md"] = feedbackContext.markdown
+            }
 
             let llmRequest = LLMRequest(
                 task: .continuation,
                 lockedPrefix: request.lockedPrefix,
                 rawInput: request.rawInput,
-                candidateHints: request.candidateHints.map(\.llmHint),
+                candidateHints: [],
                 locale: request.locale,
                 appContext: request.appBundleID,
                 maxCandidates: 1,
@@ -303,7 +328,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 request: request,
                 providerName: provider.providerName,
                 elapsedSince: startedAt,
-                reason: "task_cancelled"
+                reason: waitingForIdle ? "debounce_cancelled_by_new_input" : "task_cancelled"
             )
             return .idle
         } catch {
@@ -470,7 +495,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         if request.lockedPrefix?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             return true
         }
-        return request.candidateHints.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private static func containsSecretLikeRecommendationText(_ request: AIRecommendationRequest) -> Bool {
@@ -482,29 +507,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             return true
         }
         return false
-    }
-
-    private static func secretFilteredCandidateHints(_ candidateHints: [AICandidateHint]) -> [AICandidateHint] {
-        candidateHints.filter { !TextProtection.containsSecretLikeContent($0.text) }
-    }
-
-    private static func hasLongEnoughRecommendationContextForCloud(_ request: AIRecommendationRequest) -> Bool {
-        if let lockedPrefix = request.lockedPrefix,
-           !lockedPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return isPrefixLongEnoughForCloudRecommendation(lockedPrefix)
-        }
-        return request.candidateHints.contains { isPrefixLongEnoughForCloudRecommendation($0.text) }
-    }
-
-    private static func isPrefixLongEnoughForCloudRecommendation(_ prefix: String) -> Bool {
-        let visibleCount = prefix.filter { !$0.isWhitespace && !$0.isNewline }.count
-        let hanCount = prefix.filter {
-            String($0).range(of: #"\p{Han}"#, options: .regularExpression) != nil
-        }.count
-        if hanCount > 0 {
-            return hanCount >= 2 || visibleCount >= 6
-        }
-        return visibleCount >= 6
     }
 
     private static func rejectionSummary(_ reasons: [String]) -> String {

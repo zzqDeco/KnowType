@@ -122,7 +122,9 @@ public extension KnowTypeConversionEngine {
 }
 
 public struct RimeConversionEngine: KnowTypeConversionEngine {
+    private let nativeConfiguration: NativeRimeConfiguration?
     private var nativeSession: NativeRimeSession?
+    private var nativeSessionCreationAttempted = false
     private var currentSnapshot: ConversionEngineSnapshot
     private var nativeBypassUntilReset = false
     private var nativeRawInputMirror = ""
@@ -144,9 +146,30 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         traditionalInputEngine _: TraditionalInputEngine? = nil,
         configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration()
     ) {
+        self.nativeConfiguration = configuration
         self.configuredSchemaID = configuration?.schemaID ?? "pinyin_simp"
-        self.nativeSession = configuration.flatMap { NativeRimeSession(configuration: $0) }
-        self.currentSnapshot = nativeSession?.snapshot() ?? Self.unavailableSnapshot(rawInput: "")
+        self.nativeSession = nil
+        self.currentSnapshot = Self.unavailableSnapshot(rawInput: "")
+    }
+
+    @discardableResult
+    static func prewarmNativeSession(
+        configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration()
+    ) -> Bool {
+        guard let configuration else {
+            traceStartupEvent("rime_prewarm_done", elapsed: 0, details: "schema=<none> success=false")
+            return false
+        }
+        traceStartupEvent("rime_prewarm_start", details: "schema=\(configuration.schemaID)")
+        let startedAt = Date()
+        let session = NativeRimeSession.prewarm(configuration: configuration)
+        let success = session != nil
+        traceStartupEvent(
+            "rime_prewarm_done",
+            elapsed: Date().timeIntervalSince(startedAt),
+            details: "schema=\(configuration.schemaID) success=\(success)"
+        )
+        return success
     }
 
     public mutating func reset() {
@@ -161,7 +184,12 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return processRawBypass(key)
         }
 
-        guard let nativeSession, !nativeBypassUntilReset else {
+        guard !nativeBypassUntilReset else {
+            return processUnavailable(key, engineName: "rime-raw-bypass")
+        }
+
+        let nativeSession = ensureNativeSession(for: key)
+        guard let nativeSession else {
             return processUnavailable(key)
         }
 
@@ -178,6 +206,91 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         }
         currentSnapshot = result.snapshot
         return result
+    }
+
+    private mutating func ensureNativeSession(for key: ConversionEngineKey) -> NativeRimeSession? {
+        if let nativeSession {
+            return nativeSession
+        }
+        guard !nativeSessionCreationAttempted,
+              let nativeConfiguration else {
+            return nil
+        }
+        let startedAt = Date()
+        let creationResult = NativeRimeSession.createForeground(
+            configuration: nativeConfiguration,
+            foregroundMayPreemptSpeculative: Self.shouldPreemptSpeculativePrewarm(
+                for: key,
+                rawInput: rawMirrorOrSnapshotInput()
+            )
+        )
+        let success: Bool
+        let details: String
+        switch creationResult {
+        case .created(let session):
+            nativeSessionCreationAttempted = true
+            nativeSession = session
+            replayNativeRawInputMirrorIfNeeded(into: session)
+            currentSnapshot = nativeSession?.snapshot() ?? currentSnapshot
+            success = true
+            details = "schema=\(configuredSchemaID) success=true"
+        case .preemptedBySpeculativePrewarm:
+            success = false
+            details = "schema=\(configuredSchemaID) success=false reason=prewarm_busy"
+        case .failed:
+            nativeSessionCreationAttempted = true
+            success = false
+            details = "schema=\(configuredSchemaID) success=false"
+        }
+        Self.traceStartupEvent(
+            "first_rime_session_create",
+            elapsed: Date().timeIntervalSince(startedAt),
+            details: details
+        )
+        guard success else {
+            return nil
+        }
+        return nativeSession
+    }
+
+    private static func shouldPreemptSpeculativePrewarm(
+        for key: ConversionEngineKey,
+        rawInput: String
+    ) -> Bool {
+        switch key {
+        case .text,
+             .deleteBackward:
+            return true
+        case .space,
+             .selectCandidateOnCurrentPage,
+             .selectCandidate,
+             .highlightCandidateOnCurrentPage,
+             .pageUp,
+             .pageDown,
+             .commitComposition:
+            return rawInput.isEmpty
+        }
+    }
+
+    private mutating func replayNativeRawInputMirrorIfNeeded(into nativeSession: NativeRimeSession) {
+        guard !nativeRawInputMirror.isEmpty else {
+            return
+        }
+        for scalar in nativeRawInputMirror.unicodeScalars {
+            _ = nativeSession.process(.text(String(scalar)))
+        }
+    }
+
+    private static func traceStartupEvent(_ event: String, elapsed: TimeInterval, details: String = "") {
+        traceStartupEvent(event, details: "elapsedMs=\(String(format: "%.1f", elapsed * 1_000))\(details.isEmpty ? "" : " \(details)")")
+    }
+
+    private static func traceStartupEvent(_ event: String, details: String = "") {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" else {
+            return
+        }
+        let suffix = details.isEmpty ? "" : " \(details)"
+        fputs("KnowType startup: event=\(event)\(suffix)\n", stderr)
     }
 
     private mutating func processRawBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
@@ -456,14 +569,119 @@ protocol RimeUserDBMaintenanceSession: RimeUserDBSnapshotSession {
 }
 
 final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable {
+    private enum CreationLockMode {
+        case blocking
+        case speculative
+    }
+
+    enum ForegroundCreationResult {
+        case created(NativeRimeSession)
+        case preemptedBySpeculativePrewarm
+        case failed
+    }
+
+    private enum SessionPointerCreationResult {
+        case created(OpaquePointer)
+        case preemptedBySpeculativePrewarm
+        case failed
+    }
+
+    private enum CreationSlotAcquireResult {
+        case acquired
+        case preemptedBySpeculativePrewarm
+        case unavailable
+    }
+
+    private final class CreationState: @unchecked Sendable {
+        let condition = NSCondition()
+        var activeCreationMode: CreationLockMode?
+        var foregroundCreationRequested = false
+    }
+
+    private static let creationState = CreationState()
+
     private let session: OpaquePointer
 
-    init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
+    convenience init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
+        switch Self.makeSessionPointer(
+            configuration: configuration,
+            fileManager: fileManager,
+            lockMode: .blocking,
+            foregroundMayPreemptSpeculative: false
+        ) {
+        case .created(let session):
+            self.init(session: session)
+        case .preemptedBySpeculativePrewarm,
+             .failed:
+            return nil
+        }
+    }
+
+    static func createForeground(
+        configuration: NativeRimeConfiguration,
+        fileManager: FileManager = .default,
+        foregroundMayPreemptSpeculative: Bool = true
+    ) -> ForegroundCreationResult {
+        switch makeSessionPointer(
+            configuration: configuration,
+            fileManager: fileManager,
+            lockMode: .blocking,
+            foregroundMayPreemptSpeculative: foregroundMayPreemptSpeculative
+        ) {
+        case .created(let session):
+            return .created(NativeRimeSession(session: session))
+        case .preemptedBySpeculativePrewarm:
+            return .preemptedBySpeculativePrewarm
+        case .failed:
+            return .failed
+        }
+    }
+
+    static func prewarm(
+        configuration: NativeRimeConfiguration,
+        fileManager: FileManager = .default
+    ) -> NativeRimeSession? {
+        switch makeSessionPointer(
+            configuration: configuration,
+            fileManager: fileManager,
+            lockMode: .speculative,
+            foregroundMayPreemptSpeculative: false
+        ) {
+        case .created(let session):
+            return NativeRimeSession(session: session)
+        case .preemptedBySpeculativePrewarm,
+             .failed:
+            return nil
+        }
+    }
+
+    private init(session: OpaquePointer) {
+        self.session = session
+    }
+
+    private static func makeSessionPointer(
+        configuration: NativeRimeConfiguration,
+        fileManager: FileManager,
+        lockMode: CreationLockMode,
+        foregroundMayPreemptSpeculative: Bool
+    ) -> SessionPointerCreationResult {
         do {
             try fileManager.createDirectory(at: configuration.userDataURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: configuration.logURL, withIntermediateDirectories: true)
         } catch {
-            return nil
+            return .failed
+        }
+
+        switch acquireCreationSlot(lockMode, foregroundMayPreemptSpeculative: foregroundMayPreemptSpeculative) {
+        case .acquired:
+            break
+        case .preemptedBySpeculativePrewarm:
+            return .preemptedBySpeculativePrewarm
+        case .unavailable:
+            return .failed
+        }
+        defer {
+            releaseCreationSlot(lockMode)
         }
 
         guard let session = ktb_rime_session_create(
@@ -475,9 +693,51 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
             configuration.appName,
             configuration.schemaID
         ) else {
-            return nil
+            return .failed
         }
-        self.session = session
+        return .created(session)
+    }
+
+    private static func acquireCreationSlot(
+        _ mode: CreationLockMode,
+        foregroundMayPreemptSpeculative: Bool
+    ) -> CreationSlotAcquireResult {
+        creationState.condition.lock()
+        defer {
+            creationState.condition.unlock()
+        }
+
+        switch mode {
+        case .speculative:
+            guard creationState.activeCreationMode == nil,
+                  !creationState.foregroundCreationRequested else {
+                return .unavailable
+            }
+            creationState.activeCreationMode = .speculative
+            return .acquired
+        case .blocking:
+            if foregroundMayPreemptSpeculative,
+               creationState.activeCreationMode == .speculative {
+                creationState.foregroundCreationRequested = true
+                return .preemptedBySpeculativePrewarm
+            }
+            while creationState.activeCreationMode != nil {
+                creationState.condition.wait()
+            }
+            creationState.foregroundCreationRequested = false
+            creationState.activeCreationMode = .blocking
+            return .acquired
+        }
+    }
+
+    private static func releaseCreationSlot(_ mode: CreationLockMode) {
+        creationState.condition.lock()
+        creationState.activeCreationMode = nil
+        if mode == .blocking {
+            creationState.foregroundCreationRequested = false
+        }
+        creationState.condition.broadcast()
+        creationState.condition.unlock()
     }
 
     deinit {

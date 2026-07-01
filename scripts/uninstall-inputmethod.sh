@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
-source "$ROOT_DIR/scripts/lib/inputmethod-installation.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR"
+source "$SCRIPTS_DIR/lib/inputsource-tool.sh"
+source "$SCRIPTS_DIR/lib/inputmethod-installation.sh"
 DRY_RUN=0
+BACKUP_ENABLED=1
+PURGE_BACKUPS=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/uninstall-inputmethod.sh [--dry-run]
+Usage: scripts/uninstall-inputmethod.sh [--dry-run] [--no-backup] [--purge-backups]
 
 Removes all local KnowType input method bundles from ~/Library/Input Methods
 and removes the optional compatibility KnowType PreferencePane when installed.
 
 Options:
-  --dry-run   Print removal actions without changing files or preferences.
-  -h, --help  Show this help.
+  --dry-run        Print removal actions without changing files or preferences.
+  --no-backup      Remove install artifacts without creating an app/prefPane backup.
+  --purge-backups  Delete existing KnowType install backups. User data is still preserved.
+  -h, --help       Show this help.
 EOF
 }
 
@@ -23,6 +29,14 @@ while (($# > 0)); do
   case "$1" in
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --no-backup)
+      BACKUP_ENABLED=0
+      shift
+      ;;
+    --purge-backups)
+      PURGE_BACKUPS=1
       shift
       ;;
     -h|--help)
@@ -38,6 +52,13 @@ while (($# > 0)); do
 done
 
 PREFPANE_TARGET_PATH="$(knowtype_preferencepane_target_path)"
+TARGET_PATH="$(knowtype_inputmethod_target_path)"
+BACKUP_ROOT="$(knowtype_backup_root_dir)"
+INSTALL_STATE_PATH="$(knowtype_install_state_path)"
+
+if (( BACKUP_ENABLED == 1 && PURGE_BACKUPS == 0 )); then
+  knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" "$DRY_RUN" "$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
+fi
 
 if (( DRY_RUN == 0 )); then
   INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
@@ -69,12 +90,35 @@ fi
 knowtype_clean_preferencepane_caches "$DRY_RUN"
 knowtype_quit_system_settings_if_running "$DRY_RUN"
 
+if [[ -f "$INSTALL_STATE_PATH" ]]; then
+  if (( DRY_RUN == 1 )); then
+    echo "[dry-run] Would remove KnowType install state: $INSTALL_STATE_PATH"
+  else
+    rm -f -- "$INSTALL_STATE_PATH"
+    echo "Removed KnowType install state: $INSTALL_STATE_PATH"
+  fi
+fi
+
+if (( PURGE_BACKUPS == 1 )); then
+  if [[ -d "$BACKUP_ROOT" ]]; then
+    if (( DRY_RUN == 1 )); then
+      echo "[dry-run] Would delete KnowType install backups: $BACKUP_ROOT"
+    else
+      rm -rf -- "$BACKUP_ROOT"
+      echo "Deleted KnowType install backups: $BACKUP_ROOT"
+    fi
+  fi
+elif [[ -d "$BACKUP_ROOT" ]]; then
+  echo "Preserved KnowType install backups: $BACKUP_ROOT"
+fi
+
 if (( DRY_RUN == 0 )); then
   INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
   "$INPUTSOURCE_TOOL" repair-preferences \
     --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" \
     --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
-    --include-history >/dev/null 2>&1 || true
+    --include-history \
+    --remove-parent-anchor >/dev/null 2>&1 || true
 fi
 
 if (( bundle_count == 0 )); then

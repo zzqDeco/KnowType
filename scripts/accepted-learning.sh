@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+exec swift run \
+  --quiet \
+  --package-path "$ROOT_DIR" \
+  knowtype-accepted-learning-tool \
+  "$@"

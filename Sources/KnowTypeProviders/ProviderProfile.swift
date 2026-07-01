@@ -63,15 +63,24 @@ public struct FileProviderProfileStore: ProviderProfileStore {
         self.fileURL = fileURL
     }
 
-    public static func defaultStore() throws -> FileProviderProfileStore {
+    public static func defaultStore(createDirectory: Bool = true) throws -> FileProviderProfileStore {
         let base = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: createDirectory
         )
+        return try defaultStore(applicationSupportDirectory: base, createDirectory: createDirectory)
+    }
+
+    public static func defaultStore(
+        applicationSupportDirectory base: URL,
+        createDirectory: Bool = true
+    ) throws -> FileProviderProfileStore {
         let directory = base.appendingPathComponent("KnowType", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if createDirectory {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
         return FileProviderProfileStore(fileURL: directory.appendingPathComponent("providers.json"))
     }
 

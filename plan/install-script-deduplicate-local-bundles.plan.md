@@ -15,7 +15,8 @@ Input Methods directory.
 - `scripts/install-inputmethod.sh --dry-run` prints local KnowType bundles and
   LaunchServices records that would be cleaned without mutating system state.
 - Real install removes safe local duplicate bundles before copying the newly
-  built app, then continues to use installed-app TIS activation for `.Hans`.
+  built app, then uses helper TIS activation for the single
+  `com.knowtype.inputmethod.KnowType` source.
 - `scripts/repair-inputmethod-selection.sh` backs up relevant preference plists,
   removes duplicate local bundles except the installed path, unregisters stale
   LaunchServices records, and then runs the existing installed-app activation

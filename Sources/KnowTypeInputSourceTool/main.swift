@@ -6,7 +6,8 @@ private let defaultParentID = KnowTypeInputSourceIDs.parent
 private let defaultModeID = KnowTypeInputSourceIDs.activeMode
 private let defaultLegacyModeIDs = KnowTypeInputSourceIDs.legacyModes
 private let defaultFallbackID = KnowTypeInputSourceIDs.fallback
-private let lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+private typealias LSSupport = KnowTypeLaunchServicesSupport
+private typealias TISSupport = KnowTypeTISSupport
 
 private enum ExitCode: Int32 {
     case ok = 0
@@ -23,22 +24,25 @@ private func usage() -> Never {
           knowtype-inputsource-tool disable [--bundle-id ID]
           knowtype-inputsource-tool inspect-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool dedupe-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID]
-          knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--add-active]
-          knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID]
+          knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--include-selected] [--add-active] [--remove-parent-anchor] [--legacy-parent-anchor]
+          knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID] [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool register --path PATH [--parent-id ID] [--mode-id ID] [--select]
           knowtype-inputsource-tool bootstrap --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID] [--select]
           knowtype-inputsource-tool purge-legacy --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool select [--parent-id ID] [--mode-id ID] [--require-selected]
 
         This helper performs KnowType Text Input Source diagnostics and legacy
-        cleanup through TIS APIs. Prefer the installed KnowTypeInputMethodApp
-        command-line flags for user-facing selection so macOS authorization
-        prompts name the real input method app. Preference inspection is
-        read-only; repair-preferences is an explicit local development cleanup
-        for stale parent or .Mode rows in protected input-source preferences.
-        Use --add-active only for local cache repair; it writes the visible
-        .Hans mode row and the third-party parent anchor expected by System
-        Settings, while keeping HIToolbox/history on the .Hans mode.
+        cleanup through TIS APIs. switch-away can clear stale KnowType selected
+        preferences before install so macOS does not relaunch the host.
+        Preference inspection is read-only; repair-preferences is an explicit local development cleanup
+        for stale selected/history parent rows or .Mode rows in protected input-source preferences.
+        Use --add-active only for local cache repair; it writes the required
+        parent anchor plus visible .Hans input mode to enabled preferences, while
+        history repair keeps KnowType available and selected repair is reserved
+        for explicit verified selection. .Mode is treated as legacy cleanup.
+        --remove-parent-anchor is an explicit uninstall cleanup mode for removing
+        enabled KnowType rows after the bundle is gone.
+        --legacy-parent-anchor is accepted as a deprecated compatibility no-op.
 
         """,
         stderr
@@ -95,67 +99,6 @@ private struct Arguments {
 private func legacyModeIDs(from arguments: inout Arguments) -> [String] {
     let explicit = arguments.options("--legacy-mode-id")
     return explicit.isEmpty ? defaultLegacyModeIDs : explicit
-}
-
-private func stringProperty(_ source: TISInputSource?, _ key: CFString) -> String? {
-    guard let source, let raw = TISGetInputSourceProperty(source, key) else {
-        return nil
-    }
-    return Unmanaged<CFString>.fromOpaque(raw).takeUnretainedValue() as String
-}
-
-private func boolProperty(_ source: TISInputSource?, _ key: CFString) -> Bool {
-    guard let source, let raw = TISGetInputSourceProperty(source, key) else {
-        return false
-    }
-    return CFBooleanGetValue(unsafeBitCast(raw, to: CFBoolean.self))
-}
-
-private func inputSources(id: String) -> [TISInputSource] {
-    let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
-    return TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource] ?? []
-}
-
-private func inputSources(bundleID: String) -> [TISInputSource] {
-    let filter = [kTISPropertyBundleID as String: bundleID] as CFDictionary
-    return TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource] ?? []
-}
-
-private func inputSource(id: String) -> TISInputSource? {
-    inputSources(id: id).first
-}
-
-private func postTISNotification(_ name: CFString) {
-    CFNotificationCenterPostNotification(
-        CFNotificationCenterGetDistributedCenter(),
-        CFNotificationName(name),
-        nil,
-        nil,
-        true
-    )
-}
-
-private func inputSourceSignature(_ source: TISInputSource) -> String {
-    [
-        stringProperty(source, kTISPropertyInputSourceID) ?? "",
-        stringProperty(source, kTISPropertyInputModeID) ?? "",
-        stringProperty(source, kTISPropertyInputSourceType) ?? "",
-        stringProperty(source, kTISPropertyInputSourceCategory) ?? "",
-        stringProperty(source, kTISPropertyBundleID) ?? "",
-        stringProperty(source, kTISPropertyLocalizedName) ?? ""
-    ].joined(separator: "|")
-}
-
-private func deduplicatedInputSources(_ sources: [TISInputSource]) -> [TISInputSource] {
-    var seen = Set<String>()
-    var result: [TISInputSource] = []
-    for source in sources {
-        let signature = inputSourceSignature(source)
-        if seen.insert(signature).inserted {
-            result.append(source)
-        }
-    }
-    return result
 }
 
 private func preferenceArray(_ key: String, domain: String) -> [[String: Any]] {
@@ -218,14 +161,6 @@ private func preferencesContainEntry(_ entries: [[String: Any]], target: [String
     entries.contains { preferenceEntryMatches($0, target: target) }
 }
 
-private func preferencesContainInputModeOrParent(bundleID: String, modeID: String, domain: String, key: String) -> Bool {
-    let entries = preferenceArray(key, domain: domain)
-    if preferencesContainEntry(entries, target: modePreferenceEntry(bundleID: bundleID, modeID: modeID)) {
-        return true
-    }
-    return modeID != bundleID && preferencesContainEntry(entries, target: parentPreferenceEntry(bundleID: bundleID))
-}
-
 private func inputSourcePreferenceSignature(_ entry: [String: Any]) -> String {
     [
         entry["InputSourceKind"] as? String ?? "",
@@ -266,11 +201,12 @@ private func isStalePreferenceEntry(
     legacyModeIDs: Set<String>,
     removeParent: Bool
 ) -> Bool {
-    if removeParent,
-       modeID != bundleID,
-       entry["Bundle ID"] as? String == bundleID,
-       entry["InputSourceKind"] as? String == "Keyboard Input Method" {
-        return true
+    if removeParent {
+        return isKnowTypePreferenceEntry(
+            entry,
+            bundleID: bundleID,
+            modeIDs: Set([modeID] + Array(legacyModeIDs))
+        )
     }
     return isLegacyModePreferenceEntry(entry, bundleID: bundleID, legacyModeIDs: legacyModeIDs)
 }
@@ -340,25 +276,24 @@ private func hitoolboxSelectedModeID() -> String? {
     return nil
 }
 
-private func enableInputSource(_ source: TISInputSource, label: String) {
-    if boolProperty(source, kTISPropertyInputSourceIsEnabled) {
-        return
+@discardableResult
+private func enableInputSource(_ source: TISInputSource, label: String) -> Bool {
+    if TISSupport.boolProperty(source, kTISPropertyInputSourceIsEnabled) {
+        return true
     }
     let status = TISEnableInputSource(source)
     if status != noErr {
         fputs("Warning: TISEnableInputSource(\(label)) returned \(status)\n", stderr)
+        return false
     }
+    return true
 }
 
 private func disableInputSources(bundleID: String) {
-    let sources = inputSources(bundleID: bundleID)
+    let sources = TISSupport.inputSources(bundleID: bundleID)
     var disabledCount = 0
-    for source in sources.sorted(by: { lhs, rhs in
-        let lhsIsMode = stringProperty(lhs, kTISPropertyInputModeID) != nil
-        let rhsIsMode = stringProperty(rhs, kTISPropertyInputModeID) != nil
-        return lhsIsMode && !rhsIsMode
-    }) {
-        let id = stringProperty(source, kTISPropertyInputSourceID) ?? "<unknown>"
+    for source in sources.sorted(by: TISSupport.disableModesBeforeParent) {
+        let id = TISSupport.stringProperty(source, kTISPropertyInputSourceID) ?? "<unknown>"
         let status = TISDisableInputSource(source)
         if status == noErr {
             disabledCount += 1
@@ -400,6 +335,7 @@ private struct PreferenceRepairResult {
 }
 
 private enum ActivePreferencePlacement {
+    case prepend
     case append
     case afterFirstRetained
 }
@@ -444,22 +380,24 @@ private func repairPreferenceEntries(
     var added = 0
     if addActive {
         let activeEntry = activePreferenceEntry(bundleID: bundleID, modeID: modeID)
+        var entriesToAdd: [[String: Any]] = []
+        if addParent && modeID != bundleID {
+            entriesToAdd.append(parentPreferenceEntry(bundleID: bundleID) as [String: Any])
+            added += 1
+        }
+        entriesToAdd.append(activeEntry as [String: Any])
+        added += 1
+
         switch activePlacement {
+        case .prepend:
+            repaired = entriesToAdd + retained
         case .append:
-            repaired = retained + [activeEntry as [String: Any]]
+            repaired = retained + entriesToAdd
         case .afterFirstRetained:
             if let first = retained.first {
-                repaired = [first, activeEntry as [String: Any]] + retained.dropFirst()
+                repaired = [first] + entriesToAdd + retained.dropFirst()
             } else {
-                repaired = [activeEntry as [String: Any]]
-            }
-        }
-        added += 1
-        if addParent && modeID != bundleID {
-            let parentEntry = parentPreferenceEntry(bundleID: bundleID)
-            if !preferencesContainEntry(repaired, target: parentEntry) {
-                repaired.append(parentEntry as [String: Any])
-                added += 1
+                repaired = entriesToAdd
             }
         }
     }
@@ -531,8 +469,13 @@ private func repairPreferences(
     modeID: String,
     legacyModeIDs: [String],
     includeHistory: Bool,
-    addActive: Bool
+    includeSelected: Bool,
+    addActive: Bool,
+    removeParentAnchor: Bool,
+    addLegacyParentAnchor: Bool
 ) {
+    let addParentAnchor = addActive && modeID != bundleID
+    let removeEnabledParentAnchor = removeParentAnchor && !addActive
     var results = [
         repairPreferenceArray(
             domain: "com.apple.HIToolbox",
@@ -540,8 +483,8 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: true,
-            addParent: false,
+            removeParent: removeEnabledParentAnchor,
+            addParent: addParentAnchor,
             addActive: addActive
         ),
         repairPreferenceArray(
@@ -550,8 +493,8 @@ private func repairPreferences(
             bundleID: bundleID,
             modeID: modeID,
             legacyModeIDs: legacyModeIDs,
-            removeParent: false,
-            addParent: addActive,
+            removeParent: removeEnabledParentAnchor,
+            addParent: addParentAnchor,
             addActive: addActive
         )
     ]
@@ -566,7 +509,23 @@ private func repairPreferences(
                 legacyModeIDs: legacyModeIDs,
                 removeParent: true,
                 addParent: false,
-                activePlacement: .afterFirstRetained,
+                activePlacement: includeSelected ? .prepend : .afterFirstRetained,
+                addActive: addActive
+            )
+        )
+    }
+
+    if includeSelected {
+        results.append(
+            repairPreferenceArray(
+                domain: "com.apple.HIToolbox",
+                key: "AppleSelectedInputSources",
+                bundleID: bundleID,
+                modeID: modeID,
+                legacyModeIDs: legacyModeIDs,
+                removeParent: true,
+                addParent: false,
+                activePlacement: .prepend,
                 addActive: addActive
             )
         )
@@ -581,40 +540,60 @@ private func repairPreferences(
     print("preference.repair.active.inputsource.id=\(modeID)")
     print("preference.repair.active.mode.id=\(modeID)")
     print("preference.repair.include.history=\(includeHistory)")
+    print("preference.repair.include.selected=\(includeSelected)")
     print("preference.repair.add.active=\(addActive)")
-    postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
-}
-
-private func currentInputSourceID() -> String? {
-    stringProperty(TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), kTISPropertyInputSourceID)
+    print("preference.repair.add.parent.anchor=\(addParentAnchor)")
+    print("preference.repair.remove.parent.anchor=\(removeEnabledParentAnchor)")
+    print("preference.repair.add.legacy.parent.anchor=false")
+    print("preference.repair.legacy.parent.anchor.option=\(addLegacyParentAnchor)")
+    TISSupport.postNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
+    if includeSelected {
+        TISSupport.postNotification(kTISNotifySelectedKeyboardInputSourceChanged)
+    }
 }
 
 private func printStatus(parentID: String, modeID: String, legacyModeIDs: [String]) {
     let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
-    let currentID = stringProperty(current, kTISPropertyInputSourceID) ?? ""
-    let rawParentSources = inputSources(id: parentID)
-    let rawModeSources = inputSources(id: modeID)
-    let parentSources = deduplicatedInputSources(rawParentSources)
-    let modeSources = deduplicatedInputSources(rawModeSources)
+    let currentID = TISSupport.stringProperty(current, kTISPropertyInputSourceID) ?? ""
+    let usesSingleInputSource = modeID == parentID
+    let rawParentSources = TISSupport.inputSources(id: parentID)
+    let rawModeSources = usesSingleInputSource ? rawParentSources : TISSupport.inputSources(id: modeID)
+    let parentSources = TISSupport.deduplicatedDiagnosticSources(rawParentSources)
+    let modeSources = usesSingleInputSource ? parentSources : TISSupport.deduplicatedDiagnosticSources(rawModeSources)
     let parent = parentSources.first
     let mode = modeSources.first
     let activeModeCount = modeSources.count
-    let legacyCounts = legacyModeIDs.map { ($0, deduplicatedInputSources(inputSources(id: $0)).count) }
+    let legacySourcesByID = legacyModeIDs.map { ($0, TISSupport.deduplicatedDiagnosticSources(TISSupport.inputSources(id: $0))) }
+    let userVisibleModeCount = TISSupport.visibleUserModeCount(
+        sources: parentSources + modeSources + legacySourcesByID.flatMap(\.1)
+    )
+    let legacyCounts = legacySourcesByID.map { ($0, $1.count) }
     let legacyTotal = legacyCounts.reduce(0) { $0 + $1.1 }
 
     print("current.id=\(currentID)")
+    print("inputSource.found=\(mode != nil)")
+    print("inputSource.enabled=\(TISSupport.boolProperty(mode, kTISPropertyInputSourceIsEnabled))")
+    print("inputSource.selectCapable=\(TISSupport.boolProperty(mode, kTISPropertyInputSourceIsSelectCapable))")
+    print("inputSource.selected=\(currentID == modeID)")
+    print("inputSource.type=\(TISSupport.stringProperty(mode, kTISPropertyInputSourceType) ?? "")")
+    print("inputSource.name=\(TISSupport.stringProperty(mode, kTISPropertyLocalizedName) ?? "")")
+    print("inputSource.id=\(modeID)")
+    print("inputSource.raw.count=\(rawModeSources.count)")
+    print("inputSource.count=\(activeModeCount)")
+    print("inputSource.singleSource=\(usesSingleInputSource)")
     print("parent.found=\(parent != nil)")
-    print("parent.enabled=\(boolProperty(parent, kTISPropertyInputSourceIsEnabled))")
-    print("parent.selectCapable=\(boolProperty(parent, kTISPropertyInputSourceIsSelectCapable))")
-    print("parent.type=\(stringProperty(parent, kTISPropertyInputSourceType) ?? "")")
-    print("parent.name=\(stringProperty(parent, kTISPropertyLocalizedName) ?? "")")
+    print("parent.enabled=\(TISSupport.boolProperty(parent, kTISPropertyInputSourceIsEnabled))")
+    print("parent.selectCapable=\(TISSupport.boolProperty(parent, kTISPropertyInputSourceIsSelectCapable))")
+    print("parent.type=\(TISSupport.stringProperty(parent, kTISPropertyInputSourceType) ?? "")")
+    print("parent.name=\(TISSupport.stringProperty(parent, kTISPropertyLocalizedName) ?? "")")
     print("mode.found=\(mode != nil)")
-    print("mode.enabled=\(boolProperty(mode, kTISPropertyInputSourceIsEnabled))")
-    print("mode.selectCapable=\(boolProperty(mode, kTISPropertyInputSourceIsSelectCapable))")
-    print("mode.type=\(stringProperty(mode, kTISPropertyInputSourceType) ?? "")")
+    print("mode.enabled=\(TISSupport.boolProperty(mode, kTISPropertyInputSourceIsEnabled))")
+    print("mode.selectCapable=\(TISSupport.boolProperty(mode, kTISPropertyInputSourceIsSelectCapable))")
+    print("mode.type=\(TISSupport.stringProperty(mode, kTISPropertyInputSourceType) ?? "")")
     print("mode.selected=\(currentID == modeID)")
-    print("mode.name=\(stringProperty(mode, kTISPropertyLocalizedName) ?? "")")
+    print("mode.name=\(TISSupport.stringProperty(mode, kTISPropertyLocalizedName) ?? "")")
     print("mode.count=\(activeModeCount)")
+    print("user.visible.mode.count=\(userVisibleModeCount)")
     print("active.mode.id=\(modeID)")
     print("active.mode.raw.count=\(rawModeSources.count)")
     print("active.mode.count=\(activeModeCount)")
@@ -625,10 +604,11 @@ private func printStatus(parentID: String, modeID: String, legacyModeIDs: [Strin
     }
     print("preference.selected.mode=\(hitoolboxSelectedModeID() ?? "")")
     print("preference.selected.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.HIToolbox", key: "AppleSelectedInputSources"))")
+    print("preference.selected.parent.knowtype=\(modeID != parentID && preferencesContainEntry(preferenceArray("AppleSelectedInputSources", domain: "com.apple.HIToolbox"), target: parentPreferenceEntry(bundleID: parentID)))")
     print("preference.enabled.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.HIToolbox", key: "AppleEnabledInputSources"))")
     print("preference.enabled.parent.knowtype=\(modeID != parentID && preferencesContainEntry(preferenceArray("AppleEnabledInputSources", domain: "com.apple.HIToolbox"), target: parentPreferenceEntry(bundleID: parentID)))")
     print("preference.enabled.legacy.knowtype=\(preferencesContainAnyInputMode(bundleID: parentID, modeIDs: legacyModeIDs, domain: "com.apple.HIToolbox", key: "AppleEnabledInputSources"))")
-    print("preference.thirdparty.enabled.knowtype=\(preferencesContainInputModeOrParent(bundleID: parentID, modeID: modeID, domain: "com.apple.inputsources", key: "AppleEnabledThirdPartyInputSources"))")
+    print("preference.thirdparty.enabled.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.inputsources", key: "AppleEnabledThirdPartyInputSources"))")
     print("preference.thirdparty.enabled.parent.knowtype=\(modeID != parentID && preferencesContainEntry(preferenceArray("AppleEnabledThirdPartyInputSources", domain: "com.apple.inputsources"), target: parentPreferenceEntry(bundleID: parentID)))")
     print("preference.thirdparty.enabled.legacy.knowtype=\(preferencesContainAnyInputMode(bundleID: parentID, modeIDs: legacyModeIDs, domain: "com.apple.inputsources", key: "AppleEnabledThirdPartyInputSources"))")
     print("preference.history.knowtype=\(preferencesContainInputMode(bundleID: parentID, modeID: modeID, domain: "com.apple.HIToolbox", key: "AppleInputSourceHistory"))")
@@ -640,194 +620,147 @@ private func printStatus(parentID: String, modeID: String, legacyModeIDs: [Strin
 }
 
 private func printDump(bundleID: String) {
-    let rawSources = inputSources(bundleID: bundleID)
-    let sources = deduplicatedInputSources(rawSources)
+    let rawSources = TISSupport.inputSources(bundleID: bundleID)
+    let sources = TISSupport.deduplicatedDiagnosticSources(rawSources)
     print("bundle.id=\(bundleID)")
     print("bundle.raw.count=\(rawSources.count)")
     print("bundle.count=\(sources.count)")
 
     for (index, source) in sources.enumerated() {
-        let id = stringProperty(source, kTISPropertyInputSourceID) ?? ""
-        let modeID = stringProperty(source, kTISPropertyInputModeID) ?? ""
-        let name = stringProperty(source, kTISPropertyLocalizedName) ?? ""
-        let category = stringProperty(source, kTISPropertyInputSourceCategory) ?? ""
-        let type = stringProperty(source, kTISPropertyInputSourceType) ?? ""
+        let id = TISSupport.stringProperty(source, kTISPropertyInputSourceID) ?? ""
+        let modeID = TISSupport.stringProperty(source, kTISPropertyInputModeID) ?? ""
+        let name = TISSupport.stringProperty(source, kTISPropertyLocalizedName) ?? ""
+        let category = TISSupport.stringProperty(source, kTISPropertyInputSourceCategory) ?? ""
+        let type = TISSupport.stringProperty(source, kTISPropertyInputSourceType) ?? ""
 
         print("source.\(index).id=\(id)")
         print("source.\(index).mode=\(modeID)")
         print("source.\(index).name=\(name)")
         print("source.\(index).category=\(category)")
         print("source.\(index).type=\(type)")
-        print("source.\(index).enabled=\(boolProperty(source, kTISPropertyInputSourceIsEnabled))")
-        print("source.\(index).enableCapable=\(boolProperty(source, kTISPropertyInputSourceIsEnableCapable))")
-        print("source.\(index).selectCapable=\(boolProperty(source, kTISPropertyInputSourceIsSelectCapable))")
-        print("source.\(index).asciiCapable=\(boolProperty(source, kTISPropertyInputSourceIsASCIICapable))")
+        print("source.\(index).enabled=\(TISSupport.boolProperty(source, kTISPropertyInputSourceIsEnabled))")
+        print("source.\(index).enableCapable=\(TISSupport.boolProperty(source, kTISPropertyInputSourceIsEnableCapable))")
+        print("source.\(index).selectCapable=\(TISSupport.boolProperty(source, kTISPropertyInputSourceIsSelectCapable))")
+        print("source.\(index).asciiCapable=\(TISSupport.boolProperty(source, kTISPropertyInputSourceIsASCIICapable))")
     }
 }
 
-private func switchAway(prefix: String, fallbackID: String) {
-    let currentID = currentInputSourceID()
-    guard currentID?.hasPrefix(prefix) == true else {
-        return
-    }
-    if let fallback = inputSource(id: fallbackID) {
-        TISSelectInputSource(fallback)
-    }
-}
-
-private func waitForInputSource(id: String, timeout: TimeInterval) -> TISInputSource? {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-        if let source = inputSource(id: id) {
-            return source
+private func repairSelectedPreferenceAwayFromKnowType(
+    bundleID: String,
+    modeID: String,
+    legacyModeIDs: [String]
+) -> PreferenceRepairResult {
+    let domain = "com.apple.HIToolbox"
+    let key = "AppleSelectedInputSources"
+    var dictionary = directUserPreferenceDictionary(domain: domain)
+    let current = dictionary[key] as? [[String: Any]] ?? []
+    let modeIDs = Set([modeID] + legacyModeIDs)
+    var removed = 0
+    let repaired = current.filter { entry in
+        let shouldRemove = isKnowTypePreferenceEntry(entry, bundleID: bundleID, modeIDs: modeIDs)
+        if shouldRemove {
+            removed += 1
         }
-        Thread.sleep(forTimeInterval: 0.25)
+        return !shouldRemove
     }
-    return inputSource(id: id)
-}
 
-private func bootstrap(path: String, parentID: String, modeID: String, legacyModeIDs: [String], select: Bool) {
-    let needsRegistration = inputSource(id: parentID) == nil || inputSource(id: modeID) == nil
-    if needsRegistration {
-        let status = TISRegisterInputSource(URL(fileURLWithPath: path) as CFURL)
-        if status != noErr {
-            fputs("Warning: TISRegisterInputSource returned \(status)\n", stderr)
+    let changed = !plistEntriesAreEqual(current, repaired)
+    if changed {
+        dictionary[key] = repaired
+        do {
+            try writeUserPreferenceDictionary(dictionary, domain: domain)
+            CFPreferencesAppSynchronize(domain as CFString)
+        } catch {
+            fputs("Failed to repair \(domain) \(key): \(error)\n", stderr)
+            exit(ExitCode.failure.rawValue)
         }
     }
 
-    guard waitForInputSource(id: parentID, timeout: 5.0) != nil else {
-        fputs("KnowType parent input source was not found after bootstrap.\n", stderr)
-        exit(ExitCode.failure.rawValue)
-    }
-    guard let mode = waitForInputSource(id: modeID, timeout: 5.0) else {
-        fputs("KnowType active input mode was not found after bootstrap.\n", stderr)
-        exit(ExitCode.failure.rawValue)
-    }
-
-    enableInputSource(mode, label: "mode")
-
-    postTISNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
-
-    if select {
-        selectMode(parentID: parentID, modeID: modeID, requireSelected: false)
-    }
-
-    print("bootstrap.path=\(path)")
-    print("bootstrap.registered=\(needsRegistration)")
-    print("bootstrap.preference.writes=skipped")
-    print("bootstrap.selected=\(select)")
-}
-
-@discardableResult
-private func runProcess(_ executable: String, _ arguments: [String]) -> (status: Int32, output: String) {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: executable)
-    process.arguments = arguments
-
-    let outputPipe = Pipe()
-    process.standardOutput = outputPipe
-    process.standardError = outputPipe
-
-    do {
-        try process.run()
-    } catch {
-        return (ExitCode.failure.rawValue, "")
-    }
-
-    let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
-}
-
-private func stripLSRegisterSuffix(_ value: String) -> String {
-    value.replacingOccurrences(
-        of: #"\s+\(0x[0-9A-Fa-f]+\)$"#,
-        with: "",
-        options: .regularExpression
+    return PreferenceRepairResult(
+        domain: domain,
+        key: key,
+        removed: removed,
+        added: 0,
+        changed: changed
     )
 }
 
-private func expandedPath(_ path: String) -> String {
-    if path == "~" {
-        return NSHomeDirectory()
+private func switchAway(
+    prefix: String,
+    fallbackID: String,
+    bundleID: String,
+    modeID: String,
+    legacyModeIDs: [String]
+) {
+    let beforeID = TISSupport.currentInputSourceID() ?? ""
+    var selectStatus: OSStatus?
+    if beforeID.hasPrefix(prefix), let fallback = TISSupport.inputSource(id: fallbackID) {
+        selectStatus = TISSelectInputSource(fallback)
     }
-    if path.hasPrefix("~/") {
-        return NSHomeDirectory() + "/" + path.dropFirst(2)
+    let repair = repairSelectedPreferenceAwayFromKnowType(
+        bundleID: bundleID,
+        modeID: modeID,
+        legacyModeIDs: legacyModeIDs
+    )
+    if selectStatus == noErr || repair.changed {
+        TISSupport.postNotification(kTISNotifySelectedKeyboardInputSourceChanged)
     }
-    return path
+    print("switch-away.current.before=\(beforeID)")
+    if let selectStatus {
+        print("switch-away.select.status=\(selectStatus)")
+    } else {
+        print("switch-away.select.status=skipped")
+    }
+    print("switch-away.preference.selected.changed=\(repair.changed)")
+    print("switch-away.preference.selected.removed=\(repair.removed)")
+    print("switch-away.current.after=\(TISSupport.currentInputSourceID() ?? "")")
 }
 
-private func canonicalBundlePath(_ path: String) -> String {
-    let expanded = expandedPath(stripLSRegisterSuffix(path))
-    var isDirectory: ObjCBool = false
-    if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) {
-        return URL(fileURLWithPath: expanded).resolvingSymlinksInPath().path
-    }
-    return expanded
-}
-
-private func launchServicesPaths(bundleID: String) -> [String] {
-    guard FileManager.default.isExecutableFile(atPath: lsregisterPath) else {
-        return []
-    }
-    let result = runProcess(lsregisterPath, ["-dump"])
-    guard result.status == 0 else {
-        return []
+private func bootstrap(path: String, parentID: String, modeID: String, legacyModeIDs: [String], select: Bool) {
+    let registrationStatus = TISRegisterInputSource(URL(fileURLWithPath: path) as CFURL)
+    if registrationStatus != noErr {
+        fputs("Warning: TISRegisterInputSource returned \(registrationStatus)\n", stderr)
     }
 
-    var paths: [String] = []
-    var currentPath = ""
-    for rawLine in result.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
-        let line = rawLine.trimmingCharacters(in: .whitespaces)
-        if line.hasPrefix("bundle id:") {
-            currentPath = ""
-        } else if line.hasPrefix("path:") {
-            currentPath = line.replacingOccurrences(of: "path:", with: "").trimmingCharacters(in: .whitespaces)
-        } else if line.hasPrefix("identifier:") {
-            let identifier = stripLSRegisterSuffix(
-                line.replacingOccurrences(of: "identifier:", with: "").trimmingCharacters(in: .whitespaces)
-            )
-            if identifier == bundleID, !currentPath.isEmpty {
-                paths.append(currentPath)
-                currentPath = ""
-            }
-        }
+    guard let parent = TISSupport.waitForInputSource(id: parentID, timeout: 5.0) else {
+        fputs("KnowType input source was not found after bootstrap.\n", stderr)
+        exit(ExitCode.failure.rawValue)
     }
-    return Array(Set(paths)).sorted()
-}
-
-private func unregisterStaleLaunchServices(path: String, bundleID: String) -> Int {
-    guard FileManager.default.isExecutableFile(atPath: lsregisterPath) else {
-        fputs("Warning: lsregister command is unavailable.\n", stderr)
-        return 0
+    guard let mode = TISSupport.waitForInputSource(id: modeID, timeout: 5.0) else {
+        fputs("KnowType active input source was not found after bootstrap.\n", stderr)
+        exit(ExitCode.failure.rawValue)
     }
 
-    let canonicalTarget = canonicalBundlePath(path)
-    var unregistered = 0
-    for candidate in launchServicesPaths(bundleID: bundleID) {
-        let canonicalCandidate = canonicalBundlePath(candidate)
-        guard canonicalCandidate != canonicalTarget else {
-            continue
-        }
-        let unregisterPath = expandedPath(stripLSRegisterSuffix(candidate))
-        let result = runProcess(lsregisterPath, ["-u", unregisterPath])
-        if result.status == 0 {
-            unregistered += 1
-        } else if !FileManager.default.fileExists(atPath: unregisterPath) {
-            _ = runProcess(lsregisterPath, ["-gc"])
-        } else {
-            fputs("Warning: lsregister -u failed for \(unregisterPath)\n", stderr)
-        }
+    let parentEnabled = enableInputSource(parent, label: "parent")
+    let modeEnabled = enableInputSource(mode, label: "mode")
+
+    TISSupport.postNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
+
+    var selectStatus = noErr
+    if select {
+        selectStatus = selectMode(parentID: parentID, modeID: modeID, requireSelected: true, exitOnFailure: false)
     }
 
-    return unregistered
+    print("bootstrap.path=\(path)")
+    print("bootstrap.register.status=\(registrationStatus)")
+    print("bootstrap.preference.writes=skipped")
+    print("bootstrap.singleSource=\(modeID == parentID)")
+    print("bootstrap.parent.enabled=\(parentEnabled)")
+    print("bootstrap.mode.enabled=\(modeEnabled)")
+    print("bootstrap.selected=\(select)")
+    if !parentEnabled || !modeEnabled {
+        exit(ExitCode.failure.rawValue)
+    }
+    if selectStatus != noErr {
+        exit(ExitCode.failure.rawValue)
+    }
 }
 
 private func disableLegacyModes(_ legacyModeIDs: [String]) -> Int {
     var disabled = 0
     for modeID in legacyModeIDs {
-        for source in deduplicatedInputSources(inputSources(id: modeID)) {
-            guard boolProperty(source, kTISPropertyInputSourceIsEnabled) else {
+        for source in TISSupport.deduplicatedDiagnosticSources(TISSupport.inputSources(id: modeID)) {
+            guard TISSupport.boolProperty(source, kTISPropertyInputSourceIsEnabled) else {
                 continue
             }
             let status = TISDisableInputSource(source)
@@ -843,7 +776,11 @@ private func disableLegacyModes(_ legacyModeIDs: [String]) -> Int {
 
 private func purgeLegacy(path: String, parentID: String, modeID: String, legacyModeIDs: [String]) {
     let disabled = disableLegacyModes(legacyModeIDs)
-    let unregistered = unregisterStaleLaunchServices(path: path, bundleID: parentID)
+    let unregistered = LSSupport.unregisterStaleLaunchServices(
+        path: path,
+        bundleID: parentID,
+        warning: { fputs($0 + "\n", stderr) }
+    )
     print("purge.legacy.disabled=\(disabled)")
     print("purge.legacy.preference.writes=skipped")
     print("purge.active.inputsource.id=\(modeID)")
@@ -856,29 +793,46 @@ private func register(path: String, parentID: String, modeID: String, select: Bo
     bootstrap(path: path, parentID: parentID, modeID: modeID, legacyModeIDs: defaultLegacyModeIDs, select: select)
 }
 
-private func selectMode(parentID: String, modeID: String, requireSelected: Bool) {
-    guard let mode = inputSource(id: modeID) else {
-        fputs("KnowType input mode was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
-        exit(ExitCode.failure.rawValue)
+@discardableResult
+private func selectMode(parentID: String, modeID: String, requireSelected: Bool, exitOnFailure: Bool = true) -> OSStatus {
+    guard let parent = TISSupport.inputSource(id: parentID) else {
+        fputs("KnowType input source was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
+        if exitOnFailure {
+            exit(ExitCode.failure.rawValue)
+        }
+        return OSStatus(paramErr)
+    }
+    guard let mode = TISSupport.inputSource(id: modeID) else {
+        fputs("KnowType active input source was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
+        if exitOnFailure {
+            exit(ExitCode.failure.rawValue)
+        }
+        return OSStatus(paramErr)
     }
 
+    enableInputSource(parent, label: "parent")
     enableInputSource(mode, label: "mode")
+    TISSupport.postNotification(kTISNotifyEnabledKeyboardInputSourcesChanged)
 
     let selectStatus = TISSelectInputSource(mode)
     if selectStatus == noErr {
         print("Requested KnowType input source selection: \(modeID)")
         print("preference.writes=skipped")
-        postTISNotification(kTISNotifySelectedKeyboardInputSourceChanged)
+        TISSupport.postNotification(kTISNotifySelectedKeyboardInputSourceChanged)
     } else {
-        fputs("TISSelectInputSource(mode) returned \(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\n", stderr)
-        exit(Int32(selectStatus))
+        fputs("TISSelectInputSource returned \(selectStatus). Enable or select KnowType from System Settings if macOS did not switch automatically.\n", stderr)
+        print("select.status=\(selectStatus)")
+        if exitOnFailure {
+            exit(Int32(selectStatus))
+        }
+        return selectStatus
     }
 
     let deadline = Date().addingTimeInterval(2.0)
-    var currentID = currentInputSourceID()
+    var currentID = TISSupport.currentInputSourceID()
     while currentID != modeID && Date() < deadline {
         Thread.sleep(forTimeInterval: 0.1)
-        currentID = currentInputSourceID()
+        currentID = TISSupport.currentInputSourceID()
     }
 
     if currentID == modeID {
@@ -889,9 +843,14 @@ private func selectMode(parentID: String, modeID: String, requireSelected: Bool)
         let observed = currentID ?? "<unavailable>"
         fputs("Warning: this preflight TIS context is \(observed), not \(modeID). Activate the target text app, rerun this helper, then type a real probe in that app.\n", stderr)
         if requireSelected {
-            exit(ExitCode.failure.rawValue)
+            if exitOnFailure {
+                exit(ExitCode.failure.rawValue)
+            }
+            return OSStatus(paramErr)
         }
     }
+
+    return selectStatus
 }
 
 private var arguments = Arguments(values: Array(CommandLine.arguments.dropFirst()))
@@ -926,20 +885,35 @@ case "repair-preferences":
     let modeID = arguments.option("--mode-id", default: defaultModeID) ?? defaultModeID
     let legacyModeIDs = legacyModeIDs(from: &arguments)
     let includeHistory = arguments.flag("--include-history")
+    let includeSelected = arguments.flag("--include-selected")
     let addActive = arguments.flag("--add-active")
+    let removeParentAnchor = arguments.flag("--remove-parent-anchor")
+    let addLegacyParentAnchor = arguments.flag("--legacy-parent-anchor")
     arguments.ensureConsumed()
     repairPreferences(
         bundleID: bundleID,
         modeID: modeID,
         legacyModeIDs: legacyModeIDs,
         includeHistory: includeHistory,
-        addActive: addActive
+        includeSelected: includeSelected,
+        addActive: addActive,
+        removeParentAnchor: removeParentAnchor,
+        addLegacyParentAnchor: addLegacyParentAnchor
     )
 case "switch-away":
     let prefix = arguments.option("--prefix", default: defaultParentID) ?? defaultParentID
     let fallbackID = arguments.option("--fallback-id", default: defaultFallbackID) ?? defaultFallbackID
+    let parentID = arguments.option("--parent-id", default: defaultParentID) ?? defaultParentID
+    let modeID = arguments.option("--mode-id", default: defaultModeID) ?? defaultModeID
+    let legacyModeIDs = legacyModeIDs(from: &arguments)
     arguments.ensureConsumed()
-    switchAway(prefix: prefix, fallbackID: fallbackID)
+    switchAway(
+        prefix: prefix,
+        fallbackID: fallbackID,
+        bundleID: parentID,
+        modeID: modeID,
+        legacyModeIDs: legacyModeIDs
+    )
 case "register":
     guard let path = arguments.option("--path") else {
         usage()

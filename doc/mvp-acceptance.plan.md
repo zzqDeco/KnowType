@@ -13,7 +13,8 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - `swift test` passes before manual acceptance.
 - CI checks local input-method script syntax, read-only help paths, and bundle packaging resources without installing or selecting the input method.
 - `./scripts/build-inputmethod-bundle.sh` creates `dist/KnowType.app`.
-- `./scripts/package-release.sh --version X.Y.Z --build N --configuration release` creates the local MVP GitHub Release archive, SHA256 file, and manifest under `dist/release/`.
+- `./scripts/package-dmg.sh --version X.Y.Z --build N --configuration release` creates the Developer Preview DMG, SHA256 file, and manifest under `dist/release/`.
+- `./scripts/package-release.sh --version X.Y.Z --build N --configuration release` still creates the local MVP zip for developer/debug installs.
 - The built app includes SwiftPM resource bundles such as `KnowType_KnowTypeCore.bundle`, so bundled lexicons load after installation.
 - `./scripts/install-inputmethod.sh` copies the bundle to `~/Library/Input Methods/KnowType.app`.
 - `./scripts/diagnose-inputmethod.sh --strict` passes after install, confirming bundle metadata, signing, Text Input Source registration, and packaged resources.
@@ -22,7 +23,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - `./scripts/accept-inputmethod-local.sh` runs the repeatable local acceptance harness. By default it performs script/profile smoke, diagnostics, and report-template generation without selecting an input source; pass `--install` or `--select` only when intentionally mutating the local macOS session.
 - KnowType can be enabled from System Settings > Keyboard > Text Input > Input Sources.
 - `./scripts/uninstall-inputmethod.sh` removes the local bundle after verification.
-- This gate covers local MVP packaging only; signed installer, notarization, update flow, and App Store packaging are follow-up work.
+- This gate covers Developer Preview packaging only; notarized pkg, update flow, and App Store packaging are follow-up work.
 
 ## Automated Scenarios
 
@@ -117,6 +118,6 @@ MVP release notes must not claim:
 
 ## Current Automation
 
-`Tests/KnowTypeInputMethodTests/MVPAcceptanceTests.swift` verifies the product-level flow through `InputMethodPipeline` and `InputCompositionController`.
+`Tests/KnowTypeInputMethodTests/MVPAcceptanceTests.swift` verifies the product-level flow through `SessionSuggestionPipeline` and `InputCompositionController`.
 `Tests/KnowTypeInputMethodTests/CandidatePanelRendererTests.swift` verifies candidate window render rows and shortcut labels.
 `Tests/KnowTypeProvidersTests/ProviderProfileTests.swift` verifies profile persistence and secret-store resolution.

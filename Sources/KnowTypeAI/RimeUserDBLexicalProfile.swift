@@ -222,7 +222,7 @@ public final class LexicalProfileStore: @unchecked Sendable {
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: false
         )) ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
         return root
             .appendingPathComponent("KnowType", isDirectory: true)
@@ -239,6 +239,17 @@ public final class LexicalProfileStore: @unchecked Sendable {
 
     public func currentSnapshot() -> LexicalContextSnapshot? {
         currentProfile()?.lexicalContext
+    }
+
+    public func reloadFromDisk() -> PersistentLexicalProfile? {
+        guard let jsonURL else {
+            return currentProfile()
+        }
+        let reloaded = Self.loadProfile(from: jsonURL, fileManager: fileManager)
+        lock.lock()
+        profile = reloaded
+        lock.unlock()
+        return reloaded
     }
 
     @discardableResult

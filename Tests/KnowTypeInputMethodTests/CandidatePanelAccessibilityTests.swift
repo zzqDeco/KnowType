@@ -52,6 +52,48 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertTrue(selectedChildren.first?.isAccessibilitySelected() == true)
     }
 
+    func testPreeditRowExposesStaticAccessibilityEvenWhenReadable() throws {
+        let view = CandidatePanelContentView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 73),
+            appearance: .snapshotLight
+        )
+        let model = CandidatePanelRenderModel(
+            title: "KnowType",
+            previewText: nil,
+            rows: [
+                CandidatePanelRenderRow(
+                    kind: .preedit,
+                    selection: nil,
+                    shortcutLabel: nil,
+                    text: "ni",
+                    isSelected: false,
+                    isEnabled: true,
+                    visualRole: .rawInput,
+                    accessibilityLabel: "预编辑，ni"
+                ),
+                CandidatePanelRenderRow(
+                    kind: .prefixCandidate,
+                    selection: .prefixCandidate(0),
+                    shortcutLabel: "1",
+                    text: "你",
+                    isSelected: true,
+                    visualRole: .lockedPrefix
+                )
+            ]
+        )
+
+        view.update(model: model, layoutPlan: verticalLayoutPlan())
+
+        let children = try XCTUnwrap(view.accessibilityChildren() as? [NSAccessibilityElement])
+        XCTAssertEqual(children.count, 2)
+        XCTAssertEqual(children[0].accessibilityRole(), .staticText)
+        XCTAssertEqual(children[0].accessibilityLabel(), "预编辑，ni")
+        XCTAssertFalse(children[0].isAccessibilityEnabled())
+        XCTAssertFalse(children[0].isAccessibilitySelected())
+        XCTAssertEqual(children[1].accessibilityRole(), .button)
+        XCTAssertEqual(children[1].accessibilityLabel(), "1，你")
+    }
+
     private func accessibilityModel(selectedIndex: Int) -> CandidatePanelRenderModel {
         CandidatePanelRenderModel(
             title: "KnowType",
@@ -89,6 +131,7 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
     private func verticalLayoutPlan() -> CandidatePanelLayoutPlan {
         CandidatePanelLayoutPlan(
             orientation: .vertical,
+            verticalPlacement: .visualBelowCaret,
             panelSize: CGSize(width: 320, height: 73),
             panelOrigin: .zero,
             contentInsets: CandidatePanelLayoutInsets(top: 5, left: 6, bottom: 5, right: 6),

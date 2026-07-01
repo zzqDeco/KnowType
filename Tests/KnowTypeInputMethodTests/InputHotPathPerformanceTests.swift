@@ -27,7 +27,9 @@ final class InputHotPathPerformanceTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertFalse(coordinator.contains("InputMethodPipeline.localSuggestions"))
+        XCTAssertFalse(coordinator.contains("SessionSuggestionPipeline.localSuggestions"))
+        XCTAssertFalse(coordinator.contains("suggestionTask"))
+        XCTAssertFalse(coordinator.contains(".localCandidates"))
         XCTAssertFalse(coordinator.contains(".segmentCandidates("))
         XCTAssertFalse(coordinator.contains("mergedPrefixCandidates"))
         XCTAssertFalse(coordinator.contains("prioritizedSegmentCandidates"))
@@ -39,8 +41,26 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(inputController.contains("InputMethodLexiconRuntime.defaultRuntime"))
         XCTAssertFalse(inputController.contains("initialEngineState"))
         XCTAssertFalse(rimeEngine.contains("InputMethodLexiconRuntime.defaultEngine"))
+        XCTAssertFalse(rimeEngine.contains("creationLock"))
+        XCTAssertTrue(rimeEngine.contains("preemptedBySpeculativePrewarm"))
+        XCTAssertTrue(rimeEngine.contains("activeCreationMode == .speculative"))
+        XCTAssertTrue(rimeEngine.contains("shouldPreemptSpeculativePrewarm"))
+        XCTAssertTrue(rimeEngine.contains("case .space,"))
+        XCTAssertTrue(rimeEngine.contains("return rawInput.isEmpty"))
+        XCTAssertTrue(rimeEngine.contains("foregroundMayPreemptSpeculative: Self.shouldPreemptSpeculativePrewarm"))
+        XCTAssertTrue(rimeEngine.contains("NativeRimeSession.prewarm(configuration: configuration)"))
         XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
         XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
+        XCTAssertTrue(inputController.contains("DispatchQueue.main.asyncAfter"))
+        XCTAssertTrue(inputController.contains("schedulePostInsertCaretVerification"))
+        XCTAssertTrue(coordinator.contains("shouldScheduleRecommendationRequest"))
+        XCTAssertTrue(coordinator.contains("let canBuildRecommendationContext"))
+        XCTAssertTrue(coordinator.contains("isProviderAvailabilityProbe"))
+        XCTAssertTrue(coordinator.contains("isProviderAvailabilityProbe = shouldScheduleRecommendationRequest && !canBuildRecommendationContext"))
+        XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext ? lexicalContextSnapshot"))
+        XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext\n                ? aiAcceptedFeedbackProvider?.snapshot"))
+        XCTAssertTrue(coordinator.contains("schedulePostInsertCaretVerification"))
+        XCTAssertFalse(coordinator.contains("scheduleDelayedReanchor { [weak self, client] in\n                    self?.aiAcceptanceRuntime.verifyPostInsertCaret"))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {
@@ -61,10 +81,12 @@ final class InputHotPathPerformanceTests: XCTestCase {
         }
 
         var rimeEngine = RimeConversionEngine(configuration: configuration)
+        XCTAssertTrue(rimeEngine.process(.text("w")).handled)
         guard rimeEngine.isNativeActive else {
             throw XCTSkip("librime could not create a native session")
         }
-        _ = runRimeSequence("wo", commit: .space, engine: &rimeEngine)
+        XCTAssertTrue(rimeEngine.process(.text("o")).handled)
+        _ = rimeEngine.process(.space)
 
         try assertP95("rime.wo.space", budgetMilliseconds: 5) {
             rimeEngine.reset()
@@ -398,11 +420,15 @@ private final class PerfInputControllerHost: InputControllerHost {
     private(set) var panelStates: [CandidatePanelState] = []
 
     func updateComposition() {}
-    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale) {
-        panelStates.append(state)
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale: KnowTypeLocale) {
+        if frame.isVisible || frame.visibilityReason == .layoutImpossible {
+            panelStates.append(frame.panelModel)
+        }
     }
-    func hideCandidatePanel() {}
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
+        operation()
+    }
+    func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void) {
         operation()
     }
 }
@@ -429,14 +455,14 @@ private final class PerfInputControllerClient: InputControllerClient, @unchecked
     }
 
     func setMarkedText(
-        _ text: String,
+        _ text: InputClientMarkedText,
         selectionRange: NSRange,
         replacementRange: NSRange
     ) {
-        if text.isEmpty {
+        if text.string.isEmpty {
             markedRange = nil
         } else {
-            markedRange = NSRange(location: selectedRange.location, length: (text as NSString).length)
+            markedRange = NSRange(location: selectedRange.location, length: (text.string as NSString).length)
         }
     }
 

@@ -147,7 +147,7 @@ public enum InputSessionCommitPolicy {
                 appBundleID: appBundleID,
                 locale: locale
             )
-            let suggestion = InputMethodPipeline.localSuggestions(
+            let suggestion = SessionSuggestionPipeline.localSuggestions(
                 for: context,
                 includeFallbackContinuations: true,
                 traditionalInputEngine: traditionalInputEngine,
@@ -161,7 +161,7 @@ public enum InputSessionCommitPolicy {
             )
         case .optionR:
             return .polishRequested(rawInput)
-        case .optionNumber, .toggleSymbolMode, .commitRaw:
+        case .optionNumber, .toggleSymbolMode, .toggleTextMode, .commitRaw:
             return .noAction
         }
     }
@@ -179,7 +179,7 @@ public enum InputSessionCommitPolicy {
                 return .commit(rawInput)
             case .optionR:
                 return .polishRequested(rawInput)
-            case .optionNumber, .toggleSymbolMode:
+            case .optionNumber, .toggleSymbolMode, .toggleTextMode:
                 return .noAction
             }
         case .prefixCandidate(let index):
@@ -192,7 +192,7 @@ public enum InputSessionCommitPolicy {
                     return .commit(suggestion.prefixCandidates[index].text)
                 case .optionR:
                     return .polishRequested(rawInput)
-                case .toggleSymbolMode:
+                case .toggleSymbolMode, .toggleTextMode:
                     return .noAction
                 case .commitRaw:
                     return .commit(rawInput)
@@ -221,7 +221,7 @@ public enum InputSessionCommitPolicy {
                 )
             case .optionR:
                 return .polishRequested(rawInput)
-            case .toggleSymbolMode:
+            case .toggleSymbolMode, .toggleTextMode:
                 return .noAction
             case .commitRaw:
                 return .commit(rawInput)
@@ -245,12 +245,12 @@ public actor InputSessionController {
         traditionalInputEngine: TraditionalInputEngine = InputMethodLexiconRuntime.defaultEngine(),
         runtimePreferences: InputMethodRuntimePreferences = .standard
     ) {
-        let pipeline = InputMethodPipeline(
+        let pipeline = SessionSuggestionPipeline(
             provider: provider,
             traditionalInputEngine: traditionalInputEngine,
             runtimePreferences: runtimePreferences
         )
-        let protectedPipeline = InputMethodPipeline(
+        let protectedPipeline = SessionSuggestionPipeline(
             provider: nil,
             traditionalInputEngine: traditionalInputEngine,
             runtimePreferences: runtimePreferences
@@ -364,7 +364,7 @@ public actor InputSessionController {
 
         let result: InputCommitResult
         switch action {
-        case .space, .tab, .optionR, .toggleSymbolMode:
+        case .space, .tab, .optionR, .toggleSymbolMode, .toggleTextMode:
             result = compositionController.handle(
                 action: action,
                 prefixCandidates: [prefix],

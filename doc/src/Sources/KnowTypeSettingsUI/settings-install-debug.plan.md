@@ -32,12 +32,12 @@ Provider and lexicon display decisions that are easy to regress now live in test
 The Diagnostics tab documents the local developer loop through `DebugInstallGuidance`, a small testable settings-side source of truth:
 
 - build and Apple Development-sign the bundle by default when a local identity exists, while still allowing `CODESIGN_IDENTITY=-` for explicit ad-hoc local testing;
-- copy `KnowType.app` to `~/Library/Input Methods` and execute its install-activation flag so registration and best-effort selection happen from the installed app context before the server starts;
+- copy `KnowType.app` to `~/Library/Input Methods` and use the input-source helper for registration/enabling without launching the installed input-method host or running a typing probe;
 - optionally install `KnowType.prefPane` to `~/Library/PreferencePanes` as a compatibility settings fallback when `--with-prefpane` is requested;
-- request selection of `com.knowtype.inputmethod.KnowType.Hans` with `scripts/select-inputmethod.sh` only as a retry/preflight after activating the target text app, while directing developers to `scripts/diagnose-inputmethod.sh` for the independent system status check;
+- request selection of the single `com.knowtype.inputmethod.KnowType` input source with `scripts/select-inputmethod.sh` only as a retry/preflight after activating the target text app, while directing developers to `scripts/diagnose-inputmethod.sh` for the independent system status check;
 - remind developers that the selection script is only a preflight and final acceptance still requires typing a real probe in the target app;
 - run `scripts/diagnose-inputmethod.sh` to verify bundle metadata, signing, packaged resources, Text Input Source registration, and local data paths without changing system state;
-- run `scripts/repair-inputmethod-selection.sh` when stale LaunchServices records, visible legacy `.Mode` TIS rows, or a missing third-party parent anchor make selection bounce back to another source;
+- run `scripts/repair-inputmethod-selection.sh` when stale LaunchServices records, legacy `.Hans` / `.Mode` TIS rows, or stale selected/history rows make selection bounce back to another source;
 - use `scripts/select-inputmethod.sh --require-selected` as the installed-app selection preflight before typing in the active text app;
 - log out and back in only after the repair script still leaves macOS on stale session state;
 - approve the macOS System Settings prompt that asks whether to allow `知键` to enable `KnowType`, then enable KnowType in System Settings;

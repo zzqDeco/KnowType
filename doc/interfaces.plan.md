@@ -11,7 +11,7 @@ LLMRequest {
   task: correction | continuation | contextDigest | polish
   lockedPrefix?: string
   rawInput?: string
-  candidateHints: [
+  candidateHints: [              // legacy-compatible; realtime continuation sends []
     { text: string, nativeIndex?: number, pageNumber: number, isHighlighted: boolean, comment?: string }
   ]
   locale: zh-CN | en-US | mixed
@@ -49,15 +49,46 @@ endpoints that reject schema fields fall back once to JSON mode and report `stru
 rejects those fields. Ollama and custom HTTP do not claim provider-enforced schema, but their outputs still pass
 through strict local decoding instead of line-based candidate extraction.
 
-Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, current-page Rime `candidateHints`, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; an unselected Rime first candidate must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
+Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; unselected Rime candidates are not sent to the provider and must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
-Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from Rime hints:
+Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from unconfirmed raw input:
 
 - when `lockedPrefix` is present, candidate `text` must be directly appendable after it and must not repeat, paraphrase, translate, rewrite, or polish the locked prefix
-- when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput`, context, and `candidateHints`
-- `candidateHints` are context only; providers do not need to choose a `base` from them and may produce a recommendation that does not copy any hint exactly
+- when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput` and context documents
 
-When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; hints cannot make a too-short confirmed prefix eligible. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Unselected `candidateHints` containing secret-like text are filtered and logged as `secret_hint_filtered`; they cannot disable the whole request when safe context remains. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
+When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
+
+## Input Client Compatibility
+
+Host write behavior is selected before each key write:
+
+```text
+InputClientWriteMode =
+  inlineComposition
+  commitOnlyComposition
+  asciiPassthrough
+  disabled
+```
+
+Unknown clients, standard text clients, browsers, editors, IDEs, Electron
+shells, and JetBrains-style clients use `inlineComposition` by default, so raw
+preedit appears in the focused text field. Terminal, iTerm, MacVim, and
+Emacs-style profiles use placeholder carrier during Chinese composition, while
+their app-mode default keeps idle printable ASCII in `asciiPassthrough`.
+Commit-only composition uses a full-width-space
+`NSAttributedString` marked-text placeholder with marked attributes to keep the
+IMK composition and candidate anchor alive. The host text field sees only that
+placeholder; the candidate panel receives the real raw/preedit display text as a
+non-selectable preedit row above candidates, then commits with `insertText`.
+`Option + /` toggles the session text mode; ASCII mode passes idle printable
+input back to the focused app. Missing clients use `disabled`; printable idle
+input is returned as unhandled so the host can keep normal typing behavior. All
+write modes keep replacement ranges as `{NSNotFound, NSNotFound}` unless a
+future reconversion feature introduces an explicit owned range.
+`InputClientCompositionWriter` is the internal boundary that applies this mode
+to inline marked text, placeholder marked text, idle passthrough, and owned
+marked-text cleanup. `InputClientWriteCoordinator` remains the lower-level
+writer for `setMarkedText`, `insertText`, replacement ranges, and debug logs.
 
 ## Provider Kinds
 
@@ -94,7 +125,7 @@ ProviderProfile {
 }
 ```
 
-Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory.
+Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory only on explicit save. Runtime cold-start paths use the no-create loader, so a missing provider profile does not create `Application Support/KnowType` merely because the IMK host was launched.
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys under the `KnowType` service. Tests and non-UI code can use in-memory or read-only dictionary stores.
 
@@ -125,6 +156,47 @@ Settings connection tests:
 - preserve existing save/load errors after diagnostic success
 - avoid reusing a saved remote secret when a blank-key draft switches to a local endpoint, another remote endpoint, or another provider protocol
 
+## Local Install State
+
+Local install scripts record recoverable install metadata under the user's
+Application Support directory. `install-state.json` is schema version `1` and
+contains the install time, source (`local-build`, `dmg-dev-preview`,
+`release-zip`, or `bundle`), bundle version/build, optional git commit/tag,
+installed app and prefPane paths, release manifest digest, and the previous
+backup id. It describes install artifacts only; it does not snapshot Rime
+userdb, provider profiles, Keychain secrets, or AI context files.
+Default install and rollback paths do not launch `KnowTypeInputMethodApp`, do
+not select the input method, and do not initialize Rime user data; first real
+typing after the user selects KnowType is normal product use rather than an
+install side effect.
+If macOS prelaunches the IMK host while refreshing TIS or LaunchServices state,
+controller cold start remains read-only: Rime native sessions, provider profile
+loading, user selection history, AI learning/feedback files, lexical profiles,
+`ENV.md`, and `CORRECTION.md` are lazy and are not created until a real input,
+AI request, or explicit maintenance action needs them.
+Lazy provider wrappers expose provider availability only after their loader has
+resolved a real provider state, so local no-provider fallback rows are not
+suppressed merely because the wrapper exists. Accepted learning and feedback
+startup reads always join their in-process locks and join existing file locks
+when present, but do not create lock files for missing histories.
+If the host process is already running, install/rollback must fail before
+replacement instead of killing it, since forced shutdown can flush Rime userdb
+files and would count as a user-data mutation.
+
+Install backups live under `Backups/<backup-id>/`. Each backup manifest records
+schema version, backup id, creation time, app version/build, bundle identifier,
+app checksum, whether a prefPane was included, and the restore command. Rollback
+restores only `KnowType.app` and optional `KnowType.prefPane`, then refreshes
+LaunchServices and input-source preferences.
+
+`scripts/diagnose-inputmethod.sh --json` is the stable machine-readable
+diagnostic surface for local tooling. It emits top-level `install`, `bundle`,
+`preferencePane`, `rime`, `ai`, `userData`, `backups`, `warnings`, and
+`failures` objects. The JSON output must not contain API keys, user text,
+candidate text, or complete lexicon/userdb contents.
+Install postflight parses that JSON and treats any non-empty `failures` array as
+a warning even when the diagnostic process exits successfully.
+
 ## Candidate Data
 
 Core candidate types:
@@ -148,21 +220,67 @@ Core candidate types:
 - `ContinuationCandidate`: text after the locked prefix only.
 - `AIRecommendationCandidate`: ready AI slot payload with the locked prefix, optional continuation, display text, provider, confidence, and context version.
 - `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
+- `InputAIRecommendationSchedulePolicy`: input-method value policy that returns
+  either an AI recommendation schedule decision or the skipped AI state plus
+  diagnostic stage and reason before provider tasks are started.
+- `InputAIRecommendationRuntime`: input-method runtime boundary that owns
+  real-time AI request construction, active request ids, generations, task
+  cancellation, stale-result diagnostics, and state publication callbacks.
+- `InputAIAcceptanceRuntime`: input-method runtime boundary that owns
+  post-commit AI accepted-learning records, typing-context events, accepted
+  feedback tracking orchestration, and protected/secret gates.
 - `AITypingEvent`: committed typing event used by the background memory runtime.
+- `AIAcceptedLearningRecord`: local-only JSONL record for an AI recommendation the user explicitly accepted.
+- `AIAcceptedLanguageSummary`: bounded accepted-AI term, style, and recent-commit summary used by lexical profile merging.
 - `RimeUserDBTextSnapshot`: text export snapshot from Rime user data sync.
 - `RimeMaintenanceService`: background owner of explicit `sync_user_data`, userdb snapshot discovery, and idle/manual maintenance policy.
-- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with current Rime candidates and schedules background profile refresh from existing userdb snapshots.
+- `LexicalProfileRuntime`: input-method runtime that merges persisted profile terms with recent commits and selection history, schedules background profile refresh from existing userdb snapshots, and clears summary-ready observer state when refreshes are cancelled during controller close.
+- `InputLexicalCommitRuntime`: input-method runtime that owns local lexical
+  commit/selection side effects, including bounded recent commits,
+  selection-history orchestration, lexical profile refresh scheduling, and
+  `compositionCommitted` / `candidateSelected` event payload construction.
+- `InputSuggestionStateRuntime`: input-method runtime that owns the latest
+  `SuggestionResponse`, the raw input that produced it, commit suggestion
+  snapshots, current-suggestion checks, and resolved-composition no-provider
+  fallback cleanup.
+- `InputCompositionStateRuntime`: input-method runtime that owns raw input,
+  `CompositionBuffer`, composition id, raw revision, delete count, and pure
+  composition-state mutation results.
+- `InputCompositionLifecycleRuntime`: input-method runtime that owns
+  composition begin/finish plans, first-begin trace-once state, finish reason
+  mapping, finished composition id capture, and owned marked-text clear intent.
+- `InputCommitApplicationRuntime`: input-method runtime that maps commit
+  results to coordinator plans and constructs accepted-feedback, AI acceptance,
+  and lexical commit contexts without performing host writes or
+  Rime/candidate-panel side effects.
+- `InputSelectionHistoryRuntime`: input-method session owner for protected-input
+  filtering, recent selection history, `candidateSelected` event payloads, and
+  persistence delegation for prefix candidate choices.
 - `LexicalContextSnapshot`: top-K lexical/tone summary rendered as `LEXICAL_PROFILE.md` and hashed into AI cache keys.
 - `SuggestionResponse`: UI-facing snapshot containing `prefixCandidates`, `lockedPrefix`, `continuationCandidates`, and `latencyMs`.
 - `ConversionEngineSnapshot`: Rime-facing snapshot containing raw input, preedit, current-page candidates, highlighted index, page size, page number, page-end state, and engine name.
+- `InputCandidatePanelPublicationRuntime`: input-method runtime boundary that
+  owns candidate-panel state publication, async stale-snapshot gating,
+  visibility reasons, delayed re-anchor generation, and panel diagnostics.
+- `InputNativeCandidateNavigationRuntime`: input-method runtime boundary that
+  owns displayed native selection state, panel-selection mapping, stable native
+  index matching, hover highlight, numeric current-page selection, paging, and
+  boundary paging decisions.
 - `CandidatePanelFrame`: candidate-panel presentation intent with composition id, raw revision, raw length, anchor source, panel model, and explicit visibility reason.
 - `AIRecommendationPatch`: AI slot-only update guarded by request id, generation, composition id, raw revision, and raw input.
 
-Raw input is tracked outside `SuggestionResponse` by the input-method session, for example through stale-result guards such as `latestSuggestionRawInput`. Protection metadata lives on correction candidates, locked prefixes, and protected ranges rather than on the top-level suggestion response.
+Raw input is tracked outside `SuggestionResponse` by
+`InputSuggestionStateRuntime`, because the UI-facing suggestion snapshot remains
+focused on candidates and latency rather than identity. Protection metadata
+lives on correction candidates, locked prefixes, and protected ranges rather
+than on the top-level suggestion response.
+The active composition raw input itself is owned by
+`InputCompositionStateRuntime`; suggestion state stores only the raw identity of
+the suggestion currently being published or committed.
 
 Core correction and traditional-input candidates may carry `rawRange` and `segments` for offline/session tests. The production IMK coordinator no longer generates segment candidates from `TraditionalInputEngine`; Rime candidates are treated as whole-prefix candidates over the current raw input.
 
-`InputContext.userSelectionHistory` is a local-only ranking hint. It may reorder prefix candidates that were already generated by the local correction engine, but it must not create new candidates and must not be serialized into provider requests. The IMK frontend may persist this history locally in `user-selection-history.json`; provider adapters still receive only `LLMRequest`.
+`InputContext.userSelectionHistory` is a local-only ranking hint. It may reorder prefix candidates that were already generated by the local correction engine, but it must not create new candidates and must not be serialized into provider requests. The IMK frontend may persist this history locally in `user-selection-history.json`; `InputSelectionHistoryRuntime` keeps the active process's recent selection cache separate from the loaded durable log, and provider adapters still receive only `LLMRequest`.
 
 `TraditionalInputEngine()` loads `TraditionalInputSeedLexicon` first. `TraditionalInputEngine(additionalLexiconEntries:)` is the public extension point for larger local lexicons. The engine trims and lowercases injected pinyin tokens, ignores empty rows, merges duplicate pinyin keys through its private index, and uses those entries for both spaced and compact pinyin parsing.
 
@@ -189,7 +307,9 @@ Interactive correction calls use `TraditionalInputQueryOptions.interactive`. The
 
 `LexiconSettingsViewModel` uses the shared resolver for settings status. It uses `TraditionalInputLexiconFileSource` for entry counts and diagnostics, can create missing directories or a non-overwriting `knowtype-sample.tsv`, and can install the recommended managed lexicon pack on explicit user action. It displays `*.metadata.json` pack metadata but does not treat metadata files as lexicon resources.
 
-Input-method presentation maps `SuggestionResponse` into compact candidate rows:
+Input-method presentation maps `SuggestionResponse` into compact candidate rows
+through `CandidatePanelRowBuilder`, which is shared by selection state and
+rendering:
 
 - raw input is shown only when no prefix or continuation suggestion exists
 - Rime prefix candidate 1 is the first selectable row
@@ -213,11 +333,19 @@ same `CandidatePanelSelection` values so click commits match keyboard commits.
 `KnowTypeConversionEngine` is the IMK boundary for base conversion. `RimeConversionEngine` is the production implementation:
 
 - `process(.text)`, `.space`, `.commitComposition`, `.selectCandidateOnCurrentPage`, `.highlightCandidateOnCurrentPage`, `.pageUp`, and `.pageDown` call the native Rime session synchronously.
+- Native Rime session creation is lazy. Non-ASCII raw-bypass mode is checked
+  before session creation, so continuing a bypassed composition with ASCII or
+  navigation keys does not initialize Rime user/log directories until reset and
+  a later native conversion actually starts.
 - `ConversionEngineSnapshot.suggestionResponse` maps only the current Rime page into prefix candidates; full candidate-list iteration is not part of the key path.
 - Numeric shortcuts select the displayed current-page candidate with `select_candidate_on_current_page`.
 - Marked text mirrors `ConversionEngineSnapshot.preedit` while Rime has composition. If Rime commits part of a long input and keeps composition active, KnowType inserts the commit text and keeps showing the remaining Rime preedit instead of reverting to raw pinyin.
 - Ordinary digits `1...9` select Rime current-page candidates whenever native composition is active, even if the custom panel is hidden or the native snapshot currently has candidates without raw/preedit text. Out-of-range digits are consumed by the active composition and do not commit AI or append a literal digit.
 - With no active text/native composition, ordinary Space and `0...9` are direct passthrough text insertions at the current cursor. They ignore lingering host `markedRange` values and use `NSNotFound`; stale candidate-panel or AI state must not capture those keys.
+- `InputNativeCandidateNavigationRuntime` is the owner of Rime navigation
+  decisions above the engine boundary. It may call highlight, current-page
+  select, PageUp, and PageDown keys, but conversion result side effects, host
+  writes, and candidate-panel publication stay outside the runtime.
 
 ## IMK Client Writes
 
@@ -231,9 +359,15 @@ Current write contract:
 - composing `setMarkedText`, clear-marked `setMarkedText("")`, ordinary
   `insertText` commits, and idle Space/digit passthrough all use
   `NSRange(location: NSNotFound, length: NSNotFound)`
-- clear-marked writes are only issued when KnowType had an active composition
-  to end; idle Return/Enter must not clear stale host marked ranges before
-  returning the key to the app
+- inline hosts receive attributed marked text while composition is active
+- terminal-style or override commit-only hosts receive a full-width-space
+  attributed placeholder marked text while composition is active; raw pinyin and
+  candidate text are not written inline
+- commit-only preedit is a candidate-panel display concern: it is not
+  selectable, does not receive numeric shortcuts, and must not enter commit text
+- clear-marked writes are only issued for KnowType-owned marked text; idle
+  Return/Enter must not clear stale host marked ranges before returning the key
+  to the app
 - KnowType has no reconversion or selected-range replacement path today
 - future reconversion must maintain an explicit KnowType-owned replacement
   range, reset it after commit, and must not directly trust `client.markedRange`
@@ -247,11 +381,16 @@ Current write contract:
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
 - xctest processes use temporary Rime user/log directories so tests do not lock or mutate the user's live Rime DB.
 - The hot path emits `InputFrame`/`CandidatePanelFrame`-style state and side-effect events. It must not call AI providers,
-  lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly.
+  lexical profile write APIs, userdb sync, or candidate-panel AppKit APIs directly. Lexical commit/selection facts go through
+  `InputLexicalCommitRuntime`, which may schedule refresh from bounded local snapshots but does not run userdb sync. Composition lifecycle plans go through
+  `InputCompositionLifecycleRuntime`, commit choices go through
+  `InputCommitDecisionRuntime`, and commit side-effect contexts go through
+  `InputCommitApplicationRuntime` before the coordinator executes order-sensitive host writes and lifecycle cleanup. Real-time AI provider calls go through
+  `InputAIRecommendationRuntime`, which publishes only AI slot state after stale-result guards pass.
 
 Candidate panel sizing is measurement-first. `CandidatePanelRenderer` owns row semantics only; the
 `CandidatePanelLayoutEngine` measures visible rows, chooses horizontal layout for 4-6 complete candidates when
-possible, switches to vertical layout for long phrases, and returns the final panel size, origin, row frames, and
+possible, switches to vertical layout for long phrases or a fixed preedit row, and returns the final panel size, origin, row frames, and
 per-row text limits used by the AppKit view. The layout plan must keep shortcut/selectable rows in sync with
 rendered rows; constrained vertical layouts compress row height and spacing instead of dropping rows after
 shortcuts are assigned. Shortcut labels are measured instead of using a fixed reserved slot. Horizontal rows use
@@ -260,21 +399,30 @@ shortcut label; rows without shortcuts reserve no shortcut space.
 
 The native AppKit candidate panel is a borderless non-activating `NSPanel` at `.popUpMenu` window level, with
 all-spaces/full-screen auxiliary behavior, `isFloatingPanel`, `worksWhenModal`, and `hidesOnDeactivate = false`.
-This keeps the panel above Spotlight and search-like overlays while avoiding private APIs, screen-saver level, or
-shielding levels. The visual style uses compact rows, `hudWindow` material, dynamic system colors, and continuous
-corners so it stays close to macOS native candidate panels.
+Panel placement is search-aware: ordinary text fields prefer the visual-below-caret placement, while Spotlight
+uses a visual-above-caret preference so search result overlays do not cover candidates. This avoids private APIs,
+screen-saver level, or shielding levels. The visual style uses compact rows, `hudWindow` material, dynamic system
+colors, and continuous corners so it stays close to macOS native candidate panels.
 
 Because the panel does not hide automatically on app deactivation, the input-method coordinator explicitly hides it
-on commit, cancel, deactivate, close, reset, and native composition end. Candidate-panel publication is frame-based:
-updates carry `CandidatePanelVisibilityReason`, composition id, raw revision, raw length, and anchor source through
-`CandidatePanelPresenter`. Stale suggestions, delayed reanchors, and AI patches must not make the panel visible
-after composition teardown. A transient empty Rime snapshot does not hide the panel while KnowType still has non-empty
-raw input; the presenter keeps a raw/preedit fallback frame until Rime context recovers or composition ends. With
+on commit, cancel, deactivate, close, reset, and native composition end. Candidate-panel publication is frame-based
+and owned by `InputCandidatePanelPublicationRuntime`: updates carry
+`CandidatePanelVisibilityReason`, composition id, raw revision, raw length, and
+anchor source through `CandidatePanelPresenter`. Stale suggestions, delayed
+reanchors, and AI patches must not make the panel visible after composition
+teardown. Anchor source `.none` remains an undisplayable layout-impossible frame
+rather than an explicit hide path. A transient empty Rime snapshot does not hide
+the panel while KnowType still has non-empty raw input; the presenter keeps a
+raw/preedit fallback frame until Rime context recovers or composition ends. With
 `KNOWTYPE_PANEL_DEBUG=1`, panel logs include frame or cleanup reasons such as `composition_active`,
-`composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`.
-Deactivation uses the current IMK client as a fallback when the callback sender is not an `IMKTextInput`, so pending
-raw text is not dropped. It still avoids `setMarkedText("")` on deactivate; native handled/no-commit end states clear
-marked text through the normal client path because composition has ended without inserted text.
+`composition_ended`, `deactivate`, `close`, `reset`, `native_ended`, `layout_impossible`, and `stale_update`,
+plus placement preference and the final visual-above/visual-below choice.
+Key event and text callbacks pass only the `IMKTextInput` client supplied by the IMK callback, so idle printable input
+with a missing sender can pass through instead of reusing a stale current client. Commit, candidate, deactivation, and
+close-style lifecycle callbacks may use the current IMK client as a final flush fallback when the callback sender is not
+an `IMKTextInput`, so pending raw text is not dropped during lifecycle teardown. Teardown only clears marked text that
+KnowType owns; native handled/no-commit end states clear that owned marked text because composition has ended without
+inserted text.
 
 The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
 that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use
@@ -313,11 +461,12 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
 - plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
 - `Option + .` toggles Chinese/English punctuation for the active controller session.
+- `Option + /` toggles Chinese/ASCII text mode for the active controller session; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
 
-Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries and preserves session-local toggles while preferences are unchanged.
+Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries, bypasses the normal reload throttle when the focused app bundle changes, and preserves session-local toggles while preferences and app context are unchanged.
 
 Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation preference for legacy paths, continuation length, and continuation count. These preferences use the same shared defaults domain and are read by the input method at startup and new composition boundaries. The Rime-only settings UI no longer exposes the legacy input-scheme picker; production conversion uses the bundled Rime full-pinyin schema. Defaults preserve the current production behavior: six adaptive candidates per page, adaptive horizontal panel layout, cloud continuation enabled, medium continuation length, and six continuation candidates. If an older preference stores nine candidates per page, adaptive layout caps the effective page size at six; vertical-list mode uses the saved page size.
 
@@ -336,13 +485,12 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
 - includes `LEXICAL_PROFILE.md` when the coordinator provides a lexical snapshot
 - creates default documents when missing
-- debounces before provider calls
+- debounces for 350 ms by default before provider calls
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
-- caches by locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
+- caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
-- skips cloud requests for too-short prefixes: fewer than two Han characters, or fewer than six visible mixed/Latin characters
+- skips cloud requests for too-short context: with a confirmed locked prefix, fewer than two Han characters or fewer than six visible mixed/Latin characters; without a locked prefix, fewer than three visible raw-input characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
-- filters secret-like candidate hints before provider request construction, with diagnostic reason `secret_hint_filtered`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
 - reports sanitizer outcomes as normalized reasons such as `same_as_prefix`, `still_repeats_prefix`, `no_usable_suffix`, and `repeated_prefix_repaired`
 - emits privacy-preserving AI diagnostics to macOS unified logging by default under subsystem `com.knowtype.inputmethod.KnowType` and category `ai`
@@ -370,6 +518,60 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - stores only top-K terms, recent commits, source counts, and tone metrics
 - never stores full Rime userdb exports, raw provider responses, or API keys
 
+`AIAcceptedLearningStore`:
+
+- appends full accepted AI commit history to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-learning.jsonl`
+- writes bounded language-habit summary JSON to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-summary.json`
+- mirrors summary diagnostics to `~/.knowtype/ACCEPTED_AI_LEARNING.md`
+- skips records containing secret-like raw input, locked prefix, or accepted text
+- feeds only bounded summary terms and recent short accepted commits into
+  `LEXICAL_PROFILE.md`; it never writes Rime userdb or calls `sync_user_data`
+- emits summary-ready metadata after a delayed summary rebuild is persisted; the
+  event contains only schema id, history hash, and counts, not user text
+- emits summary-ready metadata only for schemas changed by the current rebuild
+
+`knowtype-accepted-learning-tool` and `scripts/accepted-learning.sh`:
+
+- expose read-only `status`, explicit `rebuild`, and guarded `clear --yes`
+  maintenance commands for accepted AI learning
+- report only paths, counts, hashes, mtimes, and freshness state; they never
+  print raw input, accepted text, locked prefix, or full history
+- `clear --yes` deletes only `accepted-ai-learning.jsonl`,
+  `accepted-ai-summary.json`, and `ACCEPTED_AI_LEARNING.md`, writes a clear
+  marker for running stores, and scrubs accepted-AI terms/source lines and
+  matching accepted recent commits from the persistent lexical profile while
+  preserving non-AI recent commits and tone data; when accepted history is
+  unavailable, markdown-only scrub removes accepted-AI marker/source lines but
+  preserves unknown recent commits; it does not delete ENV, CORRECTION,
+  provider profiles, Keychain secrets, or Rime userdb
+- runtime and maintenance writes, including startup summary repair, use a shared
+  lock file so rebuild, clear, startup repair, and accepted-record appends do not
+  publish stale summaries across processes
+- runtime snapshot reads observe the clear marker before returning accepted-AI
+  summaries so active input-method processes stop injecting cleared learning
+  without requiring a restart or another accepted record
+
+`AIAcceptedFeedbackStore`:
+
+- appends only verified post-accept edit signals to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-feedback.jsonl`
+- writes bounded feedback summary JSON to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-feedback-summary.json`
+- mirrors summary diagnostics to `~/.knowtype/ACCEPTED_AI_FEEDBACK.md`
+- feeds request-time `AI_FEEDBACK.md` only as a soft style signal; it is not a
+  hard block, does not rewrite locked prefixes, and does not touch Rime userdb
+- skips feedback containing secret-like deleted or replacement text
+- treats unknown, stale, moved, or unverified cursor ranges as no signal rather
+  than negative feedback
+- `LexicalProfileRuntime` reloads the persisted lexical profile when its
+  in-memory cache still contains accepted-AI source data after accepted learning
+  has been cleared, and it filters any remaining accepted-AI terms/source lines
+  before building request-time `LEXICAL_PROFILE.md`
+- `diagnose-inputmethod.sh --json` includes `userData.acceptedLearning` with the
+  same status shape subset used by settings diagnostics
+
 Rime userdb profile refresh is a background-only input-method task. It calls
 librime sync as a best-effort freshness step, reads the live active schema from
 the Rime session, resolves that schema's `translator/user_dict` or
@@ -386,7 +588,8 @@ outside the generation gate, and conditional publish re-checks freshness without
 holding the gate lock across filesystem operations. If a refresh becomes stale
 mid-publish, any promoted profile files are rolled back before the task returns.
 AI requests merge persisted `LEXICAL_PROFILE.md` terms only when the stored
-profile schema matches the active Rime schema.
+profile schema matches the active Rime schema. They do not add the current
+composition's Rime candidate page to the lexical profile.
 
 KnowType-specific settings use the InputMethodKit preferences window opened from
 the input-method menu as the primary user entry point. `KnowType Settings...`
@@ -417,20 +620,38 @@ The tool delegates download, SHA256 verification, conversion, atomic writes,
 and metadata generation to `ManagedLexiconPackInstaller`. It must not commit
 third-party dictionary data to the repository.
 
-`knowtype-inputsource-tool` is the local helper for direct macOS TIS diagnostics
-and cleanup in KnowType scripts:
+`knowtype-inputsource-tool` is the local helper for direct macOS TIS diagnostics,
+registration, and cleanup in KnowType scripts:
 
 - `status` emits read-only registration, enabled, selected, and HIToolbox
   preference status.
-- `switch-away` is a debug fallback; install scripts use the installed app's
-  command-line path to move away from KnowType before bundle replacement.
+- `switch-away` moves away from KnowType before bundle replacement without
+  starting the installed input-method host. It also removes KnowType rows from
+  HIToolbox `AppleSelectedInputSources` so stale selected preferences do not
+  relaunch the host while install tooling refreshes registration state.
 - `inspect-preferences` and compatibility `dedupe-preferences` report
   duplicate KnowType rows without mutating protected system preference domains.
 - `repair-preferences` rewrites only KnowType rows in protected input-source
   preference arrays as an explicit local development fallback for stale `.Mode`
-  cache state or a missing third-party parent anchor.
-- `register --path ... [--select]` manually registers and optionally selects the
-  installed bundle through TIS APIs only for debug use.
+  cache state, parent-only selected/history rows, or stale selected/history rows.
+  The default `--add-active` shape restores the enabled parent anchor plus the
+  user-selectable `com.knowtype.inputmethod.KnowType.Hans` input mode without
+  changing selected preferences. `--include-history` repairs history to `.Hans`
+  without moving it ahead of the retained current source unless selected repair
+  is also requested. `--include-selected` is reserved for explicit selection
+  repair after installed app selection is verified and rewrites selected
+  preferences to `.Hans`. `--remove-parent-anchor` is reserved for uninstall
+  cleanup after the bundle is gone.
+  `--legacy-parent-anchor` is accepted as a deprecated compatibility no-op.
+- `purge-legacy --path ...` disables legacy `.Mode` rows and
+  refreshes LaunchServices without starting `KnowTypeInputMethodApp`.
+- `bootstrap --path ... [--select]` registers the installed bundle, enables the
+  parent anchor and visible `.Hans` input mode through TIS APIs, and optionally
+  requests helper-local selection of `.Hans`. Default install/repair registration
+  uses the installed app CLI context before helper preference repair; explicit
+  repair/selection tooling owns user-visible selection.
+- `register --path ... [--select]` remains a lower-level manual register path
+  for debug use.
 - `select [--require-selected]` remains a debug-only helper-local selection path.
 
 Script contracts:
@@ -438,8 +659,9 @@ Script contracts:
 - `scripts/build-inputmethod-bundle.sh` creates `dist/KnowType.app` and must
   package SwiftPM resource bundles required by the local engine.
 - `scripts/install-inputmethod.sh` copies the local development bundle to
-  `~/Library/Input Methods/KnowType.app` and runs app-local purge plus
-  activation commands.
+  `~/Library/Input Methods/KnowType.app`, refreshes LaunchServices, and uses
+  `knowtype-inputsource-tool purge-legacy` plus `bootstrap` without launching the
+  input-method host or selecting KnowType.
 - `scripts/diagnose-inputmethod.sh` is the read-only install status and recent
   log diagnostic path.
 - `scripts/select-inputmethod.sh` requests selection through the installed app,

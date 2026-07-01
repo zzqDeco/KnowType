@@ -20,6 +20,7 @@ let package = Package(
         .executable(name: "KnowTypeInputMethodApp", targets: ["KnowTypeInputMethodApp"]),
         .executable(name: "knowtype-inputsource-tool", targets: ["KnowTypeInputSourceTool"]),
         .executable(name: "knowtype-lexicon-tool", targets: ["KnowTypeLexiconTool"]),
+        .executable(name: "knowtype-accepted-learning-tool", targets: ["KnowTypeAcceptedLearningTool"]),
         .executable(name: "knowtype-demo", targets: ["KnowTypeDemo"])
     ],
     targets: [
@@ -89,7 +90,10 @@ let package = Package(
         ),
         .target(
             name: "KnowTypeInputSourceSupport",
-            path: "Sources/KnowTypeInputSourceSupport"
+            path: "Sources/KnowTypeInputSourceSupport",
+            linkerSettings: [
+                .linkedFramework("Carbon", .when(platforms: [.macOS]))
+            ]
         ),
         .executableTarget(
             name: "KnowTypeInputMethodApp",
@@ -117,6 +121,11 @@ let package = Package(
             name: "KnowTypeLexiconTool",
             dependencies: ["KnowTypeCore"],
             path: "Sources/KnowTypeLexiconTool"
+        ),
+        .executableTarget(
+            name: "KnowTypeAcceptedLearningTool",
+            dependencies: ["KnowTypeAI"],
+            path: "Sources/KnowTypeAcceptedLearningTool"
         ),
         .executableTarget(
             name: "KnowTypeDemo",

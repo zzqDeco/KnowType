@@ -7,7 +7,7 @@ Make the installed KnowType input source appear in macOS UI as `KnowType` / `知
 ## Behavior
 
 - Package `en.lproj/InfoPlist.strings` and `zh-Hans.lproj/InfoPlist.strings` into the input-method bundle resources.
-- Localize the parent input method id and the visible `.Hans` mode id.
+- Localize the parent input method id as a container and the visible `.Hans` mode as `KnowType` / `知键`.
 - Keep the menu icon label as `知`; the full menu/settings name comes from `InfoPlist.strings`.
 - Warn in diagnostics when `kTISPropertyLocalizedName` still resolves to the raw bundle id.
 - Warn when TIS reports multiple registrations for the same input-source id, because repeated local installs can leave stale menu/cache entries until logout or reboot.
@@ -31,4 +31,4 @@ After reinstalling, run:
 ./scripts/diagnose-inputmethod.sh --strict
 ```
 
-The localized input-source name should be `KnowType` on English systems or `知键` on Simplified Chinese systems. `com.knowtype.inputmethod.KnowType.Hans` is the current visible mode id; `com.knowtype.inputmethod.KnowType.Mode` is legacy cleanup only. If the input menu still shows stale duplicate rows, run the repair script and then log out or reboot to force HIToolbox/TIS to rebuild its cached input-source menu.
+The localized visible input-mode name should be `KnowType` on English systems or `知键` on Simplified Chinese systems. `com.knowtype.inputmethod.KnowType.Hans` is the current visible source id; `.Mode` is legacy cleanup only. If the input menu still shows stale duplicate rows, run the repair script and then log out or reboot to force HIToolbox/TIS to rebuild its cached input-source menu.

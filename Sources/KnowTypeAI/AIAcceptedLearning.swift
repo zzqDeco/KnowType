@@ -1,0 +1,1014 @@
+import Darwin
+import CryptoKit
+import Foundation
+import KnowTypeCore
+
+let acceptedLearningFileLock = NSLock()
+
+func acceptedLearningLockURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
+}
+
+func acceptedLearningClearMarkerURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+}
+
+func withAcceptedLearningFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
+    acceptedLearningFileLock.lock()
+    defer {
+        acceptedLearningFileLock.unlock()
+    }
+
+    guard let lockURL else {
+        return try body()
+    }
+
+    try fileManager.createDirectory(
+        at: lockURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    if !fileManager.fileExists(atPath: lockURL.path) {
+        fileManager.createFile(atPath: lockURL.path, contents: nil)
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
+    return try body()
+}
+
+func withExistingAcceptedLearningFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
+    acceptedLearningFileLock.lock()
+    defer {
+        acceptedLearningFileLock.unlock()
+    }
+
+    guard let lockURL,
+          fileManager.fileExists(atPath: lockURL.path) else {
+        return try body()
+    }
+    let handle = try FileHandle(forWritingTo: lockURL)
+    defer {
+        try? handle.close()
+    }
+    guard flock(handle.fileDescriptor, LOCK_EX) == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+        flock(handle.fileDescriptor, LOCK_UN)
+    }
+    return try body()
+}
+
+public struct AIAcceptedLearningRecord: Codable, Sendable, Equatable {
+    public var schemaVersion: Int
+    public var acceptedAt: Date
+    public var acceptID: UUID?
+    public var schemaID: String
+    public var appBundleID: String?
+    public var rawInput: String?
+    public var lockedPrefix: String?
+    public var acceptedText: String
+    public var provider: String
+    public var contextVersion: String
+    public var textHash: String
+    public var commitKind: String
+    public var candidateSource: String
+    public var extractedTerms: [LexicalContextTerm]
+
+    public init(
+        schemaVersion: Int = 1,
+        acceptedAt: Date = Date(),
+        acceptID: UUID? = nil,
+        schemaID: String,
+        appBundleID: String? = nil,
+        rawInput: String? = nil,
+        lockedPrefix: String? = nil,
+        acceptedText: String,
+        provider: String,
+        contextVersion: String,
+        textHash: String? = nil,
+        commitKind: String = "ai",
+        candidateSource: String,
+        extractedTerms: [LexicalContextTerm]? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.acceptedAt = acceptedAt
+        self.acceptID = acceptID
+        self.schemaID = schemaID
+        self.appBundleID = appBundleID
+        self.rawInput = rawInput
+        self.lockedPrefix = lockedPrefix
+        self.acceptedText = acceptedText
+        self.provider = provider
+        self.contextVersion = contextVersion
+        self.textHash = textHash ?? Self.hash(acceptedText)
+        self.commitKind = commitKind
+        self.candidateSource = candidateSource
+        self.extractedTerms = extractedTerms ?? AIAcceptedTermExtractor().extractTerms(from: acceptedText)
+    }
+
+    private static func hash(_ text: String) -> String {
+        SHA256.hash(data: Data(text.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+}
+
+public struct AIAcceptedLanguageSummary: Codable, Sendable, Equatable {
+    public var schemaVersion: Int
+    public var generatedAt: Date
+    public var historyHash: String
+    public var acceptedCount: Int
+    public var termProfile: [LexicalContextTerm]
+    public var styleProfile: ToneProfile
+    public var recentAcceptedCommits: [String]
+    public var sourceSummary: [String]
+
+    public init(
+        schemaVersion: Int = 1,
+        generatedAt: Date = Date(),
+        historyHash: String,
+        acceptedCount: Int,
+        termProfile: [LexicalContextTerm],
+        styleProfile: ToneProfile,
+        recentAcceptedCommits: [String],
+        sourceSummary: [String]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.generatedAt = generatedAt
+        self.historyHash = historyHash
+        self.acceptedCount = acceptedCount
+        self.termProfile = termProfile
+        self.styleProfile = styleProfile
+        self.recentAcceptedCommits = recentAcceptedCommits
+        self.sourceSummary = sourceSummary
+    }
+}
+
+public protocol AIAcceptedLearningRecording: Sendable {
+    func recordAcceptedAI(_ record: AIAcceptedLearningRecord) async
+}
+
+public protocol AIAcceptedLearningSnapshotProviding: Sendable {
+    func snapshot() -> AIAcceptedLanguageSummary?
+    func snapshot(schemaID: String?) -> AIAcceptedLanguageSummary?
+}
+
+public struct AIAcceptedLearningSummaryReadyEvent: Sendable, Equatable {
+    public var schemaID: String
+    public var historyHash: String
+    public var acceptedCount: Int
+    public var termCount: Int
+    public var recentCommitCount: Int
+
+    public init(
+        schemaID: String,
+        historyHash: String,
+        acceptedCount: Int,
+        termCount: Int,
+        recentCommitCount: Int
+    ) {
+        self.schemaID = schemaID
+        self.historyHash = historyHash
+        self.acceptedCount = acceptedCount
+        self.termCount = termCount
+        self.recentCommitCount = recentCommitCount
+    }
+}
+
+public protocol AIAcceptedLearningSummaryObserving: Sendable {
+    @discardableResult
+    func addSummaryReadyObserver(
+        _ observer: @escaping @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void
+    ) -> UUID
+    func removeSummaryReadyObserver(_ id: UUID)
+}
+
+public extension AIAcceptedLearningSnapshotProviding {
+    func snapshot(schemaID _: String?) -> AIAcceptedLanguageSummary? {
+        snapshot()
+    }
+}
+
+public struct AIAcceptedTermExtractor: Sendable {
+    public var maxTerms: Int
+
+    public init(maxTerms: Int = 24) {
+        self.maxTerms = max(1, maxTerms)
+    }
+
+    public func extractTerms(from text: String) -> [LexicalContextTerm] {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty,
+              !TextProtection.containsSecretLikeContent(clean),
+              !TextProtection.requiresNoCorrection(clean) else {
+            return []
+        }
+
+        var counts: [String: Int] = [:]
+        addTechnicalTerms(from: clean, to: &counts)
+        addHanTerms(from: clean, to: &counts)
+
+        return counts
+            .map { term, count in
+                LexicalContextTerm(
+                    text: term,
+                    score: min(1, 0.52 + Double(count) * 0.12),
+                    source: "accepted-ai"
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.text < rhs.text
+                }
+                return lhs.score > rhs.score
+            }
+            .prefix(maxTerms)
+            .map { $0 }
+    }
+
+    private func addTechnicalTerms(from text: String, to counts: inout [String: Int]) {
+        let tokens = matches(#"\b[A-Za-z][A-Za-z0-9_+.-]{1,}\b"#, in: text)
+            .map { token -> String in
+                TextProtection.canonicalTechnicalToken(token) ?? token
+            }
+            .filter { token in
+                token.count >= 2 && token.count <= 32
+            }
+
+        for token in tokens where isInjectableToken(token) {
+            counts[token, default: 0] += 1
+        }
+
+        for index in tokens.indices.dropLast() {
+            let phrase = "\(tokens[index]) \(tokens[index + 1])"
+            guard phrase.count <= 40,
+                  phrase.range(of: #"[A-Z_]"#, options: .regularExpression) != nil else {
+                continue
+            }
+            counts[phrase, default: 0] += 1
+        }
+    }
+
+    private func addHanTerms(from text: String, to counts: inout [String: Int]) {
+        for run in matches(#"\p{Han}+"#, in: text) {
+            let chars = Array(run)
+            if (2...8).contains(chars.count) {
+                let term = String(chars)
+                if isUsefulHanTerm(term) {
+                    counts[term, default: 0] += 1
+                }
+                continue
+            }
+            guard chars.count > 8 else {
+                continue
+            }
+            for width in 2...4 {
+                guard chars.count >= width else {
+                    continue
+                }
+                for start in 0...(chars.count - width) {
+                    let term = String(chars[start..<(start + width)])
+                    if isUsefulHanTerm(term) {
+                        counts[term, default: 0] += 1
+                    }
+                }
+            }
+        }
+    }
+
+    private func isInjectableToken(_ token: String) -> Bool {
+        guard LexicalContextBuilder.sanitizedAcceptedProfileText(token) != nil else {
+            return false
+        }
+        if TextProtection.canonicalTechnicalToken(token) != nil {
+            return true
+        }
+        return token.range(of: #"[A-Z_]"#, options: .regularExpression) != nil
+            || token.count >= 3
+    }
+
+    private func isUsefulHanTerm(_ term: String) -> Bool {
+        let stopTerms: Set<String> = [
+            "这个", "那个", "就是", "然后", "所以", "但是", "可以", "需要", "觉得",
+            "我们", "你们", "他们", "一个", "一下", "这里", "那里"
+        ]
+        return !stopTerms.contains(term)
+            && LexicalContextBuilder.sanitizedAcceptedProfileText(term) != nil
+    }
+
+    private func matches(_ pattern: String, in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.matches(in: text, range: nsRange).compactMap { match in
+            guard let range = Range(match.range, in: text) else {
+                return nil
+            }
+            return String(text[range])
+        }
+    }
+}
+
+public final class AIAcceptedLearningStore:
+    AIAcceptedLearningRecording,
+    AIAcceptedLearningSnapshotProviding,
+    AIAcceptedLearningSummaryObserving,
+    @unchecked Sendable
+{
+    private let historyURL: URL?
+    private let summaryURL: URL?
+    private let mirrorURL: URL?
+    private let fileManager: FileManager
+    private let diagnosticSink: any AIRecommendationDiagnosticSink
+    private let summaryDelayNanoseconds: UInt64
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+    private let lock = NSLock()
+    private var records: [AIAcceptedLearningRecord]
+    private var summary: AIAcceptedLanguageSummary?
+    private var schemaSummaries: [String: AIAcceptedLanguageSummary]
+    private var pendingSummarySchemaIDs: Set<String>
+    private var summaryTask: Task<Void, Never>?
+    private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
+    private var lastClearMarkerModifiedAt: Date?
+
+    private struct StartupState {
+        var records: [AIAcceptedLearningRecord]
+        var summary: AIAcceptedLanguageSummary?
+        var schemaSummaries: [String: AIAcceptedLanguageSummary]
+        var lastClearMarkerModifiedAt: Date?
+    }
+
+    public init(
+        historyURL: URL? = AIAcceptedLearningStore.defaultHistoryURL(),
+        summaryURL: URL? = AIAcceptedLearningStore.defaultSummaryURL(),
+        mirrorURL: URL? = AIUserDirectory.defaultDirectory().acceptedLearningMirrorURL,
+        fileManager: FileManager = .default,
+        diagnosticSink: any AIRecommendationDiagnosticSink = NoopAIRecommendationDiagnosticSink(),
+        summaryDelayNanoseconds: UInt64 = 2_000_000_000
+    ) {
+        let configuredEncoder = JSONEncoder()
+        configuredEncoder.dateEncodingStrategy = .iso8601
+        let configuredDecoder = JSONDecoder()
+        configuredDecoder.dateDecodingStrategy = .iso8601
+        let startupState: StartupState
+        let startupRepairErrorReason: String?
+        do {
+            startupState = try withExistingAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                try Self.loadStartupState(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    encoder: configuredEncoder,
+                    decoder: configuredDecoder,
+                    repairPersistentSummary: false
+                )
+            }
+            startupRepairErrorReason = nil
+        } catch {
+            startupState = (try? withExistingAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                try Self.loadStartupState(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    encoder: configuredEncoder,
+                    decoder: configuredDecoder,
+                    repairPersistentSummary: false
+                )
+            }) ?? StartupState(
+                records: [],
+                summary: nil,
+                schemaSummaries: [:],
+                lastClearMarkerModifiedAt: Self.fileModificationDate(
+                    acceptedLearningClearMarkerURL(historyURL: historyURL),
+                    fileManager: fileManager
+                )
+            )
+            startupRepairErrorReason = String(describing: type(of: error))
+        }
+
+        self.historyURL = historyURL
+        self.summaryURL = summaryURL
+        self.mirrorURL = mirrorURL
+        self.fileManager = fileManager
+        self.diagnosticSink = diagnosticSink
+        self.summaryDelayNanoseconds = summaryDelayNanoseconds
+        self.encoder = configuredEncoder
+        self.decoder = configuredDecoder
+        self.records = startupState.records
+        self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
+        self.summary = startupState.summary
+        self.schemaSummaries = startupState.schemaSummaries
+        self.pendingSummarySchemaIDs = []
+        if let startupRepairErrorReason {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_summary_repair_failed:\(startupRepairErrorReason)"
+                )
+            )
+        }
+    }
+
+    public static func inMemory(
+        diagnosticSink: any AIRecommendationDiagnosticSink = NoopAIRecommendationDiagnosticSink()
+    ) -> AIAcceptedLearningStore {
+        AIAcceptedLearningStore(
+            historyURL: nil,
+            summaryURL: nil,
+            mirrorURL: nil,
+            diagnosticSink: diagnosticSink,
+            summaryDelayNanoseconds: 0
+        )
+    }
+
+    public static func defaultHistoryURL(fileManager: FileManager = .default) -> URL {
+        defaultApplicationSupportAIDirectory(fileManager: fileManager)
+            .appendingPathComponent("accepted-ai-learning.jsonl", isDirectory: false)
+    }
+
+    public static func defaultSummaryURL(fileManager: FileManager = .default) -> URL {
+        defaultApplicationSupportAIDirectory(fileManager: fileManager)
+            .appendingPathComponent("accepted-ai-summary.json", isDirectory: false)
+    }
+
+    public func recordAcceptedAI(_ record: AIAcceptedLearningRecord) async {
+        let protectedValues = [record.rawInput, record.lockedPrefix, record.acceptedText].compactMap { $0 }
+        guard !protectedValues.contains(where: TextProtection.containsSecretLikeContent) else {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .acceptedLearningSkippedSecret,
+                    rawLength: record.rawInput?.count,
+                    candidateCount: record.extractedTerms.count,
+                    reason: "secret_like_text"
+                )
+            )
+            return
+        }
+
+        do {
+            try append(record)
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .acceptedLearningRecorded,
+                    rawLength: record.rawInput?.count,
+                    candidateCount: record.extractedTerms.count,
+                    reason: "text_hash=\(String(record.textHash.prefix(8)))"
+                )
+            )
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .acceptedLearningTermsExtracted,
+                    candidateCount: record.extractedTerms.count,
+                    reason: "source=ai-accepted"
+                )
+            )
+        } catch {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_write_failed:\(String(describing: type(of: error)))"
+                )
+            )
+        }
+    }
+
+    public func snapshot() -> AIAcceptedLanguageSummary? {
+        syncRecordsAfterExternalClear()
+        lock.lock()
+        let current = summary
+        lock.unlock()
+        return current
+    }
+
+    public func snapshot(schemaID: String?) -> AIAcceptedLanguageSummary? {
+        guard let schemaID else {
+            return snapshot()
+        }
+        syncRecordsAfterExternalClear()
+        lock.lock()
+        let current = schemaSummaries[schemaID]
+        lock.unlock()
+        return current
+    }
+
+    public func allRecords() -> [AIAcceptedLearningRecord] {
+        syncRecordsAfterExternalClear()
+        lock.lock()
+        let current = records
+        lock.unlock()
+        return current
+    }
+
+    @discardableResult
+    public func addSummaryReadyObserver(
+        _ observer: @escaping @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void
+    ) -> UUID {
+        let id = UUID()
+        lock.lock()
+        summaryObservers[id] = observer
+        lock.unlock()
+        return id
+    }
+
+    public func removeSummaryReadyObserver(_ id: UUID) {
+        lock.lock()
+        summaryObservers.removeValue(forKey: id)
+        lock.unlock()
+    }
+
+    private func append(_ record: AIAcceptedLearningRecord) throws {
+        try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
+            syncRecordsAfterExternalClearLocked()
+            if let historyURL {
+                try fileManager.createDirectory(
+                    at: historyURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                let data = try encoder.encode(record)
+                var line = data
+                line.append(0x0A)
+                if fileManager.fileExists(atPath: historyURL.path) {
+                    let handle = try FileHandle(forWritingTo: historyURL)
+                    defer { try? handle.close() }
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: line)
+                } else {
+                    try line.write(to: historyURL, options: .atomic)
+                }
+            }
+            lock.lock()
+            records.append(record)
+            pendingSummarySchemaIDs.insert(record.schemaID)
+            lock.unlock()
+        }
+        scheduleSummaryRebuild()
+    }
+
+    private func scheduleSummaryRebuild() {
+        lock.lock()
+        summaryTask?.cancel()
+        lock.unlock()
+
+        if summaryDelayNanoseconds == 0 {
+            rebuildSummary()
+            return
+        }
+
+        let task = Task.detached(priority: .utility) { [weak self] in
+            guard let self else {
+                return
+            }
+            do {
+                try await Task.sleep(nanoseconds: self.summaryDelayNanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else {
+                return
+            }
+            self.rebuildSummary()
+        }
+        lock.lock()
+        summaryTask = task
+        lock.unlock()
+    }
+
+    private func rebuildSummary() {
+        var changedSchemaIDsForRetry: Set<String> = []
+        do {
+            let events = try withAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) { () -> [AIAcceptedLearningSummaryReadyEvent] in
+                syncRecordsAfterExternalClearLocked()
+                lock.lock()
+                let currentRecords = records
+                let changedSchemaIDs = pendingSummarySchemaIDs
+                changedSchemaIDsForRetry = changedSchemaIDs
+                pendingSummarySchemaIDs.removeAll()
+                lock.unlock()
+
+                let generatedAt = Date()
+                let nextSummary = Self.buildSummary(records: currentRecords, generatedAt: generatedAt)
+                let nextSchemaSummaries = Self.buildSchemaSummaries(records: currentRecords, generatedAt: generatedAt)
+
+                lock.lock()
+                summary = nextSummary
+                schemaSummaries = nextSchemaSummaries
+                lock.unlock()
+
+                try persistSummary(nextSummary)
+                return Self.summaryReadyEvents(
+                    from: nextSchemaSummaries,
+                    changedSchemaIDs: changedSchemaIDs
+                )
+            }
+            notifySummaryReady(events)
+        } catch {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_summary_write_failed:\(String(describing: type(of: error)))"
+                )
+            )
+            lock.lock()
+            pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
+            lock.unlock()
+        }
+    }
+
+    private func syncRecordsAfterExternalClearLocked() {
+        guard let markerURL = acceptedLearningClearMarkerURL(historyURL: historyURL) else {
+            return
+        }
+        let markerModifiedAt = Self.fileModificationDate(markerURL, fileManager: fileManager)
+        guard let markerModifiedAt else {
+            return
+        }
+        lock.lock()
+        let shouldReload = lastClearMarkerModifiedAt == nil || markerModifiedAt > (lastClearMarkerModifiedAt ?? .distantPast)
+        lock.unlock()
+        guard shouldReload else {
+            return
+        }
+        let reloadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: Date())
+        let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: Date())
+        lock.lock()
+        records = reloadedRecords
+        summary = reloadedSummary
+        schemaSummaries = reloadedSchemaSummaries
+        pendingSummarySchemaIDs.removeAll()
+        lastClearMarkerModifiedAt = markerModifiedAt
+        lock.unlock()
+    }
+
+    private func syncRecordsAfterExternalClear() {
+        do {
+            try withExistingAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                syncRecordsAfterExternalClearLocked()
+            }
+        } catch {
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_clear_sync_failed:\(String(describing: type(of: error)))"
+                )
+            )
+        }
+    }
+
+    private func notifySummaryReady(_ events: [AIAcceptedLearningSummaryReadyEvent]) {
+        guard !events.isEmpty else {
+            return
+        }
+        lock.lock()
+        let observers = Array(summaryObservers.values)
+        lock.unlock()
+        guard !observers.isEmpty else {
+            return
+        }
+        for event in events {
+            for observer in observers {
+                observer(event)
+            }
+        }
+    }
+
+    public static func buildSummary(
+        records: [AIAcceptedLearningRecord],
+        generatedAt: Date
+    ) -> AIAcceptedLanguageSummary? {
+        guard !records.isEmpty else {
+            return nil
+        }
+
+        var termScores: [String: (score: Double, source: String)] = [:]
+        for record in records {
+            guard !TextProtection.requiresNoCorrection(record.acceptedText) else {
+                continue
+            }
+            for term in record.extractedTerms {
+                guard let clean = LexicalContextBuilder.sanitizedAcceptedProfileText(term.text) else {
+                    continue
+                }
+                let nextScore = min(1, max(0, term.score))
+                if let existing = termScores[clean] {
+                    termScores[clean] = (
+                        score: min(1, existing.score + nextScore * 0.18),
+                        source: existing.source
+                    )
+                } else {
+                    termScores[clean] = (score: nextScore, source: "accepted-ai")
+                }
+            }
+        }
+
+        let terms = termScores
+            .map { text, value in
+                LexicalContextTerm(text: text, score: value.score, source: value.source)
+            }
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.text < rhs.text
+                }
+                return lhs.score > rhs.score
+            }
+            .prefix(32)
+            .map { $0 }
+
+        let recentCommits = records
+            .suffix(16)
+            .compactMap { boundedCommit($0.acceptedText) }
+            .suffix(8)
+
+        let style = LexicalContextBuilder().acceptedStyleProfile(from: Array(recentCommits))
+        let historyHash = Self.historyHash(records)
+        return AIAcceptedLanguageSummary(
+            generatedAt: generatedAt,
+            historyHash: historyHash,
+            acceptedCount: records.count,
+            termProfile: terms,
+            styleProfile: style,
+            recentAcceptedCommits: Array(recentCommits),
+            sourceSummary: [
+                "accepted-ai-summary: terms=\(terms.count) commits=\(recentCommits.count) history=\(String(historyHash.prefix(8)))"
+            ]
+        )
+    }
+
+    private static func buildSchemaSummaries(
+        records: [AIAcceptedLearningRecord],
+        generatedAt: Date
+    ) -> [String: AIAcceptedLanguageSummary] {
+        Dictionary(
+            uniqueKeysWithValues: Dictionary(grouping: records, by: \.schemaID).compactMap { schemaID, schemaRecords in
+                guard let summary = buildSummary(records: schemaRecords, generatedAt: generatedAt) else {
+                    return nil
+                }
+                return (schemaID, summary)
+            }
+        )
+    }
+
+    private static func summaryReadyEvents(
+        from schemaSummaries: [String: AIAcceptedLanguageSummary],
+        changedSchemaIDs: Set<String>
+    ) -> [AIAcceptedLearningSummaryReadyEvent] {
+        schemaSummaries
+            .filter { changedSchemaIDs.contains($0.key) }
+            .map { schemaID, summary in
+                AIAcceptedLearningSummaryReadyEvent(
+                    schemaID: schemaID,
+                    historyHash: summary.historyHash,
+                    acceptedCount: summary.acceptedCount,
+                    termCount: summary.termProfile.count,
+                    recentCommitCount: summary.recentAcceptedCommits.count
+                )
+            }
+            .sorted { $0.schemaID < $1.schemaID }
+    }
+
+    private static func summary(
+        _ summary: AIAcceptedLanguageSummary?,
+        matches records: [AIAcceptedLearningRecord]
+    ) -> Bool {
+        guard let rebuilt = buildSummary(records: records, generatedAt: Date()) else {
+            return summary == nil
+        }
+        guard let summary else {
+            return false
+        }
+        return summary.acceptedCount == records.count
+            && summary.historyHash == rebuilt.historyHash
+    }
+
+    private static func boundedCommit(_ text: String) -> String? {
+        let clean = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        guard !clean.isEmpty,
+              !TextProtection.containsSecretLikeContent(clean),
+              !TextProtection.requiresNoCorrection(clean) else {
+            return nil
+        }
+        if clean.count <= 48 {
+            return clean
+        }
+        return String(clean.prefix(48)) + "..."
+    }
+
+    public static func historyHash(_ records: [AIAcceptedLearningRecord]) -> String {
+        let joined = records.map(\.textHash).joined(separator: "\n")
+        return SHA256.hash(data: Data(joined.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    public static func renderMarkdown(_ summary: AIAcceptedLanguageSummary) -> String {
+        var lines: [String] = [
+            "# KnowType Accepted AI Learning",
+            "",
+            "This is a local summary of AI recommendations the user explicitly accepted. Full history stays local and is not injected into provider requests.",
+            "",
+            "## Stats",
+            "- Accepted count: \(summary.acceptedCount)",
+            "- History hash: \(summary.historyHash)",
+            "- Generated at: \(ISO8601DateFormatter().string(from: summary.generatedAt))",
+            "",
+            "## Style",
+            "- Register: \(summary.styleProfile.register)",
+            "- Technical density: \(String(format: "%.2f", summary.styleProfile.technicalDensity))",
+            "- Code switching ratio: \(String(format: "%.2f", summary.styleProfile.codeSwitchingRatio))",
+            "- Punctuation style: \(summary.styleProfile.punctuationStyle)"
+        ]
+        if !summary.styleProfile.connectors.isEmpty {
+            lines.append("- Connectors: \(summary.styleProfile.connectors.joined(separator: ", "))")
+        }
+        if !summary.styleProfile.endings.isEmpty {
+            lines.append("- Common endings: \(summary.styleProfile.endings.joined(separator: ", "))")
+        }
+        lines.append("")
+        lines.append("## Accepted Terms")
+        if summary.termProfile.isEmpty {
+            lines.append("- No accepted AI terms yet.")
+        } else {
+            for term in summary.termProfile {
+                lines.append("- \(term.text) [\(term.source), \(String(format: "%.2f", term.score))]")
+            }
+        }
+        lines.append("")
+        lines.append("## Recent Accepted Commits")
+        if summary.recentAcceptedCommits.isEmpty {
+            lines.append("- No recent accepted AI commits yet.")
+        } else {
+            summary.recentAcceptedCommits.forEach { lines.append("- \($0)") }
+        }
+        lines.append("")
+        lines.append("## Sources")
+        summary.sourceSummary.forEach { lines.append("- \($0)") }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func loadRecords(
+        from url: URL?,
+        decoder: JSONDecoder
+    ) -> [AIAcceptedLearningRecord] {
+        guard let url,
+              let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return []
+        }
+        return content
+            .split(whereSeparator: \.isNewline)
+            .compactMap { line in
+                guard let data = String(line).data(using: .utf8) else {
+                    return nil
+                }
+                return try? decoder.decode(AIAcceptedLearningRecord.self, from: data)
+            }
+    }
+
+    private static func loadSummary(
+        from url: URL?,
+        decoder: JSONDecoder
+    ) -> AIAcceptedLanguageSummary? {
+        guard let url,
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return try? decoder.decode(AIAcceptedLanguageSummary.self, from: data)
+    }
+
+    private static func loadStartupState(
+        historyURL: URL?,
+        summaryURL: URL?,
+        mirrorURL: URL?,
+        fileManager: FileManager,
+        encoder: JSONEncoder,
+        decoder: JSONDecoder,
+        repairPersistentSummary: Bool
+    ) throws -> StartupState {
+        let records = Self.loadRecords(from: historyURL, decoder: decoder)
+        let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
+        let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
+        let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
+            && (!summaryFileExists || loadedSummary != nil)
+        let nextSummary = summaryIsCurrent ? loadedSummary : rebuiltSummary
+        if repairPersistentSummary, !summaryIsCurrent {
+            try persistSummary(
+                nextSummary,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                encoder: encoder,
+                fileManager: fileManager
+            )
+        }
+        return StartupState(
+            records: records,
+            summary: nextSummary,
+            schemaSummaries: Self.buildSchemaSummaries(records: records, generatedAt: Date()),
+            lastClearMarkerModifiedAt: Self.fileModificationDate(
+                acceptedLearningClearMarkerURL(historyURL: historyURL),
+                fileManager: fileManager
+            )
+        )
+    }
+
+    private static func fileModificationDate(_ url: URL?, fileManager: FileManager) -> Date? {
+        guard let url,
+              let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
+            return nil
+        }
+        return attributes[.modificationDate] as? Date
+    }
+
+    private func atomicWrite(_ data: Data, to url: URL) throws {
+        try Self.atomicWrite(data, to: url, fileManager: fileManager)
+    }
+
+    private static func atomicWrite(_ data: Data, to url: URL, fileManager: FileManager) throws {
+        try fileManager.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func persistSummary(_ summary: AIAcceptedLanguageSummary?) throws {
+        try Self.persistSummary(
+            summary,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            encoder: encoder,
+            fileManager: fileManager
+        )
+    }
+
+    private static func persistSummary(
+        _ summary: AIAcceptedLanguageSummary?,
+        summaryURL: URL?,
+        mirrorURL: URL?,
+        encoder: JSONEncoder,
+        fileManager: FileManager
+    ) throws {
+        if let summary {
+            if let summaryURL {
+                try atomicWrite(try encoder.encode(summary), to: summaryURL, fileManager: fileManager)
+            }
+            if let mirrorURL {
+                try atomicWrite(Data(Self.renderMarkdown(summary).utf8), to: mirrorURL, fileManager: fileManager)
+            }
+            return
+        }
+        if let summaryURL,
+           fileManager.fileExists(atPath: summaryURL.path) {
+            try fileManager.removeItem(at: summaryURL)
+        }
+        if let mirrorURL,
+           fileManager.fileExists(atPath: mirrorURL.path) {
+            try fileManager.removeItem(at: mirrorURL)
+        }
+    }
+
+    private static func defaultApplicationSupportAIDirectory(fileManager: FileManager) -> URL {
+        let root = (try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )) ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+        return root
+            .appendingPathComponent("KnowType", isDirectory: true)
+            .appendingPathComponent("AI", isDirectory: true)
+    }
+}

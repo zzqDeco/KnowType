@@ -4,7 +4,10 @@
 
 - Branch: `fix/ai-candidate-hints-lock-prefix`; PR base: `dev`.
 - Unselected Rime candidates are no longer promoted into `lockedPrefix`.
-- Current-page Rime candidates are sent to AI as contextual `candidateHints`.
+- Current-page Rime candidates were initially sent as contextual
+  `candidateHints`; this behavior is superseded by
+  `ai-remove-candidate-hints-bias.plan.md`, which keeps realtime continuation
+  requests candidate-free.
 - If no `lockedPrefix` exists, the provider returns a full commit-ready
   recommendation. It does not need to explicitly choose a base from hints.
 
@@ -21,13 +24,12 @@
 
 - `RimeConversionEngine` native snapshots build `SuggestionResponse` without
   setting `lockedPrefix` from the first current-page candidate.
-- `InputControllerCoordinator` derives `candidateHints` from the active Rime
-  page and schedules AI only when raw input plus confirmed prefix or hints
-  provide enough context.
+- `InputControllerCoordinator` no longer derives realtime `candidateHints`;
+  AI scheduling uses raw input plus confirmed prefixes.
 - `InputControllerCoordinator` forwards confirmed locked prefixes verbatim,
   including intentional whitespace, and trims only for blank-prefix checks.
-- `AIRecommendationRuntime` forwards `candidateHints` to providers and includes
-  them in the recommendation cache key.
+- `AIRecommendationRuntime` keeps `candidateHints` as a compatibility field but
+  clears it before provider requests and cache-key generation.
 - With a `lockedPrefix`, runtime still sanitizes provider `text` as suffix-only
   and joins it after the original locked prefix, preserving intentional
   whitespace in the user-confirmed text.
@@ -42,16 +44,16 @@
 - `./scripts/smoke-inputmethod-install.sh`
 - `./scripts/perf-input-hotpath.sh`
 - `git diff --check`
-- Unit tests cover hint propagation, cache invalidation when hints change, no
-  first-candidate locked prefix during Rime composition, and full
+- Unit tests cover empty realtime hints, no first-candidate locked prefix during
+  Rime composition, and full
   recommendation handling when no locked prefix exists.
-- Review hardening tests cover protected hints, short locked-prefix gating, and
+- Review hardening tests cover short locked-prefix gating and
   whitespace preservation in the final AI display text.
 
 ## Assumptions
 
-- `candidateHints` uses only the current Rime page and does not iterate the full
-  candidate list.
+- `candidateHints` remains in public models for compatibility but is not used by
+  realtime continuation.
 - AI recommendations remain explicit: they update only the AI slot and are
   committed by existing AI actions.
 - A future reasoning-effort setting can be handled separately if the local

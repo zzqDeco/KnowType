@@ -51,8 +51,7 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
   Anthropic Messages、Gemini native、Ollama native 和 custom HTTP 都归一化到
   同一套 provider 接口。
 - 隐私保护：纠错会保护 URL、邮箱、路径、命令、代码片段和受保护 app
-  场景不被改写；实时 AI 只在疑似 secret 时硬禁用，并过滤疑似 secret 的
-  候选 hint。
+  场景不被改写；实时 AI 只在 raw input 或已确认前缀疑似 secret 时硬禁用。
 - 本地词库：内置 seed 词库、用户自有 JSON/TSV 词库，以及托管安装
   Rime 简体拼音词库的路径。
 
@@ -62,12 +61,12 @@ KnowType 目前是用于本地开发和手动验收的 MVP。它包含 Swift pac
 本地 InputMethodKit app bundle、SwiftUI 设置宿主、provider profile 存储、
 Keychain-backed API key 和本地词库工具。
 
-它还不是签名安装器、公证发行包、自动更新程序或 App Store 应用。
+它还不是公证安装器、自动更新程序或 App Store 应用。
 
-GitHub Releases 可以提供名为 `KnowType-vX.Y.Z-macos-local-mvp.zip` 的本地
-MVP zip。这个压缩包包含 ad-hoc 签名的 `KnowType.app` 输入法 bundle 和
-`KnowType.prefPane`，并附带 SHA256 文件和 release manifest。它仍然只是本地
-MVP 打包，不是公证安装器。
+GitHub Releases 默认提供名为 `KnowType-vX.Y.Z-macos-dev-preview.dmg` 的
+Developer Preview DMG。它包含 `KnowType.app`、命令文件安装入口、release manifest
+和 SHA256 文件。该 DMG 没有 Developer ID 签名，也未公证；macOS 可能要求右键打开，
+或在“隐私与安全性”里点击“仍要打开”。旧的本地 MVP zip 仍保留为开发者调试资产。
 
 ## 快速开始
 
@@ -102,15 +101,26 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 ```
 
 本地安装脚本会刷新传统 InputMethodKit app 注册，清理过期的 `.Mode`
-开发状态，补齐系统设置需要的第三方 parent anchor 和可见 `.Hans` mode，并启动已安装的
-app，让注册和 best-effort 选择从 macOS 输入法切换使用的 app 上下文中执行。KnowType 采用
-Squirrel、McBopomofo、macSKK 这类成熟 IMK 的 component mode 形态：parent id 是
-`com.knowtype.inputmethod.KnowType`，系统可见输入源是
-`com.knowtype.inputmethod.KnowType.Hans`。
+开发状态，从已安装 app 上下文注册并启用 KnowType parent input method 与可见 `.Hans` 输入模式，并修复 history 但不会把 KnowType 移到当前保留输入源之前；默认安装不改 selected preference，不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
+Rime 用户数据。即使 macOS 在刷新 TIS 或 LaunchServices 状态时预热启动 host，controller 冷启动
+也会把 Rime session、provider profile、AI learning/profile 文件、`ENV.md` 和 `CORRECTION.md`
+延迟到真实输入、AI 请求或显式维护动作时才初始化。如果已有 `KnowTypeInputMethodApp` 进程正在运行，安装脚本会先中止，而不是强杀它，
+因为 host 退出可能会把 Rime 用户数据刷盘。KnowType 使用成熟 macOS IMK 形态：
+`com.knowtype.inputmethod.KnowType` 是不可直接选择的 parent input method，
+`com.knowtype.inputmethod.KnowType.Hans` 是唯一用户可选的可见输入模式；旧 `.Mode`
+记录以及 parent-only selected/history 行只作为历史缓存清理对象。System Settings
+和右上角输入法菜单里应只显示一个用户可选的 `知键`。
 
 `scripts/install-inputmethod.sh` 默认使用 release 构建，方便本地打字测试覆盖优化后的热路径。
 Rime runtime 文件会打包在 `KnowType.app` 中；如果文件缺失或加载失败，KnowType 会保留
 raw 输入可用并报告 degraded conversion state，而不是回退到已经退役的自研转换器。
+
+覆盖安装会先在 `~/Library/Application Support/KnowType/Backups/` 创建 app 级回滚备份，
+并把当前安装来源、版本、build、commit/tag 和备份 id 写入
+`~/Library/Application Support/KnowType/install-state.json`。备份只包含安装产物：
+`KnowType.app` 和可选 `KnowType.prefPane`；不会复制、回滚或改写 Rime userdb、provider 配置、
+Keychain secret、AI 上下文文档、`~/.knowtype` 或本地词库。用户手动选择 KnowType 并开始真实输入后，
+Rime 初始化属于正常使用行为，不属于安装阶段副作用。
 
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
 macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。它会打开
@@ -127,7 +137,7 @@ macOS 原生 sidebar 和 grouped settings 页面；中文 macOS locale 下使用
 Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流程使用 TIS 注册和启用，
 受保护的第三方输入源授权行由系统设置写入。
 
-需要时，在当前目标 app 上选择 KnowType：
+安装后先激活目标 app，再从 macOS 输入法菜单选择 KnowType；也可以在目标 app 激活时运行：
 
 ```bash
 ./scripts/select-inputmethod.sh --require-selected
@@ -139,15 +149,35 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 ./scripts/uninstall-inputmethod.sh
 ```
 
+列出或恢复本地回滚点：
+
+```bash
+./scripts/rollback-inputmethod.sh --list
+./scripts/rollback-inputmethod.sh --latest
+```
+
 本地 IME 行为仍需要在真实 host app 中打字验证。macOS policy、输入源选择和
 手动验收流程见 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md)
 和 [MVP Acceptance](doc/mvp-acceptance.plan.md)。
 
-使用 GitHub Release zip 时，先用发布页提供的 `.sha256` 文件校验下载的 zip。
-然后解压，把 `KnowType.app` 复制到 `~/Library/Input Methods/`，通过输入法菜单中的
-`KnowType Settings...` 修改配置。`KnowType.prefPane` 是兼容设置入口，只有需要 fallback
-时再复制到 `~/Library/PreferencePanes/`。除非已安装匹配版本的 pane，否则不要使用系统设置侧边栏里残留的
-KnowType 入口。如果手边有源码 checkout，再运行同一套本地诊断和真实打字验收流程。
+使用 GitHub Release DMG 时，先用发布页提供的 `.sha256` 文件校验下载的 DMG：
+
+```bash
+cd ~/Downloads
+shasum -a 256 -c KnowType-v0.2.3-macos-dev-preview.dmg.sha256
+```
+
+打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
+或到“系统设置 > 隐私与安全性”点击“仍要打开”。安装命令会在诊断中记录
+`source=dmg-dev-preview`、release commit/tag 和 manifest digest，但不会启动输入法 host
+或做真实打字探测。只有需要兼容 System Settings pane 时才额外传 `--with-prefpane`。
+除非已安装匹配版本的 pane，否则不要使用系统设置侧边栏里残留的 KnowType 入口。
+
+旧的本地 MVP zip 仍可用于开发者调试：
+
+```bash
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.3-macos-local-mvp.zip
+```
 
 ## 配置
 
@@ -188,14 +218,23 @@ profile 可以留空 model，并通过 `/v1/models` 发现。
 
 AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
 记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明，`LEXICAL_PROFILE.md`
-是由 Rime userdb 词频、KnowType 近期提交和选择历史合成的本地 top-K 词汇画像镜像。
-Canonical JSON 存在 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
-这些文件。
+是由 Rime userdb 词频、KnowType 近期提交、选择历史，以及用户明确接受过的
+AI 推荐摘要合成的本地 top-K 词汇画像镜像。用户接受 AI 推荐后立即发生、
+且光标范围可验证的编辑会单独汇总为本地 AI feedback；普通 Backspace 不会
+自动当成负反馈。完整 accepted-AI 和 feedback 历史只保存在本机
+Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
+`~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
+这些文件。可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或
+`clear --yes` 查看、重建或删除 accepted-AI learning/feedback 数据；clear 会
+删除 accepted-learning/feedback history/summary/mirror，并从 lexical profile
+中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或
+CORRECTION 数据。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
-输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选只作为
-`candidateHints` 提供给 AI；未选择的候选不会被当成 locked prefix。还没有
-locked prefix 时，AI 返回的是可直接上屏的完整推荐，而不是拼到第一候选后的后缀。
+输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给
+实时 AI 请求；未选择的候选不会被当成 locked prefix。还没有 locked prefix 时，
+AI 会基于 raw input、上下文文档和持久 `LEXICAL_PROFILE.md` 返回可直接上屏的
+完整推荐，而不是拼到第一候选后的后缀。
 日志可以区分 schema 降级、结构化解析失败、prefix-lock sanitizer 拒绝、
 prefix 太短等原因。查看命令：
 `log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`。
@@ -204,23 +243,36 @@ prefix 太短等原因。查看命令：
 
 | 快捷键 | 行为 |
 |---|---|
-| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时插入普通空格。 |
-| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时插入普通数字。 |
+| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时插入普通空格，或在兼容宿主中直通给宿主。 |
+| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时输入普通数字，或在兼容宿主中直通给宿主。 |
 | 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。第一页首项按左/上会到上一页最后一项。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
-| `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时插入 `0`。 |
-| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点。 |
+| `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
+| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点/在兼容宿主中直通给宿主。 |
 | `Option + .` | 切换当前输入会话的中文/英文标点。 |
+| `Option + /` | 切换当前输入会话的中文/ASCII 文本模式；在终端类兼容宿主中用于在中文 placeholder composition 和空闲 ASCII 直通之间切换。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
-候选窗显示 Rime 前缀候选、固定 AI 推荐状态行，以及没有建议时的 raw input。它是
-紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标 hover/click
-选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，KnowType 会
-先发布 Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider 失败时，不会
-把固定本地 fallback 文本伪装成 AI 输出。
+宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
+IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
+因此 raw preedit 会显示在当前宿主输入框内。Terminal、iTerm、MacVim 和 Emacs
+风格宿主默认空闲 ASCII 直通，普通字母、数字、空格和标点先交还给 shell 或编辑器，
+按 `Option + /` 后再进入中文输入。这些终端类宿主的中文 composition 使用带
+marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
+composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
+上方，确认时再通过 `insertText` 上屏。仍可用 UserDefaults override 将任意
+bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline marked text 的宿主。
+
+候选窗显示 Rime 前缀候选、固定 AI 推荐状态行、终端/override commit-only
+placeholder 宿主中的真实 preedit，以及没有建议时的 raw input。preedit 行没有
+快捷键、不可选、不能提交；inline 宿主不会额外显示这一行，避免和宿主输入框里的
+preedit 重复。它是紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标
+hover/click 选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，
+KnowType 会先发布 Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider
+失败时，不会把固定本地 fallback 文本伪装成 AI 输出。
 
 候选窗第一项固定为 Rime 转换推荐，第二项固定为 AI 推荐状态。Provider 返回后
 只更新第二项，不重排 Rime 候选列表。Ready AI 使用 Tab 或显式 Option+数字，不占用
@@ -243,7 +295,10 @@ Level 0 纠错保护用于避免把本应原样提交的文本改写，例如 UR
 
 实时 AI 推荐使用更窄的云端隐私门禁：只有 raw input 或已确认前缀疑似包含
 API key、Bearer token、JWT、私钥、password/token 赋值等 credential 时才显示
-`AI 已禁用`。Rime 候选 hint 中的疑似 secret 会被过滤，不会禁用整次请求。
+`AI 已禁用`。
+Accepted AI learning 也只用 secret-like hard block：疑似 credential 的 AI
+接受文本不会被记录，普通技术文本可以留在本地摘要中用于后续推荐。AI feedback
+learning 同样只拦截 secret-like 内容，并且只记录可验证的 post-accept edit。
 
 `API`、`JSON`、`FastAPI`、`iOS`、`macOS`、`InputMethodKit`、
 `snake_case`、`camelCase` 等技术 token 会被保留或规范化。

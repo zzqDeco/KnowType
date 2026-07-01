@@ -104,6 +104,8 @@ struct KnowTypeDemo {
             return "Option+R"
         case .toggleSymbolMode:
             return "Option+."
+        case .toggleTextMode:
+            return "Option+/"
         case .commitRaw:
             return "Return"
         }
