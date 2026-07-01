@@ -78,6 +78,7 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     private let panelAppearance: CandidatePanelAppearance
     private weak var interactionHandler: CandidatePanelInteractionHandling?
     private var lastPresentationSignature: CandidatePanelPresentationSignature?
+    private var isPanelOrderedVisible = false
 
     convenience init(interactionHandler: CandidatePanelInteractionHandling? = nil) {
         self.init(
@@ -115,9 +116,11 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         }
         let presentationSignature = CandidatePanelPresentationSignature(
             windowState: windowState,
-            locale: locale
+            locale: locale,
+            screens: screenProvider.screens
         )
-        if presentationSignature == lastPresentationSignature,
+        if isPanelOrderedVisible,
+           presentationSignature == lastPresentationSignature,
            let panel {
             panel.orderFrontRegardless()
             return
@@ -140,7 +143,7 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
             screenProvider: screenProvider,
             placementPreference: windowState.placementPreference
         ) else {
-            panel.orderOut(nil)
+            orderOutPanel(panel)
             return
         }
         traceLayout(windowState: windowState, renderModel: renderModel, layoutPlan: layoutPlan)
@@ -148,7 +151,7 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         panel.setFrameOrigin(layoutPlan.panelOrigin)
         contentView.update(model: renderModel, layoutPlan: layoutPlan)
         panel.orderFrontRegardless()
-        lastPresentationSignature = presentationSignature
+        markPanelVisible(presentationSignature: presentationSignature)
     }
 
     func candidatePanelContentDidHover(_ selection: CandidatePanelSelection) {
@@ -164,8 +167,18 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     }
 
     func hide() {
+        orderOutPanel(panel)
+    }
+
+    private func orderOutPanel(_ panel: CandidatePanelWindowOperating?) {
         panel?.orderOut(nil)
+        isPanelOrderedVisible = false
         lastPresentationSignature = nil
+    }
+
+    private func markPanelVisible(presentationSignature: CandidatePanelPresentationSignature) {
+        isPanelOrderedVisible = true
+        lastPresentationSignature = presentationSignature
     }
 
     private func candidatePanel() -> CandidatePanelWindowOperating {
@@ -210,6 +223,7 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
 private struct CandidatePanelPresentationSignature: Equatable {
     var windowState: CandidatePanelWindowState
     var locale: KnowTypeLocale
+    var screens: [CandidateAnchorScreen]
 }
 
 private final class CachingCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
