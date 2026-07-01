@@ -45,6 +45,8 @@ final class InputCandidatePanelPublicationRuntimeTests: XCTestCase {
         XCTAssertEqual(state.viewModel.preeditDisplayText, "ni")
         XCTAssertEqual(state.viewModel.aiRecommendation.displayText, "AI 推荐中...")
         XCTAssertEqual(host.panelStates.last, result.state)
+        XCTAssertEqual(host.candidatePanelFrames.last?.presentationGeneration, 1)
+        XCTAssertEqual(host.candidatePanelFrames.last?.visibilityReason, .compositionActive)
         XCTAssertEqual(host.hideCount, 0)
     }
 
@@ -64,6 +66,8 @@ final class InputCandidatePanelPublicationRuntimeTests: XCTestCase {
         XCTAssertEqual(result.visibilityReason, .rawEmpty)
         XCTAssertEqual(result.state, CandidatePanelState())
         XCTAssertEqual(host.hideCount, 1)
+        XCTAssertEqual(host.candidatePanelFrames.last?.presentationGeneration, 1)
+        XCTAssertEqual(host.candidatePanelFrames.last?.visibilityReason, .rawEmpty)
         XCTAssertEqual(supervisor.cancellationCount(for: .panelRender), 0)
     }
 
@@ -166,6 +170,7 @@ final class InputCandidatePanelPublicationRuntimeTests: XCTestCase {
         XCTAssertEqual(appliedResults.last?.state.windowState.viewModel.rawInput, "ni")
         XCTAssertEqual(host.panelStates.count, 1)
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.rawInput, "ni")
+        XCTAssertEqual(host.candidatePanelFrames.map(\.presentationGeneration), [2])
     }
 
     func testHideCancelsPendingPublicationAndDelayedReanchor() async {
@@ -201,7 +206,7 @@ final class InputCandidatePanelPublicationRuntimeTests: XCTestCase {
             }
         )
 
-        let result = runtime.hide(reason: .escape, compositionID: 1, rawRevision: 1, rawLength: 1)
+        let result = runtime.hide(reason: .escape, compositionID: 1, rawRevision: 1, rawLength: 1, locale: .zhCN)
         host.runScheduledOperations()
         await Task.yield()
 
@@ -209,8 +214,57 @@ final class InputCandidatePanelPublicationRuntimeTests: XCTestCase {
         XCTAssertTrue(result.didHide)
         XCTAssertEqual(host.hideCount, 1)
         XCTAssertEqual(host.panelStates.count, 0)
+        XCTAssertFalse(host.candidatePanelFrames.last?.isVisible ?? true)
+        XCTAssertEqual(host.candidatePanelFrames.last?.visibilityReason, .escape)
         XCTAssertEqual(reanchorCount.value, 0)
         XCTAssertGreaterThanOrEqual(supervisor.cancellationCount(for: .panelRender), 1)
+    }
+
+    func testPublishAndHideFramesUseMonotonicPresentationGenerations() {
+        let host = RecordingCandidatePanelHost()
+        let runtime = InputCandidatePanelPublicationRuntime(
+            host: host,
+            taskSupervisor: InputTaskSupervisor()
+        )
+
+        _ = runtime.publishImmediately(
+            snapshot: snapshot(rawInput: "d", suggestion: suggestion()),
+            request: {
+                request(rawInput: "d", suggestion: suggestion())
+            },
+            locale: .zhCN
+        )
+        _ = runtime.hide(reason: .compositionEnded, compositionID: 1, rawRevision: 2, rawLength: 0, locale: .zhCN)
+
+        XCTAssertEqual(host.candidatePanelFrames.map(\.presentationGeneration), [1, 2])
+        XCTAssertEqual(host.candidatePanelFrames.map(\.isVisible), [true, false])
+    }
+
+    func testApplyCurrentFrameUsesCurrentGenerationAfterHide() {
+        let host = RecordingCandidatePanelHost()
+        let runtime = InputCandidatePanelPublicationRuntime(
+            host: host,
+            taskSupervisor: InputTaskSupervisor()
+        )
+
+        _ = runtime.publishImmediately(
+            snapshot: snapshot(rawInput: "d", suggestion: suggestion()),
+            request: {
+                request(rawInput: "d", suggestion: suggestion())
+            },
+            locale: .zhCN
+        )
+        _ = runtime.hide(reason: .compositionEnded, compositionID: 1, rawRevision: 2, rawLength: 0, locale: .zhCN)
+        runtime.applyCurrentFrame(
+            reason: .compositionEnded,
+            compositionID: 1,
+            rawRevision: 2,
+            rawLength: 0,
+            locale: .zhCN
+        )
+
+        XCTAssertEqual(host.candidatePanelFrames.map(\.presentationGeneration), [1, 2, 2])
+        XCTAssertEqual(host.candidatePanelFrames.map(\.isVisible), [true, false, false])
     }
 
     func testDelayedReanchorPublishesOnlyForMatchingActiveComposition() {
@@ -372,18 +426,21 @@ private func multiPageSuggestion(count: Int) -> SuggestionResponse {
 private final class RecordingCandidatePanelHost: InputControllerHost {
     var currentClient: InputControllerClient?
     private(set) var panelStates: [CandidatePanelState] = []
+    private(set) var candidatePanelFrames: [CandidatePanelFrame] = []
     private(set) var hideCount = 0
     private var scheduledOperations: [@Sendable () -> Void] = []
     private var postInsertVerificationOperations: [@Sendable () -> Void] = []
 
     func updateComposition() {}
 
-    func updateCandidatePanel(state: CandidatePanelState, locale _: KnowTypeLocale) {
-        panelStates.append(state)
-    }
-
-    func hideCandidatePanel() {
-        hideCount += 1
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale _: KnowTypeLocale) {
+        candidatePanelFrames.append(frame)
+        if frame.isVisible || frame.visibilityReason == .layoutImpossible {
+            panelStates.append(frame.panelModel)
+        }
+        if !frame.isVisible {
+            hideCount += 1
+        }
     }
 
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {

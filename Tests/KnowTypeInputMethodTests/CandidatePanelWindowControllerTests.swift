@@ -274,6 +274,81 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testStaleVisibleFrameAfterHiddenFrameDoesNotReopenPanel() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let visibleFrame = panelFrame(
+            generation: 1,
+            state: visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+        )
+        let hiddenFrame = panelFrame(generation: 2, state: CandidatePanelState(), reason: .compositionEnded)
+
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+        controller.apply(frame: hiddenFrame, locale: .zhCN)
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 1)
+        XCTAssertEqual(window.orderOutCount, 1)
+        XCTAssertEqual(window.contentSizes.count, 1)
+        XCTAssertEqual(contentView.models.count, 1)
+    }
+
+    @MainActor
+    func testNewVisibleFrameAfterHiddenFrameCanReopenPanel() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let visibleState = visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+
+        controller.apply(frame: panelFrame(generation: 1, state: visibleState), locale: .zhCN)
+        controller.apply(
+            frame: panelFrame(generation: 2, state: CandidatePanelState(), reason: .compositionEnded),
+            locale: .zhCN
+        )
+        controller.apply(frame: panelFrame(generation: 3, state: visibleState), locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 2)
+        XCTAssertEqual(window.orderOutCount, 1)
+        XCTAssertEqual(window.contentSizes.count, 2)
+        XCTAssertEqual(contentView.models.count, 2)
+    }
+
+    @MainActor
+    func testSameGenerationVisibleFrameUsesFastPathWhilePanelIsVisible() {
+        let contentView = FakeCandidatePanelContentRenderer()
+        let window = FakeCandidatePanelWindow()
+        let controller = CandidatePanelWindowController(
+            screenProvider: fakeScreenProvider(),
+            contentView: contentView,
+            layoutEngine: layoutEngine(),
+            makePanel: { _ in window }
+        )
+        let visibleFrame = panelFrame(
+            generation: 1,
+            state: visibleState(anchor: CGRect(x: 100, y: 400, width: 0, height: 18))
+        )
+
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+        controller.apply(frame: visibleFrame, locale: .zhCN)
+
+        XCTAssertEqual(window.orderFrontCount, 2)
+        XCTAssertEqual(window.orderOutCount, 0)
+        XCTAssertEqual(window.contentSizes.count, 1)
+        XCTAssertEqual(contentView.models.count, 1)
+    }
+
+    @MainActor
     func testLongCandidatesUseMeasuredVerticalLayoutBeforePlacement() {
         let contentView = FakeCandidatePanelContentRenderer()
         let window = FakeCandidatePanelWindow()
@@ -501,6 +576,22 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                     visualRole: .rawInput
                 )
             ]
+        )
+    }
+
+    private func panelFrame(
+        generation: Int,
+        state: CandidatePanelState,
+        reason: CandidatePanelVisibilityReason = .compositionActive
+    ) -> CandidatePanelFrame {
+        CandidatePanelFrame(
+            presentationGeneration: generation,
+            compositionID: 1,
+            rawRevision: 1,
+            rawLength: state.windowState.viewModel.rawInput.count,
+            panelModel: state,
+            anchorSource: state.windowState.anchorSource,
+            visibilityReason: reason
         )
     }
 

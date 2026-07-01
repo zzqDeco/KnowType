@@ -420,10 +420,11 @@ private final class PerfInputControllerHost: InputControllerHost {
     private(set) var panelStates: [CandidatePanelState] = []
 
     func updateComposition() {}
-    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale) {
-        panelStates.append(state)
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale: KnowTypeLocale) {
+        if frame.isVisible || frame.visibilityReason == .layoutImpossible {
+            panelStates.append(frame.panelModel)
+        }
     }
-    func hideCandidatePanel() {}
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
         operation()
     }

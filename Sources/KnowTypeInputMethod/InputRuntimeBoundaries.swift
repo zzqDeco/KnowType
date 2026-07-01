@@ -16,6 +16,7 @@ enum CandidatePanelVisibilityReason: String, Sendable, Equatable {
 }
 
 struct CandidatePanelFrame: Sendable, Equatable {
+    var presentationGeneration: Int
     var compositionID: Int
     var rawRevision: Int
     var rawLength: Int
@@ -37,21 +38,19 @@ final class CandidatePanelPresenter: @unchecked Sendable {
 
     func apply(_ frame: CandidatePanelFrame, locale: KnowTypeLocale) {
         trace(frame)
-        guard frame.isVisible else {
-            host?.updateCandidatePanel(state: frame.panelModel, locale: locale)
-            host?.hideCandidatePanel()
-            return
-        }
-        host?.updateCandidatePanel(state: frame.panelModel, locale: locale)
+        host?.applyCandidatePanelFrame(frame, locale: locale)
     }
 
     func hide(
         reason: CandidatePanelVisibilityReason,
+        presentationGeneration: Int,
         compositionID: Int,
         rawRevision: Int,
-        rawLength: Int
+        rawLength: Int,
+        locale: KnowTypeLocale
     ) {
         let frame = CandidatePanelFrame(
+            presentationGeneration: presentationGeneration,
             compositionID: compositionID,
             rawRevision: rawRevision,
             rawLength: rawLength,
@@ -59,8 +58,7 @@ final class CandidatePanelPresenter: @unchecked Sendable {
             anchorSource: .none,
             visibilityReason: reason
         )
-        trace(frame)
-        host?.hideCandidatePanel()
+        apply(frame, locale: locale)
     }
 
     private func trace(_ frame: CandidatePanelFrame) {
@@ -69,7 +67,7 @@ final class CandidatePanelPresenter: @unchecked Sendable {
         }
         let windowState = frame.panelModel.windowState
         fputs(
-            "KnowType panel frame: reason=\(frame.visibilityReason.rawValue) compositionID=\(frame.compositionID) rawRevision=\(frame.rawRevision) rawLength=\(frame.rawLength) anchorSource=\(frame.anchorSource.rawValue) visible=\(windowState.isVisible) layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue)\n",
+            "KnowType panel frame: generation=\(frame.presentationGeneration) reason=\(frame.visibilityReason.rawValue) compositionID=\(frame.compositionID) rawRevision=\(frame.rawRevision) rawLength=\(frame.rawLength) anchorSource=\(frame.anchorSource.rawValue) visible=\(windowState.isVisible) layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue)\n",
             stderr
         )
     }

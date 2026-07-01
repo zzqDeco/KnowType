@@ -20,7 +20,8 @@ implementation plans.
   context.
 - `CandidatePanelFrame` is the only shape passed to `CandidatePanelPresenter`.
   It carries composition id, raw revision, raw length, anchor source, panel
-  model, and `CandidatePanelVisibilityReason`.
+  model, `CandidatePanelVisibilityReason`, and a presentation generation used
+  to order frames across the host/AppKit boundary.
 - `InputCompositionStateRuntime` owns pure composition state: raw input,
   `CompositionBuffer`, composition id, raw revision, and delete count. It may
   return snapshots and mutation results, but Rime processing, host writes,
@@ -33,9 +34,10 @@ implementation plans.
   candidate-panel publication, AI/lexical side effects, preference reloads, or
   event publication.
 - `InputCandidatePanelPublicationRuntime` owns candidate-panel publication
-  state, frame emission, async stale-snapshot gating, hide reasons, delayed
-  re-anchor generation, and panel diagnostics. It must receive Rime/native
-  facts from the coordinator instead of reading the conversion engine.
+  state, frame emission, candidate-frame presentation generation, async
+  stale-snapshot gating, hide reasons, delayed re-anchor generation, and panel
+  diagnostics. It must receive Rime/native facts from the coordinator instead
+  of reading the conversion engine.
 - `InputNativeCandidateNavigationRuntime` owns Rime/native candidate navigation
   state, panel-selection mapping, stable native index matching, hover
   highlight, numeric current-page selection, paging, and boundary paging. It
@@ -77,10 +79,14 @@ implementation plans.
 
 - Candidate-panel debug logs are enabled with `KNOWTYPE_PANEL_DEBUG=1` and
   include frame reasons such as `composition_active`, `composition_ended`,
-  `layout_impossible`, and `stale_update`.
+  `layout_impossible`, and `stale_update`; window-layer logs also include
+  dropped stale frame generations.
 - Candidate-panel publication may hide for raw-empty or stale-suggestion
   snapshots, but anchor source `.none` remains an undisplayable published frame
   so layout-impossible behavior stays diagnosable.
+- Candidate-panel visible and hidden updates use one ordered frame channel
+  through `InputControllerHost.applyCandidatePanelFrame`; there is no separate
+  unordered update/hide host path.
 - Production delayed re-anchor callbacks intentionally run after a short delay;
   stale raw/composition gates in `InputCandidatePanelPublicationRuntime` remain
   the correctness boundary that prevents old anchors from reviving the panel.
