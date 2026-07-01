@@ -26,6 +26,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let lexicalCommitRuntime: InputLexicalCommitRuntime
     private let commitApplicationRuntime = InputCommitApplicationRuntime()
     private let commitDecisionRuntime = InputCommitDecisionRuntime()
+    private let turnSequencingRuntime = InputTurnSequencingRuntime()
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
@@ -1054,46 +1055,23 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         acceptedAIRecommendation: AIRecommendationCandidate? = nil
     ) -> Bool {
-        switch commitApplicationRuntime.plan(for: result, hasComposition: !rawBuffer.isEmpty) {
-        case .insertAndReset(let text):
-            let acceptID = aiAcceptanceRuntime.prepareAcceptedFeedbackTracking(
-                context: commitApplicationRuntime.acceptedFeedbackContext(
-                    text: text,
-                    schemaID: conversionEngine.activeSchemaID,
-                    appBundleID: appBundleIdentifier(client: client),
-                    acceptedAIRecommendation: acceptedAIRecommendation,
-                    client: client
-                )
-            )
-            recordCommitSideEffects(
-                commitSideEffectContexts(
-                    text,
-                    client: client,
-                    acceptedAIRecommendation: acceptedAIRecommendation,
-                    acceptID: acceptID,
-                    compositionSnapshot: compositionState
-                )
-            )
-            insert(text, client: client)
-            if acceptID != nil {
-                host?.schedulePostInsertCaretVerification { [weak self, client] in
-                    self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
-                }
-            }
-            resetComposition(client: client)
-            return true
-        case .requestPolishAndKeepComposition(let text):
-            Task { [sessionController] in
-                await sessionController.requestPolish(rawInput: text)
-            }
-            refreshComposition(client: client)
-            return true
-        case .keepComposition:
-            refreshComposition(client: client)
-            return true
-        case .noAction(let consume):
-            return consume
-        }
+        let turn = turnSequencingRuntime.beginTurn(
+            kind: .commitResult,
+            snapshot: compositionState
+        )
+        let resetPlan = compositionLifecycleRuntime.finishPlan(
+            reason: .reset,
+            compositionSnapshot: turn.compositionSnapshot,
+            hasNativeComposition: conversionEngine.snapshot.hasComposition,
+            commitText: nil
+        )
+        let sequence = turnSequencingRuntime.commitSequence(
+            token: turn,
+            applicationPlan: commitApplicationRuntime.plan(for: result, hasComposition: !rawBuffer.isEmpty),
+            acceptedAIRecommendation: acceptedAIRecommendation,
+            resetPlan: resetPlan
+        )
+        return executeTurnEffectSequence(sequence, client: client)
     }
 
     @discardableResult
@@ -1104,17 +1082,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if let commitText = result.commitText,
            !commitText.isEmpty {
             if result.snapshot.hasComposition {
-                recordCommitSideEffects(
-                    commitSideEffectContexts(
-                        commitText,
-                        client: client,
-                        compositionSnapshot: compositionState
-                    )
+                let turn = turnSequencingRuntime.beginTurn(
+                    kind: .nativeCommit,
+                    snapshot: compositionState
                 )
-                insert(commitText, client: client)
-                syncRawBufferToNativeSnapshot(result.snapshot)
-                publishLocalSuggestion(client: client)
-                return true
+                return executeTurnEffectSequence(
+                    turnSequencingRuntime.nativeCommitSequence(
+                        token: turn,
+                        text: commitText,
+                        snapshot: result.snapshot
+                    ),
+                    client: client
+                )
             }
             return applyCommitResult(.commit(commitText), client: client)
         }
@@ -1125,9 +1104,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
             _ = finishCompositionLifecycle(reason: .nativeEnded, client: client, commitPolicy: .none)
             return true
         }
-        syncRawBufferToNativeSnapshot(result.snapshot)
-        publishLocalSuggestion(client: client)
-        return true
+        let turn = turnSequencingRuntime.beginTurn(
+            kind: .nativeHandled,
+            snapshot: compositionState
+        )
+        return executeTurnEffectSequence(
+            turnSequencingRuntime.nativeHandledSequence(token: turn, snapshot: result.snapshot),
+            client: client
+        )
     }
 
     @discardableResult
@@ -1257,17 +1241,26 @@ final class InputControllerCoordinator: @unchecked Sendable {
         guard let lifecycleClient = client ?? host?.currentClient else {
             return false
         }
-        aiAcceptanceRuntime.cancelFeedback(reason: "idle_passthrough")
-        let state = writeState(hasActiveComposition: false)
-        _ = finishCompositionLifecycle(reason: .reset, client: nil, commitPolicy: .none)
-        inputClientCompositionWriter.insertText(
-            text,
-            client: lifecycleClient,
-            state: state,
-            reason: "idle_passthrough",
-            clearsOwnedMarkedText: false
+        let directWriteState = writeState(hasActiveComposition: false)
+        let turn = turnSequencingRuntime.beginTurn(
+            kind: .directPassthrough,
+            snapshot: compositionState
         )
-        return true
+        let resetPlan = compositionLifecycleRuntime.finishPlan(
+            reason: .reset,
+            compositionSnapshot: turn.compositionSnapshot,
+            hasNativeComposition: conversionEngine.snapshot.hasComposition,
+            commitText: nil
+        )
+        return executeTurnEffectSequence(
+            turnSequencingRuntime.directPassthroughSequence(
+                token: turn,
+                text: text,
+                resetPlan: resetPlan
+            ),
+            client: lifecycleClient,
+            directPassthroughWriteState: directWriteState
+        )
     }
 
     private func commitSideEffectContexts(
@@ -1331,42 +1324,116 @@ final class InputControllerCoordinator: @unchecked Sendable {
             hasNativeComposition: conversionEngine.snapshot.hasComposition,
             commitText: compositionStateRuntime.lifecycleCommitText(policy: commitPolicy)
         )
-        hideCandidatePanel(reason: finishPlan.panelVisibilityReason)
-
-        let lifecycleClient = client ?? host?.currentClient
-        if let commitText = finishPlan.commitText,
-           !commitText.isEmpty {
-            recordCommitSideEffects(
-                commitSideEffectContexts(
-                    commitText,
-                    client: lifecycleClient,
-                    compositionSnapshot: finishingSnapshot
-                )
-            )
-            insert(commitText, client: lifecycleClient)
-        } else if finishPlan.shouldClearOwnedMarkedText {
-            inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
-                client: lifecycleClient,
-                state: writeState()
-            )
-        }
-
-        conversionEngine.reset()
-        compositionStateRuntime.resetAfterLifecycleFinish()
-        resetAnchorState()
-        invalidateSuggestion()
-        inputClientCompositionWriter.finishLifecycle(
-            shouldClearOwnedMarkedTextWhenEndingWithoutCommit: finishPlan.shouldClearOwnedMarkedText
+        let turn = turnSequencingRuntime.beginTurn(
+            kind: .lifecycleFinish,
+            snapshot: finishingSnapshot
         )
-        if finishPlan.shouldPublishCompositionEnded {
-            publishRuntimeEvent(
-                .compositionEnded(
-                    reason: finishPlan.panelVisibilityReason,
-                    compositionID: finishPlan.finishedCompositionID
+        return executeTurnEffectSequence(
+            turnSequencingRuntime.lifecycleFinishSequence(token: turn, finishPlan: finishPlan),
+            client: client
+        )
+    }
+
+    @discardableResult
+    private func executeTurnEffectSequence(
+        _ sequence: InputTurnEffectSequence,
+        client: InputControllerClient?,
+        directPassthroughWriteState: InputClientCompositionWriteState? = nil
+    ) -> Bool {
+        var preparedAcceptedFeedbackID: UUID?
+        for effect in sequence.effects {
+            switch effect {
+            case .prepareAcceptedFeedback(let text, let acceptedAIRecommendation):
+                preparedAcceptedFeedbackID = aiAcceptanceRuntime.prepareAcceptedFeedbackTracking(
+                    context: commitApplicationRuntime.acceptedFeedbackContext(
+                        text: text,
+                        schemaID: conversionEngine.activeSchemaID,
+                        appBundleID: appBundleIdentifier(client: client),
+                        acceptedAIRecommendation: acceptedAIRecommendation,
+                        client: client
+                    )
                 )
-            )
+            case .recordCommitSideEffects(let text, let acceptedAIRecommendation, let clientScope):
+                let effectClient = turnClient(for: clientScope, providedClient: client)
+                recordCommitSideEffects(
+                    commitSideEffectContexts(
+                        text,
+                        client: effectClient,
+                        acceptedAIRecommendation: acceptedAIRecommendation,
+                        acceptID: acceptedAIRecommendation == nil ? nil : preparedAcceptedFeedbackID,
+                        compositionSnapshot: sequence.token.compositionSnapshot
+                    )
+                )
+            case .insertCommittedText(let text, let clientScope):
+                insert(text, client: turnClient(for: clientScope, providedClient: client))
+            case .schedulePostInsertCaretVerification:
+                guard preparedAcceptedFeedbackID != nil else {
+                    continue
+                }
+                host?.schedulePostInsertCaretVerification { [weak self, client] in
+                    self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
+                }
+            case .requestPolish(let text):
+                Task { [sessionController] in
+                    await sessionController.requestPolish(rawInput: text)
+                }
+            case .refreshComposition:
+                refreshComposition(client: client)
+            case .hideCandidatePanel(let reason):
+                hideCandidatePanel(reason: reason)
+            case .clearOwnedMarkedText:
+                inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
+                    client: turnClient(for: .effective, providedClient: client),
+                    state: writeState()
+                )
+            case .resetConversionEngine:
+                conversionEngine.reset()
+            case .resetCompositionStateAfterLifecycleFinish:
+                compositionStateRuntime.resetAfterLifecycleFinish()
+            case .resetAnchorState:
+                resetAnchorState()
+            case .invalidateSuggestion:
+                invalidateSuggestion()
+            case .finishWriterLifecycle(let shouldClearOwnedMarkedTextWhenEndingWithoutCommit):
+                inputClientCompositionWriter.finishLifecycle(
+                    shouldClearOwnedMarkedTextWhenEndingWithoutCommit: shouldClearOwnedMarkedTextWhenEndingWithoutCommit
+                )
+            case .publishCompositionEnded(let reason, let compositionID):
+                publishRuntimeEvent(
+                    .compositionEnded(reason: reason, compositionID: compositionID)
+                )
+            case .cancelAIFeedback(let reason):
+                aiAcceptanceRuntime.cancelFeedback(reason: reason)
+            case .insertDirectPassthroughText(let text):
+                guard let passthroughClient = turnClient(for: .effective, providedClient: client) else {
+                    continue
+                }
+                inputClientCompositionWriter.insertText(
+                    text,
+                    client: passthroughClient,
+                    state: directPassthroughWriteState ?? writeState(hasActiveComposition: false),
+                    reason: "idle_passthrough",
+                    clearsOwnedMarkedText: false
+                )
+            case .syncRawInputFromNativeSnapshot(let snapshot):
+                syncRawBufferToNativeSnapshot(snapshot)
+            case .publishLocalSuggestion:
+                publishLocalSuggestion(client: client)
+            }
         }
-        return finishPlan.commitText?.isEmpty == false
+        return sequence.handled
+    }
+
+    private func turnClient(
+        for scope: InputTurnClientScope,
+        providedClient client: InputControllerClient?
+    ) -> InputControllerClient? {
+        switch scope {
+        case .provided:
+            return client
+        case .effective:
+            return client ?? host?.currentClient
+        }
     }
 
     private func beginCompositionIfNeeded(client: InputControllerClient?) {
