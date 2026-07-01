@@ -79,6 +79,7 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     private weak var interactionHandler: CandidatePanelInteractionHandling?
     private var lastPresentationSignature: CandidatePanelPresentationSignature?
     private var isPanelOrderedVisible = false
+    private var latestAppliedPresentationGeneration = 0
 
     convenience init(interactionHandler: CandidatePanelInteractionHandling? = nil) {
         self.init(
@@ -154,6 +155,19 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         markPanelVisible(presentationSignature: presentationSignature)
     }
 
+    func apply(frame: CandidatePanelFrame, locale: KnowTypeLocale) {
+        guard frame.presentationGeneration >= latestAppliedPresentationGeneration else {
+            traceDroppedFrame(frame)
+            return
+        }
+        latestAppliedPresentationGeneration = frame.presentationGeneration
+        if frame.isVisible {
+            update(state: frame.panelModel, locale: locale)
+        } else {
+            hide()
+        }
+    }
+
     func candidatePanelContentDidHover(_ selection: CandidatePanelSelection) {
         interactionHandler?.candidatePanelDidHover(selection)
     }
@@ -201,6 +215,16 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         }
         fputs(
             "KnowType panel layout: layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue) verticalPlacement=\(layoutPlan.verticalPlacement.rawValue) pageSize=\(windowState.paging.pageSize) renderRows=\(renderModel.rows.count) orientation=\(layoutPlan.orientation) anchorRect=\(windowState.anchorRect) origin=\(layoutPlan.panelOrigin)\n",
+            stderr
+        )
+    }
+
+    private func traceDroppedFrame(_ frame: CandidatePanelFrame) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+            return
+        }
+        fputs(
+            "KnowType panel drop: reason=stale_frame generation=\(frame.presentationGeneration) latestGeneration=\(latestAppliedPresentationGeneration) visibilityReason=\(frame.visibilityReason.rawValue) visible=\(frame.isVisible)\n",
             stderr
         )
     }

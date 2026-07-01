@@ -284,6 +284,24 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(host.hideCandidatePanelCount, 2)
     }
 
+    func testSingleLetterFastSpacePublishesOrderedHiddenFrameAfterVisibleFrame() throws {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("d", client: client))
+        let visibleFrame = try XCTUnwrap(host.candidatePanelFrames.last)
+        XCTAssertTrue(visibleFrame.isVisible)
+        XCTAssertEqual(visibleFrame.panelModel.windowState.viewModel.rawInput, "d")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        let hiddenFrame = try XCTUnwrap(host.candidatePanelFrames.last)
+
+        XCTAssertFalse(hiddenFrame.isVisible)
+        XCTAssertEqual(hiddenFrame.visibilityReason, .reset)
+        XCTAssertGreaterThan(hiddenFrame.presentationGeneration, visibleFrame.presentationGeneration)
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["候选d"])
+    }
+
     func testCommitCompositionPreservesResolvedSegments() throws {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -5231,6 +5249,7 @@ private final class FakeInputControllerHost: InputControllerHost {
     var currentClientValue: InputControllerClient?
     private(set) var updateCompositionCount = 0
     private(set) var panelStates: [CandidatePanelState] = []
+    private(set) var candidatePanelFrames: [CandidatePanelFrame] = []
     private(set) var hideCandidatePanelCount = 0
     private(set) var scheduledOperations: [@Sendable () -> Void] = []
     private(set) var postInsertVerificationOperations: [@Sendable () -> Void] = []
@@ -5243,12 +5262,14 @@ private final class FakeInputControllerHost: InputControllerHost {
         updateCompositionCount += 1
     }
 
-    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale) {
-        panelStates.append(state)
-    }
-
-    func hideCandidatePanel() {
-        hideCandidatePanelCount += 1
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale _: KnowTypeLocale) {
+        candidatePanelFrames.append(frame)
+        if frame.isVisible || frame.visibilityReason == .layoutImpossible {
+            panelStates.append(frame.panelModel)
+        }
+        if !frame.isVisible {
+            hideCandidatePanelCount += 1
+        }
     }
 
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {

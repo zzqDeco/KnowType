@@ -110,8 +110,7 @@ protocol InputControllerHost: AnyObject {
     var currentClient: InputControllerClient? { get }
 
     func updateComposition()
-    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale)
-    func hideCandidatePanel()
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale: KnowTypeLocale)
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void)
     func schedulePostInsertCaretVerification(_ operation: @escaping @Sendable () -> Void)
 }

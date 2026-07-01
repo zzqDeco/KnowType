@@ -71,19 +71,22 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         request: () -> InputCandidatePanelPublicationRequest,
         locale: KnowTypeLocale
     ) -> InputCandidatePanelPublicationResult {
-        panelUpdateGeneration += 1
+        let generation = nextPanelGeneration()
         panelUpdateTask?.cancel()
         panelUpdateTask = nil
         taskSupervisor.cancel(.panelRender)
         guard canPublish(snapshot: snapshot) else {
-            return hide(
+            return applyHiddenFrame(
                 reason: suppressionReason(snapshot: snapshot),
+                presentationGeneration: generation,
                 compositionID: snapshot.compositionID,
                 rawRevision: snapshot.rawRevision,
-                rawLength: snapshot.rawInput.count
+                rawLength: snapshot.rawInput.count,
+                locale: locale,
+                cancelPendingPublication: false
             )
         }
-        return publish(request: request(), locale: locale)
+        return publish(request: request(), locale: locale, presentationGeneration: generation)
     }
 
     @discardableResult
@@ -100,7 +103,8 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
                 reason: suppressionReason(snapshot: snapshot),
                 compositionID: snapshot.compositionID,
                 rawRevision: snapshot.rawRevision,
-                rawLength: snapshot.rawInput.count
+                rawLength: snapshot.rawInput.count,
+                locale: locale
             )
             return result
         }
@@ -108,12 +112,19 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             guard let request = request() else {
                 return nil
             }
-            let result = publish(request: request, locale: locale)
+            let generation = nextPanelGeneration()
+            panelUpdateTask?.cancel()
+            panelUpdateTask = nil
+            taskSupervisor.cancel(.panelRender)
+            let result = publish(
+                request: request,
+                locale: locale,
+                presentationGeneration: generation
+            )
             return result
         }
 
-        panelUpdateGeneration += 1
-        let generation = panelUpdateGeneration
+        let generation = nextPanelGeneration()
         panelUpdateTask?.cancel()
         taskSupervisor.cancel(.panelRender)
         let task = Task { @MainActor [weak self] in
@@ -133,16 +144,23 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
                 return
             }
             guard self.canPublish(snapshot: resolvedRequest.snapshot) else {
-                let result = self.hide(
+                let result = self.applyHiddenFrame(
                     reason: self.suppressionReason(snapshot: resolvedRequest.snapshot),
+                    presentationGeneration: generation,
                     compositionID: resolvedRequest.snapshot.compositionID,
                     rawRevision: resolvedRequest.snapshot.rawRevision,
-                    rawLength: resolvedRequest.snapshot.rawInput.count
+                    rawLength: resolvedRequest.snapshot.rawInput.count,
+                    locale: locale,
+                    cancelPendingPublication: false
                 )
                 onPublication(result)
                 return
             }
-            let result = self.publish(request: resolvedRequest, locale: locale)
+            let result = self.publish(
+                request: resolvedRequest,
+                locale: locale,
+                presentationGeneration: generation
+            )
             onPublication(result)
         }
         panelUpdateTask = task
@@ -155,19 +173,44 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         reason: CandidatePanelVisibilityReason,
         compositionID: Int,
         rawRevision: Int,
-        rawLength: Int
+        rawLength: Int,
+        locale: KnowTypeLocale
     ) -> InputCandidatePanelPublicationResult {
-        panelUpdateGeneration += 1
+        applyHiddenFrame(
+            reason: reason,
+            presentationGeneration: nextPanelGeneration(),
+            compositionID: compositionID,
+            rawRevision: rawRevision,
+            rawLength: rawLength,
+            locale: locale,
+            cancelPendingPublication: true
+        )
+    }
+
+    @discardableResult
+    private func applyHiddenFrame(
+        reason: CandidatePanelVisibilityReason,
+        presentationGeneration: Int,
+        compositionID: Int,
+        rawRevision: Int,
+        rawLength: Int,
+        locale: KnowTypeLocale,
+        cancelPendingPublication: Bool
+    ) -> InputCandidatePanelPublicationResult {
         delayedReanchorGeneration += 1
-        panelUpdateTask?.cancel()
-        panelUpdateTask = nil
-        taskSupervisor.cancel(.panelRender)
+        if cancelPendingPublication {
+            panelUpdateTask?.cancel()
+            panelUpdateTask = nil
+            taskSupervisor.cancel(.panelRender)
+        }
         panelState.hide()
         presenter.hide(
             reason: reason,
+            presentationGeneration: presentationGeneration,
             compositionID: compositionID,
             rawRevision: rawRevision,
-            rawLength: rawLength
+            rawLength: rawLength,
+            locale: locale
         )
         return result(reason: reason, didHide: true)
     }
@@ -205,6 +248,7 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
     ) {
         presenter.apply(
             CandidatePanelFrame(
+                presentationGeneration: currentPanelGeneration(),
                 compositionID: compositionID,
                 rawRevision: rawRevision,
                 rawLength: rawLength,
@@ -245,7 +289,8 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
 
     private func publish(
         request: InputCandidatePanelPublicationRequest,
-        locale: KnowTypeLocale
+        locale: KnowTypeLocale,
+        presentationGeneration: Int
     ) -> InputCandidatePanelPublicationResult {
         let isDisplayable = request.anchorResult.source != .none
         panelState.update(
@@ -272,6 +317,7 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             : .layoutImpossible
         presenter.apply(
             CandidatePanelFrame(
+                presentationGeneration: presentationGeneration,
                 compositionID: request.snapshot.compositionID,
                 rawRevision: request.snapshot.rawRevision,
                 rawLength: request.snapshot.rawInput.count,
@@ -282,6 +328,18 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             locale: locale
         )
         return result(reason: reason, didHide: false)
+    }
+
+    private func nextPanelGeneration() -> Int {
+        panelUpdateGeneration += 1
+        return panelUpdateGeneration
+    }
+
+    private func currentPanelGeneration() -> Int {
+        if panelUpdateGeneration == 0 {
+            return nextPanelGeneration()
+        }
+        return panelUpdateGeneration
     }
 
     private func canPublish(snapshot: InputCandidatePanelPublicationSnapshot) -> Bool {

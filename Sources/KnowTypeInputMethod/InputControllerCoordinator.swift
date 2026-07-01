@@ -1534,7 +1534,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reason: reason,
             compositionID: compositionID,
             rawRevision: rawRevision,
-            rawLength: rawBuffer.count
+            rawLength: rawBuffer.count,
+            locale: locale
         )
         applyCandidatePanelPublicationResult(result)
     }

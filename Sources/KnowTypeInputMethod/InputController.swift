@@ -265,15 +265,9 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         super.updateComposition()
     }
 
-    fileprivate func updateCandidatePanelWindow(state: CandidatePanelState, locale: KnowTypeLocale) {
+    fileprivate func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale: KnowTypeLocale) {
         MainActor.assumeIsolated {
-            candidatePanelController.update(state: state, locale: locale)
-        }
-    }
-
-    fileprivate func hideCandidatePanelWindow() {
-        MainActor.assumeIsolated {
-            candidatePanelController.hide()
+            candidatePanelController.apply(frame: frame, locale: locale)
         }
     }
 
@@ -364,12 +358,8 @@ private final class IMKInputControllerHostAdapter: InputControllerHost, @uncheck
         controller?.performSuperUpdateComposition()
     }
 
-    func updateCandidatePanel(state: CandidatePanelState, locale: KnowTypeLocale) {
-        controller?.updateCandidatePanelWindow(state: state, locale: locale)
-    }
-
-    func hideCandidatePanel() {
-        controller?.hideCandidatePanelWindow()
+    func applyCandidatePanelFrame(_ frame: CandidatePanelFrame, locale: KnowTypeLocale) {
+        controller?.applyCandidatePanelFrame(frame, locale: locale)
     }
 
     func scheduleDelayedReanchor(_ operation: @escaping @Sendable () -> Void) {
