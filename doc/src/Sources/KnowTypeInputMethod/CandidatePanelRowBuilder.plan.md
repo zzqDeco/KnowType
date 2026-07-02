@@ -31,6 +31,9 @@ It converts a `CandidatePanelViewModel` into:
   first pageable row when no prefix rows exist.
 - Disabled AI status rows have no selection identity and are skipped by
   keyboard, mouse, and number-shortcut selection.
+- Pending AI status rows are spinner-only visually: the row keeps empty visible
+  text, a fixed spinner accessory, and an explicit `AI 状态，AI 推荐中`
+  accessibility label.
 - Ready AI rows are selectable, but they are not default selections. Users must
   accept them through Tab, Option-number, click, hover, or another explicit
   selection action rather than ordinary Space accidentally committing an

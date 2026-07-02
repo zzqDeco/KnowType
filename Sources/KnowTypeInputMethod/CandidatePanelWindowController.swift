@@ -562,13 +562,15 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
             container.addArrangedSubview(makeSpinner())
         }
 
-        let textLabel = baseLabel(row.text)
-        textLabel.font = panelAppearance.font(for: row.visualRole)
-        textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected, isEnabled: row.isEnabled)
-        textLabel.lineBreakMode = .byTruncatingTail
-        textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: layoutItem.textWidthLimit).isActive = true
-        container.addArrangedSubview(textLabel)
+        if !row.text.isEmpty {
+            let textLabel = baseLabel(row.text)
+            textLabel.font = panelAppearance.font(for: row.visualRole)
+            textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected, isEnabled: row.isEnabled)
+            textLabel.lineBreakMode = .byTruncatingTail
+            textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: layoutItem.textWidthLimit).isActive = true
+            container.addArrangedSubview(textLabel)
+        }
         return container
     }
 

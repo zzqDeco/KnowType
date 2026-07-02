@@ -8,16 +8,17 @@ Active
 
 Keep the candidate panel visually stable while real-time AI recommendations wait
 for input to settle. Eligible input should immediately show a fixed AI pending
-row with a spinner, while provider transport still starts only after a shorter
-input-method debounce.
+row with a spinner-only visual placeholder, while provider transport still
+starts only after a shorter input-method debounce.
 
 ## Scope
 
 - Shorten the IMK-side AI dispatch debounce from 850 ms to 450 ms.
 - Treat `.pending` as the current input's AI waiting state, covering both
   debounce and transport phases.
-- Render pending AI rows with a fixed spinner accessory and keep them
-  non-selectable. Pending rows also do not consume `Tab`; visible continuation
+- Render pending AI rows with a fixed spinner accessory and no visible status
+  text, while keeping the accessibility label as `AI 状态，AI 推荐中`. Pending
+  rows remain non-selectable and do not consume `Tab`; visible continuation
   shortcuts remain usable while an AI request is waiting.
 - Keep provider requests stale-dropped rather than actively cancelled once
   transport has started.
@@ -32,11 +33,12 @@ input-method debounce.
 - The runtime still cancels only pre-transport debounce tasks on new input; old
   transport results continue through the existing generation/raw-revision stale
   gate.
-- `CandidatePanelRowBuilder` marks pending AI rows with a spinner accessory.
-  `CandidatePanelRenderer` carries the accessory to AppKit render rows.
+- `CandidatePanelRowBuilder` marks pending AI rows with a spinner accessory,
+  empty visible text, and an explicit accessibility label. `CandidatePanelRenderer`
+  carries the accessory and accessibility metadata to AppKit render rows.
 - `CandidatePanelLayoutEngine` reserves spinner width in text measurement, and
   `CandidatePanelContentView` creates a small indeterminate `NSProgressIndicator`
-  for the row.
+  for the row without adding an empty text label.
 - AI diagnostics add a privacy-safe `pending_placeholder` stage; logs include
   request ids, lengths, revisions, elapsed timings, and reasons, never raw text
   or provider output.
@@ -56,12 +58,13 @@ input-method debounce.
 Manual acceptance: install the branch build, enable `KNOWTYPE_AI_DEBUG=1` and
 `KNOWTYPE_PANEL_DEBUG=1`, type a long pinyin string, pause briefly, then continue
 typing after AI appears. The AI row should become a spinner placeholder instead
-of disappearing, and stale provider results must not interrupt the current input.
+of disappearing, should not show visible `AI 推荐中...` text, and stale provider
+results must not interrupt the current input.
 
 ## Assumptions
 
 - 450 ms is the first user-facing default for the IMK-side debounce.
-- Pending rows reserve one row of height and spinner width; full panel width
-  still follows existing candidate layout rules.
+- Pending rows reserve one row of height and spinner width without visible
+  status copy; full panel width still follows existing candidate layout rules.
 - Too-short, disabled, protected, and unavailable-provider states are not
   eligible AI waits and do not show the spinner placeholder.
