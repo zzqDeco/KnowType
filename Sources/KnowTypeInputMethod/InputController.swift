@@ -99,13 +99,17 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         hostAdapter.controller = self
         InputMethodRimePrewarmer.shared.scheduleOnce()
         inputControllerLogger.notice("KnowTypeInputController initialized client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)")
-        if ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" {
-            let elapsedMs = Date().timeIntervalSince(startupDebugStartedAt) * 1_000
-            let formattedElapsed = String(format: "%.1f", elapsedMs)
-            inputControllerLogger.notice(
-                "KnowType cold start lazy runtime event=controller_init elapsedMs=\(formattedElapsed, privacy: .public) rime=deferred provider=deferred learning=read_only client=\(initialClient?.bundleIdentifier ?? "<unknown>", privacy: .public)"
-            )
-        }
+        let elapsedMs = Date().timeIntervalSince(startupDebugStartedAt) * 1_000
+        InputDebugDiagnostics.emit(
+            category: .startup,
+            fields: [
+                .init(.stage, "controller_init"),
+                .init(.elapsedMs, String(format: "%.1f", elapsedMs)),
+                .init(.bundleID, initialClient?.bundleIdentifier ?? "unknown"),
+                .init(.reason, "rime=deferred;provider=deferred;learning=read_only")
+            ],
+            logger: inputControllerLogger
+        )
     }
 
     public override func inputText(_ string: String!, key keyCode: Int, modifiers flags: Int, client sender: Any!) -> Bool {

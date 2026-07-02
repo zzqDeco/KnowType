@@ -296,6 +296,7 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         locale: KnowTypeLocale,
         presentationGeneration: Int
     ) -> InputCandidatePanelPublicationResult {
+        let startedAt = ContinuousClock.now
         let isDisplayable = request.anchorResult.source != .none
         panelState.update(
             rawInput: request.snapshot.rawInput,
@@ -313,6 +314,7 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         traceCandidatePanelUpdate(
             savedPageSize: request.savedPageSize,
             effectivePageSize: request.effectivePageSize,
+            presentationGeneration: presentationGeneration,
             locale: locale
         )
         traceFirstCandidatePanelMaterializationIfNeeded(locale: locale)
@@ -330,6 +332,15 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
                 visibilityReason: reason
             ),
             locale: locale
+        )
+        traceCandidatePanelPublication(
+            stage: "publication",
+            presentationGeneration: presentationGeneration,
+            reason: reason,
+            snapshot: request.snapshot,
+            anchorSource: panelState.windowState.anchorSource,
+            isVisible: panelState.windowState.isVisible,
+            elapsedMilliseconds: InputDebugDiagnostics.milliseconds(startedAt.duration(to: .now))
         )
         return result(reason: reason, didHide: false)
     }
@@ -411,11 +422,9 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
     private func traceCandidatePanelUpdate(
         savedPageSize: Int,
         effectivePageSize: Int,
+        presentationGeneration: Int,
         locale: KnowTypeLocale
     ) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
-            return
-        }
         let windowState = panelState.windowState
         let rowCount = CandidatePanelRenderer(locale: locale)
             .render(
@@ -425,9 +434,43 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             )
             .rows
             .count
-        fputs(
-            "KnowType panel: layoutMode=\(windowState.layoutMode.rawValue) savedPageSize=\(savedPageSize) effectivePageSize=\(effectivePageSize) anchorSource=\(windowState.anchorSource.rawValue) visible=\(windowState.isVisible) renderRows=\(rowCount)\n",
-            stderr
+        InputDebugDiagnostics.emit(
+            category: .panel,
+            fields: [
+                .init(.stage, "state_update"),
+                .init(.panelGeneration, presentationGeneration),
+                .init(.anchorSource, windowState.anchorSource.rawValue),
+                .init(.handled, windowState.isVisible),
+                .init(
+                    .reason,
+                    "layoutMode=\(windowState.layoutMode.rawValue);savedPageSize=\(savedPageSize);effectivePageSize=\(effectivePageSize);renderRows=\(rowCount)"
+                )
+            ]
+        )
+    }
+
+    private func traceCandidatePanelPublication(
+        stage: String,
+        presentationGeneration: Int,
+        reason: CandidatePanelVisibilityReason,
+        snapshot: InputCandidatePanelPublicationSnapshot,
+        anchorSource: CandidateAnchorSource,
+        isVisible: Bool,
+        elapsedMilliseconds: Double
+    ) {
+        InputDebugDiagnostics.emit(
+            category: .panel,
+            fields: [
+                .init(.stage, stage),
+                .init(.elapsedMs, String(format: "%.2f", elapsedMilliseconds)),
+                .init(.panelGeneration, presentationGeneration),
+                .init(.reason, reason.rawValue),
+                .init(.compositionID, snapshot.compositionID),
+                .init(.rawRevision, snapshot.rawRevision),
+                .init(.rawLength, snapshot.rawInput.count),
+                .init(.anchorSource, anchorSource.rawValue),
+                .init(.handled, isVisible)
+            ]
         )
     }
 }

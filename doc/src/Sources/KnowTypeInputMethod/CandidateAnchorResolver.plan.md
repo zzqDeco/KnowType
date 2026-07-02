@@ -14,5 +14,7 @@ Current behavior:
 - scopes the last usable anchor to the same composition id, bundle id, screen id, and short age window
 - uses a stable safe point inside the screen visible frame when host geometry is temporarily unavailable
 - uses `KNOWTYPE_ANCHOR_DEBUG=1` to trace accepted and rejected anchor sources
+  through `InputDebugDiagnostics`, including source, composition id, bundle id,
+  handled state, and rejection reason without logging raw geometry
 
 Accessibility fallback is optional. It only runs when macOS already trusts the process for accessibility access; it does not request permissions during typing.

@@ -22,6 +22,26 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputAIRecommendationRuntime.swift"),
             encoding: .utf8
         )
+        let aiRecommendationDiagnostics = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeAI/AIRecommendationDiagnostics.swift"),
+            encoding: .utf8
+        )
+        let candidateAnchorResolver = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/CandidateAnchorResolver.swift"),
+            encoding: .utf8
+        )
+        let candidatePanelWindowController = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/CandidatePanelWindowController.swift"),
+            encoding: .utf8
+        )
+        let inputClientWriteCoordinator = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputClientWriteCoordinator.swift"),
+            encoding: .utf8
+        )
+        let inputRuntimeBoundaries = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputRuntimeBoundaries.swift"),
+            encoding: .utf8
+        )
         let rimeEngine = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
             encoding: .utf8
@@ -70,6 +90,15 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(aiRecommendationRuntime.contains("case .transportStarted:"))
         XCTAssertTrue(aiRecommendationRuntime.contains(".transportLeftStale"))
         XCTAssertTrue(aiRecommendationRuntime.contains("if phase == .dispatchDeferred"))
+        XCTAssertFalse(coordinator.contains("fputs("))
+        XCTAssertFalse(aiRecommendationDiagnostics.contains("fputs("))
+        XCTAssertFalse(candidateAnchorResolver.contains("fputs("))
+        XCTAssertFalse(candidateAnchorResolver.contains("NSLog("))
+        XCTAssertFalse(candidatePanelWindowController.contains("fputs("))
+        XCTAssertFalse(inputClientWriteCoordinator.contains("fputs("))
+        XCTAssertFalse(inputRuntimeBoundaries.contains("fputs("))
+        XCTAssertFalse(aiRecommendationDiagnostics.contains("candidateCount="))
+        XCTAssertFalse(aiRecommendationDiagnostics.contains("acceptedCount="))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {

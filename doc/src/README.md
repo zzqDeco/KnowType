@@ -18,6 +18,7 @@ required for every test file.
 
 - [Overview](Sources/KnowTypeCore/README.plan.md)
 - [CorrectionEngine](Sources/KnowTypeCore/CorrectionEngine.plan.md)
+- [InputDebugDiagnostics](Sources/KnowTypeCore/InputDebugDiagnostics.plan.md)
 - [InputMethodRuntimePreferences](Sources/KnowTypeCore/InputMethodRuntimePreferences.plan.md)
 - [InputModePreferences](Sources/KnowTypeCore/InputModePreferences.plan.md)
 - [ManagedLexiconPack](Sources/KnowTypeCore/ManagedLexiconPack.plan.md)
@@ -106,6 +107,7 @@ required for every test file.
 - [InputMethodLexiconRuntime](Sources/KnowTypeInputMethod/InputMethodLexiconRuntime.plan.md)
 - [InputSessionController](Sources/KnowTypeInputMethod/InputSessionController.plan.md)
 - [InputSymbolMode](Sources/KnowTypeInputMethod/InputSymbolMode.plan.md)
+- [InputTaskSupervisor](Sources/KnowTypeInputMethod/InputTaskSupervisor.plan.md)
 - [KnowTypePreferencesWindowController](Sources/KnowTypeInputMethod/KnowTypePreferencesWindowController.plan.md)
 - [LexicalProfileRuntime](Sources/KnowTypeInputMethod/LexicalProfileRuntime.plan.md)
 - [RimeConversionEngine](Sources/KnowTypeInputMethod/RimeConversionEngine.plan.md)

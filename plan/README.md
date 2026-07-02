@@ -44,6 +44,7 @@ when converting a shipped plan into a short record.
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
 | [input-method-first-key-performance.plan.md](input-method-first-key-performance.plan.md) | Reduce post-install/process-cold first-key stall and repeated hot-path overhead | Active |
 | [input-method-first-key-review-followup.plan.md](input-method-first-key-review-followup.plan.md) | Resolve PR #150 first-key performance review regressions | Active |
+| [input-debug-diagnostics-consolidation.plan.md](input-debug-diagnostics-consolidation.plan.md) | Consolidate privacy-safe debug and performance diagnostics for input hot-path investigations | Active |
 | [inputmethod-async-keypath-supervisor.plan.md](inputmethod-async-keypath-supervisor.plan.md) | Fully asynchronous IMK key path with cancellable candidate, AI, anchor, and panel tasks | Active |
 | [rime-conversion-lexical-ai.plan.md](rime-conversion-lexical-ai.plan.md) | Optional librime bridge, synchronous base candidate hot path, and AI lexical profile context | Active |
 | [rime-userdb-lexical-profile.plan.md](rime-userdb-lexical-profile.plan.md) | Persist AI lexical profile from Rime userdb frequency plus recent KnowType commits/selections | Active |
@@ -97,7 +98,6 @@ when converting a shipped plan into a short record.
 | [ai-accepted-feedback-learning.plan.md](ai-accepted-feedback-learning.plan.md) | Learn only from verified edits inside recently accepted AI text spans | Active |
 | [provider-live-smoke-timeout-alignment.plan.md](provider-live-smoke-timeout-alignment.plan.md) | Align env-gated provider live smoke timeout with the AI runtime budget | Active |
 | [provider-live-smoke-model-alignment.plan.md](provider-live-smoke-model-alignment.plan.md) | Align env-gated continuation live smoke with the explicit product model under test | Active |
-| [ai-recommendation-stability-latency.plan.md](ai-recommendation-stability-latency.plan.md) | Debounce input-method AI dispatch and stale-drop older transport results without aborting started provider requests | Active |
 | [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |
 | [imk-owned-marked-range-commit.plan.md](imk-owned-marked-range-commit.plan.md) | Prevent cursor misplacement by ignoring stale host marked ranges on ordinary IMK writes | Active |
 | [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
@@ -130,6 +130,7 @@ when converting a shipped plan into a short record.
 | Document | Purpose | Status |
 |---|---|---|
 | [input-commit-decision-runtime-refactor.plan.md](input-commit-decision-runtime-refactor.plan.md) | Extract Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions from the coordinator | Delivered |
+| [ai-recommendation-stability-latency.plan.md](ai-recommendation-stability-latency.plan.md) | Debounce input-method AI dispatch and stale-drop older transport results without aborting started provider requests | Delivered |
 | [input-composition-lifecycle-runtime-refactor.plan.md](input-composition-lifecycle-runtime-refactor.plan.md) | Extract composition begin/finish lifecycle planning and trace-once state from the coordinator | Delivered |
 | [input-commit-application-runtime-refactor.plan.md](input-commit-application-runtime-refactor.plan.md) | Extract commit-result planning and side-effect context construction from the coordinator | Delivered |
 | [input-refactor-regression-audit.plan.md](input-refactor-regression-audit.plan.md) | Lock coordinator-level behavior after the input-method runtime extraction sequence | Delivered |

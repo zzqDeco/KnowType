@@ -96,6 +96,11 @@ Current behavior:
 - validates planned turn effect order through `InputTurnSequenceValidator` before
   executing effects; violations and `KNOWTYPE_TURN_DEBUG=1` traces contain only
   turn metadata and effect names, never user text
+- emits privacy-safe input latency stages through `InputDebugDiagnostics`,
+  including `handle_key_total`, `commit_decision`,
+  `turn_effect.<effectName>`, `refresh_composition`, and
+  `publish_local_suggestion`; `KNOWTYPE_PERF_DEBUG=1` emits all traced stages,
+  while `KNOWTYPE_INPUT_LATENCY_DEBUG=1` respects the configured latency budget
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - delegates explicit AI accepted-learning records, typing-context events, and
   accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the
@@ -185,11 +190,11 @@ Current behavior:
   `InputNativeCandidateNavigationRuntime` to map visible panel selection back
   into native/Rime candidate selection state
 - emits privacy-safe `KNOWTYPE_STARTUP_DEBUG=1` timing logs for first
-  composition begin and first candidate-panel materialization; logs include
-  timing and state metadata, not user text
+  composition begin and first candidate-panel materialization through
+  `InputDebugDiagnostics`; logs include timing and state metadata, not user text
 - emits privacy-safe IMK write diagnostics with
   `KNOWTYPE_CLIENT_WRITE_DEBUG=1`; logs include bundle id, write mode,
-  handled/pass-through state, ranges, write kind, and reasons, never user text
+  handled/pass-through state, write kind, and reasons, never user text
 - explicitly hides and invalidates the candidate panel on deactivate, close, reset, and native composition end because the panel uses `hidesOnDeactivate = false`
 - keeps Rime/native candidate navigation authoritative through
   `InputNativeCandidateNavigationRuntime`; panel publication helpers live in

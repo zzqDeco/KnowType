@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import KnowTypeCore
 
 public enum CandidateAnchorSource: String, Sendable, Equatable {
     case firstRectMarkedEnd
@@ -372,14 +373,23 @@ public final class CandidateAnchorResolver {
         reason: String?,
         context: CandidateAnchorContext
     ) {
-        guard traceEnabled else {
+        _ = rect
+        guard traceEnabled
+            || ProcessInfo.processInfo.environment[InputDebugDiagnostics.performanceEnvironmentKey] == "1" else {
             return
         }
-        let status = accepted ? "accepted" : "rejected"
-        let reasonText = reason.map { " reason=\($0)" } ?? ""
-        let message = "KnowTypeAnchor source=\(source.rawValue) status=\(status) rect=\(rect) bundle=\(context.appBundleID ?? "-") composition=\(context.compositionID)\(reasonText)"
-        fputs("\(message)\n", stderr)
-        NSLog("%@", message)
+        InputDebugDiagnostics.emit(
+            category: .anchor,
+            fields: [
+                .init(.stage, accepted ? "accepted" : "rejected"),
+                .init(.anchorSource, source.rawValue),
+                .init(.compositionID, context.compositionID),
+                .init(.bundleID, context.appBundleID ?? "unknown"),
+                .init(.handled, accepted),
+                .init(.reason, reason ?? "-")
+            ],
+            force: traceEnabled
+        )
     }
 }
 

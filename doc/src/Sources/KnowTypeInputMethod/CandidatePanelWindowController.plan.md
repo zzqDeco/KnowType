@@ -24,6 +24,9 @@ Current behavior:
 - hides from composition reset, `hidePalettes`, input-controller close lifecycle, and layout-impossible states by clearing both AppKit visibility and cached presentation state
 - receives candidate-panel changes as ordered `CandidatePanelFrame` values and records the latest applied presentation generation
 - drops stale frames whose presentation generation is older than the latest applied frame, so an old visible frame cannot be replayed after a newer hidden frame
+- emits privacy-safe panel diagnostics through `InputDebugDiagnostics`, including
+  frame generation, visibility reason, anchor source, handled state, and
+  window/layout elapsed timing, without logging candidate text or raw input
 - uses a borderless non-activating AppKit panel at `.popUpMenu` window level, with all-spaces/full-screen auxiliary behavior, `isFloatingPanel`, `worksWhenModal`, and `hidesOnDeactivate = false`
 - uses `NSVisualEffectView` `hudWindow` material, compact row sizing, system highlight selection, 0.5 pt separator border, continuous corners, and muted continuation/AI-status styling to stay close to macOS native input method candidate windows
 - uses placement preference rather than elevated private window levels to keep Spotlight candidates above the search results overlay; ordinary apps keep automatic visual-below placement
@@ -43,4 +46,6 @@ Screenshot QA:
 - `CandidatePanelSnapshotTests` renders fixed AppKit examples for light horizontal, dark vertical, and AI-status layouts.
 - Baselines are stored in `Tests/KnowTypeInputMethodTests/__Snapshots__/`.
 - `KNOWTYPE_RECORD_SNAPSHOTS=1` refreshes baselines; default test runs compare PNG output and write actual/diff files only under a temporary directory on mismatch.
-- `KNOWTYPE_PANEL_DEBUG=1` logs placement preference and final vertical placement with the layout trace, and logs stale frame drops with the rejected generation.
+- `KNOWTYPE_PANEL_DEBUG=1` logs privacy-safe panel frame, window apply,
+  layout, and stale-frame-drop metadata. Use `KNOWTYPE_PERF_DEBUG=1` to include
+  panel timing in broad hot-path traces.

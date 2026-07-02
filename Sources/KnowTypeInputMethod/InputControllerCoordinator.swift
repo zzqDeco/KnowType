@@ -183,7 +183,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func handle(stroke: InputKeyStroke, client: InputControllerClient?) -> Bool {
-        return latencyTracer.trace("handle-key") {
+        return latencyTracer.trace("handle_key_total") {
             handle(intent: keyMapper.intent(for: stroke), client: client)
         }
     }
@@ -491,10 +491,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             )
         }
 
-        let baseResult = executeCommitDecisionResultPlan(
-            commitDecisionRuntime.resultPlan(context: commitDecisionContext(action: .space, client: client)),
-            client: client
-        )
+        let baseResultPlan = latencyTracer.trace("commit_decision") {
+            commitDecisionRuntime.resultPlan(context: commitDecisionContext(action: .space, client: client))
+        }
+        let baseResult = executeCommitDecisionResultPlan(baseResultPlan, client: client)
         if case .noAction = baseResult,
            compositionBuffer.hasResolvedSegments {
             return applyCommitResult(
@@ -579,13 +579,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ selection: InputCandidateSelection,
         client: InputControllerClient?
     ) -> InputCommitResult {
-        executeCommitDecisionResultPlan(
+        let plan = latencyTracer.trace("commit_decision") {
             commitDecisionRuntime.numberSelectionPlan(
                 selection: selection,
                 context: commitDecisionContext(action: .space, client: client)
-            ),
-            client: client
-        )
+            )
+        }
+        return executeCommitDecisionResultPlan(plan, client: client)
     }
 
     @discardableResult
@@ -776,7 +776,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func publishLocalSuggestion(client: InputControllerClient?) {
-        publishLocalSuggestionSynchronously(client: client)
+        latencyTracer.trace("publish_local_suggestion") {
+            publishLocalSuggestionSynchronously(client: client)
+        }
     }
 
     private func publishLocalSuggestionSynchronously(client: InputControllerClient?) {
@@ -1006,8 +1008,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     @discardableResult
     private func commit(action: InputAction, client: InputControllerClient?) -> Bool {
-        executeCommitDecisionPlan(
-            commitDecisionRuntime.commitPlan(context: commitDecisionContext(action: action, client: client)),
+        let plan = latencyTracer.trace("commit_decision") {
+            commitDecisionRuntime.commitPlan(context: commitDecisionContext(action: action, client: client))
+        }
+        return executeCommitDecisionPlan(
+            plan,
             action: action,
             client: client
         )
@@ -1346,7 +1351,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let sequenceViolations = turnSequenceValidator.validate(sequence)
         var preparedAcceptedFeedbackID: UUID?
         for effect in sequence.effects {
-            switch effect {
+            traceTurnEffect(effect, sequence: sequence) {
+                switch effect {
             case .prepareAcceptedFeedback(let text, let acceptedAIRecommendation):
                 preparedAcceptedFeedbackID = aiAcceptanceRuntime.prepareAcceptedFeedbackTracking(
                     context: commitApplicationRuntime.acceptedFeedbackContext(
@@ -1372,7 +1378,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 insert(text, client: turnClient(for: clientScope, providedClient: client))
             case .schedulePostInsertCaretVerification:
                 guard preparedAcceptedFeedbackID != nil else {
-                    continue
+                    return
                 }
                 host?.schedulePostInsertCaretVerification { [weak self, client] in
                     self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
@@ -1410,7 +1416,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 aiAcceptanceRuntime.cancelFeedback(reason: reason)
             case .insertDirectPassthroughText(let text):
                 guard let passthroughClient = turnClient(for: .effective, providedClient: client) else {
-                    continue
+                    return
                 }
                 inputClientCompositionWriter.insertText(
                     text,
@@ -1424,26 +1430,52 @@ final class InputControllerCoordinator: @unchecked Sendable {
             case .publishLocalSuggestion:
                 publishLocalSuggestion(client: client)
             }
+            }
         }
         traceTurnSequence(sequence, violations: sequenceViolations)
         return sequence.handled
+    }
+
+    private func traceTurnEffect(
+        _ effect: InputTurnEffect,
+        sequence: InputTurnEffectSequence,
+        operation: () -> Void
+    ) {
+        latencyTracer.trace(
+            "turn_effect.\(effect.privacySafeName)",
+            fields: turnTraceFields(for: sequence)
+        ) {
+            operation()
+        }
     }
 
     private func traceTurnSequence(
         _ sequence: InputTurnEffectSequence,
         violations: [InputTurnSequenceViolation]
     ) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_TURN_DEBUG"] == "1" || !violations.isEmpty else {
-            return
-        }
         let effects = sequence.effects.map(\.privacySafeName).joined(separator: ",")
         let violationText = violations.isEmpty
             ? "none"
             : violations.map(\.description).joined(separator: ";")
-        fputs(
-            "KnowType turn sequence: turnID=\(sequence.token.turnID) kind=\(sequence.token.kind.rawValue) compositionID=\(sequence.token.compositionID) rawRevision=\(sequence.token.rawRevision) rawLength=\(sequence.token.rawLength) handled=\(sequence.handled) panelGeneration=\(candidatePanelPublicationRuntime.currentPresentationGeneration) effects=[\(effects)] violations=[\(violationText)]\n",
-            stderr
+        var fields = turnTraceFields(for: sequence)
+        fields.insert(.init(.stage, "sequence.\(sequence.token.kind.rawValue)"), at: 0)
+        fields.append(.init(.reason, "effects=\(effects);violations=\(violationText)"))
+        InputDebugDiagnostics.emit(
+            category: .turn,
+            fields: fields,
+            force: !violations.isEmpty
         )
+    }
+
+    private func turnTraceFields(for sequence: InputTurnEffectSequence) -> [InputDebugDiagnostics.Field] {
+        [
+            .init(.turnID, sequence.token.turnID),
+            .init(.compositionID, sequence.token.compositionID),
+            .init(.rawRevision, sequence.token.rawRevision),
+            .init(.rawLength, sequence.token.rawLength),
+            .init(.handled, sequence.handled),
+            .init(.panelGeneration, candidatePanelPublicationRuntime.currentPresentationGeneration)
+        ]
     }
 
     private func turnClient(
@@ -1644,13 +1676,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func traceCompositionLifecycleFinish(reason: CompositionLifecycleFinishReason) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
-            return
-        }
-        let message = "KnowType panel cleanup: reason=\(reason.rawValue)\n"
-        if let data = message.data(using: .utf8) {
-            FileHandle.standardError.write(data)
-        }
+        InputDebugDiagnostics.emit(
+            category: .panel,
+            fields: [
+                .init(.stage, "lifecycle_cleanup"),
+                .init(.reason, reason.rawValue),
+                .init(.compositionID, compositionID),
+                .init(.rawRevision, rawRevision),
+                .init(.rawLength, rawBuffer.count),
+                .init(.panelGeneration, candidatePanelPublicationRuntime.currentPresentationGeneration)
+            ]
+        )
     }
 
     private func handleNativePagingSymbol(_ text: String, client: InputControllerClient?) -> Bool {
@@ -1747,11 +1783,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func refreshComposition(client: InputControllerClient?) {
-        let didWriteMarkedText = inputClientCompositionWriter.refreshComposition(
-            client: client,
-            state: writeState(),
-            markedDisplayText: nativeMarkedText() ?? compositionBuffer.displayText
-        )
+        let didWriteMarkedText = latencyTracer.trace("refresh_composition") {
+            inputClientCompositionWriter.refreshComposition(
+                client: client,
+                state: writeState(),
+                markedDisplayText: nativeMarkedText() ?? compositionBuffer.displayText
+            )
+        }
         guard didWriteMarkedText,
               let client else {
             return
@@ -1829,13 +1867,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private static func traceStartupEvent(event: String, details: String, startedAt: Date) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" else {
-            return
-        }
         let elapsedMs = Date().timeIntervalSince(startedAt) * 1_000
         let formattedElapsed = String(format: "%.1f", elapsedMs)
-        let suffix = details.isEmpty ? "" : " \(details)"
-        fputs("KnowType startup: event=\(event) elapsedMs=\(formattedElapsed)\(suffix)\n", stderr)
+        var fields: [InputDebugDiagnostics.Field] = [
+            .init(.stage, event),
+            .init(.elapsedMs, formattedElapsed)
+        ]
+        if !details.isEmpty {
+            fields.append(.init(.reason, details))
+        }
+        InputDebugDiagnostics.emit(category: .startup, fields: fields)
     }
 
     private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
