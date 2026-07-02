@@ -93,6 +93,7 @@ required for every test file.
 - [InputLexicalCommitRuntime](Sources/KnowTypeInputMethod/InputLexicalCommitRuntime.plan.md)
 - [InputNativeCandidateNavigationRuntime](Sources/KnowTypeInputMethod/InputNativeCandidateNavigationRuntime.plan.md)
 - [InputSuggestionStateRuntime](Sources/KnowTypeInputMethod/InputSuggestionStateRuntime.plan.md)
+- [InputTurnSequenceValidator](Sources/KnowTypeInputMethod/InputTurnSequenceValidator.plan.md)
 - [InputTurnSequencingRuntime](Sources/KnowTypeInputMethod/InputTurnSequencingRuntime.plan.md)
 - [InputController](Sources/KnowTypeInputMethod/InputController.plan.md)
 - [InputControllerCoordinator](Sources/KnowTypeInputMethod/InputControllerCoordinator.plan.md)

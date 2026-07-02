@@ -27,6 +27,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let commitApplicationRuntime = InputCommitApplicationRuntime()
     private let commitDecisionRuntime = InputCommitDecisionRuntime()
     private let turnSequencingRuntime = InputTurnSequencingRuntime()
+    private let turnSequenceValidator = InputTurnSequenceValidator()
     private let enablesAsyncSuggestionRefresh: Bool
     private let asyncSuggestionDelayNanoseconds: UInt64
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
@@ -1340,6 +1341,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         directPassthroughWriteState: InputClientCompositionWriteState? = nil
     ) -> Bool {
+        let sequenceViolations = turnSequenceValidator.validate(sequence)
         var preparedAcceptedFeedbackID: UUID?
         for effect in sequence.effects {
             switch effect {
@@ -1421,7 +1423,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 publishLocalSuggestion(client: client)
             }
         }
+        traceTurnSequence(sequence, violations: sequenceViolations)
         return sequence.handled
+    }
+
+    private func traceTurnSequence(
+        _ sequence: InputTurnEffectSequence,
+        violations: [InputTurnSequenceViolation]
+    ) {
+        guard ProcessInfo.processInfo.environment["KNOWTYPE_TURN_DEBUG"] == "1" || !violations.isEmpty else {
+            return
+        }
+        let effects = sequence.effects.map(\.privacySafeName).joined(separator: ",")
+        let violationText = violations.isEmpty
+            ? "none"
+            : violations.map(\.description).joined(separator: ";")
+        fputs(
+            "KnowType turn sequence: turnID=\(sequence.token.turnID) kind=\(sequence.token.kind.rawValue) compositionID=\(sequence.token.compositionID) rawRevision=\(sequence.token.rawRevision) rawLength=\(sequence.token.rawLength) handled=\(sequence.handled) panelGeneration=\(candidatePanelPublicationRuntime.currentPresentationGeneration) effects=[\(effects)] violations=[\(violationText)]\n",
+            stderr
+        )
     }
 
     private func turnClient(

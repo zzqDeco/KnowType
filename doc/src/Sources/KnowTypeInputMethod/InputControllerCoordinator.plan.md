@@ -93,6 +93,9 @@ Current behavior:
   the coordinator executes ordered effects returned by the runtime instead of
   embedding commit, native conversion, lifecycle finish, and direct passthrough
   ordering inline
+- validates planned turn effect order through `InputTurnSequenceValidator` before
+  executing effects; violations and `KNOWTYPE_TURN_DEBUG=1` traces contain only
+  turn metadata and effect names, never user text
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
 - delegates explicit AI accepted-learning records, typing-context events, and
   accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the

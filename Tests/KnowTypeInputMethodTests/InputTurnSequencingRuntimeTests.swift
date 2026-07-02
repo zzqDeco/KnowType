@@ -25,6 +25,7 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
         )
 
         XCTAssertTrue(sequence.handled)
+        assertNoSequenceViolations(sequence)
         XCTAssertEqual(sequence.token.turnID, 1)
         XCTAssertEqual(
             sequence.effects,
@@ -62,6 +63,7 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
         let sequence = runtime.lifecycleFinishSequence(token: token, finishPlan: plan)
 
         XCTAssertTrue(sequence.handled)
+        assertNoSequenceViolations(sequence)
         XCTAssertEqual(sequence.token.compositionID, 9)
         XCTAssertEqual(
             sequence.effects,
@@ -91,6 +93,7 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
         let sequence = runtime.nativeCommitSequence(token: token, text: "你", snapshot: nativeSnapshot)
 
         XCTAssertTrue(sequence.handled)
+        assertNoSequenceViolations(sequence)
         XCTAssertEqual(
             sequence.effects,
             [
@@ -114,6 +117,7 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
         let sequence = runtime.directPassthroughSequence(token: token, text: " ", resetPlan: resetPlan)
 
         XCTAssertTrue(sequence.handled)
+        assertNoSequenceViolations(sequence)
         XCTAssertEqual(
             sequence.effects,
             [
@@ -128,6 +132,14 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
                 .insertDirectPassthroughText(" ")
             ]
         )
+    }
+
+    private func assertNoSequenceViolations(
+        _ sequence: InputTurnEffectSequence,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(InputTurnSequenceValidator().validate(sequence), [], file: file, line: line)
     }
 
     private func snapshot(rawInput: String, compositionID: Int) -> InputCompositionStateSnapshot {
