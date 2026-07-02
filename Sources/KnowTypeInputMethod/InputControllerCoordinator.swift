@@ -1464,6 +1464,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ sequence: InputTurnEffectSequence,
         violations: [InputTurnSequenceViolation]
     ) {
+        guard InputDebugDiagnostics.isEnabled(.turn) || !violations.isEmpty else {
+            return
+        }
         let effects = sequence.effects.map(\.privacySafeName).joined(separator: ",")
         let violationText = violations.isEmpty
             ? "none"

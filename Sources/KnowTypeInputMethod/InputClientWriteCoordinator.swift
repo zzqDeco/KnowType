@@ -71,6 +71,9 @@ struct InputClientWriteCoordinator: Sendable {
         context: InputClientWriteContext,
         handled: Bool
     ) {
+        guard InputDebugDiagnostics.isEnabled(.clientWrite) else {
+            return
+        }
         _ = chosenReplacementRange
         InputDebugDiagnostics.emit(
             category: .clientWrite,

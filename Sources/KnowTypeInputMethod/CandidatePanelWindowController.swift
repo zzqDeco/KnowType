@@ -228,6 +228,9 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         layoutPlan: CandidatePanelLayoutPlan?,
         elapsedMilliseconds: Double
     ) {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
+            return
+        }
         let layoutReason: String
         if let layoutPlan {
             layoutReason = "layoutMode=\(windowState.layoutMode.rawValue);placement=\(layoutPlan.verticalPlacement.rawValue);renderRows=\(renderModel.rows.count)"
@@ -247,6 +250,9 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     }
 
     private func traceDroppedFrame(_ frame: CandidatePanelFrame) {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
+            return
+        }
         InputDebugDiagnostics.emit(
             category: .panel,
             fields: [
@@ -266,6 +272,9 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
         _ frame: CandidatePanelFrame,
         elapsedMilliseconds: Double
     ) {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
+            return
+        }
         InputDebugDiagnostics.emit(
             category: .panel,
             fields: [
