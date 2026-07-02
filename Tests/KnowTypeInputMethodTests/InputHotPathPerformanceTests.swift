@@ -77,6 +77,7 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(rimeEngine.contains("return rawInput.isEmpty"))
         XCTAssertTrue(rimeEngine.contains("foregroundMayPreemptSpeculative: Self.shouldPreemptSpeculativePrewarm"))
         XCTAssertTrue(rimeEngine.contains("NativeRimeSession.prewarm(configuration: configuration)"))
+        XCTAssertTrue(rimeEngine.contains("guard InputDebugDiagnostics.isEnabled(.rime) else"))
         XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
         XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
         XCTAssertTrue(inputController.contains("DispatchQueue.main.asyncAfter"))

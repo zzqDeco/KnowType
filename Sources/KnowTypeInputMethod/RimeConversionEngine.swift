@@ -180,6 +180,9 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     public mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        guard InputDebugDiagnostics.isEnabled(.rime) else {
+            return processWithoutTracing(key)
+        }
         let startedAt = ContinuousClock.now
         let result = processWithoutTracing(key)
         Self.traceProcess(
