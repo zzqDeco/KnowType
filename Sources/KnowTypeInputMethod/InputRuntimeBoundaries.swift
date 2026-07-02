@@ -62,6 +62,9 @@ final class CandidatePanelPresenter: @unchecked Sendable {
     }
 
     private func trace(_ frame: CandidatePanelFrame) {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
+            return
+        }
         InputDebugDiagnostics.emit(
             category: .panel,
             fields: [

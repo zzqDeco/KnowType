@@ -61,12 +61,16 @@ struct InputLatencyTracer: Sendable {
         self.budgetMilliseconds = budgetMilliseconds
     }
 
+    var isEnabled: Bool {
+        enabled || ProcessInfo.processInfo.environment[InputDebugDiagnostics.performanceEnvironmentKey] == "1"
+    }
+
     func trace<T>(
         _ name: String,
         fields: [InputDebugDiagnostics.Field] = [],
         operation: () -> T
     ) -> T {
-        guard enabled || ProcessInfo.processInfo.environment[InputDebugDiagnostics.performanceEnvironmentKey] == "1" else {
+        guard isEnabled else {
             return operation()
         }
         return InputDebugDiagnostics.trace(

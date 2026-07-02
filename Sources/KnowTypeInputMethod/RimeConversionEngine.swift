@@ -296,10 +296,23 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     private static func traceStartupEvent(_ event: String, elapsed: TimeInterval, details: String = "") {
-        traceStartupEvent(event, details: "elapsedMs=\(String(format: "%.1f", elapsed * 1_000))\(details.isEmpty ? "" : " \(details)")")
+        guard InputDebugDiagnostics.isEnabled(.startup) else {
+            return
+        }
+        var fields: [InputDebugDiagnostics.Field] = [
+            .init(.stage, event),
+            .init(.elapsedMs, String(format: "%.1f", elapsed * 1_000))
+        ]
+        if !details.isEmpty {
+            fields.append(.init(.reason, details))
+        }
+        InputDebugDiagnostics.emit(category: .startup, fields: fields)
     }
 
     private static func traceStartupEvent(_ event: String, details: String = "") {
+        guard InputDebugDiagnostics.isEnabled(.startup) else {
+            return
+        }
         var fields: [InputDebugDiagnostics.Field] = [
             .init(.stage, event)
         ]
