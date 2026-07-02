@@ -425,6 +425,9 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         presentationGeneration: Int,
         locale: KnowTypeLocale
     ) {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
+            return
+        }
         let windowState = panelState.windowState
         let rowCount = CandidatePanelRenderer(locale: locale)
             .render(

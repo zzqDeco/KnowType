@@ -115,6 +115,24 @@ final class InputDebugDiagnosticsTests: XCTestCase {
         XCTAssertTrue(output.value.contains("budgetMs=60000.00"))
     }
 
+    func testTurnTraceEmitsWhenTurnDebugIsEnabled() {
+        let output = DiagnosticOutputBox()
+        let value = InputDebugDiagnostics.trace(
+            category: .turn,
+            stage: "turn_effect.insert_text",
+            environment: ["KNOWTYPE_TURN_DEBUG": "1"],
+            stderrSink: { output.append($0) }
+        ) {
+            42
+        }
+
+        XCTAssertEqual(value, 42)
+        XCTAssertTrue(output.value.contains("category=turn"))
+        XCTAssertTrue(output.value.contains("stage=turn_effect.insert_text"))
+        XCTAssertTrue(output.value.contains("elapsedMs="))
+        XCTAssertFalse(output.value.contains("budgetMs="))
+    }
+
     func testFormattedDiagnosticsDoNotContainSensitivePayloadsWhenCallersUseAllowedMetadata() {
         let line = InputDebugDiagnostics.formatLine(
             category: .ai,

@@ -1441,9 +1441,20 @@ final class InputControllerCoordinator: @unchecked Sendable {
         sequence: InputTurnEffectSequence,
         operation: () -> Void
     ) {
+        let stage = "turn_effect.\(effect.privacySafeName)"
+        let fields = turnTraceFields(for: sequence)
+        guard !InputDebugDiagnostics.isEnabled(.turn) else {
+            InputDebugDiagnostics.trace(
+                category: .turn,
+                stage: stage,
+                fields: fields,
+                operation: operation
+            )
+            return
+        }
         latencyTracer.trace(
-            "turn_effect.\(effect.privacySafeName)",
-            fields: turnTraceFields(for: sequence)
+            stage,
+            fields: fields
         ) {
             operation()
         }

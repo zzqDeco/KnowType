@@ -34,6 +34,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/CandidatePanelWindowController.swift"),
             encoding: .utf8
         )
+        let candidatePanelPublicationRuntime = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputCandidatePanelPublicationRuntime.swift"),
+            encoding: .utf8
+        )
         let inputClientWriteCoordinator = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputClientWriteCoordinator.swift"),
             encoding: .utf8
@@ -95,6 +99,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(candidateAnchorResolver.contains("fputs("))
         XCTAssertFalse(candidateAnchorResolver.contains("NSLog("))
         XCTAssertFalse(candidatePanelWindowController.contains("fputs("))
+        XCTAssertTrue(candidatePanelPublicationRuntime.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
+        XCTAssertTrue(coordinator.contains("InputDebugDiagnostics.trace(\n                category: .turn"))
         XCTAssertFalse(inputClientWriteCoordinator.contains("fputs("))
         XCTAssertFalse(inputRuntimeBoundaries.contains("fputs("))
         XCTAssertFalse(aiRecommendationDiagnostics.contains("candidateCount="))
