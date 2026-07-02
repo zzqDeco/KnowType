@@ -30,7 +30,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
     typealias StateChangeHandler = @MainActor @Sendable (AIRecommendationState) -> Void
 
     enum Defaults {
-        static let dispatchDebounceMilliseconds = 850
+        static let dispatchDebounceMilliseconds = 450
     }
 
     private enum ActiveRequestPhase: Equatable {
@@ -204,6 +204,18 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         )
         activeRequestID = requestID
         activeRequestPhase = .dispatchDeferred
+        if !context.isProviderAvailabilityProbe {
+            record(
+                .pendingPlaceholder,
+                requestID: requestID,
+                compositionID: context.compositionID,
+                rawLength: context.rawInput.count,
+                rawRevision: context.rawRevision,
+                prefixLength: context.lockedPrefix?.count,
+                appBundleID: context.appBundleID,
+                reason: "waiting_for_stable_input"
+            )
+        }
         let scheduledAt = Date()
         let task = Task.detached(priority: .utility) { [weak self, provider, diagnosticSink] in
             guard let self else {
@@ -248,10 +260,6 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                     return false
                 }
                 self.activeRequestPhase = .transportStarted
-                if !context.isProviderAvailabilityProbe,
-                   self.dispatchDebounceNanoseconds > 0 {
-                    onStateChange(.pending(requestID: requestID))
-                }
                 return true
             }
             guard shouldDispatch else {
@@ -396,7 +404,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             }
         }
         activeTask = task
-        if context.isProviderAvailabilityProbe || dispatchDebounceNanoseconds > 0 {
+        if context.isProviderAvailabilityProbe {
             return .idle
         }
         return .pending(requestID: requestID)

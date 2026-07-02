@@ -33,6 +33,13 @@ public enum AIRecommendationState: Sendable, Equatable {
     case ineligible(reason: String)
     case unavailable(reason: String)
 
+    public var isPendingRecommendation: Bool {
+        if case .pending = self {
+            return true
+        }
+        return false
+    }
+
     public var isSelectableRecommendation: Bool {
         if case .ready = self {
             return true

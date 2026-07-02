@@ -10,6 +10,7 @@ public struct CandidatePanelRowItem: Sendable, Equatable {
     public var accessibilityLabel: String?
     public var isEnabled: Bool
     public var isNumberShortcutEligible: Bool
+    public var accessory: CandidatePanelRowAccessory?
 
     public init(
         selection: CandidatePanelSelection?,
@@ -18,7 +19,8 @@ public struct CandidatePanelRowItem: Sendable, Equatable {
         visualRole: CandidatePanelVisualRole,
         accessibilityLabel: String? = nil,
         isEnabled: Bool = true,
-        isNumberShortcutEligible: Bool = false
+        isNumberShortcutEligible: Bool = false,
+        accessory: CandidatePanelRowAccessory? = nil
     ) {
         self.selection = selection
         self.kind = kind
@@ -27,6 +29,7 @@ public struct CandidatePanelRowItem: Sendable, Equatable {
         self.accessibilityLabel = accessibilityLabel
         self.isEnabled = isEnabled
         self.isNumberShortcutEligible = isNumberShortcutEligible
+        self.accessory = accessory
     }
 }
 
@@ -157,7 +160,8 @@ public struct CandidatePanelRowBuilder: Sendable {
             kind: .aiRecommendation,
             text: text,
             visualRole: .aiRecommendation,
-            isEnabled: state.isSelectableRecommendation
+            isEnabled: state.isSelectableRecommendation,
+            accessory: state.isPendingRecommendation ? .spinner : nil
         )
     }
 

@@ -32,6 +32,7 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case transportStarted = "transport_started"
     case transportLeftStale = "transport_left_stale"
     case cancelPrevious = "cancel_previous"
+    case pendingPlaceholder = "pending_placeholder"
     case staleResultDropped = "stale_result_dropped"
     case stateApplied = "state_applied"
     case lexicalProfileLoad = "lexical_profile_load"

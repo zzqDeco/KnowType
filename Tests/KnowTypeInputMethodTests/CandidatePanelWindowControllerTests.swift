@@ -20,6 +20,54 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testPendingAIContentRowRendersFixedSpinnerAccessory() throws {
+        let contentView = CandidatePanelContentView(appearance: .native)
+        let renderModel = CandidatePanelRenderModel(
+            title: "候选",
+            previewText: nil,
+            rows: [
+                CandidatePanelRenderRow(
+                    kind: .aiRecommendation,
+                    selection: nil,
+                    shortcutLabel: nil,
+                    text: "AI 推荐中...",
+                    isSelected: false,
+                    isEnabled: false,
+                    visualRole: .aiRecommendation,
+                    accessory: .spinner
+                )
+            ]
+        )
+        let layoutPlan = CandidatePanelLayoutPlan(
+            orientation: .vertical,
+            verticalPlacement: .visualBelowCaret,
+            panelSize: CGSize(width: 220, height: 34),
+            panelOrigin: .zero,
+            contentInsets: CandidatePanelLayoutInsets(top: 4, left: 5, bottom: 4, right: 5),
+            itemSpacing: 2,
+            items: [
+                CandidatePanelLayoutItem(
+                    rowIndex: 0,
+                    frame: CGRect(x: 5, y: 4, width: 210, height: 26),
+                    textWidthLimit: 180,
+                    isTruncated: false
+                )
+            ]
+        )
+
+        contentView.update(model: renderModel, layoutPlan: layoutPlan)
+
+        let indicators = contentView.allDescendants().compactMap { $0 as? NSProgressIndicator }
+        let indicator = try XCTUnwrap(indicators.first)
+        XCTAssertEqual(indicators.count, 1)
+        XCTAssertEqual(indicator.style, .spinning)
+        XCTAssertEqual(indicator.controlSize, .small)
+        XCTAssertTrue(indicator.isIndeterminate)
+        XCTAssertTrue(indicator.isDisplayedWhenStopped)
+        XCTAssertTrue(indicator.constraints.contains { $0.constant == 12 })
+    }
+
+    @MainActor
     func testUpdateMovesExistingWindowWhenAnchorMoves() {
         let contentView = FakeCandidatePanelContentRenderer()
         let window = FakeCandidatePanelWindow()
@@ -681,6 +729,12 @@ private final class FakeCandidatePanelWindow: CandidatePanelWindowOperating {
 
 private final class CandidatePanelWindowOperationLog {
     var events: [String] = []
+}
+
+private extension NSView {
+    func allDescendants() -> [NSView] {
+        subviews + subviews.flatMap { $0.allDescendants() }
+    }
 }
 
 private final class FakeCandidatePanelInteractionHandler: CandidatePanelInteractionHandling {

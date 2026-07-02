@@ -31,6 +31,9 @@ Current behavior:
 - uses `NSVisualEffectView` `hudWindow` material, compact row sizing, system highlight selection, 0.5 pt separator border, continuous corners, and muted continuation/AI-status styling to stay close to macOS native input method candidate windows
 - uses placement preference rather than elevated private window levels to keep Spotlight candidates above the search results overlay; ordinary apps keep automatic visual-below placement
 - hit-tests visible rows so hover updates selection, mouse up commits the same selection as keyboard shortcuts, and disabled AI status rows do not react
+- renders pending AI status rows with a fixed small indeterminate spinner
+  accessory, reserving width in layout while keeping the row disabled and
+  non-selectable
 - maps scroll-wheel up/down to PageUp/PageDown with a threshold so trackpad jitter does not page accidentally
 - exposes each visible row as an accessibility element; enabled candidates use button semantics, disabled AI status uses static-text semantics, and selection changes post focused-element and selected-children notifications
 - avoids preview text, section headers, and raw-input rows once correction candidates are available

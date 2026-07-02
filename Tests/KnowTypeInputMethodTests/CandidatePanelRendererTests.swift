@@ -113,6 +113,7 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows[1].selection, nil)
         XCTAssertFalse(rendered.rows[1].isEnabled)
         XCTAssertFalse(rendered.rows[1].isSelected)
+        XCTAssertEqual(rendered.rows[1].accessory, .spinner)
         XCTAssertEqual(rendered.rows[1].accessibilityLabel, "AI 状态，AI 推荐中...")
     }
 

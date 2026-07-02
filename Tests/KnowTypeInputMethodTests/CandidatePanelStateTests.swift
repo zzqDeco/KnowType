@@ -183,6 +183,47 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertFalse(rendered.rows[0].isSelected)
     }
 
+    func testReadyAIReplacedByPendingKeepsAIRowWithoutSelectingIt() {
+        var state = CandidatePanelState()
+        let initialSuggestion = suggestion(prefixTexts: ["你好", "你号"])
+        state.update(
+            rawInput: "nihao",
+            suggestion: initialSuggestion,
+            aiRecommendation: .ready(
+                AIRecommendationCandidate(
+                    prefixText: "你好",
+                    continuationText: "继续推进",
+                    displayText: "你好继续推进",
+                    confidence: 0.9,
+                    provider: "test",
+                    contextVersion: "v1"
+                )
+            )
+        )
+        let readyRows = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        ).rows
+
+        state.update(
+            rawInput: "nihaoa",
+            suggestion: initialSuggestion,
+            aiRecommendation: .pending(requestID: UUID())
+        )
+        let pendingRows = CandidatePanelRenderer(locale: .zhCN).render(
+            state.windowState.viewModel,
+            selected: state.windowState.selection,
+            paging: state.windowState.paging
+        ).rows
+
+        XCTAssertEqual(readyRows.map(\.kind), [.prefixCandidate, .aiRecommendation, .prefixCandidate])
+        XCTAssertEqual(pendingRows.map(\.kind), [.prefixCandidate, .aiRecommendation, .prefixCandidate])
+        XCTAssertEqual(pendingRows[1].selection, nil)
+        XCTAssertEqual(pendingRows[1].accessory, .spinner)
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+    }
+
     func testNavigationSkipsNonReadyAIStatusRows() {
         var state = CandidatePanelState()
         state.update(
