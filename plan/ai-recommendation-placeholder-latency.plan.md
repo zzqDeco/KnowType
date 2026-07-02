@@ -17,7 +17,8 @@ input-method debounce.
 - Treat `.pending` as the current input's AI waiting state, covering both
   debounce and transport phases.
 - Render pending AI rows with a fixed spinner accessory and keep them
-  non-selectable.
+  non-selectable. Pending rows also do not consume `Tab`; visible continuation
+  shortcuts remain usable while an AI request is waiting.
 - Keep provider requests stale-dropped rather than actively cancelled once
   transport has started.
 - Do not change provider prompts, model selection, proxy configuration, Rime,
