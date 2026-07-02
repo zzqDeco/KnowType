@@ -51,18 +51,21 @@ final class InputTaskSupervisor: @unchecked Sendable {
 
 struct InputLatencyTracer: Sendable {
     private let enabled: Bool
+    private let perfDebugEnabled: Bool
     private let budgetMilliseconds: Double
 
     init(
         enabled: Bool = ProcessInfo.processInfo.environment["KNOWTYPE_INPUT_LATENCY_DEBUG"] == "1",
+        perfDebugEnabled: Bool = ProcessInfo.processInfo.environment[InputDebugDiagnostics.performanceEnvironmentKey] == "1",
         budgetMilliseconds: Double = Double(ProcessInfo.processInfo.environment["KNOWTYPE_INPUT_LATENCY_BUDGET_MS"] ?? "") ?? 8
     ) {
         self.enabled = enabled
+        self.perfDebugEnabled = perfDebugEnabled
         self.budgetMilliseconds = budgetMilliseconds
     }
 
     var isEnabled: Bool {
-        enabled || ProcessInfo.processInfo.environment[InputDebugDiagnostics.performanceEnvironmentKey] == "1"
+        enabled || perfDebugEnabled
     }
 
     func trace<T>(

@@ -13,6 +13,24 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 350)
     }
 
+    func testDiagnosticFormatterPreservesPrefixLength() {
+        let fields = OSLogAIRecommendationDiagnosticSink.fields(
+            for: AIRecommendationDiagnosticEvent(
+                stage: .skippedPrefixTooShort,
+                rawLength: 5,
+                rawRevision: 7,
+                prefixLength: 2,
+                providerName: "spark"
+            )
+        )
+        let line = InputDebugDiagnostics.formatLine(category: .ai, fields: fields)
+
+        XCTAssertTrue(line.contains("rawLength=5"))
+        XCTAssertTrue(line.contains("rawRevision=7"))
+        XCTAssertTrue(line.contains("prefixLength=2"))
+        XCTAssertTrue(line.contains("provider=spark"))
+    }
+
     func testLazyDefaultCanDisableProviderDebounceForInputMethodFactoryPath() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案可以继续推进。", confidence: 0.8)

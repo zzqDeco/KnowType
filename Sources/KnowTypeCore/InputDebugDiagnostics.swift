@@ -43,6 +43,7 @@ public enum InputDebugDiagnostics {
         case elapsedMs
         case handled
         case panelGeneration
+        case prefixLength
         case provider
         case rawLength
         case rawRevision

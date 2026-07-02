@@ -46,6 +46,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputRuntimeBoundaries.swift"),
             encoding: .utf8
         )
+        let inputTaskSupervisor = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputTaskSupervisor.swift"),
+            encoding: .utf8
+        )
         let rimeEngine = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
             encoding: .utf8
@@ -106,6 +110,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(candidatePanelPublicationRuntime.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
         XCTAssertTrue(candidatePanelWindowController.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
         XCTAssertTrue(inputRuntimeBoundaries.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
+        XCTAssertTrue(inputTaskSupervisor.contains("private let perfDebugEnabled"))
+        XCTAssertTrue(inputTaskSupervisor.contains("var isEnabled: Bool {\n        enabled || perfDebugEnabled\n    }"))
+        XCTAssertFalse(inputTaskSupervisor.contains("var isEnabled: Bool {\n        enabled || ProcessInfo.processInfo.environment"))
+        XCTAssertTrue(candidatePanelPublicationRuntime.contains("let publicationTraceStartedAt = InputDebugDiagnostics.isEnabled(.panel)"))
         XCTAssertTrue(coordinator.contains("InputDebugDiagnostics.trace(\n                category: .turn"))
         XCTAssertTrue(coordinator.contains("guard isTurnTraceEnabled || latencyTracer.isEnabled else"))
         XCTAssertTrue(coordinator.contains("guard InputDebugDiagnostics.isEnabled(.turn) || !violations.isEmpty else"))

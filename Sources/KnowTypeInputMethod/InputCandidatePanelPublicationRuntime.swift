@@ -296,7 +296,9 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         locale: KnowTypeLocale,
         presentationGeneration: Int
     ) -> InputCandidatePanelPublicationResult {
-        let startedAt = ContinuousClock.now
+        let publicationTraceStartedAt = InputDebugDiagnostics.isEnabled(.panel)
+            ? ContinuousClock.now
+            : nil
         let isDisplayable = request.anchorResult.source != .none
         panelState.update(
             rawInput: request.snapshot.rawInput,
@@ -333,15 +335,17 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             ),
             locale: locale
         )
-        traceCandidatePanelPublication(
-            stage: "publication",
-            presentationGeneration: presentationGeneration,
-            reason: reason,
-            snapshot: request.snapshot,
-            anchorSource: panelState.windowState.anchorSource,
-            isVisible: panelState.windowState.isVisible,
-            elapsedMilliseconds: InputDebugDiagnostics.milliseconds(startedAt.duration(to: .now))
-        )
+        if let publicationTraceStartedAt {
+            traceCandidatePanelPublication(
+                stage: "publication",
+                presentationGeneration: presentationGeneration,
+                reason: reason,
+                snapshot: request.snapshot,
+                anchorSource: panelState.windowState.anchorSource,
+                isVisible: panelState.windowState.isVisible,
+                elapsedMilliseconds: InputDebugDiagnostics.milliseconds(publicationTraceStartedAt.duration(to: .now))
+            )
+        }
         return result(reason: reason, didHide: false)
     }
 
@@ -461,6 +465,9 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         isVisible: Bool,
         elapsedMilliseconds: Double
     ) {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
+            return
+        }
         InputDebugDiagnostics.emit(
             category: .panel,
             fields: [

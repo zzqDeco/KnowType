@@ -120,7 +120,7 @@ public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSin
         )
     }
 
-    private static func fields(for event: AIRecommendationDiagnosticEvent) -> [InputDebugDiagnostics.Field] {
+    static func fields(for event: AIRecommendationDiagnosticEvent) -> [InputDebugDiagnostics.Field] {
         var fields: [InputDebugDiagnostics.Field] = [
             .init(.stage, event.stage.rawValue)
         ]
@@ -135,6 +135,9 @@ public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSin
         }
         if let rawRevision = event.rawRevision {
             fields.append(.init(.rawRevision, rawRevision))
+        }
+        if let prefixLength = event.prefixLength {
+            fields.append(.init(.prefixLength, prefixLength))
         }
         if let providerName = event.providerName {
             fields.append(.init(.provider, providerName))
