@@ -54,6 +54,8 @@ struct CandidatePanelLayoutConfiguration: Sendable, Equatable {
     var verticalItemSpacing: CGFloat = 2
     var minimumShortcutWidth: CGFloat = 0
     var shortcutTextSpacing: CGFloat = 3
+    var accessoryWidth: CGFloat = 12
+    var accessoryTextSpacing: CGFloat = 4
     var visibleFrameInset: CGFloat = 8
     var verticalAnchorSpacing: CGFloat = 6
     var minimumHorizontalCandidateCount: Int = 4
@@ -493,6 +495,7 @@ struct CandidatePanelLayoutEngine {
     private func naturalItemWidth(for row: MeasuredRow, shortcutLabelWidth: CGFloat) -> CGFloat {
         configuration.itemInsets.horizontal
             + shortcutSlotWidth(shortcutLabelWidth: shortcutLabelWidth)
+            + accessorySlotWidth(for: row)
             + row.textWidth
     }
 
@@ -506,6 +509,7 @@ struct CandidatePanelLayoutEngine {
             itemWidth
                 - configuration.itemInsets.horizontal
                 - shortcutSlotWidth(shortcutLabelWidth: shortcutLabelWidth)
+                - accessorySlotWidth(for: row)
         )
     }
 
@@ -531,6 +535,13 @@ struct CandidatePanelLayoutEngine {
             return 0
         }
         return shortcutLabelWidth + configuration.shortcutTextSpacing
+    }
+
+    private func accessorySlotWidth(for row: MeasuredRow) -> CGFloat {
+        guard row.row.accessory != nil else {
+            return 0
+        }
+        return configuration.accessoryWidth + configuration.accessoryTextSpacing
     }
 
     private func horizontalMaximumWidth(availableWidth: CGFloat) -> CGFloat {

@@ -82,6 +82,7 @@ final class CandidatePanelRowBuilderTests: XCTestCase {
         XCTAssertEqual(pendingKinds, [.aiRecommendation])
         XCTAssertEqual(pendingSelections, [nil])
         XCTAssertFalse(pendingRows.pageableRows[0].isEnabled)
+        XCTAssertEqual(pendingRows.pageableRows[0].accessory, .spinner)
         XCTAssertNil(builder.defaultSelection(in: pendingAI))
     }
 

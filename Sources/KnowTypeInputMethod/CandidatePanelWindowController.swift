@@ -530,7 +530,9 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = panelAppearance.shortcutTextSpacing
+        container.spacing = row.accessory == nil
+            ? panelAppearance.shortcutTextSpacing
+            : panelAppearance.accessoryTextSpacing
         container.edgeInsets = NSEdgeInsets(
             top: panelAppearance.itemInsets.top,
             left: panelAppearance.itemInsets.left,
@@ -556,6 +558,10 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
             )
         }
 
+        if row.accessory == .spinner {
+            container.addArrangedSubview(makeSpinner())
+        }
+
         let textLabel = baseLabel(row.text)
         textLabel.font = panelAppearance.font(for: row.visualRole)
         textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected, isEnabled: row.isEnabled)
@@ -564,6 +570,21 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
         textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: layoutItem.textWidthLimit).isActive = true
         container.addArrangedSubview(textLabel)
         return container
+    }
+
+    private func makeSpinner() -> NSProgressIndicator {
+        let spinner = NSProgressIndicator()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = true
+        spinner.setContentCompressionResistancePriority(.required, for: .horizontal)
+        spinner.setContentHuggingPriority(.required, for: .horizontal)
+        spinner.widthAnchor.constraint(equalToConstant: panelAppearance.accessoryWidth).isActive = true
+        spinner.heightAnchor.constraint(equalToConstant: panelAppearance.accessoryWidth).isActive = true
+        spinner.startAnimation(nil)
+        return spinner
     }
 
     private func rowBackgroundColor(_ row: CandidatePanelRenderRow) -> NSColor {

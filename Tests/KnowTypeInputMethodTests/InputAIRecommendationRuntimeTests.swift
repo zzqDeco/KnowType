@@ -173,8 +173,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
     }
 
     @MainActor
-    func testDefaultDebounceKeepsStateIdleUntilProviderDispatch() async {
-        XCTAssertEqual(InputAIRecommendationRuntime.Defaults.dispatchDebounceMilliseconds, 850)
+    func testDefaultDebounceShowsPendingPlaceholderUntilProviderDispatch() async {
+        XCTAssertEqual(InputAIRecommendationRuntime.Defaults.dispatchDebounceMilliseconds, 450)
         let provider = RecordingRuntimeAIRecommendationProvider(
             response: readyState("稳定后推荐")
         )
@@ -194,7 +194,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             onStateChange: { states.append($0) }
         )
 
-        XCTAssertEqual(initialState, .idle)
+        XCTAssertNotNil(pendingRequestID(initialState))
         try? await Task.sleep(nanoseconds: 20_000_000)
         let earlyRequests = await provider.requests
         XCTAssertTrue(earlyRequests.isEmpty)
@@ -204,12 +204,13 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             await provider.requests.count == 1
         }
         XCTAssertTrue(didDispatch)
-        XCTAssertTrue(states.contains {
+        XCTAssertFalse(states.contains {
             if case .pending = $0 {
                 return true
             }
             return false
         })
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .pendingPlaceholder })
         XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .dispatchDeferred })
         XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .transportStarted })
     }
@@ -233,7 +234,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             currentSnapshot: { snapshot(rawInput: "abc", compositionID: 1, rawRevision: 1) },
             onStateChange: { _ in XCTFail("debounced request must not publish state") }
         )
-        XCTAssertEqual(firstState, .idle)
+        XCTAssertNotNil(pendingRequestID(firstState))
         let firstRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
 
         let secondState = runtime.schedule(
@@ -241,7 +242,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             currentSnapshot: { snapshot(rawInput: "abcd", compositionID: 1, rawRevision: 2) },
             onStateChange: { _ in }
         )
-        XCTAssertEqual(secondState, .idle)
+        XCTAssertNotNil(pendingRequestID(secondState))
 
         let didCallProvider = await waitUntilAsync {
             await provider.requests.count == 1
@@ -253,6 +254,10 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             $0.stage == .dispatchCancelledByNewInput
                 && $0.requestID == firstRequestID
         })
+        XCTAssertEqual(
+            diagnosticSink.events.filter { $0.stage == .pendingPlaceholder }.count,
+            2
+        )
     }
 
     @MainActor
@@ -373,7 +378,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             currentSnapshot: { snapshot(rawInput: "abc", compositionID: 9, rawRevision: 1) },
             onStateChange: { _ in XCTFail("reset request must not publish state") }
         )
-        XCTAssertEqual(state, .idle)
+        XCTAssertNotNil(pendingRequestID(state))
         let requestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
 
         XCTAssertEqual(
@@ -389,7 +394,10 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             diagnosticSink.events.contains {
                 $0.stage == .dispatchCancelledByNewInput
                     && $0.requestID == requestID
-                    && $0.reason == "debounce_cancelled_by_new_input"
+                    && (
+                        $0.reason == "debounce_cancelled_by_new_input"
+                        || $0.reason == "request_inactive_before_transport"
+                    )
             }
         }
         XCTAssertTrue(cancelled, "\(diagnosticSink.events)")
@@ -510,6 +518,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         let requests = await provider.requests
         XCTAssertEqual(requests.count, 1)
         XCTAssertTrue(publishedStates.isEmpty)
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .pendingPlaceholder })
         XCTAssertTrue(diagnosticSink.events.contains {
             $0.stage == .stateApplied
                 && ($0.reason?.hasPrefix("availability_probe_suppressed_") ?? false)

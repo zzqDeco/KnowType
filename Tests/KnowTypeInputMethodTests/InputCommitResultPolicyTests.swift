@@ -69,10 +69,7 @@ final class InputCommitResultPolicyTests: XCTestCase {
 
     func testAIShortcutPolicyConsumesTabOnlyForVisibleNonReadyAIStatus() {
         XCTAssertNil(InputCommitResultPolicy.aiShortcutResult(for: .tab, aiRecommendationState: .idle))
-        XCTAssertEqual(
-            InputCommitResultPolicy.aiShortcutResult(for: .tab, aiRecommendationState: .pending(requestID: UUID())),
-            .noAction
-        )
+        XCTAssertNil(InputCommitResultPolicy.aiShortcutResult(for: .tab, aiRecommendationState: .pending(requestID: UUID())))
         XCTAssertEqual(
             InputCommitResultPolicy.aiShortcutResult(for: .tab, aiRecommendationState: .ineligible(reason: "AI 已关闭")),
             .noAction

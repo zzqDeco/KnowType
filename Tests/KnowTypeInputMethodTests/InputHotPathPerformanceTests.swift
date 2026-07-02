@@ -99,6 +99,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(coordinator.contains("scheduleDelayedReanchor { [weak self, client] in\n                    self?.aiAcceptanceRuntime.verifyPostInsertCaret"))
         XCTAssertTrue(inputController.contains("debounceMilliseconds: 0"))
         XCTAssertTrue(aiRecommendationRuntime.contains("dispatchDebounceMilliseconds"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("static let dispatchDebounceMilliseconds = 450"))
+        XCTAssertTrue(aiRecommendationRuntime.contains(".pendingPlaceholder"))
         XCTAssertTrue(aiRecommendationRuntime.contains("case .transportStarted:"))
         XCTAssertTrue(aiRecommendationRuntime.contains(".transportLeftStale"))
         XCTAssertTrue(aiRecommendationRuntime.contains("if phase == .dispatchDeferred"))

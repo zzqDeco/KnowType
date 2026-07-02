@@ -34,9 +34,10 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
 - Scheduling starts with `InputAIRecommendationSchedulePolicy`; skipped states
   do not start provider tasks.
 - IMK callers use an input-method trailing debounce before dispatching the
-  provider request. During that debounce the runtime keeps state `.idle`, so the
-  candidate panel does not flash a pending AI row while the user is still
-  typing.
+  provider request. Eligible inputs return `.pending` immediately so the
+  candidate panel keeps a fixed AI placeholder row while waiting for stable
+  input. Provider-availability probes and skip paths still return `.idle` or
+  their explicit ineligible/unavailable state instead of showing a placeholder.
 - New input cancels only the pre-dispatch debounce task. Once transport has
   started, the runtime does not abort the provider task; it invalidates the old
   request id/generation and lets the old result return through the existing
@@ -51,8 +52,9 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
   revision, and raw input still match the current composition snapshot.
 - Reset and reschedule paths preserve existing `cancel_previous`,
   `stale_result_dropped`, and `state_applied` diagnostic semantics, and add
-  `dispatch_deferred`, `dispatch_cancelled_by_new_input`, `transport_started`,
-  and `transport_left_stale` for request-timing analysis. Set
+  `pending_placeholder`, `dispatch_deferred`,
+  `dispatch_cancelled_by_new_input`, `transport_started`, and
+  `transport_left_stale` for request-timing analysis. Set
   `KNOWTYPE_AI_DEBUG=1` or `KNOWTYPE_PERF_DEBUG=1` to mirror privacy-safe AI
   diagnostics to stderr/unified logging without raw input, candidates, locked
   prefixes, provider output, or context bodies.
