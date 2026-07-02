@@ -155,13 +155,15 @@ public struct CandidatePanelRowBuilder: Sendable {
         guard let text = state.displayText else {
             return nil
         }
+        let isPending = state.isPendingRecommendation
         return CandidatePanelRowItem(
             selection: state.isSelectableRecommendation ? .aiRecommendation : nil,
             kind: .aiRecommendation,
-            text: text,
+            text: isPending ? "" : text,
             visualRole: .aiRecommendation,
+            accessibilityLabel: isPending ? "AI 状态，AI 推荐中" : nil,
             isEnabled: state.isSelectableRecommendation,
-            accessory: state.isPendingRecommendation ? .spinner : nil
+            accessory: isPending ? .spinner : nil
         )
     }
 

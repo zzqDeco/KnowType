@@ -30,11 +30,12 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
                     kind: .aiRecommendation,
                     selection: nil,
                     shortcutLabel: nil,
-                    text: "AI 推荐中...",
+                    text: "",
                     isSelected: false,
                     isEnabled: false,
                     visualRole: .aiRecommendation,
-                    accessory: .spinner
+                    accessory: .spinner,
+                    accessibilityLabel: "AI 状态，AI 推荐中"
                 )
             ]
         )
@@ -58,8 +59,10 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         contentView.update(model: renderModel, layoutPlan: layoutPlan)
 
         let indicators = contentView.allDescendants().compactMap { $0 as? NSProgressIndicator }
+        let labels = contentView.allDescendants().compactMap { $0 as? NSTextField }
         let indicator = try XCTUnwrap(indicators.first)
         XCTAssertEqual(indicators.count, 1)
+        XCTAssertTrue(labels.isEmpty)
         XCTAssertEqual(indicator.style, .spinning)
         XCTAssertEqual(indicator.controlSize, .small)
         XCTAssertTrue(indicator.isIndeterminate)

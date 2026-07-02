@@ -21,7 +21,7 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertTrue(children[0].isAccessibilityEnabled())
         XCTAssertTrue(children[0].isAccessibilitySelected())
         XCTAssertEqual(children[1].accessibilityRole(), .staticText)
-        XCTAssertEqual(children[1].accessibilityLabel(), "AI 状态，AI 推荐中...")
+        XCTAssertEqual(children[1].accessibilityLabel(), "AI 状态，AI 推荐中")
         XCTAssertFalse(children[1].isAccessibilityEnabled())
         XCTAssertFalse(children[1].isAccessibilitySelected())
         XCTAssertEqual(children[2].accessibilityRole(), .button)
@@ -111,10 +111,12 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
                     kind: .aiRecommendation,
                     selection: nil,
                     shortcutLabel: nil,
-                    text: "AI 推荐中...",
+                    text: "",
                     isSelected: false,
                     isEnabled: false,
-                    visualRole: .aiRecommendation
+                    visualRole: .aiRecommendation,
+                    accessory: .spinner,
+                    accessibilityLabel: "AI 状态，AI 推荐中"
                 ),
                 CandidatePanelRenderRow(
                     kind: .prefixCandidate,
