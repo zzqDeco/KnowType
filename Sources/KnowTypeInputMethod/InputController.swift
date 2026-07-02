@@ -59,7 +59,8 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         let aiProviderAvailability = AIRecommendationProviderAvailabilityState()
         let aiRecommendationRuntime = LazyDefaultAIRecommendationRuntime(
             diagnosticSink: aiDiagnosticSink,
-            providerAvailability: aiProviderAvailability
+            providerAvailability: aiProviderAvailability,
+            debounceMilliseconds: 0
         )
         let aiContextEventRecorder: any AIContextEventRecording = LazyDefaultAIContextMemoryRuntime()
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()

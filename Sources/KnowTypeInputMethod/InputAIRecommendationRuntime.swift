@@ -29,13 +29,24 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
     typealias SnapshotProvider = @MainActor @Sendable () -> InputAIRecommendationRuntimeCompositionSnapshot?
     typealias StateChangeHandler = @MainActor @Sendable (AIRecommendationState) -> Void
 
+    enum Defaults {
+        static let dispatchDebounceMilliseconds = 850
+    }
+
+    private enum ActiveRequestPhase: Equatable {
+        case dispatchDeferred
+        case transportStarted
+    }
+
     private let provider: (any AIRecommendationProviding)?
     private let providerAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)?
     private let schedulePolicy: InputAIRecommendationSchedulePolicy
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let hasEagerProvider: Bool
+    private let dispatchDebounceNanoseconds: UInt64
     private var activeTask: Task<Void, Never>?
     private var activeRequestID: UUID?
+    private var activeRequestPhase: ActiveRequestPhase?
     private var generation = 0
 
     init(
@@ -43,12 +54,14 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         providerAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)?,
         hasEagerProvider: Bool,
         schedulePolicy: InputAIRecommendationSchedulePolicy = .default,
+        dispatchDebounceMilliseconds: Int = Defaults.dispatchDebounceMilliseconds,
         diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink()
     ) {
         self.provider = provider
         self.providerAvailability = providerAvailability
         self.hasEagerProvider = hasEagerProvider
         self.schedulePolicy = schedulePolicy
+        self.dispatchDebounceNanoseconds = UInt64(max(0, dispatchDebounceMilliseconds)) * 1_000_000
         self.diagnosticSink = diagnosticSink
     }
 
@@ -90,13 +103,41 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 requestID: cancelledRequestID,
                 compositionID: context.compositionID,
                 rawLength: context.rawInput.count,
+                rawRevision: context.rawRevision,
                 appBundleID: context.appBundleID,
                 reason: "new_schedule"
             )
+            switch activeRequestPhase {
+            case .dispatchDeferred:
+                activeTask?.cancel()
+                record(
+                    .dispatchCancelledByNewInput,
+                    requestID: cancelledRequestID,
+                    compositionID: context.compositionID,
+                    rawLength: context.rawInput.count,
+                    rawRevision: context.rawRevision,
+                    appBundleID: context.appBundleID,
+                    reason: "new_schedule"
+                )
+            case .transportStarted:
+                record(
+                    .transportLeftStale,
+                    requestID: cancelledRequestID,
+                    compositionID: context.compositionID,
+                    rawLength: context.rawInput.count,
+                    rawRevision: context.rawRevision,
+                    appBundleID: context.appBundleID,
+                    reason: "new_schedule"
+                )
+            case nil:
+                activeTask?.cancel()
+            }
+        } else {
+            activeTask?.cancel()
         }
-        activeTask?.cancel()
         activeTask = nil
         activeRequestID = nil
+        activeRequestPhase = nil
         generation += 1
         let currentGeneration = generation
         let requestID = UUID()
@@ -118,6 +159,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 requestID: requestID,
                 compositionID: context.compositionID,
                 rawLength: context.rawInput.count,
+                rawRevision: context.rawRevision,
                 prefixLength: context.lockedPrefix?.count,
                 appBundleID: context.appBundleID,
                 reason: skip.reason
@@ -131,6 +173,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 requestID: requestID,
                 compositionID: context.compositionID,
                 rawLength: context.rawInput.count,
+                rawRevision: context.rawRevision,
                 prefixLength: context.lockedPrefix?.count,
                 appBundleID: context.appBundleID,
                 reason: "recommendation_provider_missing"
@@ -155,11 +198,86 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             requestID: requestID,
             compositionID: context.compositionID,
             rawLength: context.rawInput.count,
+            rawRevision: context.rawRevision,
             prefixLength: context.lockedPrefix?.count,
             appBundleID: context.appBundleID
         )
         activeRequestID = requestID
+        activeRequestPhase = .dispatchDeferred
         let task = Task.detached(priority: .utility) { [weak self, provider, diagnosticSink] in
+            guard let self else {
+                return
+            }
+            if self.dispatchDebounceNanoseconds > 0 {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .dispatchDeferred,
+                        requestID: requestID,
+                        compositionID: context.compositionID,
+                        rawLength: context.rawInput.count,
+                        rawRevision: context.rawRevision,
+                        prefixLength: context.lockedPrefix?.count,
+                        appBundleID: context.appBundleID,
+                        reason: "waiting_for_stable_input"
+                    )
+                )
+                do {
+                    try await Task.sleep(nanoseconds: self.dispatchDebounceNanoseconds)
+                } catch {
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .dispatchCancelledByNewInput,
+                            requestID: requestID,
+                            compositionID: context.compositionID,
+                            rawLength: context.rawInput.count,
+                            rawRevision: context.rawRevision,
+                            prefixLength: context.lockedPrefix?.count,
+                            appBundleID: context.appBundleID,
+                            reason: "debounce_cancelled_by_new_input"
+                        )
+                    )
+                    return
+                }
+            }
+            let shouldDispatch = await MainActor.run { [weak self] in
+                guard let self,
+                      self.activeRequestID == requestID,
+                      self.generation == currentGeneration else {
+                    return false
+                }
+                self.activeRequestPhase = .transportStarted
+                if !context.isProviderAvailabilityProbe,
+                   self.dispatchDebounceNanoseconds > 0 {
+                    onStateChange(.pending(requestID: requestID))
+                }
+                return true
+            }
+            guard shouldDispatch else {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .dispatchCancelledByNewInput,
+                        requestID: requestID,
+                        compositionID: context.compositionID,
+                        rawLength: context.rawInput.count,
+                        rawRevision: context.rawRevision,
+                        prefixLength: context.lockedPrefix?.count,
+                        appBundleID: context.appBundleID,
+                        reason: "request_inactive_before_transport"
+                    )
+                )
+                return
+            }
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .transportStarted,
+                    requestID: requestID,
+                    compositionID: context.compositionID,
+                    rawLength: context.rawInput.count,
+                    rawRevision: context.rawRevision,
+                    prefixLength: context.lockedPrefix?.count,
+                    appBundleID: context.appBundleID
+                )
+            )
             let state = await provider.recommendation(for: request)
             let patch = AIRecommendationPatch(
                 requestID: requestID,
@@ -176,6 +294,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                         requestID: requestID,
                         compositionID: context.compositionID,
                         rawLength: context.rawInput.count,
+                        rawRevision: context.rawRevision,
                         prefixLength: context.lockedPrefix?.count,
                         appBundleID: context.appBundleID,
                         reason: "task_cancelled_before_apply"
@@ -192,6 +311,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                             requestID: requestID,
                             compositionID: context.compositionID,
                             rawLength: context.rawInput.count,
+                            rawRevision: context.rawRevision,
                             prefixLength: context.lockedPrefix?.count,
                             appBundleID: context.appBundleID,
                             reason: "coordinator_released"
@@ -212,6 +332,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                     if self.activeRequestID == requestID {
                         self.activeRequestID = nil
                         self.activeTask = nil
+                        self.activeRequestPhase = nil
                     }
                     diagnosticSink.record(
                         AIRecommendationDiagnosticEvent(
@@ -219,6 +340,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                             requestID: requestID,
                             compositionID: context.compositionID,
                             rawLength: context.rawInput.count,
+                            rawRevision: context.rawRevision,
                             prefixLength: context.lockedPrefix?.count,
                             appBundleID: context.appBundleID,
                             reason: reason
@@ -229,6 +351,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 if self.activeRequestID == requestID {
                     self.activeRequestID = nil
                     self.activeTask = nil
+                    self.activeRequestPhase = nil
                 }
                 if context.isProviderAvailabilityProbe,
                    !Self.shouldApplyProviderAvailabilityProbeState(patch.state) {
@@ -238,6 +361,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                             requestID: requestID,
                             compositionID: context.compositionID,
                             rawLength: context.rawInput.count,
+                            rawRevision: context.rawRevision,
                             prefixLength: context.lockedPrefix?.count,
                             appBundleID: context.appBundleID,
                             reason: "availability_probe_suppressed_\(Self.diagnosticReason(for: patch.state))"
@@ -251,6 +375,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                         requestID: requestID,
                         compositionID: context.compositionID,
                         rawLength: context.rawInput.count,
+                        rawRevision: context.rawRevision,
                         prefixLength: context.lockedPrefix?.count,
                         appBundleID: context.appBundleID,
                         reason: Self.diagnosticReason(for: patch.state)
@@ -260,19 +385,26 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             }
         }
         activeTask = task
-        return context.isProviderAvailabilityProbe ? .idle : .pending(requestID: requestID)
+        if context.isProviderAvailabilityProbe || dispatchDebounceNanoseconds > 0 {
+            return .idle
+        }
+        return .pending(requestID: requestID)
     }
 
     @discardableResult
     func reset(compositionID: Int?, rawLength: Int?, reason: String) -> AIRecommendationState {
+        let phase = activeRequestPhase
         cancelActiveForDiagnostics(
             compositionID: compositionID,
             rawLength: rawLength,
             reason: reason
         )
         generation += 1
-        activeTask?.cancel()
+        if phase == .dispatchDeferred {
+            activeTask?.cancel()
+        }
         activeTask = nil
+        activeRequestPhase = nil
         return .idle
     }
 
@@ -291,7 +423,17 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             rawLength: rawLength,
             reason: reason
         )
+        if activeRequestPhase == .transportStarted {
+            record(
+                .transportLeftStale,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawLength,
+                reason: reason
+            )
+        }
         activeRequestID = nil
+        activeRequestPhase = nil
     }
 
     private func record(
@@ -299,6 +441,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         requestID: UUID? = nil,
         compositionID: Int? = nil,
         rawLength: Int? = nil,
+        rawRevision: Int? = nil,
         prefixLength: Int? = nil,
         appBundleID: String? = nil,
         reason: String? = nil
@@ -309,6 +452,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 requestID: requestID,
                 compositionID: compositionID,
                 rawLength: rawLength,
+                rawRevision: rawRevision,
                 prefixLength: prefixLength,
                 appBundleID: appBundleID,
                 reason: reason

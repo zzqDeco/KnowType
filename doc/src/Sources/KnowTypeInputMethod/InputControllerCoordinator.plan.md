@@ -161,6 +161,10 @@ Current behavior:
   provider state can use them; known-unavailable lazy providers keep the
   lightweight availability-probe path without repeated heavy context
   construction
+- delegates real-time AI request timing to `InputAIRecommendationRuntime`: the
+  coordinator can receive `.pending` only after provider dispatch, and stale
+  transport results cannot overwrite newer raw input, composition id, or raw
+  revision state
 - merges persisted lexical profile terms into AI requests only when the stored profile schema matches the active Rime schema; in-memory recent commits and selection history can participate, but current-page Rime candidates do not
 - requests lexical context and commit/selection refresh through
   `InputLexicalCommitRuntime`; underlying Rime userdb refresh reads existing

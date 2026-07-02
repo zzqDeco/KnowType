@@ -81,6 +81,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
+        aiRecommendationDispatchDebounceMilliseconds: Int = InputAIRecommendationRuntime.Defaults.dispatchDebounceMilliseconds,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
         lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
@@ -122,6 +123,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             provider: aiRecommendationProvider,
             providerAvailability: aiRecommendationProviderAvailability,
             hasEagerProvider: provider != nil,
+            dispatchDebounceMilliseconds: aiRecommendationDispatchDebounceMilliseconds,
             diagnosticSink: aiDiagnosticSink
         )
         self.aiAcceptanceRuntime = InputAIAcceptanceRuntime(

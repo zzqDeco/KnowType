@@ -97,6 +97,7 @@ when converting a shipped plan into a short record.
 | [ai-accepted-feedback-learning.plan.md](ai-accepted-feedback-learning.plan.md) | Learn only from verified edits inside recently accepted AI text spans | Active |
 | [provider-live-smoke-timeout-alignment.plan.md](provider-live-smoke-timeout-alignment.plan.md) | Align env-gated provider live smoke timeout with the AI runtime budget | Active |
 | [provider-live-smoke-model-alignment.plan.md](provider-live-smoke-model-alignment.plan.md) | Align env-gated continuation live smoke with the explicit product model under test | Active |
+| [ai-recommendation-stability-latency.plan.md](ai-recommendation-stability-latency.plan.md) | Debounce input-method AI dispatch and stale-drop older transport results without aborting started provider requests | Active |
 | [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |
 | [imk-owned-marked-range-commit.plan.md](imk-owned-marked-range-commit.plan.md) | Prevent cursor misplacement by ignoring stale host marked ranges on ordinary IMK writes | Active |
 | [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
