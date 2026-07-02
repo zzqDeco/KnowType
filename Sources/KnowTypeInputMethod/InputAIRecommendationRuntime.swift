@@ -204,6 +204,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         )
         activeRequestID = requestID
         activeRequestPhase = .dispatchDeferred
+        let scheduledAt = Date()
         let task = Task.detached(priority: .utility) { [weak self, provider, diagnosticSink] in
             guard let self else {
                 return
@@ -233,6 +234,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                             rawRevision: context.rawRevision,
                             prefixLength: context.lockedPrefix?.count,
                             appBundleID: context.appBundleID,
+                            elapsedMilliseconds: Self.elapsedMilliseconds(since: scheduledAt),
                             reason: "debounce_cancelled_by_new_input"
                         )
                     )
@@ -262,6 +264,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                         rawRevision: context.rawRevision,
                         prefixLength: context.lockedPrefix?.count,
                         appBundleID: context.appBundleID,
+                        elapsedMilliseconds: Self.elapsedMilliseconds(since: scheduledAt),
                         reason: "request_inactive_before_transport"
                     )
                 )
@@ -272,13 +275,16 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                     stage: .transportStarted,
                     requestID: requestID,
                     compositionID: context.compositionID,
-                    rawLength: context.rawInput.count,
-                    rawRevision: context.rawRevision,
-                    prefixLength: context.lockedPrefix?.count,
-                    appBundleID: context.appBundleID
-                )
+                rawLength: context.rawInput.count,
+                rawRevision: context.rawRevision,
+                prefixLength: context.lockedPrefix?.count,
+                appBundleID: context.appBundleID,
+                elapsedMilliseconds: Self.elapsedMilliseconds(since: scheduledAt)
             )
+            )
+            let transportStartedAt = Date()
             let state = await provider.recommendation(for: request)
+            let transportElapsedMilliseconds = Self.elapsedMilliseconds(since: transportStartedAt)
             let patch = AIRecommendationPatch(
                 requestID: requestID,
                 generation: currentGeneration,
@@ -297,6 +303,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                         rawRevision: context.rawRevision,
                         prefixLength: context.lockedPrefix?.count,
                         appBundleID: context.appBundleID,
+                        elapsedMilliseconds: transportElapsedMilliseconds,
                         reason: "task_cancelled_before_apply"
                     )
                 )
@@ -314,6 +321,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                             rawRevision: context.rawRevision,
                             prefixLength: context.lockedPrefix?.count,
                             appBundleID: context.appBundleID,
+                            elapsedMilliseconds: transportElapsedMilliseconds,
                             reason: "coordinator_released"
                         )
                     )
@@ -343,6 +351,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                             rawRevision: context.rawRevision,
                             prefixLength: context.lockedPrefix?.count,
                             appBundleID: context.appBundleID,
+                            elapsedMilliseconds: transportElapsedMilliseconds,
                             reason: reason
                         )
                     )
@@ -364,6 +373,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                             rawRevision: context.rawRevision,
                             prefixLength: context.lockedPrefix?.count,
                             appBundleID: context.appBundleID,
+                            elapsedMilliseconds: transportElapsedMilliseconds,
                             reason: "availability_probe_suppressed_\(Self.diagnosticReason(for: patch.state))"
                         )
                     )
@@ -378,6 +388,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                         rawRevision: context.rawRevision,
                         prefixLength: context.lockedPrefix?.count,
                         appBundleID: context.appBundleID,
+                        elapsedMilliseconds: transportElapsedMilliseconds,
                         reason: Self.diagnosticReason(for: patch.state)
                     )
                 )
@@ -444,6 +455,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         rawRevision: Int? = nil,
         prefixLength: Int? = nil,
         appBundleID: String? = nil,
+        elapsedMilliseconds: Int? = nil,
         reason: String? = nil
     ) {
         diagnosticSink.record(
@@ -455,9 +467,14 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 rawRevision: rawRevision,
                 prefixLength: prefixLength,
                 appBundleID: appBundleID,
+                elapsedMilliseconds: elapsedMilliseconds,
                 reason: reason
             )
         )
+    }
+
+    private static func elapsedMilliseconds(since start: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(start) * 1_000))
     }
 
     private static func diagnosticReason(for state: AIRecommendationState) -> String {

@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeCore
 import OSLog
 
 public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
@@ -112,43 +113,44 @@ public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSin
     public init() {}
 
     public func record(_ event: AIRecommendationDiagnosticEvent) {
-        if ProcessInfo.processInfo.environment["KNOWTYPE_AI_DEBUG"] == "1" {
-            fputs(Self.debugLine(for: event), stderr)
-        }
-        logger.notice(
-            """
-            AI stage=\(event.stage.rawValue, privacy: .public) \
-            requestID=\(event.requestID?.uuidString ?? "-", privacy: .public) \
-            compositionID=\(event.compositionID ?? -1, privacy: .public) \
-            rawLength=\(event.rawLength ?? -1, privacy: .public) \
-            rawRevision=\(event.rawRevision ?? -1, privacy: .public) \
-            prefixLength=\(event.prefixLength ?? -1, privacy: .public) \
-            appBundleID=\(event.appBundleID ?? "-", privacy: .public) \
-            provider=\(event.providerName ?? "-", privacy: .public) \
-            elapsedMs=\(event.elapsedMilliseconds ?? -1, privacy: .public) \
-            candidateCount=\(event.candidateCount ?? -1, privacy: .public) \
-            acceptedCount=\(event.acceptedCount ?? -1, privacy: .public) \
-            reason=\(event.reason ?? "-", privacy: .public)
-            """
+        InputDebugDiagnostics.emit(
+            category: .ai,
+            fields: Self.fields(for: event),
+            logger: logger
         )
     }
 
-    private static func debugLine(for event: AIRecommendationDiagnosticEvent) -> String {
-        [
-            "KnowTypeAI",
-            "stage=\(event.stage.rawValue)",
-            "requestID=\(event.requestID?.uuidString ?? "-")",
-            "compositionID=\(event.compositionID.map(String.init) ?? "-")",
-            "rawLength=\(event.rawLength.map(String.init) ?? "-")",
-            "rawRevision=\(event.rawRevision.map(String.init) ?? "-")",
-            "prefixLength=\(event.prefixLength.map(String.init) ?? "-")",
-            "appBundleID=\(event.appBundleID ?? "-")",
-            "provider=\(event.providerName ?? "-")",
-            "elapsedMs=\(event.elapsedMilliseconds.map(String.init) ?? "-")",
-            "candidateCount=\(event.candidateCount.map(String.init) ?? "-")",
-            "acceptedCount=\(event.acceptedCount.map(String.init) ?? "-")",
-            "reason=\(event.reason ?? "-")"
+    static func fields(for event: AIRecommendationDiagnosticEvent) -> [InputDebugDiagnostics.Field] {
+        var fields: [InputDebugDiagnostics.Field] = [
+            .init(.stage, event.stage.rawValue)
         ]
-        .joined(separator: " ") + "\n"
+        if let requestID = event.requestID {
+            fields.append(.init(.requestID, requestID.uuidString))
+        }
+        if let compositionID = event.compositionID {
+            fields.append(.init(.compositionID, compositionID))
+        }
+        if let rawLength = event.rawLength {
+            fields.append(.init(.rawLength, rawLength))
+        }
+        if let rawRevision = event.rawRevision {
+            fields.append(.init(.rawRevision, rawRevision))
+        }
+        if let prefixLength = event.prefixLength {
+            fields.append(.init(.prefixLength, prefixLength))
+        }
+        if let providerName = event.providerName {
+            fields.append(.init(.provider, providerName))
+        }
+        if let elapsedMilliseconds = event.elapsedMilliseconds {
+            fields.append(.init(.elapsedMs, elapsedMilliseconds))
+        }
+        if let appBundleID = event.appBundleID {
+            fields.append(.init(.bundleID, appBundleID))
+        }
+        if let reason = event.reason {
+            fields.append(.init(.reason, reason))
+        }
+        return fields
     }
 }

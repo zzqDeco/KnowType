@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeCore
 
 struct InputClientWriteContext: Sendable, Equatable {
     var compositionID: Int
@@ -70,27 +71,21 @@ struct InputClientWriteCoordinator: Sendable {
         context: InputClientWriteContext,
         handled: Bool
     ) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_CLIENT_WRITE_DEBUG"] == "1" else {
+        guard InputDebugDiagnostics.isEnabled(.clientWrite) else {
             return
         }
-        let message = "KnowType client write: kind=\(kind) " +
-            "compositionID=\(context.compositionID) rawLength=\(context.rawLength) " +
-            "bundleID=\(client?.bundleIdentifier ?? "<unknown>") " +
-            "writeMode=\(context.writeMode.rawValue) handled=\(handled) " +
-            "selectedRange=\(Self.describeRange(client?.selectedRange)) " +
-            "reportedMarkedRange=\(Self.describeRange(client?.markedRange)) " +
-            "chosenReplacementRange=\(Self.describeRange(chosenReplacementRange)) " +
-            "reason=\(context.reason)\n"
-        fputs(message, stderr)
-    }
-
-    private static func describeRange(_ range: NSRange?) -> String {
-        guard let range else {
-            return "nil"
-        }
-        if range.location == NSNotFound {
-            return "{NSNotFound,\(range.length)}"
-        }
-        return "{\(range.location),\(range.length)}"
+        _ = chosenReplacementRange
+        InputDebugDiagnostics.emit(
+            category: .clientWrite,
+            fields: [
+                .init(.stage, kind),
+                .init(.compositionID, context.compositionID),
+                .init(.rawLength, context.rawLength),
+                .init(.bundleID, client?.bundleIdentifier ?? "unknown"),
+                .init(.writeMode, context.writeMode.rawValue),
+                .init(.handled, handled),
+                .init(.reason, context.reason)
+            ]
+        )
     }
 }

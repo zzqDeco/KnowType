@@ -53,8 +53,12 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
   `stale_result_dropped`, and `state_applied` diagnostic semantics, and add
   `dispatch_deferred`, `dispatch_cancelled_by_new_input`, `transport_started`,
   and `transport_left_stale` for request-timing analysis. Set
-  `KNOWTYPE_AI_DEBUG=1` to mirror privacy-safe AI diagnostics to stderr without
-  raw input, candidates, locked prefixes, provider output, or context bodies.
+  `KNOWTYPE_AI_DEBUG=1` or `KNOWTYPE_PERF_DEBUG=1` to mirror privacy-safe AI
+  diagnostics to stderr/unified logging without raw input, candidates, locked
+  prefixes, provider output, or context bodies.
+- AI diagnostic elapsed fields separate debounce wait from provider transport
+  time: `transport_started` reports time since scheduling, and returned,
+  stale-dropped, or applied transport results report elapsed provider time.
 
 ## Tests
 

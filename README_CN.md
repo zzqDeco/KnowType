@@ -239,6 +239,37 @@ AI 会基于 raw input、上下文文档和持久 `LEXICAL_PROFILE.md` 返回可
 prefix 太短等原因。查看命令：
 `log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`。
 
+## 调试诊断
+
+Debug 输出默认关闭。开启后，诊断只使用隐私安全的 key/value 字段：id、长度、
+revision、generation、reason、耗时、bundle id、write mode、anchor source
+以及 handled/pass-through 状态。日志不会记录 raw input、preedit、候选文本、
+上屏文本、prompt、provider 输出、context body 或 API key。
+
+使用 `KNOWTYPE_PERF_DEBUG=1` 可以打开关键性能链路，也可以按问题组合更窄的开关，
+例如 `KNOWTYPE_AI_DEBUG=1`、`KNOWTYPE_PANEL_DEBUG=1`、
+`KNOWTYPE_TURN_DEBUG=1`、`KNOWTYPE_CLIENT_WRITE_DEBUG=1` 和
+`KNOWTYPE_ANCHOR_DEBUG=1`。
+
+```bash
+launchctl setenv KNOWTYPE_PERF_DEBUG 1
+log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType"' --style compact
+```
+
+验收结束后清理调试变量：
+
+```bash
+launchctl unsetenv KNOWTYPE_PERF_DEBUG
+launchctl unsetenv KNOWTYPE_AI_DEBUG
+launchctl unsetenv KNOWTYPE_PANEL_DEBUG
+launchctl unsetenv KNOWTYPE_TURN_DEBUG
+launchctl unsetenv KNOWTYPE_CLIENT_WRITE_DEBUG
+launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
+```
+
+首键卡顿、AI 延迟、候选窗残留、host 写入和 anchor 错位的推荐日志组合见
+[Debug Diagnostics](doc/debug-diagnostics.plan.md)。
+
 ## 输入行为
 
 | 快捷键 | 行为 |

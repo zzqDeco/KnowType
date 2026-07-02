@@ -283,6 +283,39 @@ prefix-lock sanitizer rejections, and too-short prefixes without recording raw
 text. To inspect them, run
 `log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact`.
 
+## Debug Diagnostics
+
+Debug output is off by default. When enabled, diagnostics use privacy-safe
+key/value fields only: ids, lengths, revisions, generations, reasons, elapsed
+times, bundle ids, write modes, anchor sources, and handled/pass-through state.
+They do not log raw input, preedit, candidate text, committed text, prompts,
+provider output, context bodies, or API keys.
+
+Use `KNOWTYPE_PERF_DEBUG=1` for a broad performance trace, or combine narrower
+switches such as `KNOWTYPE_AI_DEBUG=1`, `KNOWTYPE_PANEL_DEBUG=1`,
+`KNOWTYPE_TURN_DEBUG=1`, `KNOWTYPE_CLIENT_WRITE_DEBUG=1`, and
+`KNOWTYPE_ANCHOR_DEBUG=1`.
+
+```bash
+launchctl setenv KNOWTYPE_PERF_DEBUG 1
+log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType"' --style compact
+```
+
+Clear debug variables after testing:
+
+```bash
+launchctl unsetenv KNOWTYPE_PERF_DEBUG
+launchctl unsetenv KNOWTYPE_AI_DEBUG
+launchctl unsetenv KNOWTYPE_PANEL_DEBUG
+launchctl unsetenv KNOWTYPE_TURN_DEBUG
+launchctl unsetenv KNOWTYPE_CLIENT_WRITE_DEBUG
+launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
+```
+
+See [Debug Diagnostics](doc/debug-diagnostics.plan.md) for focused recipes for
+first-key stalls, AI latency, candidate-panel residue, host writes, and anchor
+placement.
+
 ## Input Behavior
 
 | Shortcut | Behavior |

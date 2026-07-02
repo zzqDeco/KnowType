@@ -79,6 +79,12 @@ implementation plans.
   effects. It reports only turn ids, composition ids, raw revisions, effect
   indices, and effect names; it must not inspect user text or execute side
   effects.
+- `InputDebugDiagnostics` is the shared diagnostics output boundary for input
+  runtime paths. Runtimes may report category, stage, ids, lengths, revisions,
+  generations, reasons, elapsed time, provider, bundle id, write mode, anchor
+  source, and handled state; they must not directly format raw input,
+  candidates, committed text, prompt/context bodies, provider output, or API
+  keys.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method
@@ -90,6 +96,9 @@ implementation plans.
   include frame reasons such as `composition_active`, `composition_ended`,
   `layout_impossible`, and `stale_update`; window-layer logs also include
   dropped stale frame generations.
+- `KNOWTYPE_PERF_DEBUG=1` enables a broad performance trace across startup,
+  input latency, Rime process, AI dispatch/transport, panel publication/window
+  apply, anchor resolution, host write, and input-turn sequence categories.
 - Candidate-panel publication may hide for raw-empty or stale-suggestion
   snapshots, but anchor source `.none` remains an undisplayable published frame
   so layout-impossible behavior stays diagnosable.
