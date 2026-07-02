@@ -12,6 +12,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: diagnosticSink
         )
 
@@ -54,6 +55,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: RecordingRuntimeAIRecommendationProvider(),
             providerAvailability: nil,
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         let configuredUnavailableState = configuredUnavailableRuntime.schedule(
@@ -70,6 +72,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: nil,
             providerAvailability: nil,
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         let unavailableState = unavailableRuntime.schedule(
@@ -87,6 +90,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: nil,
             providerAvailability: nil,
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         let lazyMissingState = lazyMissingRuntime.schedule(
@@ -102,7 +106,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
     }
 
     @MainActor
-    func testSchedulePublishesPendingAndBuildsRequestWithoutCandidateHints() async throws {
+    func testSchedulePublishesPendingAfterDispatchAndBuildsRequestWithoutCandidateHints() async throws {
         let lexicalContext = LexicalContextSnapshot(
             terms: [LexicalContextTerm(text: "JSON", score: 1, source: "test")],
             recentCommits: ["最近提交"],
@@ -126,6 +130,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: diagnosticSink
         )
         var states: [AIRecommendationState] = []
@@ -168,29 +173,121 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
     }
 
     @MainActor
-    func testRescheduleCancelsPreviousActiveRequest() async {
+    func testDefaultDebounceKeepsStateIdleUntilProviderDispatch() async {
+        XCTAssertEqual(InputAIRecommendationRuntime.Defaults.dispatchDebounceMilliseconds, 850)
         let provider = RecordingRuntimeAIRecommendationProvider(
-            response: readyState("旧结果"),
-            delayNanoseconds: 5_000_000_000
+            response: readyState("稳定后推荐")
         )
         let diagnosticSink = RecordingRuntimeDiagnosticSink()
         let runtime = InputAIRecommendationRuntime(
             provider: provider,
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 80,
+            diagnosticSink: diagnosticSink
+        )
+        var states: [AIRecommendationState] = []
+
+        let initialState = runtime.schedule(
+            context: context(rawInput: "abc", compositionID: 2, rawRevision: 1),
+            currentSnapshot: { snapshot(rawInput: "abc", compositionID: 2, rawRevision: 1) },
+            onStateChange: { states.append($0) }
+        )
+
+        XCTAssertEqual(initialState, .idle)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let earlyRequests = await provider.requests
+        XCTAssertTrue(earlyRequests.isEmpty)
+        XCTAssertTrue(states.isEmpty)
+
+        let didDispatch = await waitUntilAsync {
+            await provider.requests.count == 1
+        }
+        XCTAssertTrue(didDispatch)
+        XCTAssertTrue(states.contains {
+            if case .pending = $0 {
+                return true
+            }
+            return false
+        })
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .dispatchDeferred })
+        XCTAssertTrue(diagnosticSink.events.contains { $0.stage == .transportStarted })
+    }
+
+    @MainActor
+    func testNewInputDuringDebounceCancelsDeferredDispatchWithoutCallingProvider() async {
+        let provider = RecordingRuntimeAIRecommendationProvider(
+            response: readyState("新结果")
+        )
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 200,
             diagnosticSink: diagnosticSink
         )
 
         let firstState = runtime.schedule(
             context: context(rawInput: "abc", compositionID: 1, rawRevision: 1),
             currentSnapshot: { snapshot(rawInput: "abc", compositionID: 1, rawRevision: 1) },
-            onStateChange: { _ in XCTFail("cancelled request must not publish state") }
+            onStateChange: { _ in XCTFail("debounced request must not publish state") }
         )
-        let firstRequestID = pendingRequestID(firstState)
+        XCTAssertEqual(firstState, .idle)
+        let firstRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
 
         let secondState = runtime.schedule(
             context: context(rawInput: "abcd", compositionID: 1, rawRevision: 2),
             currentSnapshot: { snapshot(rawInput: "abcd", compositionID: 1, rawRevision: 2) },
+            onStateChange: { _ in }
+        )
+        XCTAssertEqual(secondState, .idle)
+
+        let didCallProvider = await waitUntilAsync {
+            await provider.requests.count == 1
+        }
+        XCTAssertTrue(didCallProvider)
+        let requests = await provider.requests
+        XCTAssertEqual(requests.map(\.rawInput), ["abcd"])
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .dispatchCancelledByNewInput
+                && $0.requestID == firstRequestID
+        })
+    }
+
+    @MainActor
+    func testProviderDispatchAfterNewInputLeavesOldTransportStaleWithoutCancellation() async {
+        let provider = RecordingRuntimeAIRecommendationProvider(
+            response: readyState("旧结果"),
+            delayNanoseconds: 300_000_000
+        )
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let currentSnapshot = RuntimeSnapshotBox(
+            snapshot(rawInput: "abc", compositionID: 1, rawRevision: 1)
+        )
+
+        let firstState = runtime.schedule(
+            context: context(rawInput: "abc", compositionID: 1, rawRevision: 1),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { _ in XCTFail("cancelled request must not publish state") }
+        )
+        let firstRequestID = pendingRequestID(firstState)
+        let firstTransportStarted = await waitUntilAsync {
+            await provider.requests.count == 1
+        }
+        XCTAssertTrue(firstTransportStarted)
+        currentSnapshot.update(snapshot(rawInput: "abcd", compositionID: 1, rawRevision: 2))
+
+        let secondState = runtime.schedule(
+            context: context(rawInput: "abcd", compositionID: 1, rawRevision: 2),
+            currentSnapshot: { currentSnapshot.snapshot },
             onStateChange: { _ in }
         )
         let secondRequestID = pendingRequestID(secondState)
@@ -203,13 +300,22 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
                 && $0.requestID == firstRequestID
                 && $0.reason == "new_schedule"
         })
-        _ = runtime.reset(compositionID: 1, rawLength: 4, reason: "test_cleanup")
-        let cancelled = await waitUntil {
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .transportLeftStale
+                && $0.requestID == firstRequestID
+                && $0.reason == "new_schedule"
+        })
+        let staleDropped = await waitUntil {
             diagnosticSink.events.contains {
-                $0.stage == .cancelled && $0.requestID == firstRequestID
+                $0.stage == .staleResultDropped
+                    && $0.requestID == firstRequestID
+                    && $0.reason == "request_inactive"
             }
         }
-        XCTAssertTrue(cancelled, "\(diagnosticSink.events)")
+        XCTAssertTrue(staleDropped, "\(diagnosticSink.events)")
+        XCTAssertFalse(diagnosticSink.events.contains {
+            $0.stage == .cancelled && $0.requestID == firstRequestID
+        })
     }
 
     @MainActor
@@ -223,6 +329,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: diagnosticSink
         )
         var states: [AIRecommendationState] = []
@@ -248,7 +355,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
     }
 
     @MainActor
-    func testResetCancelsActiveTaskAndReturnsIdle() async {
+    func testResetCancelsDeferredDispatchAndReturnsIdle() async {
         let provider = RecordingRuntimeAIRecommendationProvider(
             response: .unavailable(reason: "timeout"),
             delayNanoseconds: 5_000_000_000
@@ -258,6 +365,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 200,
             diagnosticSink: diagnosticSink
         )
         let state = runtime.schedule(
@@ -265,7 +373,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             currentSnapshot: { snapshot(rawInput: "abc", compositionID: 9, rawRevision: 1) },
             onStateChange: { _ in XCTFail("reset request must not publish state") }
         )
-        let requestID = pendingRequestID(state)
+        XCTAssertEqual(state, .idle)
+        let requestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
 
         XCTAssertEqual(
             runtime.reset(compositionID: 9, rawLength: 3, reason: "composition_invalidated"),
@@ -278,12 +387,14 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         })
         let cancelled = await waitUntil {
             diagnosticSink.events.contains {
-                $0.stage == .cancelled
+                $0.stage == .dispatchCancelledByNewInput
                     && $0.requestID == requestID
-                    && $0.reason == "task_cancelled_before_apply"
+                    && $0.reason == "debounce_cancelled_by_new_input"
             }
         }
         XCTAssertTrue(cancelled, "\(diagnosticSink.events)")
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
     }
 
     @MainActor
@@ -293,6 +404,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: RecordingRuntimeAIRecommendationProvider(),
             providerAvailability: availability,
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         XCTAssertFalse(lazyRuntime.hasKnownProvider)
@@ -304,6 +416,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: nil,
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         XCTAssertTrue(eagerRuntime.hasKnownProvider)
@@ -316,6 +429,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: RecordingRuntimeAIRecommendationProvider(),
             providerAvailability: availability,
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         XCTAssertTrue(lazyRuntime.shouldBuildRecommendationContext)
@@ -330,6 +444,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: RecordingRuntimeAIRecommendationProvider(),
             providerAvailability: nil,
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         XCTAssertTrue(injectedProviderRuntime.shouldBuildRecommendationContext)
@@ -338,6 +453,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: nil,
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         XCTAssertFalse(eagerRuntime.shouldBuildRecommendationContext)
@@ -347,6 +463,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: RecordingRuntimeAIRecommendationProvider(),
             providerAvailability: nil,
             hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         XCTAssertTrue(eagerRuntimeWithRecommendationProvider.shouldBuildRecommendationContext)
@@ -356,6 +473,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: nil,
             providerAvailability: nil,
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: RecordingRuntimeDiagnosticSink()
         )
         XCTAssertFalse(missingRuntime.shouldBuildRecommendationContext)
@@ -369,6 +487,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             providerAvailability: AIRecommendationProviderAvailabilityState(.unavailable),
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: diagnosticSink
         )
 
@@ -405,6 +524,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             providerAvailability: AIRecommendationProviderAvailabilityState(.unavailable),
             hasEagerProvider: false,
+            dispatchDebounceMilliseconds: 0,
             diagnosticSink: diagnosticSink
         )
 

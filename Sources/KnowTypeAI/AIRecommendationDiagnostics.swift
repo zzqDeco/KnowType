@@ -26,6 +26,10 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case cancelled
     case skippedPrefixTooShort = "skipped_prefix_too_short"
     case scheduled
+    case dispatchDeferred = "dispatch_deferred"
+    case dispatchCancelledByNewInput = "dispatch_cancelled_by_new_input"
+    case transportStarted = "transport_started"
+    case transportLeftStale = "transport_left_stale"
     case cancelPrevious = "cancel_previous"
     case staleResultDropped = "stale_result_dropped"
     case stateApplied = "state_applied"
@@ -51,6 +55,7 @@ public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
     public var requestID: UUID?
     public var compositionID: Int?
     public var rawLength: Int?
+    public var rawRevision: Int?
     public var prefixLength: Int?
     public var appBundleID: String?
     public var providerName: String?
@@ -64,6 +69,7 @@ public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
         requestID: UUID? = nil,
         compositionID: Int? = nil,
         rawLength: Int? = nil,
+        rawRevision: Int? = nil,
         prefixLength: Int? = nil,
         appBundleID: String? = nil,
         providerName: String? = nil,
@@ -76,6 +82,7 @@ public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
         self.requestID = requestID
         self.compositionID = compositionID
         self.rawLength = rawLength
+        self.rawRevision = rawRevision
         self.prefixLength = prefixLength
         self.appBundleID = appBundleID
         self.providerName = providerName
@@ -105,12 +112,16 @@ public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSin
     public init() {}
 
     public func record(_ event: AIRecommendationDiagnosticEvent) {
+        if ProcessInfo.processInfo.environment["KNOWTYPE_AI_DEBUG"] == "1" {
+            fputs(Self.debugLine(for: event), stderr)
+        }
         logger.notice(
             """
             AI stage=\(event.stage.rawValue, privacy: .public) \
             requestID=\(event.requestID?.uuidString ?? "-", privacy: .public) \
             compositionID=\(event.compositionID ?? -1, privacy: .public) \
             rawLength=\(event.rawLength ?? -1, privacy: .public) \
+            rawRevision=\(event.rawRevision ?? -1, privacy: .public) \
             prefixLength=\(event.prefixLength ?? -1, privacy: .public) \
             appBundleID=\(event.appBundleID ?? "-", privacy: .public) \
             provider=\(event.providerName ?? "-", privacy: .public) \
@@ -120,5 +131,24 @@ public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSin
             reason=\(event.reason ?? "-", privacy: .public)
             """
         )
+    }
+
+    private static func debugLine(for event: AIRecommendationDiagnosticEvent) -> String {
+        [
+            "KnowTypeAI",
+            "stage=\(event.stage.rawValue)",
+            "requestID=\(event.requestID?.uuidString ?? "-")",
+            "compositionID=\(event.compositionID.map(String.init) ?? "-")",
+            "rawLength=\(event.rawLength.map(String.init) ?? "-")",
+            "rawRevision=\(event.rawRevision.map(String.init) ?? "-")",
+            "prefixLength=\(event.prefixLength.map(String.init) ?? "-")",
+            "appBundleID=\(event.appBundleID ?? "-")",
+            "provider=\(event.providerName ?? "-")",
+            "elapsedMs=\(event.elapsedMilliseconds.map(String.init) ?? "-")",
+            "candidateCount=\(event.candidateCount.map(String.init) ?? "-")",
+            "acceptedCount=\(event.acceptedCount.map(String.init) ?? "-")",
+            "reason=\(event.reason ?? "-")"
+        ]
+        .joined(separator: " ") + "\n"
     }
 }

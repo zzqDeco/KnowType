@@ -1082,7 +1082,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAIRecommendationDiagnosticsRecordCancellationAndStaleDrop() async {
+    func testAIRecommendationDiagnosticsRecordTransportStaleOnNewInput() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let aiProvider = PendingAIRecommendationProvider()
@@ -1098,22 +1098,25 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
-        let hasScheduled = await waitUntilOnMainActor {
-            diagnosticSink.events.contains { $0.stage == .scheduled }
+        let hasTransportStarted = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .transportStarted }
         }
-        XCTAssertTrue(hasScheduled)
-        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+        XCTAssertTrue(hasTransportStarted)
+        let staleRequestID = diagnosticSink.events.last { $0.stage == .transportStarted }?.requestID
 
         XCTAssertTrue(coordinator.handleText("x", client: client))
-        let hasCancellation = await waitUntilOnMainActor {
+        let hasStaleTransport = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
-                $0.stage == .cancelPrevious && $0.requestID == cancelledRequestID
+                $0.stage == .cancelPrevious && $0.requestID == staleRequestID
             } && diagnosticSink.events.contains {
-                $0.stage == .cancelled && $0.requestID == cancelledRequestID
+                $0.stage == .transportLeftStale && $0.requestID == staleRequestID
             }
         }
 
-        XCTAssertTrue(hasCancellation, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertTrue(hasStaleTransport, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertFalse(diagnosticSink.events.contains {
+            $0.stage == .cancelled && $0.requestID == staleRequestID
+        })
     }
 
     @MainActor
@@ -1226,7 +1229,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelledAIRecommendationDoesNotApplyAfterInputControllerWillClose() async {
+    func testStartedAIRecommendationDoesNotApplyAfterInputControllerWillClose() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let aiProvider = PendingAIRecommendationProvider()
@@ -1242,27 +1245,30 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
-        let hasScheduled = await waitUntilOnMainActor {
-            diagnosticSink.events.contains { $0.stage == .scheduled }
+        let hasTransportStarted = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .transportStarted }
         }
-        XCTAssertTrue(hasScheduled)
-        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+        XCTAssertTrue(hasTransportStarted)
+        let staleRequestID = diagnosticSink.events.last { $0.stage == .transportStarted }?.requestID
 
         coordinator.inputControllerWillClose()
         let panelUpdatesAfterClose = host.panelStates.count
-        let hasCancelledBeforeApply = await waitUntilOnMainActor {
+        let hasStaleTransportBeforeApply = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
                 $0.stage == .cancelPrevious
-                    && $0.requestID == cancelledRequestID
+                    && $0.requestID == staleRequestID
                     && $0.reason == "input_controller_will_close"
             } && diagnosticSink.events.contains {
-                $0.stage == .cancelled
-                    && $0.requestID == cancelledRequestID
-                    && $0.reason == "task_cancelled_before_apply"
+                $0.stage == .transportLeftStale
+                    && $0.requestID == staleRequestID
+                    && $0.reason == "input_controller_will_close"
             }
         }
 
-        XCTAssertTrue(hasCancelledBeforeApply, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertTrue(hasStaleTransportBeforeApply, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertFalse(diagnosticSink.events.contains {
+            $0.stage == .cancelled && $0.requestID == staleRequestID
+        })
         XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)
         XCTAssertEqual(host.hideCandidatePanelCount, 1)
     }
@@ -1291,7 +1297,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(hasScheduled)
         let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
 
-        XCTAssertTrue(returnSignal.wait(timeout: .now() + 1))
+        let didStartReturning = await waitUntilOnMainActor {
+            returnSignal.isSignaled
+        }
+        XCTAssertTrue(didStartReturning)
         usleep(20_000)
         coordinator.inputControllerWillClose()
         let panelUpdatesAfterClose = host.panelStates.count
@@ -2135,22 +2144,35 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "secretphrase" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
+        var protectedRequests: [AIRecommendationRequest] = []
+        for _ in 0..<60 {
+            protectedRequests = await aiProvider.requests
+            if !protectedRequests.isEmpty {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertFalse(protectedRequests.isEmpty)
         XCTAssertTrue(
             coordinator.handle(
                 stroke: InputKeyStroke(text: "\r", keyCode: 36),
                 client: client
             )
         )
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        let protectedRequests = await aiProvider.requests
-        XCTAssertFalse(protectedRequests.isEmpty)
 
         for character in "wojuedezhegefagnan" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
+        var requestsAfterProtectedSelection: [AIRecommendationRequest] = []
+        for _ in 0..<60 {
+            requestsAfterProtectedSelection = await aiProvider.requests
+            if requestsAfterProtectedSelection.count > protectedRequests.count {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertGreaterThan(requestsAfterProtectedSelection.count, protectedRequests.count)
         XCTAssertTrue(coordinator.handleText(" ", client: client))
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        let requestsAfterProtectedSelection = await aiProvider.requests
         XCTAssertFalse(requestsAfterProtectedSelection.isEmpty)
 
         client.bundleIdentifier = "com.example.host"
@@ -3715,6 +3737,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
+        aiRecommendationDispatchDebounceMilliseconds: Int = 0,
         aiDiagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         lexicalProfileStore: LexicalProfileStore = .inMemory(),
         lexicalProfileRefreshGate: LexicalProfileRefreshGate = LexicalProfileRefreshGate(),
@@ -3752,6 +3775,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: aiAcceptedLearning,
             aiAcceptedFeedback: aiAcceptedFeedback,
+            aiRecommendationDispatchDebounceMilliseconds: aiRecommendationDispatchDebounceMilliseconds,
             aiDiagnosticSink: aiDiagnosticSink,
             lexicalProfileStore: lexicalProfileStore,
             lexicalProfileRefreshGate: lexicalProfileRefreshGate,
@@ -4874,13 +4898,25 @@ private actor RecordingAIRecommendationProvider: AIRecommendationProviding {
 
 private final class RecommendationReturnSignal: @unchecked Sendable {
     private let semaphore = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var didSignal = false
 
     func signal() {
+        lock.lock()
+        didSignal = true
+        lock.unlock()
         semaphore.signal()
     }
 
     func wait(timeout: DispatchTime) -> Bool {
         semaphore.wait(timeout: timeout) == .success
+    }
+
+    var isSignaled: Bool {
+        lock.lock()
+        let value = didSignal
+        lock.unlock()
+        return value
     }
 }
 
@@ -4902,6 +4938,7 @@ private actor SignaledAIRecommendationProvider: AIRecommendationProviding {
             contextVersion: "test"
         )
         returnSignal.signal()
+        try? await Task.sleep(nanoseconds: 200_000_000)
         return .ready(candidate)
     }
 }

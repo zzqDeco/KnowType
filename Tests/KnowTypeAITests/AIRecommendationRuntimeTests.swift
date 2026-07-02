@@ -13,6 +13,32 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 350)
     }
 
+    func testLazyDefaultCanDisableProviderDebounceForInputMethodFactoryPath() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "这个方案可以继续推进。", confidence: 0.8)
+        ]))
+        let loader = SequencedProviderLoader([provider])
+        let diagnosticSink = RecordingDiagnosticSink()
+        let runtime = LazyDefaultAIRecommendationRuntime(
+            providerLoader: { loader.load() },
+            diagnosticSink: diagnosticSink,
+            debounceMilliseconds: 0
+        )
+
+        let state = await runtime.recommendation(
+            for: AIRecommendationRequest(rawInput: "zhegefangan", compositionID: 1)
+        )
+
+        guard case .ready = state else {
+            return XCTFail("expected ready AI recommendation")
+        }
+        XCTAssertEqual(loader.count, 1)
+        let providerRequestCount = await provider.requests.count
+        XCTAssertEqual(providerRequestCount, 1)
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .debounceStart })
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .debounceEnd })
+    }
+
     func testLazyDefaultRecommendationRetriesProviderLoadAfterMissingProvider() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案可以继续推进。", confidence: 0.8)

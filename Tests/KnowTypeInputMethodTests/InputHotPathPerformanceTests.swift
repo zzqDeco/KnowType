@@ -18,6 +18,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputController.swift"),
             encoding: .utf8
         )
+        let aiRecommendationRuntime = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputAIRecommendationRuntime.swift"),
+            encoding: .utf8
+        )
         let rimeEngine = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
             encoding: .utf8
@@ -61,6 +65,11 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext\n                ? aiAcceptedFeedbackProvider?.snapshot"))
         XCTAssertTrue(coordinator.contains("schedulePostInsertCaretVerification"))
         XCTAssertFalse(coordinator.contains("scheduleDelayedReanchor { [weak self, client] in\n                    self?.aiAcceptanceRuntime.verifyPostInsertCaret"))
+        XCTAssertTrue(inputController.contains("debounceMilliseconds: 0"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("dispatchDebounceMilliseconds"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("case .transportStarted:"))
+        XCTAssertTrue(aiRecommendationRuntime.contains(".transportLeftStale"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("if phase == .dispatchDeferred"))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {

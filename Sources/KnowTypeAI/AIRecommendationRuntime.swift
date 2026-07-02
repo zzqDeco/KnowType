@@ -6,6 +6,7 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     private let providerLoader: @Sendable () -> (any LLMProvider)?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let providerAvailability: AIRecommendationProviderAvailabilityState
+    private let debounceMilliseconds: Int
     private var runtime: AIRecommendationRuntime?
 
     public init(
@@ -13,11 +14,13 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
             ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)
         },
         diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
-        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState()
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds
     ) {
         self.providerLoader = providerLoader
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
@@ -29,11 +32,16 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
             providerAvailability.update(.unavailable)
             return await AIRecommendationRuntime(
                 provider: nil,
+                debounceMilliseconds: debounceMilliseconds,
                 diagnosticSink: diagnosticSink
             ).recommendation(for: request)
         }
         providerAvailability.update(.available)
-        let runtime = AIRecommendationRuntime(provider: provider, diagnosticSink: diagnosticSink)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: debounceMilliseconds,
+            diagnosticSink: diagnosticSink
+        )
         self.runtime = runtime
         return await runtime.recommendation(for: request)
     }
