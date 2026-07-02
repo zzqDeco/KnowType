@@ -65,6 +65,10 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
         panelState
     }
 
+    var currentPresentationGeneration: Int {
+        panelUpdateGeneration
+    }
+
     @discardableResult
     func publishImmediately(
         snapshot: InputCandidatePanelPublicationSnapshot,

@@ -75,6 +75,10 @@ implementation plans.
   ordered effects for panel hide, commit side effects, host insert, post-insert
   verification, Rime reset, composition reset, writer lifecycle finish, and
   runtime-event publication; the coordinator executes those effects.
+- `InputTurnSequenceValidator` owns privacy-safe validation of those ordered
+  effects. It reports only turn ids, composition ids, raw revisions, effect
+  indices, and effect names; it must not inspect user text or execute side
+  effects.
 - `InputEventBus` records typed lifecycle/commit/selection events for
   background consumers. Publishing an event must not block key handling, and
   retained recent-event history is bounded so the long-running input-method
@@ -115,6 +119,9 @@ implementation plans.
   finishing composition snapshot before composition state is reset.
 - Input turn effect sequences make this ordering explicit for tests; they do
   not replace the coordinator as the owner of IMK/AppKit side effects.
+- Turn sequence validation can emit `KNOWTYPE_TURN_DEBUG=1` diagnostics for
+  replaying effect order, but it must not fail production input or log user
+  content.
 - Background consumers may observe events, but they must not call back into the
   active Rime session or AppKit panel.
 
@@ -130,6 +137,7 @@ implementation plans.
 - `InputCommitDecisionRuntimeTests`
 - `InputCommitApplicationRuntimeTests`
 - `InputTurnSequencingRuntimeTests`
+- `InputTurnSequenceValidatorTests`
 - `InputHotPathPerformanceTests`
 - `InputAIRecommendationRuntimeTests`
 - `InputRuntimeBoundariesTests`
