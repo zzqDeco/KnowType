@@ -112,7 +112,7 @@ final class LexiconSettingsViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.createMissingDirectories())
 
         XCTAssertEqual(viewModel.directories.first?.exists, true)
-        XCTAssertEqual(viewModel.lastActionMessage, "Created 1 lexicon directory.")
+        XCTAssertEqual(viewModel.lastActionMessage, "已创建 1 个词库目录。")
     }
 
     func testCreateMissingDirectoriesReportsNoopWhenAllExist() throws {
@@ -123,7 +123,7 @@ final class LexiconSettingsViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.createMissingDirectories())
 
         XCTAssertEqual(viewModel.directories.first?.exists, true)
-        XCTAssertEqual(viewModel.lastActionMessage, "All lexicon directories already exist.")
+        XCTAssertEqual(viewModel.lastActionMessage, "所有词库目录都已存在。")
     }
 
     func testCreateSampleLexiconResourceCreatesDirectoryAndRefreshesStatus() {
@@ -139,7 +139,7 @@ final class LexiconSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.directories.first?.exists, true)
         XCTAssertEqual(viewModel.directories.first?.resourceFileCount, 1)
         XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 2)
-        XCTAssertEqual(viewModel.lastActionMessage, "Created knowtype-sample.tsv.")
+        XCTAssertEqual(viewModel.lastActionMessage, "已创建 knowtype-sample.tsv。")
     }
 
     func testCreateSampleLexiconResourceDoesNotOverwriteExistingFile() throws {
@@ -155,7 +155,7 @@ final class LexiconSettingsViewModelTests: XCTestCase {
             String(decoding: try Data(contentsOf: file), as: UTF8.self),
             "zi zao ci\t已有词\t0.5\n"
         )
-        XCTAssertEqual(viewModel.lastActionMessage, "knowtype-sample.tsv already exists.")
+        XCTAssertEqual(viewModel.lastActionMessage, "knowtype-sample.tsv 已存在。")
     }
 
     func testInstallRecommendedLexiconPackCreatesDirectoryAndRefreshesStatus() async throws {
@@ -191,7 +191,7 @@ final class LexiconSettingsViewModelTests: XCTestCase {
         let installed = await viewModel.installRecommendedLexiconPack()
 
         XCTAssertTrue(installed)
-        XCTAssertEqual(viewModel.lastActionMessage, "Installed Rime Pinyin Simplified with 1 entries.")
+        XCTAssertEqual(viewModel.lastActionMessage, "已安装 Rime Pinyin Simplified，共 1 条词条。")
         XCTAssertEqual(viewModel.directories.first?.resourceFileCount, 1)
         XCTAssertEqual(viewModel.directories.first?.loadedEntryCount, 1)
         XCTAssertEqual(viewModel.directories.first?.installedPacks.first?.id, "rime-pinyin-simp")

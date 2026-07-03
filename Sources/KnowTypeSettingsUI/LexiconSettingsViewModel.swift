@@ -141,8 +141,11 @@ public final class LexiconSettingsViewModel: ObservableObject {
                 createdCount += 1
             }
             lastActionMessage = createdCount == 0
-                ? "All lexicon directories already exist."
-                : "Created \(createdCount) lexicon director\(createdCount == 1 ? "y" : "ies")."
+                ? SettingsLocalization.string("settings.lexicon.action.allDirectoriesExist")
+                : String(
+                    format: SettingsLocalization.string("settings.lexicon.action.createdDirectories"),
+                    createdCount
+                )
             refresh()
             return true
         } catch {
@@ -155,7 +158,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
     @discardableResult
     public func createSampleLexiconResource() -> Bool {
         guard let directory = directoryURLs.first else {
-            lastActionMessage = "No lexicon directory is configured."
+            lastActionMessage = SettingsLocalization.string("settings.lexicon.action.noDirectory")
             refresh()
             return false
         }
@@ -167,13 +170,19 @@ public final class LexiconSettingsViewModel: ObservableObject {
 
             let file = directory.appendingPathComponent(Self.sampleResourceFileName)
             guard !fileManager.fileExists(atPath: file.path) else {
-                lastActionMessage = "\(Self.sampleResourceFileName) already exists."
+                lastActionMessage = String(
+                    format: SettingsLocalization.string("settings.lexicon.action.sampleExists"),
+                    Self.sampleResourceFileName
+                )
                 refresh()
                 return true
             }
 
             try Data(Self.sampleResourceContents.utf8).write(to: file, options: [.atomic])
-            lastActionMessage = "Created \(Self.sampleResourceFileName)."
+            lastActionMessage = String(
+                format: SettingsLocalization.string("settings.lexicon.action.sampleCreated"),
+                Self.sampleResourceFileName
+            )
             refresh()
             return true
         } catch {
@@ -186,7 +195,7 @@ public final class LexiconSettingsViewModel: ObservableObject {
     @discardableResult
     public func installRecommendedLexiconPack(force: Bool = false) async -> Bool {
         guard let directory = directoryURLs.first else {
-            lastActionMessage = "No lexicon directory is configured."
+            lastActionMessage = SettingsLocalization.string("settings.lexicon.action.noDirectory")
             refresh()
             return false
         }
@@ -203,7 +212,11 @@ public final class LexiconSettingsViewModel: ObservableObject {
                 directory,
                 force
             )
-            lastActionMessage = "Installed \(metadata.displayName) with \(metadata.entryCount) entries."
+            lastActionMessage = String(
+                format: SettingsLocalization.string("settings.lexicon.action.installedRecommended"),
+                metadata.displayName,
+                metadata.entryCount
+            )
             return true
         } catch {
             lastActionMessage = error.localizedDescription

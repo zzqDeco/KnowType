@@ -14,3 +14,7 @@ Current settings cover:
 - privacy/status copy and local install diagnostics.
 
 The module persists user choices through shared `com.knowtype.preferences` defaults and provider/secret stores. It does not import `KnowTypeInputMethod`.
+
+Settings copy defaults to Simplified Chinese through `SettingsLocalization`.
+English resources remain available for explicit English locale queries and
+missing-key fallback.

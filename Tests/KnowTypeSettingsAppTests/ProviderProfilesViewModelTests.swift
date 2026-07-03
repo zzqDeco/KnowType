@@ -50,10 +50,10 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let errors = viewModel.validate(viewModel.draft)
 
-        XCTAssertTrue(errors.contains("Display name is required."))
-        XCTAssertTrue(errors.contains("Base URL must be an HTTP or HTTPS URL."))
-        XCTAssertTrue(errors.contains("Model is required."))
-        XCTAssertTrue(errors.contains("Timeout must be greater than zero."))
+        XCTAssertTrue(errors.contains("显示名称不能为空。"))
+        XCTAssertTrue(errors.contains("Base URL 必须是 HTTP 或 HTTPS URL。"))
+        XCTAssertTrue(errors.contains("模型不能为空。"))
+        XCTAssertTrue(errors.contains("超时时间必须大于 0。"))
     }
 
     func testValidationRejectsBaseURLWithoutHost() {
@@ -66,7 +66,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let errors = viewModel.validate(viewModel.draft)
 
-        XCTAssertTrue(errors.contains("Base URL must be an HTTP or HTTPS URL."))
+        XCTAssertTrue(errors.contains("Base URL 必须是 HTTP 或 HTTPS URL。"))
     }
 
     func testSaveCreatesProfileAndWritesAPIKeyToSecretStoreOnly() throws {
@@ -230,7 +230,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.changeDraftKind(.anthropicMessages)
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+        XCTAssertEqual(viewModel.lastErrorMessage, "此 provider 需要 API Key。")
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
@@ -500,7 +500,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.saveDraft())
         XCTAssertEqual(
             viewModel.lastErrorMessage,
-            "Failed to update provider secret: set failed. Also failed to restore providers.json: rollback failed. Provider metadata may be staged on disk."
+            "更新 provider secret 失败：set failed。同时恢复 providers.json 失败：rollback failed。Provider 元数据可能已经暂存到磁盘。"
         )
         XCTAssertEqual(store.saveAttempts.count, 2)
         XCTAssertEqual(store.saveAttempts.first?.profiles.first?.displayName, "Updated Work")
@@ -529,7 +529,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.changeDraftKind(.openAIResponses)
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+        XCTAssertEqual(viewModel.lastErrorMessage, "此 provider 需要 API Key。")
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
@@ -558,7 +558,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.draft.displayName = "Updated Work"
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+        XCTAssertEqual(viewModel.lastErrorMessage, "此 provider 需要 API Key。")
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
@@ -705,7 +705,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.draft.isDefault = true
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertEqual(viewModel.lastErrorMessage, "API key is required for this provider.")
+        XCTAssertEqual(viewModel.lastErrorMessage, "此 provider 需要 API Key。")
         XCTAssertTrue(viewModel.validationErrors.isEmpty)
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
@@ -728,7 +728,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.draft.isDefault = true
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertTrue(viewModel.validationErrors.contains("Model is required."))
+        XCTAssertTrue(viewModel.validationErrors.contains("模型不能为空。"))
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
@@ -751,7 +751,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.draft.isDefault = true
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertTrue(viewModel.validationErrors.contains("Model is required."))
+        XCTAssertTrue(viewModel.validationErrors.contains("模型不能为空。"))
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
         XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
@@ -919,7 +919,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         viewModel.draft.isDefault = false
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertTrue(viewModel.validationErrors.contains("At least one default provider is required."))
+        XCTAssertTrue(viewModel.validationErrors.contains("至少需要保留一个默认 provider。"))
         XCTAssertTrue(store.savedFiles.isEmpty)
     }
 
@@ -935,8 +935,8 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let errors = viewModel.validate(viewModel.draft)
 
-        XCTAssertTrue(errors.contains("Custom HTTP body template is required."))
-        XCTAssertTrue(errors.contains("Custom HTTP response path is required."))
+        XCTAssertTrue(errors.contains("Custom HTTP 请求体模板不能为空。"))
+        XCTAssertTrue(errors.contains("Custom HTTP 响应路径不能为空。"))
     }
 
     func testCustomHTTPSavesWithoutAPIKey() throws {
@@ -1085,7 +1085,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
                 model: ""
             )
         ])
-        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_chat. Received 1 candidate(s)."))
+        XCTAssertEqual(viewModel.connectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
         XCTAssertTrue(store.savedFiles.isEmpty)
     }
 
@@ -1116,7 +1116,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let configurations = await capture.configurations
         XCTAssertEqual(configurations.first?.apiKey, "sk-test")
         XCTAssertEqual(configurations.first?.kind, .openAIResponses)
-        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_responses. Received 2 candidate(s)."))
+        XCTAssertEqual(viewModel.connectionStatus, .success("已连接 openai_responses，收到 2 条候选。"))
         XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertTrue(secrets.setSecretCalls.isEmpty)
     }
@@ -1209,7 +1209,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let didConnect = await viewModel.testDraftConnection()
 
         XCTAssertFalse(didConnect)
-        XCTAssertEqual(viewModel.connectionStatus, .failure("API key is required for this provider."))
+        XCTAssertEqual(viewModel.connectionStatus, .failure("此 provider 需要 API Key。"))
         let configurations = await capture.configurations
         XCTAssertTrue(configurations.isEmpty)
     }
@@ -1234,7 +1234,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let didConnect = await viewModel.testDraftConnection()
         XCTAssertFalse(didConnect)
-        XCTAssertEqual(viewModel.connectionStatus, .failure("API key is required for this provider."))
+        XCTAssertEqual(viewModel.connectionStatus, .failure("此 provider 需要 API Key。"))
         XCTAssertNil(viewModel.lastErrorMessage)
     }
 
@@ -1252,8 +1252,8 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let didConnect = await viewModel.testDraftConnection()
 
         XCTAssertFalse(didConnect)
-        XCTAssertEqual(viewModel.connectionStatus, .failure("Fix validation errors before testing."))
-        XCTAssertTrue(viewModel.validationErrors.contains("Display name is required."))
+        XCTAssertEqual(viewModel.connectionStatus, .failure("请先修复校验错误再测试连接。"))
+        XCTAssertTrue(viewModel.validationErrors.contains("显示名称不能为空。"))
         XCTAssertNil(viewModel.lastErrorMessage)
     }
 
@@ -1268,7 +1268,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let didConnect = await viewModel.testDraftConnection()
         XCTAssertTrue(didConnect)
-        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_chat. Received 1 candidate(s)."))
+        XCTAssertEqual(viewModel.connectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
 
         viewModel.draft.baseURL = "http://localhost:8317/v1"
 
@@ -1320,7 +1320,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let didConnect = await viewModel.testDraftConnection()
 
         XCTAssertTrue(didConnect)
-        XCTAssertEqual(viewModel.connectionStatus, .success("Connected to openai_chat. Received 1 candidate(s)."))
+        XCTAssertEqual(viewModel.connectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
         XCTAssertEqual(viewModel.lastErrorMessage, "save failed")
     }
 
@@ -1345,12 +1345,12 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         viewModel.draft.isDefault = false
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertTrue(viewModel.validationErrors.contains("At least one default provider is required."))
+        XCTAssertTrue(viewModel.validationErrors.contains("至少需要保留一个默认 provider。"))
 
         let didConnect = await viewModel.testDraftConnection()
 
         XCTAssertTrue(didConnect)
-        XCTAssertTrue(viewModel.validationErrors.contains("At least one default provider is required."))
+        XCTAssertTrue(viewModel.validationErrors.contains("至少需要保留一个默认 provider。"))
     }
 
     func testSupersededConnectionTestDoesNotPublishResult() async throws {

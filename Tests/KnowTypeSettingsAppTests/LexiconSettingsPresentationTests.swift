@@ -42,17 +42,17 @@ final class LexiconSettingsPresentationTests: XCTestCase {
         XCTAssertEqual(directoryPresentation.path, "/tmp/KnowType/Lexicons")
         XCTAssertTrue(directoryPresentation.diagnostics.isEmpty)
 
-        let englishPresentation = LexiconSettingsPresentation(
+        let englishPreferredPresentation = LexiconSettingsPresentation(
             totalLoadedEntryCount: 0,
             lastRefreshDate: nil,
             directories: [status],
             lastActionMessage: nil,
             preferredLanguages: ["en-US"]
         )
-        XCTAssertEqual(englishPresentation.loadedEntries.label, "Loaded Entries")
-        XCTAssertEqual(englishPresentation.refreshActionLabel, "Refresh")
-        XCTAssertEqual(englishPresentation.directories.first?.status.label, "Status")
-        XCTAssertEqual(englishPresentation.directories.first?.status.value, "Missing")
+        XCTAssertEqual(englishPreferredPresentation.loadedEntries.label, "已载入词条")
+        XCTAssertEqual(englishPreferredPresentation.refreshActionLabel, "刷新")
+        XCTAssertEqual(englishPreferredPresentation.directories.first?.status.label, "状态")
+        XCTAssertEqual(englishPreferredPresentation.directories.first?.status.value, "缺失")
     }
 
     func testPresentationHidesMissingDirectoryActionAndMapsDiagnostics() throws {

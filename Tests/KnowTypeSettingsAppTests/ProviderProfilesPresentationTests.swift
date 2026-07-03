@@ -35,7 +35,7 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             SettingsLocalization.string("settings.section.ai", preferredLanguages: ["en-US"]),
-            "AI Continuation"
+            "AI 续写"
         )
         XCTAssertEqual(
             SettingsLocalization.string("settings.section.ai", localeIdentifier: "en"),
@@ -47,7 +47,7 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             SettingsLocalization.string("settings.action.testConnection", localeIdentifier: "fr-FR"),
-            "Test Connection"
+            "测试连接"
         )
     }
 
@@ -151,12 +151,12 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             ).showsCustomHTTPFields
         )
 
-        let englishPresentation = ProviderProfileDraftPresentation(draft: customDraft, preferredLanguages: ["en-US"])
-        XCTAssertEqual(englishPresentation.displayNameFieldLabel, "Display Name")
-        XCTAssertEqual(englishPresentation.kindPickerLabel, "Provider Type")
-        XCTAssertEqual(englishPresentation.modelFieldLabel, "Model")
-        XCTAssertEqual(englishPresentation.timeoutLabel, "Timeout: 37 seconds")
-        XCTAssertEqual(englishPresentation.defaultProviderLabel, "Default provider")
+        let englishPreferredPresentation = ProviderProfileDraftPresentation(draft: customDraft, preferredLanguages: ["en-US"])
+        XCTAssertEqual(englishPreferredPresentation.displayNameFieldLabel, "显示名称")
+        XCTAssertEqual(englishPreferredPresentation.kindPickerLabel, "Provider 类型")
+        XCTAssertEqual(englishPreferredPresentation.modelFieldLabel, "模型")
+        XCTAssertEqual(englishPreferredPresentation.timeoutLabel, "超时：37 秒")
+        XCTAssertEqual(englishPreferredPresentation.defaultProviderLabel, "设为默认 provider")
     }
 
     func testSecretPresentationLabelsSecretReferenceWithoutExposingTypedAPIKey() {
@@ -186,9 +186,9 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.secret.helpText.contains("Keychain"))
         XCTAssertFalse(String(reflecting: presentation).contains("sk-typed-secret"))
 
-        let englishPresentation = ProviderProfileDraftPresentation(draft: draft, preferredLanguages: ["en-US"])
-        XCTAssertEqual(englishPresentation.secret.apiKeyFieldPrompt, "Leave blank to keep the existing key")
-        XCTAssertEqual(englishPresentation.secret.reference?.label, "Secret Reference")
+        let englishPreferredPresentation = ProviderProfileDraftPresentation(draft: draft, preferredLanguages: ["en-US"])
+        XCTAssertEqual(englishPreferredPresentation.secret.apiKeyFieldPrompt, "留空则保留现有 key")
+        XCTAssertEqual(englishPreferredPresentation.secret.reference?.label, "Secret 引用")
     }
 
     func testConnectionStatusPresentationMapsProgressSuccessAndFailure() {
@@ -204,9 +204,9 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         XCTAssertTrue(testing.isTesting)
         XCTAssertNil(testing.message)
 
-        let english = ProviderConnectionStatusPresentation(status: .idle, preferredLanguages: ["en-US"])
-        XCTAssertEqual(english.sectionTitle, "Connection")
-        XCTAssertEqual(english.testButtonLabel, "Test Connection")
+        let englishPreferred = ProviderConnectionStatusPresentation(status: .idle, preferredLanguages: ["en-US"])
+        XCTAssertEqual(englishPreferred.sectionTitle, "连接")
+        XCTAssertEqual(englishPreferred.testButtonLabel, "测试连接")
 
         let success = ProviderConnectionStatusPresentation(status: .success("Connected to openai_chat."))
         XCTAssertFalse(success.showsProgress)
@@ -228,9 +228,9 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         XCTAssertFalse(emptyValidation.isVisible)
         XCTAssertEqual(emptyValidation.title, "校验")
 
-        let validation = ProviderValidationPresentation(errors: ["Model is required."], preferredLanguages: ["zh-Hans-CN"])
+        let validation = ProviderValidationPresentation(errors: ["模型不能为空。"], preferredLanguages: ["zh-Hans-CN"])
         XCTAssertTrue(validation.isVisible)
-        XCTAssertEqual(validation.messages, ["Model is required."])
+        XCTAssertEqual(validation.messages, ["模型不能为空。"])
 
         let emptyError = ProviderLastErrorPresentation(message: nil, preferredLanguages: ["zh-Hans-CN"])
         XCTAssertFalse(emptyError.isVisible)
@@ -243,11 +243,11 @@ final class ProviderProfilesPresentationTests: XCTestCase {
 
         XCTAssertEqual(
             ProviderValidationPresentation(errors: [], preferredLanguages: ["en-US"]).title,
-            "Validation"
+            "校验"
         )
         XCTAssertEqual(
             ProviderLastErrorPresentation(message: nil, preferredLanguages: ["en-US"]).title,
-            "Last Error"
+            "最近错误"
         )
     }
 }

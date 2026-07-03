@@ -77,18 +77,40 @@
 "settings.lexicon.license" = "License";
 "settings.lexicon.source" = "Source";
 "settings.lexicon.installedAt" = "Installed";
+"settings.lexicon.action.allDirectoriesExist" = "All lexicon directories already exist.";
+"settings.lexicon.action.createdDirectories" = "Created %d lexicon directories.";
+"settings.lexicon.action.noDirectory" = "No lexicon directory is configured.";
+"settings.lexicon.action.sampleExists" = "%@ already exists.";
+"settings.lexicon.action.sampleCreated" = "Created %@.";
+"settings.lexicon.action.installedRecommended" = "Installed %@ with %d entries.";
 
+"settings.provider.section.profile" = "Provider";
 "settings.provider.displayName" = "Display Name";
 "settings.provider.kind" = "Provider Type";
+"settings.provider.baseURL" = "Base URL";
 "settings.provider.model" = "Model";
 "settings.provider.timeout" = "Timeout: %d seconds";
 "settings.provider.default" = "Default provider";
+"settings.provider.customHTTP" = "Custom HTTP";
+"settings.provider.responsePath" = "Response Path";
+"settings.provider.apiKey" = "API Key";
 "settings.provider.secretPrompt" = "Leave blank to keep the existing key";
 "settings.provider.secretReference" = "Secret Reference";
 "settings.provider.secretHelp" = "API keys are written through SecretStore; macOS uses Keychain, and provider JSON stores only secret references.";
 "settings.provider.connection" = "Connection";
+"settings.provider.connection.success" = "Connected to %@. Received %d candidate(s).";
+"settings.provider.connection.fixValidationBeforeTesting" = "Fix validation errors before testing.";
 "settings.provider.validation" = "Validation";
+"settings.provider.validation.displayNameRequired" = "Display name is required.";
+"settings.provider.validation.baseURLHTTP" = "Base URL must be an HTTP or HTTPS URL.";
+"settings.provider.validation.modelRequired" = "Model is required.";
+"settings.provider.validation.timeoutPositive" = "Timeout must be greater than zero.";
+"settings.provider.validation.customHTTPBodyRequired" = "Custom HTTP body template is required.";
+"settings.provider.validation.customHTTPResponsePathRequired" = "Custom HTTP response path is required.";
+"settings.provider.validation.defaultProviderRequired" = "At least one default provider is required.";
 "settings.provider.lastError" = "Last Error";
+"settings.provider.error.missingAPIKey" = "API key is required for this provider.";
+"settings.provider.error.rollbackFailed" = "Failed to update provider secret: %@. Also failed to restore providers.json: %@. Provider metadata may be staged on disk.";
 "settings.provider.section.continuation" = "Continuation";
 "settings.provider.cloudContinuation" = "Enable cloud continuation";
 "settings.provider.localContinuation" = "Show local continuation when no provider is available";
@@ -101,6 +123,13 @@
 "settings.provider.currentProfile" = "Current Profile";
 "settings.provider.add" = "Add Provider";
 "settings.provider.advancedCustomHTTP" = "Advanced Custom HTTP";
+
+"inputmethod.menu.aiContinuation" = "AI Continuation";
+"inputmethod.menu.openLogs" = "Open Logs...";
+"inputmethod.menu.openSupportFolder" = "Open Support Folder...";
+"inputmethod.menu.openRimeUserFolder" = "Open Rime User Folder...";
+"inputmethod.menu.settings" = "KnowType Settings...";
+"inputmethod.menu.about" = "About KnowType...";
 
 "settings.privacy.section.cloud" = "Cloud Continuation";
 "settings.privacy.providerCalls" = "Provider Calls";

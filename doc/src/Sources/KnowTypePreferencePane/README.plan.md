@@ -2,7 +2,8 @@
 
 `KnowTypePreferencePane` is the compatibility System Settings entry for
 KnowType configuration. The primary user-facing settings entry is the
-InputMethodKit menu item `KnowType Settings...`.
+InputMethodKit menu item localized by `SettingsLocalization`, defaulting to
+`KnowType 设置...`.
 
 The target builds a dynamic library that is packaged as `KnowType.prefPane` by `scripts/build-preference-pane.sh`. The installed pane uses a loadable bundle executable in `Contents/MacOS` and keeps the SwiftPM library in `Contents/Frameworks`, so System Settings can instantiate the `NSPreferencePane` principal class normally.
 

@@ -18,9 +18,9 @@
 ## Implementation
 
 - Add a testable `InputMethodMenuBuilder` that produces the native menu order:
-  `AI Continuation`, data/diagnostic folders, `KnowType Settings...`, and About.
-- Keep `KnowType Settings...` bound to `showPreferences:` and use the existing
-  `KnowTypePreferencesWindowController` as the in-bundle settings host.
+  localized AI continuation, data/diagnostic folders, settings, and About.
+- Keep the localized settings item bound to `showPreferences:` and use the
+  existing `KnowTypePreferencesWindowController` as the in-bundle settings host.
 - Persist menu toggles through `InputMethodRuntimePreferenceStore`, then force
   the coordinator to reload runtime preferences for that external change.
 - Make `scripts/install-inputmethod.sh` install the compatibility
@@ -38,7 +38,7 @@
 - `./scripts/smoke-inputmethod-install.sh --with-prefpane`
 - `./scripts/perf-input-hotpath.sh`
 - `git diff --check`
-- Manual: install release build, open `KnowType Settings...` from the input menu,
+- Manual: install release build, open `KnowType 设置...` from the input menu,
   toggle AI continuation, open log/support/Rime folders, and verify typing
   behavior has no performance regression.
 

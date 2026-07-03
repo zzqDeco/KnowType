@@ -48,14 +48,14 @@ final class DebugInstallGuidanceTests: XCTestCase {
         })
     }
 
-    func testGuidanceUsesEnglishFallback() {
+    func testGuidanceDefaultsToChineseForEnglishPreferredLanguages() {
         let steps = DebugInstallGuidance.steps(preferredLanguages: ["en-US"])
 
-        XCTAssertTrue(steps.contains { $0.title == "Diagnose Install" })
-        XCTAssertTrue(steps.contains { $0.title == "Request Switch" })
+        XCTAssertTrue(steps.contains { $0.title == "诊断安装" })
+        XCTAssertTrue(steps.contains { $0.title == "请求切换" })
         XCTAssertTrue(steps.contains {
-            $0.title == "Install Bundle"
-                && $0.detail.contains("input-method menu")
+            $0.title == "安装 bundle"
+                && $0.detail.contains("输入法菜单")
         })
     }
 }

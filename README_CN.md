@@ -123,9 +123,10 @@ Keychain secret、AI 上下文文档、`~/.knowtype` 或本地词库。用户手
 Rime 初始化属于正常使用行为，不属于安装阶段副作用。
 
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
-macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。它会打开
-macOS 原生 sidebar 和 grouped settings 页面；中文 macOS locale 下使用简体中文文案，
-非中文 locale 使用英文 fallback 文案。本地安装默认不安装独立 Settings app。默认安装会移除
+macOS 输入法菜单中选中 KnowType，然后点击 `KnowType 设置...`（显式英文资源路径下为
+`KnowType Settings...`）。它会打开 macOS 原生 sidebar 和 grouped settings 页面；
+设置界面默认使用简体中文文案，英文资源仅作为显式英文 locale 查询和缺失 key fallback 保留。
+本地安装默认不安装独立 Settings app。默认安装会移除
 本机过期的兼容 `KnowType.prefPane`，避免它和新安装的输入法版本不一致；需要匹配版本的兼容 pane 时，再执行
 `./scripts/install-inputmethod.sh --with-prefpane` 构建并安装。
 如果默认安装后系统设置侧边栏仍显示 `KnowType`，那是 macOS PreferencePane 缓存残留；

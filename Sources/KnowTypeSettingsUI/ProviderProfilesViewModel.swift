@@ -227,7 +227,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 connectionValidationErrors,
                 ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
             )
-            connectionStatus = .failure("Fix validation errors before testing.")
+            connectionStatus = .failure(SettingsLocalization.string("settings.provider.connection.fixValidationBeforeTesting"))
             return false
         }
         validationErrors = ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
@@ -245,7 +245,13 @@ public final class ProviderProfilesViewModel: ObservableObject {
             guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
                 return false
             }
-            connectionStatus = .success("Connected to \(result.providerName). Received \(result.candidateCount) candidate(s).")
+            connectionStatus = .success(
+                String(
+                    format: SettingsLocalization.string("settings.provider.connection.success"),
+                    result.providerName,
+                    result.candidateCount
+                )
+            )
             return true
         } catch {
             guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
@@ -291,9 +297,13 @@ public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
         case .loadFailed(let message):
             return message
         case .missingAPIKey:
-            return "API key is required for this provider."
+            return SettingsLocalization.string("settings.provider.error.missingAPIKey")
         case .rollbackFailed(let secretMutation, let rollback):
-            return "Failed to update provider secret: \(secretMutation). Also failed to restore providers.json: \(rollback). Provider metadata may be staged on disk."
+            return String(
+                format: SettingsLocalization.string("settings.provider.error.rollbackFailed"),
+                secretMutation,
+                rollback
+            )
         }
     }
 }

@@ -13,10 +13,10 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
 
         let errors = ProviderProfileEditingPolicy.validate(draft)
 
-        XCTAssertTrue(errors.contains("Display name is required."))
-        XCTAssertTrue(errors.contains("Base URL must be an HTTP or HTTPS URL."))
-        XCTAssertTrue(errors.contains("Model is required."))
-        XCTAssertTrue(errors.contains("Timeout must be greater than zero."))
+        XCTAssertTrue(errors.contains("显示名称不能为空。"))
+        XCTAssertTrue(errors.contains("Base URL 必须是 HTTP 或 HTTPS URL。"))
+        XCTAssertTrue(errors.contains("模型不能为空。"))
+        XCTAssertTrue(errors.contains("超时时间必须大于 0。"))
     }
 
     func testValidationRejectsCustomHTTPMissingTemplateAndResponsePath() {
@@ -26,8 +26,8 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
 
         let errors = ProviderProfileEditingPolicy.validate(draft)
 
-        XCTAssertTrue(errors.contains("Custom HTTP body template is required."))
-        XCTAssertTrue(errors.contains("Custom HTTP response path is required."))
+        XCTAssertTrue(errors.contains("Custom HTTP 请求体模板不能为空。"))
+        XCTAssertTrue(errors.contains("Custom HTTP 响应路径不能为空。"))
     }
 
     func testValidationRejectsRemoteOpenAIPlaceholderModel() {
@@ -37,7 +37,7 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
 
         let errors = ProviderProfileEditingPolicy.validate(draft)
 
-        XCTAssertTrue(errors.contains("Model is required."))
+        XCTAssertTrue(errors.contains("模型不能为空。"))
     }
 
     func testMakeSavePlanCreatesDefaultProfileAndScopedSetMutation() throws {
