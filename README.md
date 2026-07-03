@@ -302,6 +302,9 @@ launchctl setenv KNOWTYPE_PERF_DEBUG 1
 log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType"' --style compact
 ```
 
+For AI cancellation and token-cost checks, summarize a captured log with
+`python3 scripts/summarize-ai-debug-log.py /tmp/knowtype-ai-debug.log`.
+
 Clear debug variables after testing:
 
 ```bash

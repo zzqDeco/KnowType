@@ -63,6 +63,12 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
 - AI diagnostic elapsed fields separate debounce wait from provider transport
   time: `transport_started` reports time since scheduling, and returned,
   stale-dropped, or applied transport results report elapsed provider time.
+- Started transport cancellation is considered healthy when
+  `transport_cancellation_requested` appears for stale requests,
+  `transport_cancelled_by_new_input` appears for continued typing, and no
+  `provider_error`, `timeout`, or unavailable diagnostics are emitted for those
+  cancellations. `scripts/summarize-ai-debug-log.py` summarizes these counts
+  from privacy-safe unified-log exports.
 
 ## Tests
 
