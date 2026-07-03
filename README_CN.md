@@ -164,7 +164,7 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.3-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.4-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -176,7 +176,7 @@ shasum -a 256 -c KnowType-v0.2.3-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.3-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.4-macos-local-mvp.zip
 ```
 
 ## 配置

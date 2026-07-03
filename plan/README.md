@@ -24,7 +24,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
-| [release-0.2.3.plan.md](release-0.2.3.plan.md) | Prepare and publish the KnowType v0.2.3 Developer Preview release | Active |
+| [release-0.2.4.plan.md](release-0.2.4.plan.md) | Prepare and publish the KnowType v0.2.4 Developer Preview release | Active |
 | [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and workflow | Active |
 | [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active |
 | [chinese-lexicon-index.plan.md](chinese-lexicon-index.plan.md) | Larger-lexicon indexing path for `TraditionalInputEngine` | Active |
@@ -130,6 +130,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [release-0.2.3.plan.md](release-0.2.3.plan.md) | Prepare and publish the KnowType v0.2.3 Developer Preview release | Delivered |
 | [input-commit-decision-runtime-refactor.plan.md](input-commit-decision-runtime-refactor.plan.md) | Extract Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions from the coordinator | Delivered |
 | [ai-recommendation-stability-latency.plan.md](ai-recommendation-stability-latency.plan.md) | Debounce input-method AI dispatch and stale-drop older transport results without aborting started provider requests | Delivered |
 | [input-composition-lifecycle-runtime-refactor.plan.md](input-composition-lifecycle-runtime-refactor.plan.md) | Extract composition begin/finish lifecycle planning and trace-once state from the coordinator | Delivered |
