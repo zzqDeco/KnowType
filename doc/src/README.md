@@ -161,5 +161,6 @@ required for every test file.
 - [Input Method Selection Repair](scripts/repair-inputmethod-selection.plan.md)
 - [Input Method Rollback](scripts/rollback-inputmethod.plan.md)
 - [Input Method Selector](scripts/select-inputmethod.plan.md)
+- [AI Debug Log Summarizer](scripts/summarize-ai-debug-log.plan.md)
 - [Input Method Script Smoke](scripts/smoke-inputmethod-install.plan.md)
 - [Input Method Uninstaller](scripts/uninstall-inputmethod.plan.md)

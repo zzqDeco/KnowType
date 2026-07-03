@@ -1,5 +1,7 @@
 # AI Recommendation Cancellation Sequencing
 
+Status: Delivered
+
 ## Summary
 
 Restore sequenced cancellation for stale real-time AI recommendation transports.
@@ -38,6 +40,21 @@ Non-goals:
   provider health or cooldown.
 - Hard timeout and real provider/decode/HTTP failures keep existing failure and
   cooldown behavior.
+
+## Validation
+
+Manual validation on the merged `dev` build with `KNOWTYPE_AI_DEBUG=1` and
+`KNOWTYPE_PERF_DEBUG=1` confirmed the cancellation path without provider-health
+poisoning:
+
+- `transport_started=5`
+- `transport_cancellation_requested=5`
+- `transport_cancelled_by_new_input=4`
+- `provider_error=0`, `timeout=0`, `unavailable=0`
+
+The remaining started transport was invalidated by composition lifecycle
+cleanup, not continued input. The debug log also showed debounce-stage
+cancellations before provider dispatch, which avoid unnecessary provider calls.
 
 ## Test Plan
 

@@ -257,6 +257,10 @@ launchctl setenv KNOWTYPE_PERF_DEBUG 1
 log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType"' --style compact
 ```
 
+排查 AI 请求取消和 token 消耗时，可以用
+`python3 scripts/summarize-ai-debug-log.py /tmp/knowtype-ai-debug.log`
+汇总已捕获日志。
+
 验收结束后清理调试变量：
 
 ```bash
