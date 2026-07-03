@@ -1403,7 +1403,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             case .resetAnchorState:
                 resetAnchorState()
             case .invalidateSuggestion:
-            invalidateSuggestion(reason: "runtime_preferences_changed")
+                invalidateSuggestion()
             case .finishWriterLifecycle(let shouldClearOwnedMarkedTextWhenEndingWithoutCommit):
                 inputClientCompositionWriter.finishLifecycle(
                     shouldClearOwnedMarkedTextWhenEndingWithoutCommit: shouldClearOwnedMarkedTextWhenEndingWithoutCommit
@@ -1574,7 +1574,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         runtimePreferences = preferences
         aiAcceptanceRuntime.updateRuntimePreferences(preferences)
         sessionController = Self.polishOnlySessionController()
-        invalidateSuggestion()
+        invalidateSuggestion(reason: "runtime_preferences_changed")
         return true
     }
 

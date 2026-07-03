@@ -1228,6 +1228,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             diagnosticSink.events.contains {
                 $0.stage == .cancelPrevious
                     && $0.requestID == cancelledRequestID
+                    && $0.reason == "composition_invalidated"
             }
         }
 
@@ -2296,6 +2297,42 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(host.panelStates.last?.windowState.viewModel.prefixCandidates.isEmpty == true)
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText, "AI 已关闭")
         XCTAssertTrue(host.panelStates.last?.windowState.viewModel.continuationCandidates.isEmpty == true)
+    }
+
+    @MainActor
+    func testExternalRuntimePreferenceReloadUsesPreferenceCancellationReasonForActiveAIRequest() async {
+        let client = FakeInputControllerClient()
+        let runtimeStore = MutableInputMethodRuntimePreferenceStore(
+            preferences: InputMethodRuntimePreferences(cloudContinuationEnabled: true)
+        )
+        let diagnosticSink = RecordingDiagnosticSink()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: PendingAIRecommendationProvider(),
+            aiDiagnosticSink: diagnosticSink,
+            enablesAsyncSuggestionRefresh: true,
+            runtimePreferences: runtimeStore.preferences,
+            runtimePreferenceStore: runtimeStore
+        )
+
+        for character in "zhegeapi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasScheduled = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .scheduled }
+        }
+        XCTAssertTrue(hasScheduled)
+        let requestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+
+        runtimeStore.preferences = InputMethodRuntimePreferences(cloudContinuationEnabled: false)
+        coordinator.reloadRuntimePreferencesForExternalChange()
+
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .cancelPrevious
+                && $0.requestID == requestID
+                && $0.reason == "runtime_preferences_changed"
+        })
     }
 
     @MainActor
