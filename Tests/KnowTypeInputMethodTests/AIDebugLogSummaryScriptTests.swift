@@ -54,6 +54,25 @@ final class AIDebugLogSummaryScriptTests: XCTestCase {
         XCTAssertTrue(result.stderr.contains("log file does not exist"), result.stderr)
     }
 
+    func testCooldownActiveCountsAsUnavailableHealthSignal() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let logURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-cooldown-ai-log-\(UUID().uuidString).log")
+        try """
+        KnowType debug: category=ai stage=cooldown_active requestID=REQ-COOLDOWN compositionID=7 rawLength=8 rawRevision=21 provider=openai_chat elapsedMs=0 reason=AI_暂不可用
+
+        """.write(to: logURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: logURL) }
+
+        let output = try runSummary(rootURL: rootURL, fixture: logURL)
+
+        XCTAssertTrue(output.contains("cooldown_active=1"), output)
+        XCTAssertTrue(output.contains("provider_error=0 timeout=0 unavailable=1"), output)
+    }
+
     private func runSummary(rootURL: URL, fixture: URL) throws -> String {
         let result = try runSummaryProcess(rootURL: rootURL, fixture: fixture)
         XCTAssertEqual(result.status, 0, result.stderr)

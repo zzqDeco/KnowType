@@ -34,6 +34,8 @@ SAMPLE_KEYS = (
     "provider",
     "reason",
 )
+UNAVAILABLE_STAGES = {"cooldown_active"}
+UNAVAILABLE_REASON_MARKERS = ("unavailable", "暂不可用")
 
 
 def parse_fields(line: str) -> dict[str, str]:
@@ -47,6 +49,15 @@ def percentile(values: list[float], quantile: float) -> float:
     return values[min(index, len(values) - 1)]
 
 
+def is_unavailable_event(stage: str, reason: str | None) -> bool:
+    if stage in UNAVAILABLE_STAGES:
+        return True
+    if not reason:
+        return False
+    folded = reason.casefold()
+    return any(marker in folded for marker in UNAVAILABLE_REASON_MARKERS)
+
+
 def summarize(path: Path, sample_limit: int) -> tuple[int, str]:
     if not path.exists():
         return 2, f"error: log file does not exist: {path}\n"
@@ -58,6 +69,7 @@ def summarize(path: Path, sample_limit: int) -> tuple[int, str]:
     cancellation_samples: list[dict[str, str]] = []
     handle_key_totals: list[float] = []
     ai_event_count = 0
+    unavailable_count = 0
 
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if AI_MARKER in line:
@@ -70,6 +82,8 @@ def summarize(path: Path, sample_limit: int) -> tuple[int, str]:
             reason = fields.get("reason")
             if reason:
                 reason_counts[reason] += 1
+            if is_unavailable_event(stage, reason):
+                unavailable_count += 1
             if stage in SAMPLE_STAGES:
                 cancellation_samples.append(
                     {key: fields[key] for key in SAMPLE_KEYS if key in fields}
@@ -94,7 +108,7 @@ def summarize(path: Path, sample_limit: int) -> tuple[int, str]:
         "providerHealthSignals: "
         f"provider_error={stage_counts.get('provider_error', 0)} "
         f"timeout={stage_counts.get('timeout', 0)} "
-        f"unavailable={sum(count for reason, count in reason_counts.items() if 'unavailable' in reason)}"
+        f"unavailable={unavailable_count}"
     )
 
     values = sorted(handle_key_totals)
