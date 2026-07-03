@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeCore
 
 enum InputTaskKind: Hashable, Sendable {
     case panelRender
@@ -50,31 +51,37 @@ final class InputTaskSupervisor: @unchecked Sendable {
 
 struct InputLatencyTracer: Sendable {
     private let enabled: Bool
+    private let perfDebugEnabled: Bool
     private let budgetMilliseconds: Double
 
     init(
         enabled: Bool = ProcessInfo.processInfo.environment["KNOWTYPE_INPUT_LATENCY_DEBUG"] == "1",
+        perfDebugEnabled: Bool = ProcessInfo.processInfo.environment[InputDebugDiagnostics.performanceEnvironmentKey] == "1",
         budgetMilliseconds: Double = Double(ProcessInfo.processInfo.environment["KNOWTYPE_INPUT_LATENCY_BUDGET_MS"] ?? "") ?? 8
     ) {
         self.enabled = enabled
+        self.perfDebugEnabled = perfDebugEnabled
         self.budgetMilliseconds = budgetMilliseconds
     }
 
-    func trace<T>(_ name: String, operation: () -> T) -> T {
-        guard enabled else {
+    var isEnabled: Bool {
+        enabled || perfDebugEnabled
+    }
+
+    func trace<T>(
+        _ name: String,
+        fields: [InputDebugDiagnostics.Field] = [],
+        operation: () -> T
+    ) -> T {
+        guard isEnabled else {
             return operation()
         }
-        let start = ContinuousClock.now
-        let value = operation()
-        let elapsed = start.duration(to: .now)
-        let milliseconds = Double(elapsed.components.seconds) * 1_000
-            + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000
-        if milliseconds >= budgetMilliseconds {
-            fputs(
-                "KnowType input latency: stage=\(name) ms=\(String(format: "%.2f", milliseconds)) budget=\(String(format: "%.2f", budgetMilliseconds))\n",
-                stderr
-            )
-        }
-        return value
+        return InputDebugDiagnostics.trace(
+            category: .inputLatency,
+            stage: name,
+            budgetMilliseconds: budgetMilliseconds,
+            fields: fields,
+            operation: operation
+        )
     }
 }

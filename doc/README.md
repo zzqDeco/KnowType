@@ -9,6 +9,7 @@ This directory keeps current project documentation. It should describe how the s
 - [MVP Acceptance](mvp-acceptance.plan.md): manual test matrix for local input method builds.
 - [MVP Test Acceptance Matrix](mvp-test-acceptance-matrix.plan.md): what `swift test`, CI script smoke, provider live smoke, and manual local IME acceptance prove.
 - [Local Input Method Testing](local-inputmethod-testing.plan.md): macOS 15 local Apple Development policy and selection diagnostics.
+- [Debug Diagnostics](debug-diagnostics.plan.md): privacy-safe debug/performance logging switches and issue-specific recipes.
 - [Source Notes](src/README.md): short file-level notes organized to mirror source and script directories.
 - [Documentation Template](templates/documentation.template.md): template for new current-state docs under `doc/`.
 - [Source Note Template](templates/source-note.template.md): template for source notes under `doc/src/`.

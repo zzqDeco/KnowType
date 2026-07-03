@@ -19,8 +19,9 @@ and privacy-safe write diagnostics used by `InputClientCompositionWriter`.
   NSNotFound)` as the replacement range. Host-reported `markedRange` remains
   diagnostic and geometry input, not a trusted replacement range.
 - `KNOWTYPE_CLIENT_WRITE_DEBUG=1` logs write kind, composition id, raw length,
-  bundle id, write mode, handled/pass-through state, selected range, reported
-  marked range, chosen replacement range, and reason.
+  bundle id, write mode, handled/pass-through state, and reason through
+  `InputDebugDiagnostics`. It intentionally does not log replacement ranges or
+  user text.
 - Commit-only placeholder writes use the distinct write kind supplied by
   `InputClientCompositionWriter`, so host compatibility diagnostics can
   distinguish them from raw inline preedit writes without logging user text.

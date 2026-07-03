@@ -17,6 +17,10 @@ public enum InputCommitResultPolicy {
            aiRecommendationState.isSelectableRecommendation {
             return aiRecommendationCommitResult(for: aiRecommendationState)
         }
+        if action == .tab,
+           aiRecommendationState.isPendingRecommendation {
+            return nil
+        }
         if case .optionNumber(1) = action {
             return aiRecommendationState.isSelectableRecommendation
                 ? aiRecommendationCommitResult(for: aiRecommendationState)

@@ -17,6 +17,8 @@ Boundaries:
 - It does not call host clients, Rime, candidate-panel presenters, marked-text
   writers, AI runtimes, lexical runtimes, or event buses.
 - `InputControllerCoordinator` remains the executor for all returned effects.
+- `InputTurnSequenceValidator` checks the returned effect order without
+  executing it or reading user text.
 - `InputCommitDecisionRuntime` decides which action wins; this runtime only
   sequences effects after a decision is already known.
 - `InputCandidatePanelPublicationRuntime` remains the owner of candidate-panel
@@ -25,5 +27,6 @@ Boundaries:
 Tests:
 
 - `InputTurnSequencingRuntimeTests`
+- `InputTurnSequenceValidatorTests`
 - `InputControllerCoordinatorTests`
 - `InputControllerCoordinatorRefactorRegressionTests`

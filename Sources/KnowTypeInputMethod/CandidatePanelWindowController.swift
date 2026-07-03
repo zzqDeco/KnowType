@@ -138,16 +138,28 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
             configuration: panelAppearance.layoutConfiguration(layoutMode: windowState.layoutMode),
             textMeasurer: layoutEngine.textMeasurer
         )
+        let layoutStartedAt = ContinuousClock.now
         guard let layoutPlan = effectiveLayoutEngine.layout(
             model: renderModel,
             anchorRect: windowState.anchorRect,
             screenProvider: screenProvider,
             placementPreference: windowState.placementPreference
         ) else {
+            traceLayout(
+                windowState: windowState,
+                renderModel: renderModel,
+                layoutPlan: nil,
+                elapsedMilliseconds: InputDebugDiagnostics.milliseconds(layoutStartedAt.duration(to: .now))
+            )
             orderOutPanel(panel)
             return
         }
-        traceLayout(windowState: windowState, renderModel: renderModel, layoutPlan: layoutPlan)
+        traceLayout(
+            windowState: windowState,
+            renderModel: renderModel,
+            layoutPlan: layoutPlan,
+            elapsedMilliseconds: InputDebugDiagnostics.milliseconds(layoutStartedAt.duration(to: .now))
+        )
         panel.setContentSize(layoutPlan.panelSize)
         panel.setFrameOrigin(layoutPlan.panelOrigin)
         contentView.update(model: renderModel, layoutPlan: layoutPlan)
@@ -160,12 +172,17 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
             traceDroppedFrame(frame)
             return
         }
+        let startedAt = ContinuousClock.now
         latestAppliedPresentationGeneration = frame.presentationGeneration
         if frame.isVisible {
             update(state: frame.panelModel, locale: locale)
         } else {
             hide()
         }
+        traceAppliedFrame(
+            frame,
+            elapsedMilliseconds: InputDebugDiagnostics.milliseconds(startedAt.duration(to: .now))
+        )
     }
 
     func candidatePanelContentDidHover(_ selection: CandidatePanelSelection) {
@@ -208,24 +225,69 @@ final class CandidatePanelWindowController: CandidatePanelContentInteractionHand
     private func traceLayout(
         windowState: CandidatePanelWindowState,
         renderModel: CandidatePanelRenderModel,
-        layoutPlan: CandidatePanelLayoutPlan
+        layoutPlan: CandidatePanelLayoutPlan?,
+        elapsedMilliseconds: Double
     ) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
             return
         }
-        fputs(
-            "KnowType panel layout: layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue) verticalPlacement=\(layoutPlan.verticalPlacement.rawValue) pageSize=\(windowState.paging.pageSize) renderRows=\(renderModel.rows.count) orientation=\(layoutPlan.orientation) anchorRect=\(windowState.anchorRect) origin=\(layoutPlan.panelOrigin)\n",
-            stderr
+        let layoutReason: String
+        if let layoutPlan {
+            layoutReason = "layoutMode=\(windowState.layoutMode.rawValue);placement=\(layoutPlan.verticalPlacement.rawValue);renderRows=\(renderModel.rows.count)"
+        } else {
+            layoutReason = "layoutMode=\(windowState.layoutMode.rawValue);placement=none;renderRows=\(renderModel.rows.count)"
+        }
+        InputDebugDiagnostics.emit(
+            category: .panel,
+            fields: [
+                .init(.stage, "window_layout"),
+                .init(.elapsedMs, String(format: "%.2f", elapsedMilliseconds)),
+                .init(.anchorSource, windowState.anchorSource.rawValue),
+                .init(.handled, layoutPlan != nil),
+                .init(.reason, layoutReason)
+            ]
         )
     }
 
     private func traceDroppedFrame(_ frame: CandidatePanelFrame) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
             return
         }
-        fputs(
-            "KnowType panel drop: reason=stale_frame generation=\(frame.presentationGeneration) latestGeneration=\(latestAppliedPresentationGeneration) visibilityReason=\(frame.visibilityReason.rawValue) visible=\(frame.isVisible)\n",
-            stderr
+        InputDebugDiagnostics.emit(
+            category: .panel,
+            fields: [
+                .init(.stage, "window_drop"),
+                .init(.panelGeneration, frame.presentationGeneration),
+                .init(.reason, "stale_frame;latestGeneration=\(latestAppliedPresentationGeneration);visibilityReason=\(frame.visibilityReason.rawValue)"),
+                .init(.compositionID, frame.compositionID),
+                .init(.rawRevision, frame.rawRevision),
+                .init(.rawLength, frame.rawLength),
+                .init(.anchorSource, frame.anchorSource.rawValue),
+                .init(.handled, false)
+            ]
+        )
+    }
+
+    private func traceAppliedFrame(
+        _ frame: CandidatePanelFrame,
+        elapsedMilliseconds: Double
+    ) {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
+            return
+        }
+        InputDebugDiagnostics.emit(
+            category: .panel,
+            fields: [
+                .init(.stage, "window_apply"),
+                .init(.elapsedMs, String(format: "%.2f", elapsedMilliseconds)),
+                .init(.panelGeneration, frame.presentationGeneration),
+                .init(.reason, frame.visibilityReason.rawValue),
+                .init(.compositionID, frame.compositionID),
+                .init(.rawRevision, frame.rawRevision),
+                .init(.rawLength, frame.rawLength),
+                .init(.anchorSource, frame.anchorSource.rawValue),
+                .init(.handled, frame.isVisible)
+            ]
         )
     }
 
@@ -468,7 +530,9 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
         let container = NSStackView()
         container.orientation = .horizontal
         container.alignment = .centerY
-        container.spacing = panelAppearance.shortcutTextSpacing
+        container.spacing = row.accessory == nil
+            ? panelAppearance.shortcutTextSpacing
+            : panelAppearance.accessoryTextSpacing
         container.edgeInsets = NSEdgeInsets(
             top: panelAppearance.itemInsets.top,
             left: panelAppearance.itemInsets.left,
@@ -494,14 +558,35 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
             )
         }
 
-        let textLabel = baseLabel(row.text)
-        textLabel.font = panelAppearance.font(for: row.visualRole)
-        textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected, isEnabled: row.isEnabled)
-        textLabel.lineBreakMode = .byTruncatingTail
-        textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: layoutItem.textWidthLimit).isActive = true
-        container.addArrangedSubview(textLabel)
+        if row.accessory == .spinner {
+            container.addArrangedSubview(makeSpinner())
+        }
+
+        if !row.text.isEmpty {
+            let textLabel = baseLabel(row.text)
+            textLabel.font = panelAppearance.font(for: row.visualRole)
+            textLabel.textColor = textColor(for: row.visualRole, isSelected: row.isSelected, isEnabled: row.isEnabled)
+            textLabel.lineBreakMode = .byTruncatingTail
+            textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            textLabel.widthAnchor.constraint(lessThanOrEqualToConstant: layoutItem.textWidthLimit).isActive = true
+            container.addArrangedSubview(textLabel)
+        }
         return container
+    }
+
+    private func makeSpinner() -> NSProgressIndicator {
+        let spinner = NSProgressIndicator()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = true
+        spinner.setContentCompressionResistancePriority(.required, for: .horizontal)
+        spinner.setContentHuggingPriority(.required, for: .horizontal)
+        spinner.widthAnchor.constraint(equalToConstant: panelAppearance.accessoryWidth).isActive = true
+        spinner.heightAnchor.constraint(equalToConstant: panelAppearance.accessoryWidth).isActive = true
+        spinner.startAnimation(nil)
+        return spinner
     }
 
     private func rowBackgroundColor(_ row: CandidatePanelRenderRow) -> NSColor {

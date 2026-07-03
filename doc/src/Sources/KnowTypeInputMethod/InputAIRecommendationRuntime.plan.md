@@ -7,8 +7,8 @@ recommendation requests.
 
 It builds `AIRecommendationRequest` values from coordinator-provided input
 context, records privacy-safe diagnostics, tracks the active request id and
-generation, cancels stale tasks, and publishes matching `AIRecommendationState`
-updates back to the coordinator.
+generation, owns the input-method trailing debounce before transport dispatch,
+and publishes matching `AIRecommendationState` updates back to the coordinator.
 
 ## Boundaries
 
@@ -33,6 +33,15 @@ updates back to the coordinator.
 
 - Scheduling starts with `InputAIRecommendationSchedulePolicy`; skipped states
   do not start provider tasks.
+- IMK callers use an input-method trailing debounce before dispatching the
+  provider request. Eligible inputs return `.pending` immediately so the
+  candidate panel keeps a fixed AI placeholder row while waiting for stable
+  input. Provider-availability probes and skip paths still return `.idle` or
+  their explicit ineligible/unavailable state instead of showing a placeholder.
+- New input cancels only the pre-dispatch debounce task. Once transport has
+  started, the runtime does not abort the provider task; it invalidates the old
+  request id/generation and lets the old result return through the existing
+  stale-drop path.
 - Known-unavailable lazy providers run availability probes without lexical or
   accepted-feedback context. A probe returns `.idle` synchronously and suppresses
   unavailable async results, but still applies a recovered `.ready` result.
@@ -41,8 +50,17 @@ updates back to the coordinator.
 - Provider requests never include real-time Rime candidate hints.
 - Async results apply only when request id, generation, composition id, raw
   revision, and raw input still match the current composition snapshot.
-- Reset and reschedule paths preserve existing `cancel_previous`, `cancelled`,
-  `stale_result_dropped`, and `state_applied` diagnostic semantics.
+- Reset and reschedule paths preserve existing `cancel_previous`,
+  `stale_result_dropped`, and `state_applied` diagnostic semantics, and add
+  `pending_placeholder`, `dispatch_deferred`,
+  `dispatch_cancelled_by_new_input`, `transport_started`, and
+  `transport_left_stale` for request-timing analysis. Set
+  `KNOWTYPE_AI_DEBUG=1` or `KNOWTYPE_PERF_DEBUG=1` to mirror privacy-safe AI
+  diagnostics to stderr/unified logging without raw input, candidates, locked
+  prefixes, provider output, or context bodies.
+- AI diagnostic elapsed fields separate debounce wait from provider transport
+  time: `transport_started` reports time since scheduling, and returned,
+  stale-dropped, or applied transport results report elapsed provider time.
 
 ## Tests
 

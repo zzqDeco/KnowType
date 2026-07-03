@@ -36,6 +36,10 @@ input.
   time, schema id, and success state without logging input text.
 - With `KNOWTYPE_STARTUP_DEBUG=1`, native prewarm logs start/done events with
   elapsed time, schema id, and success state without logging input text.
+- With `KNOWTYPE_PERF_DEBUG=1`, each native Rime `process(_:)` call logs a
+  privacy-safe `native_rime_process` timing line with key kind, engine state,
+  raw length, and handled state. It never logs the actual typed character,
+  preedit text, candidate text, or commit text.
 - Native session creation serializes entry into the C bridge because librime
   setup and the cached API handle are process-global. The background prewarm
   uses a speculative creation slot and skips prewarm when foreground creation is

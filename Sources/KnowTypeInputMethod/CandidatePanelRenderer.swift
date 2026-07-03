@@ -17,6 +17,10 @@ public enum CandidatePanelVisualRole: Sendable, Equatable, Hashable {
     case rawInput
 }
 
+public enum CandidatePanelRowAccessory: Sendable, Equatable {
+    case spinner
+}
+
 public enum CandidatePanelSelection: Sendable, Equatable {
     case rawInput
     case prefixCandidate(Int)
@@ -34,6 +38,7 @@ public struct CandidatePanelRenderRow: Sendable, Equatable {
     public var isSelected: Bool
     public var isEnabled: Bool
     public var visualRole: CandidatePanelVisualRole
+    public var accessory: CandidatePanelRowAccessory?
     public var accessibilityLabel: String
 
     public init(
@@ -44,6 +49,7 @@ public struct CandidatePanelRenderRow: Sendable, Equatable {
         isSelected: Bool,
         isEnabled: Bool = true,
         visualRole: CandidatePanelVisualRole,
+        accessory: CandidatePanelRowAccessory? = nil,
         accessibilityLabel: String? = nil
     ) {
         self.kind = kind
@@ -53,6 +59,7 @@ public struct CandidatePanelRenderRow: Sendable, Equatable {
         self.isSelected = isSelected
         self.isEnabled = isEnabled
         self.visualRole = visualRole
+        self.accessory = accessory
         self.accessibilityLabel = accessibilityLabel ?? Self.defaultAccessibilityLabel(
             shortcutLabel: shortcutLabel,
             text: text,
@@ -161,6 +168,7 @@ public struct CandidatePanelRenderer: Sendable {
             isSelected: item.isEnabled && item.selection != nil && selection == item.selection,
             isEnabled: item.isEnabled,
             visualRole: item.visualRole,
+            accessory: item.accessory,
             accessibilityLabel: item.accessibilityLabel
         )
     }

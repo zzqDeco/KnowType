@@ -1,4 +1,5 @@
 import Foundation
+import KnowTypeCore
 import OSLog
 
 public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
@@ -26,7 +27,12 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case cancelled
     case skippedPrefixTooShort = "skipped_prefix_too_short"
     case scheduled
+    case dispatchDeferred = "dispatch_deferred"
+    case dispatchCancelledByNewInput = "dispatch_cancelled_by_new_input"
+    case transportStarted = "transport_started"
+    case transportLeftStale = "transport_left_stale"
     case cancelPrevious = "cancel_previous"
+    case pendingPlaceholder = "pending_placeholder"
     case staleResultDropped = "stale_result_dropped"
     case stateApplied = "state_applied"
     case lexicalProfileLoad = "lexical_profile_load"
@@ -51,6 +57,7 @@ public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
     public var requestID: UUID?
     public var compositionID: Int?
     public var rawLength: Int?
+    public var rawRevision: Int?
     public var prefixLength: Int?
     public var appBundleID: String?
     public var providerName: String?
@@ -64,6 +71,7 @@ public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
         requestID: UUID? = nil,
         compositionID: Int? = nil,
         rawLength: Int? = nil,
+        rawRevision: Int? = nil,
         prefixLength: Int? = nil,
         appBundleID: String? = nil,
         providerName: String? = nil,
@@ -76,6 +84,7 @@ public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {
         self.requestID = requestID
         self.compositionID = compositionID
         self.rawLength = rawLength
+        self.rawRevision = rawRevision
         self.prefixLength = prefixLength
         self.appBundleID = appBundleID
         self.providerName = providerName
@@ -105,20 +114,44 @@ public struct OSLogAIRecommendationDiagnosticSink: AIRecommendationDiagnosticSin
     public init() {}
 
     public func record(_ event: AIRecommendationDiagnosticEvent) {
-        logger.notice(
-            """
-            AI stage=\(event.stage.rawValue, privacy: .public) \
-            requestID=\(event.requestID?.uuidString ?? "-", privacy: .public) \
-            compositionID=\(event.compositionID ?? -1, privacy: .public) \
-            rawLength=\(event.rawLength ?? -1, privacy: .public) \
-            prefixLength=\(event.prefixLength ?? -1, privacy: .public) \
-            appBundleID=\(event.appBundleID ?? "-", privacy: .public) \
-            provider=\(event.providerName ?? "-", privacy: .public) \
-            elapsedMs=\(event.elapsedMilliseconds ?? -1, privacy: .public) \
-            candidateCount=\(event.candidateCount ?? -1, privacy: .public) \
-            acceptedCount=\(event.acceptedCount ?? -1, privacy: .public) \
-            reason=\(event.reason ?? "-", privacy: .public)
-            """
+        InputDebugDiagnostics.emit(
+            category: .ai,
+            fields: Self.fields(for: event),
+            logger: logger
         )
+    }
+
+    static func fields(for event: AIRecommendationDiagnosticEvent) -> [InputDebugDiagnostics.Field] {
+        var fields: [InputDebugDiagnostics.Field] = [
+            .init(.stage, event.stage.rawValue)
+        ]
+        if let requestID = event.requestID {
+            fields.append(.init(.requestID, requestID.uuidString))
+        }
+        if let compositionID = event.compositionID {
+            fields.append(.init(.compositionID, compositionID))
+        }
+        if let rawLength = event.rawLength {
+            fields.append(.init(.rawLength, rawLength))
+        }
+        if let rawRevision = event.rawRevision {
+            fields.append(.init(.rawRevision, rawRevision))
+        }
+        if let prefixLength = event.prefixLength {
+            fields.append(.init(.prefixLength, prefixLength))
+        }
+        if let providerName = event.providerName {
+            fields.append(.init(.provider, providerName))
+        }
+        if let elapsedMilliseconds = event.elapsedMilliseconds {
+            fields.append(.init(.elapsedMs, elapsedMilliseconds))
+        }
+        if let appBundleID = event.appBundleID {
+            fields.append(.init(.bundleID, appBundleID))
+        }
+        if let reason = event.reason {
+            fields.append(.init(.reason, reason))
+        }
+        return fields
     }
 }

@@ -29,6 +29,10 @@ Current behavior:
   or explicit maintenance occurs; Rime native session prewarm is the explicit
   post-init performance exception, and selection history opens in no-create mode
   and only writes after a real candidate selection
+- constructs the lazy default AI recommendation provider with provider-layer
+  debounce disabled; IMK-side request timing is owned by
+  `InputAIRecommendationRuntime`, which debounces before transport dispatch and
+  stale-drops older provider results instead of aborting started HTTP requests
 - injects a process-wide lexical profile store, refresh gate, and Rime userdb snapshot provider so multiple IMK controller sessions cannot independently overwrite the global `LEXICAL_PROFILE.md`
 - overrides `showPreferences(_:)` and retains `KnowTypePreferencesWindowController`, so the input-method menu opens the SwiftUI settings window without relying on InputMethodKit's default nib-backed preferences loader
 - builds its input-method menu through `KnowTypeInputMethodMenuBuilder`: `AI Continuation`, log/support/Rime folders, `KnowType Settings...`, and About

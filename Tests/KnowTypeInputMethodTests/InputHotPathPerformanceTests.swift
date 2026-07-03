@@ -18,6 +18,38 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputController.swift"),
             encoding: .utf8
         )
+        let aiRecommendationRuntime = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputAIRecommendationRuntime.swift"),
+            encoding: .utf8
+        )
+        let aiRecommendationDiagnostics = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeAI/AIRecommendationDiagnostics.swift"),
+            encoding: .utf8
+        )
+        let candidateAnchorResolver = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/CandidateAnchorResolver.swift"),
+            encoding: .utf8
+        )
+        let candidatePanelWindowController = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/CandidatePanelWindowController.swift"),
+            encoding: .utf8
+        )
+        let candidatePanelPublicationRuntime = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputCandidatePanelPublicationRuntime.swift"),
+            encoding: .utf8
+        )
+        let inputClientWriteCoordinator = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputClientWriteCoordinator.swift"),
+            encoding: .utf8
+        )
+        let inputRuntimeBoundaries = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputRuntimeBoundaries.swift"),
+            encoding: .utf8
+        )
+        let inputTaskSupervisor = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputTaskSupervisor.swift"),
+            encoding: .utf8
+        )
         let rimeEngine = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/RimeConversionEngine.swift"),
             encoding: .utf8
@@ -49,6 +81,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(rimeEngine.contains("return rawInput.isEmpty"))
         XCTAssertTrue(rimeEngine.contains("foregroundMayPreemptSpeculative: Self.shouldPreemptSpeculativePrewarm"))
         XCTAssertTrue(rimeEngine.contains("NativeRimeSession.prewarm(configuration: configuration)"))
+        XCTAssertTrue(rimeEngine.contains("guard InputDebugDiagnostics.isEnabled(.rime) else"))
+        XCTAssertTrue(rimeEngine.contains("guard InputDebugDiagnostics.isEnabled(.startup) else"))
+        XCTAssertTrue(rimeEngine.contains(".init(.elapsedMs, String(format: \"%.1f\", elapsed * 1_000))"))
+        XCTAssertFalse(rimeEngine.contains("details: \"elapsedMs="))
         XCTAssertFalse(settingsView.contains(#"Picker("Input scheme""#))
         XCTAssertFalse(settingsView.contains("Xiaohe Shuangpin"))
         XCTAssertTrue(inputController.contains("DispatchQueue.main.asyncAfter"))
@@ -61,6 +97,33 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("shouldBuildRecommendationContext\n                ? aiAcceptedFeedbackProvider?.snapshot"))
         XCTAssertTrue(coordinator.contains("schedulePostInsertCaretVerification"))
         XCTAssertFalse(coordinator.contains("scheduleDelayedReanchor { [weak self, client] in\n                    self?.aiAcceptanceRuntime.verifyPostInsertCaret"))
+        XCTAssertTrue(inputController.contains("debounceMilliseconds: 0"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("dispatchDebounceMilliseconds"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("static let dispatchDebounceMilliseconds = 450"))
+        XCTAssertTrue(aiRecommendationRuntime.contains(".pendingPlaceholder"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("case .transportStarted:"))
+        XCTAssertTrue(aiRecommendationRuntime.contains(".transportLeftStale"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("if phase == .dispatchDeferred"))
+        XCTAssertFalse(coordinator.contains("fputs("))
+        XCTAssertFalse(aiRecommendationDiagnostics.contains("fputs("))
+        XCTAssertFalse(candidateAnchorResolver.contains("fputs("))
+        XCTAssertFalse(candidateAnchorResolver.contains("NSLog("))
+        XCTAssertFalse(candidatePanelWindowController.contains("fputs("))
+        XCTAssertTrue(candidatePanelPublicationRuntime.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
+        XCTAssertTrue(candidatePanelWindowController.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
+        XCTAssertTrue(inputRuntimeBoundaries.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
+        XCTAssertTrue(inputTaskSupervisor.contains("private let perfDebugEnabled"))
+        XCTAssertTrue(inputTaskSupervisor.contains("var isEnabled: Bool {\n        enabled || perfDebugEnabled\n    }"))
+        XCTAssertFalse(inputTaskSupervisor.contains("var isEnabled: Bool {\n        enabled || ProcessInfo.processInfo.environment"))
+        XCTAssertTrue(candidatePanelPublicationRuntime.contains("let publicationTraceStartedAt = InputDebugDiagnostics.isEnabled(.panel)"))
+        XCTAssertTrue(coordinator.contains("InputDebugDiagnostics.trace(\n                category: .turn"))
+        XCTAssertTrue(coordinator.contains("guard isTurnTraceEnabled || latencyTracer.isEnabled else"))
+        XCTAssertTrue(coordinator.contains("guard InputDebugDiagnostics.isEnabled(.turn) || !violations.isEmpty else"))
+        XCTAssertFalse(inputClientWriteCoordinator.contains("fputs("))
+        XCTAssertTrue(inputClientWriteCoordinator.contains("guard InputDebugDiagnostics.isEnabled(.clientWrite) else"))
+        XCTAssertFalse(inputRuntimeBoundaries.contains("fputs("))
+        XCTAssertFalse(aiRecommendationDiagnostics.contains("candidateCount="))
+        XCTAssertFalse(aiRecommendationDiagnostics.contains("acceptedCount="))
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {

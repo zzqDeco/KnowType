@@ -30,6 +30,17 @@ final class InputCommitDecisionRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.resultPlan(context: context), .result(.commit("AI 续写")))
     }
 
+    func testTabPendingAIFallsThroughToVisibleContinuation() {
+        let context = makeContext(
+            action: .tab,
+            rawInput: "ni",
+            suggestion: suggestion(prefixes: [candidate("你")], continuations: [continuation("继续")]),
+            aiRecommendationState: .pending(requestID: UUID())
+        )
+
+        XCTAssertEqual(runtime.resultPlan(context: context), .result(.commit("你继续")))
+    }
+
     func testTabSuppressesPartialComposition() {
         var buffer = CompositionBuffer()
         buffer.updateRawInput("nishi")

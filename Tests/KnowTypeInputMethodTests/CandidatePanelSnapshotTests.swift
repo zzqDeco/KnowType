@@ -281,7 +281,17 @@ final class CandidatePanelSnapshotTests: XCTestCase {
             previewText: nil,
             rows: [
                 row(.prefixCandidate, selection: .prefixCandidate(0), shortcut: "1", text: "这个交互", selected: true, role: .lockedPrefix),
-                row(.aiRecommendation, selection: nil, shortcut: nil, text: "AI 推荐中...", enabled: false, role: .aiRecommendation),
+                CandidatePanelRenderRow(
+                    kind: .aiRecommendation,
+                    selection: nil,
+                    shortcutLabel: nil,
+                    text: "",
+                    isSelected: false,
+                    isEnabled: false,
+                    visualRole: .aiRecommendation,
+                    accessory: .spinner,
+                    accessibilityLabel: "AI 状态，AI 推荐中"
+                ),
                 row(.prefixCandidate, selection: .prefixCandidate(1), shortcut: "2", text: "这个界面", role: .lockedPrefix)
             ]
         )

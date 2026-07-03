@@ -111,9 +111,11 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows.map(\.kind), [.prefixCandidate, .aiRecommendation, .prefixCandidate])
         XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", nil, "2"])
         XCTAssertEqual(rendered.rows[1].selection, nil)
+        XCTAssertEqual(rendered.rows[1].text, "")
         XCTAssertFalse(rendered.rows[1].isEnabled)
         XCTAssertFalse(rendered.rows[1].isSelected)
-        XCTAssertEqual(rendered.rows[1].accessibilityLabel, "AI 状态，AI 推荐中...")
+        XCTAssertEqual(rendered.rows[1].accessory, .spinner)
+        XCTAssertEqual(rendered.rows[1].accessibilityLabel, "AI 状态，AI 推荐中")
     }
 
     func testRendersRawInputOnlyWhenNoSuggestionsExist() {

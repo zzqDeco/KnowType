@@ -62,13 +62,21 @@ final class CandidatePanelPresenter: @unchecked Sendable {
     }
 
     private func trace(_ frame: CandidatePanelFrame) {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_PANEL_DEBUG"] == "1" else {
+        guard InputDebugDiagnostics.isEnabled(.panel) else {
             return
         }
-        let windowState = frame.panelModel.windowState
-        fputs(
-            "KnowType panel frame: generation=\(frame.presentationGeneration) reason=\(frame.visibilityReason.rawValue) compositionID=\(frame.compositionID) rawRevision=\(frame.rawRevision) rawLength=\(frame.rawLength) anchorSource=\(frame.anchorSource.rawValue) visible=\(windowState.isVisible) layoutMode=\(windowState.layoutMode.rawValue) placementPreference=\(windowState.placementPreference.rawValue)\n",
-            stderr
+        InputDebugDiagnostics.emit(
+            category: .panel,
+            fields: [
+                .init(.stage, "frame_apply"),
+                .init(.panelGeneration, frame.presentationGeneration),
+                .init(.reason, frame.visibilityReason.rawValue),
+                .init(.compositionID, frame.compositionID),
+                .init(.rawRevision, frame.rawRevision),
+                .init(.rawLength, frame.rawLength),
+                .init(.anchorSource, frame.anchorSource.rawValue),
+                .init(.handled, frame.isVisible)
+            ]
         )
     }
 }

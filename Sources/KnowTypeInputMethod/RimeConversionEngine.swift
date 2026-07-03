@@ -180,6 +180,20 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     public mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
+        guard InputDebugDiagnostics.isEnabled(.rime) else {
+            return processWithoutTracing(key)
+        }
+        let startedAt = ContinuousClock.now
+        let result = processWithoutTracing(key)
+        Self.traceProcess(
+            key: key,
+            result: result,
+            elapsedMilliseconds: InputDebugDiagnostics.milliseconds(startedAt.duration(to: .now))
+        )
+        return result
+    }
+
+    private mutating func processWithoutTracing(_ key: ConversionEngineKey) -> ConversionEngineResult {
         if Self.containsNonASCIIText(key) {
             return processRawBypass(key)
         }
@@ -282,15 +296,47 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     }
 
     private static func traceStartupEvent(_ event: String, elapsed: TimeInterval, details: String = "") {
-        traceStartupEvent(event, details: "elapsedMs=\(String(format: "%.1f", elapsed * 1_000))\(details.isEmpty ? "" : " \(details)")")
+        guard InputDebugDiagnostics.isEnabled(.startup) else {
+            return
+        }
+        var fields: [InputDebugDiagnostics.Field] = [
+            .init(.stage, event),
+            .init(.elapsedMs, String(format: "%.1f", elapsed * 1_000))
+        ]
+        if !details.isEmpty {
+            fields.append(.init(.reason, details))
+        }
+        InputDebugDiagnostics.emit(category: .startup, fields: fields)
     }
 
     private static func traceStartupEvent(_ event: String, details: String = "") {
-        guard ProcessInfo.processInfo.environment["KNOWTYPE_STARTUP_DEBUG"] == "1" else {
+        guard InputDebugDiagnostics.isEnabled(.startup) else {
             return
         }
-        let suffix = details.isEmpty ? "" : " \(details)"
-        fputs("KnowType startup: event=\(event)\(suffix)\n", stderr)
+        var fields: [InputDebugDiagnostics.Field] = [
+            .init(.stage, event)
+        ]
+        if !details.isEmpty {
+            fields.append(.init(.reason, details))
+        }
+        InputDebugDiagnostics.emit(category: .startup, fields: fields)
+    }
+
+    private static func traceProcess(
+        key: ConversionEngineKey,
+        result: ConversionEngineResult,
+        elapsedMilliseconds: Double
+    ) {
+        InputDebugDiagnostics.emit(
+            category: .rime,
+            fields: [
+                .init(.stage, "native_rime_process"),
+                .init(.elapsedMs, String(format: "%.2f", elapsedMilliseconds)),
+                .init(.reason, "key=\(key.privacySafeName);engine=\(result.snapshot.engineName)"),
+                .init(.rawLength, result.snapshot.rawInput.count),
+                .init(.handled, result.handled)
+            ]
+        )
     }
 
     private mutating func processRawBypass(_ key: ConversionEngineKey) -> ConversionEngineResult {
@@ -359,6 +405,31 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return false
         }
         return text.unicodeScalars.contains { !$0.isASCII }
+    }
+}
+
+private extension ConversionEngineKey {
+    var privacySafeName: String {
+        switch self {
+        case .text:
+            return "text"
+        case .space:
+            return "space"
+        case .deleteBackward:
+            return "deleteBackward"
+        case .selectCandidateOnCurrentPage:
+            return "selectCandidateOnCurrentPage"
+        case .selectCandidate:
+            return "selectCandidate"
+        case .highlightCandidateOnCurrentPage:
+            return "highlightCandidateOnCurrentPage"
+        case .pageUp:
+            return "pageUp"
+        case .pageDown:
+            return "pageDown"
+        case .commitComposition:
+            return "commitComposition"
+        }
     }
 }
 

@@ -20,6 +20,8 @@ struct CandidatePanelAppearance {
     var verticalItemSpacing: CGFloat = 2
     var minimumShortcutWidth: CGFloat = 0
     var shortcutTextSpacing: CGFloat = 3
+    var accessoryWidth: CGFloat = 12
+    var accessoryTextSpacing: CGFloat = 4
     var textFontSize: CGFloat = 15
     var shortcutFontSize: CGFloat = 10.5
     var rawFontSize: CGFloat = 13.5
@@ -42,6 +44,8 @@ struct CandidatePanelAppearance {
         configuration.verticalItemSpacing = verticalItemSpacing
         configuration.minimumShortcutWidth = minimumShortcutWidth
         configuration.shortcutTextSpacing = shortcutTextSpacing
+        configuration.accessoryWidth = accessoryWidth
+        configuration.accessoryTextSpacing = accessoryTextSpacing
         return configuration
     }
 
