@@ -129,6 +129,25 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                     appBundleID: context.appBundleID,
                     reason: "new_schedule"
                 )
+                record(
+                    .transportCancellationRequested,
+                    requestID: cancelledRequestID,
+                    compositionID: context.compositionID,
+                    rawLength: context.rawInput.count,
+                    rawRevision: context.rawRevision,
+                    appBundleID: context.appBundleID,
+                    reason: "new_schedule"
+                )
+                record(
+                    .transportCancelledByNewInput,
+                    requestID: cancelledRequestID,
+                    compositionID: context.compositionID,
+                    rawLength: context.rawInput.count,
+                    rawRevision: context.rawRevision,
+                    appBundleID: context.appBundleID,
+                    reason: "new_schedule"
+                )
+                activeTask?.cancel()
             case nil:
                 activeTask?.cancel()
             }
@@ -419,7 +438,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             reason: reason
         )
         generation += 1
-        if phase == .dispatchDeferred {
+        if phase == .dispatchDeferred || phase == .transportStarted {
             activeTask?.cancel()
         }
         activeTask = nil
@@ -450,6 +469,22 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 rawLength: rawLength,
                 reason: reason
             )
+            record(
+                .transportCancellationRequested,
+                requestID: requestID,
+                compositionID: compositionID,
+                rawLength: rawLength,
+                reason: reason
+            )
+            if reason == "input_changed" {
+                record(
+                    .transportCancelledByNewInput,
+                    requestID: requestID,
+                    compositionID: compositionID,
+                    rawLength: rawLength,
+                    reason: reason
+                )
+            }
         }
         activeRequestID = nil
         activeRequestPhase = nil

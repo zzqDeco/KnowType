@@ -1082,7 +1082,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAIRecommendationDiagnosticsRecordTransportStaleOnNewInput() async {
+    func testAIRecommendationDiagnosticsRecordTransportCancellationOnNewInput() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let aiProvider = PendingAIRecommendationProvider()
@@ -1110,13 +1110,20 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 $0.stage == .cancelPrevious && $0.requestID == staleRequestID
             } && diagnosticSink.events.contains {
                 $0.stage == .transportLeftStale && $0.requestID == staleRequestID
+            } && diagnosticSink.events.contains {
+                $0.stage == .transportCancellationRequested && $0.requestID == staleRequestID
+            } && diagnosticSink.events.contains {
+                $0.stage == .transportCancelledByNewInput && $0.requestID == staleRequestID
             }
         }
 
         XCTAssertTrue(hasStaleTransport, "\(diagnosticSink.events.map(\.stage))")
-        XCTAssertFalse(diagnosticSink.events.contains {
-            $0.stage == .cancelled && $0.requestID == staleRequestID
-        })
+        let hasCancelledTransport = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelled && $0.requestID == staleRequestID
+            }
+        }
+        XCTAssertTrue(hasCancelledTransport, "\(diagnosticSink.events.map(\.stage))")
     }
 
     @MainActor
@@ -1221,7 +1228,6 @@ final class InputControllerCoordinatorTests: XCTestCase {
             diagnosticSink.events.contains {
                 $0.stage == .cancelPrevious
                     && $0.requestID == cancelledRequestID
-                    && $0.reason == "composition_invalidated"
             }
         }
 
@@ -1262,13 +1268,20 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 $0.stage == .transportLeftStale
                     && $0.requestID == staleRequestID
                     && $0.reason == "input_controller_will_close"
+            } && diagnosticSink.events.contains {
+                $0.stage == .transportCancellationRequested
+                    && $0.requestID == staleRequestID
+                    && $0.reason == "input_controller_will_close"
             }
         }
 
         XCTAssertTrue(hasStaleTransportBeforeApply, "\(diagnosticSink.events.map(\.stage))")
-        XCTAssertFalse(diagnosticSink.events.contains {
-            $0.stage == .cancelled && $0.requestID == staleRequestID
-        })
+        let hasCancelledTransport = await waitUntilOnMainActor {
+            diagnosticSink.events.contains {
+                $0.stage == .cancelled && $0.requestID == staleRequestID
+            }
+        }
+        XCTAssertTrue(hasCancelledTransport, "\(diagnosticSink.events.map(\.stage))")
         XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)
         XCTAssertEqual(host.hideCandidatePanelCount, 1)
     }

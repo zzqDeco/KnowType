@@ -38,10 +38,11 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
   candidate panel keeps a fixed AI placeholder row while waiting for stable
   input. Provider-availability probes and skip paths still return `.idle` or
   their explicit ineligible/unavailable state instead of showing a placeholder.
-- New input cancels only the pre-dispatch debounce task. Once transport has
-  started, the runtime does not abort the provider task; it invalidates the old
-  request id/generation and lets the old result return through the existing
-  stale-drop path.
+- New input cancels the pre-dispatch debounce task before the provider is
+  called. Once transport has started, the runtime invalidates the old request
+  id/generation and requests best-effort cancellation of the provider task; any
+  late result still has to pass the existing stale-drop gate before it can
+  affect UI.
 - Known-unavailable lazy providers run availability probes without lexical or
   accepted-feedback context. A probe returns `.idle` synchronously and suppresses
   unavailable async results, but still applies a recovered `.ready` result.
@@ -54,7 +55,8 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
   `stale_result_dropped`, and `state_applied` diagnostic semantics, and add
   `pending_placeholder`, `dispatch_deferred`,
   `dispatch_cancelled_by_new_input`, `transport_started`, and
-  `transport_left_stale` for request-timing analysis. Set
+  `transport_left_stale`, `transport_cancellation_requested`, and
+  `transport_cancelled_by_new_input` for request-timing analysis. Set
   `KNOWTYPE_AI_DEBUG=1` or `KNOWTYPE_PERF_DEBUG=1` to mirror privacy-safe AI
   diagnostics to stderr/unified logging without raw input, candidates, locked
   prefixes, provider output, or context bodies.

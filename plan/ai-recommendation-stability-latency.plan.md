@@ -33,6 +33,16 @@ as short-lived 500s.
   `dispatch_deferred`, `dispatch_cancelled_by_new_input`, `transport_started`,
   and `transport_left_stale`.
 
+## Follow-Up Notes
+
+- `ai-recommendation-placeholder-latency` later reduced the input-method
+  debounce to 450 ms and changed eligible scheduling to publish a fixed pending
+  spinner placeholder immediately.
+- `ai-recommendation-cancellation-sequencing` later restored best-effort
+  cancellation for stale requests after transport starts. `transport_left_stale`
+  now means the request id/generation is invalidated; it does not imply the old
+  provider transport is intentionally left to run to completion.
+
 ## Validation
 
 - `InputAIRecommendationRuntimeTests` cover pre-dispatch cancellation, non-
