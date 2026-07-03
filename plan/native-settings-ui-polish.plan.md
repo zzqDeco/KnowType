@@ -12,10 +12,9 @@
 
 - Update `KnowTypeSettingsUI` to render a `NavigationSplitView` sidebar with
   `输入`, `候选窗`, `Rime 与用户数据`, `AI 续写`, `隐私`, and `诊断`.
-- Add settings localization resources with `zh-Hans` as the user-facing path
-  and English fallback strings for non-Chinese environments. Locale-specific
-  lookups resolve parent resources, so `en-US` uses `en.lproj` and Chinese
-  variants use `zh-Hans.lproj`.
+- Add settings localization resources with `zh-Hans` as the default
+  user-facing path. English resources remain for explicit English locale
+  lookups and missing-key fallback.
 - Simplify the AI provider page into one grouped form instead of nesting a
   second split view inside the settings detail.
 - Update the IMK preferences window title and chrome to use the same localized
@@ -49,5 +48,5 @@
 
 - This slice does not change input-source registration, appex behavior,
   Rime-only hot paths, or main/release flow.
-- The input menu item remains `KnowType Settings...`; the opened window title
-  and content are Chinese.
+- The input menu item, opened window title, and settings content default to
+  Simplified Chinese.

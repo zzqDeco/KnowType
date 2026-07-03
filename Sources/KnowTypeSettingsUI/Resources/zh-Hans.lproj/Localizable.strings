@@ -77,18 +77,40 @@
 "settings.lexicon.license" = "许可证";
 "settings.lexicon.source" = "来源";
 "settings.lexicon.installedAt" = "安装时间";
+"settings.lexicon.action.allDirectoriesExist" = "所有词库目录都已存在。";
+"settings.lexicon.action.createdDirectories" = "已创建 %d 个词库目录。";
+"settings.lexicon.action.noDirectory" = "未配置词库目录。";
+"settings.lexicon.action.sampleExists" = "%@ 已存在。";
+"settings.lexicon.action.sampleCreated" = "已创建 %@。";
+"settings.lexicon.action.installedRecommended" = "已安装 %@，共 %d 条词条。";
 
+"settings.provider.section.profile" = "Provider";
 "settings.provider.displayName" = "显示名称";
 "settings.provider.kind" = "Provider 类型";
+"settings.provider.baseURL" = "Base URL";
 "settings.provider.model" = "模型";
 "settings.provider.timeout" = "超时：%d 秒";
 "settings.provider.default" = "设为默认 provider";
+"settings.provider.customHTTP" = "Custom HTTP";
+"settings.provider.responsePath" = "Response Path";
+"settings.provider.apiKey" = "API Key";
 "settings.provider.secretPrompt" = "留空则保留现有 key";
 "settings.provider.secretReference" = "Secret 引用";
 "settings.provider.secretHelp" = "API Key 通过 SecretStore 写入；macOS 使用 Keychain，provider JSON 只保存 secret 引用。";
 "settings.provider.connection" = "连接";
+"settings.provider.connection.success" = "已连接 %@，收到 %d 条候选。";
+"settings.provider.connection.fixValidationBeforeTesting" = "请先修复校验错误再测试连接。";
 "settings.provider.validation" = "校验";
+"settings.provider.validation.displayNameRequired" = "显示名称不能为空。";
+"settings.provider.validation.baseURLHTTP" = "Base URL 必须是 HTTP 或 HTTPS URL。";
+"settings.provider.validation.modelRequired" = "模型不能为空。";
+"settings.provider.validation.timeoutPositive" = "超时时间必须大于 0。";
+"settings.provider.validation.customHTTPBodyRequired" = "Custom HTTP 请求体模板不能为空。";
+"settings.provider.validation.customHTTPResponsePathRequired" = "Custom HTTP 响应路径不能为空。";
+"settings.provider.validation.defaultProviderRequired" = "至少需要保留一个默认 provider。";
 "settings.provider.lastError" = "最近错误";
+"settings.provider.error.missingAPIKey" = "此 provider 需要 API Key。";
+"settings.provider.error.rollbackFailed" = "更新 provider secret 失败：%@。同时恢复 providers.json 失败：%@。Provider 元数据可能已经暂存到磁盘。";
 "settings.provider.section.continuation" = "续写";
 "settings.provider.cloudContinuation" = "启用云端续写";
 "settings.provider.localContinuation" = "没有 provider 时显示本地续写";
@@ -101,6 +123,13 @@
 "settings.provider.currentProfile" = "当前配置";
 "settings.provider.add" = "添加 Provider";
 "settings.provider.advancedCustomHTTP" = "高级 Custom HTTP";
+
+"inputmethod.menu.aiContinuation" = "AI 续写";
+"inputmethod.menu.openLogs" = "打开日志...";
+"inputmethod.menu.openSupportFolder" = "打开支持目录...";
+"inputmethod.menu.openRimeUserFolder" = "打开 Rime 用户目录...";
+"inputmethod.menu.settings" = "KnowType 设置...";
+"inputmethod.menu.about" = "关于 KnowType...";
 
 "settings.privacy.section.cloud" = "云端续写";
 "settings.privacy.providerCalls" = "Provider 调用";
@@ -179,7 +208,7 @@
 "settings.diagnostics.step.build.title" = "构建并签名";
 "settings.diagnostics.step.build.detail" = "运行输入法 bundle 构建脚本。脚本会优先选择可用的 Apple Development 签名身份，只有找不到证书时才回退到 ad-hoc 签名。";
 "settings.diagnostics.step.install.title" = "安装 bundle";
-"settings.diagnostics.step.install.detail" = "将 KnowType.app 复制到 ~/Library/Input Methods。安装脚本会清理过期的 .Mode 开发状态，然后从已安装 app 上下文注册并启用 KnowType parent anchor 与可见 .Hans 输入模式。设置入口在输入法菜单里的 KnowType Settings...";
+"settings.diagnostics.step.install.detail" = "将 KnowType.app 复制到 ~/Library/Input Methods。安装脚本会清理过期的 .Mode 开发状态，然后从已安装 app 上下文注册并启用 KnowType parent anchor 与可见 .Hans 输入模式。设置入口在输入法菜单里的 KnowType 设置...";
 "settings.diagnostics.step.diagnose.title" = "诊断安装";
 "settings.diagnostics.step.diagnose.detail" = "运行只读诊断，检查 bundle metadata、签名、打包资源、Text Input Source 注册、本地数据路径，以及可选的 Gatekeeper 或 sandbox 日志线索。";
 "settings.diagnostics.step.select.title" = "请求切换";

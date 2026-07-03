@@ -9,14 +9,17 @@ InputMethodKit menu.
   `KnowTypeInputController.menu()`.
 - Keep ordinary menu shortcuts empty so input-method commands do not steal
   typing keys.
-- Persist the `AI Continuation` toggle through
+- Persist the localized AI continuation toggle through
   `InputMethodRuntimePreferenceStore`.
 
 ## Behavior Notes
 
 - Menu order follows mature IMK input methods: common toggle, data/diagnostic
-  folder entries, then `KnowType Settings...` and About.
-- `KnowType Settings...` is bound to `showPreferences:` and remains the primary
+  folder entries, then the localized KnowType settings item and About.
+- Menu titles resolve through `SettingsLocalization`, so the default visible
+  menu copy is Simplified Chinese while explicit English resources remain
+  available.
+- The settings item is bound to `showPreferences:` and remains the primary
   settings entry point.
 
 ## Tests

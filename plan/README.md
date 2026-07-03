@@ -46,6 +46,7 @@ when converting a shipped plan into a short record.
 | [input-method-first-key-review-followup.plan.md](input-method-first-key-review-followup.plan.md) | Resolve PR #150 first-key performance review regressions | Active |
 | [input-debug-diagnostics-consolidation.plan.md](input-debug-diagnostics-consolidation.plan.md) | Consolidate privacy-safe debug and performance diagnostics for input hot-path investigations | Active |
 | [ai-recommendation-placeholder-latency.plan.md](ai-recommendation-placeholder-latency.plan.md) | Keep eligible real-time AI recommendation waits visible with a fixed spinner placeholder and shorter debounce | Active |
+| [settings-chinese-default-copy.plan.md](settings-chinese-default-copy.plan.md) | Use Simplified Chinese as the default Settings and input-method menu copy while retaining explicit English resources | Active |
 | [inputmethod-async-keypath-supervisor.plan.md](inputmethod-async-keypath-supervisor.plan.md) | Fully asynchronous IMK key path with cancellable candidate, AI, anchor, and panel tasks | Active |
 | [rime-conversion-lexical-ai.plan.md](rime-conversion-lexical-ai.plan.md) | Optional librime bridge, synchronous base candidate hot path, and AI lexical profile context | Active |
 | [rime-userdb-lexical-profile.plan.md](rime-userdb-lexical-profile.plan.md) | Persist AI lexical profile from Rime userdb frequency plus recent KnowType commits/selections | Active |

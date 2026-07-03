@@ -20,7 +20,7 @@ public enum SettingsLocalization {
         preferredLanguages: [String],
         bundleResolver: (String) -> Bundle?
     ) -> String {
-        for localeIdentifier in preferredLanguages {
+        for localeIdentifier in unique(["zh-Hans"] + preferredLanguages + ["en"]) {
             if let value = localizedValue(
                 forKey: key,
                 localeIdentifier: localeIdentifier,
@@ -30,8 +30,7 @@ public enum SettingsLocalization {
             }
         }
 
-        let fallback = preferredLanguages.contains { languageCode(from: $0) == "zh" } ? "zh-Hans" : "en"
-        return string(key, localeIdentifier: fallback, bundleResolver: bundleResolver)
+        return key
     }
 
     public static func string(_ key: String, localeIdentifier: String) -> String {
@@ -43,12 +42,15 @@ public enum SettingsLocalization {
         localeIdentifier: String,
         bundleResolver: (String) -> Bundle?
     ) -> String {
-        let fallbackIdentifiers = [
-            localeIdentifier,
-            languageCode(from: localeIdentifier) == "zh" ? "zh-Hans" : "en",
-            "en",
-            "zh-Hans"
-        ]
+        let languageCode = languageCode(from: localeIdentifier)
+        let fallbackIdentifiers: [String]
+        if languageCode == "en" {
+            fallbackIdentifiers = [localeIdentifier, "en", "zh-Hans"]
+        } else if languageCode == "zh" {
+            fallbackIdentifiers = [localeIdentifier, "zh-Hans", "en"]
+        } else {
+            fallbackIdentifiers = [localeIdentifier, "zh-Hans", "en"]
+        }
 
         for fallbackIdentifier in unique(fallbackIdentifiers) {
             if let value = localizedValue(

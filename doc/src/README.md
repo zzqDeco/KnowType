@@ -142,6 +142,7 @@ required for every test file.
 - [ProviderProfilesViewModel](Sources/KnowTypeSettingsUI/ProviderProfilesViewModel.plan.md)
 - [RuntimePreferencesViewModel](Sources/KnowTypeSettingsUI/RuntimePreferencesViewModel.plan.md)
 - [Settings Install Debug](Sources/KnowTypeSettingsUI/settings-install-debug.plan.md)
+- [SettingsLocalization](Sources/KnowTypeSettingsUI/SettingsLocalization.plan.md)
 
 ## scripts
 

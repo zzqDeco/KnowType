@@ -26,7 +26,7 @@ Usage: scripts/install-inputmethod.sh [options]
 Builds and installs KnowType.app into ~/Library/Input Methods, then uses the
 dedicated input-source helper to register and enable the input source without
 launching the input method host. KnowType-specific settings are opened from the
-input-method menu's KnowType Settings item.
+input-method menu's KnowType 设置 item (KnowType Settings in explicit English UI).
 
 Options:
   --configuration debug|release  SwiftPM build configuration. Defaults to CONFIGURATION or release.
@@ -736,7 +736,7 @@ if (( WITH_PREFPANE == 1 )); then
   echo "Installed KnowType compatibility PreferencePane to: $PREFPANE_TARGET_PATH"
   echo "System Settings may show the compatibility KnowType pane after reopening."
 else
-  echo "KnowType settings are available from the input-method menu: KnowType Settings..."
+  echo "KnowType settings are available from the input-method menu: KnowType 设置... (KnowType Settings... in explicit English UI)"
   echo "Default install keeps System Settings free of stale KnowType PreferencePane entries."
   if (( REMOVED_STALE_PREFPANE == 1 )); then
     echo "Removed stale KnowType compatibility PreferencePane from: $PREFPANE_TARGET_PATH"

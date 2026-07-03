@@ -2,8 +2,8 @@
 
 ## Summary
 
-- Default local installs keep KnowType settings behind the input-method menu
-  item `KnowType Settings...` and do not install `KnowType.prefPane`.
+- Default local installs keep KnowType settings behind the localized
+  input-method menu settings item and do not install `KnowType.prefPane`.
 - macOS can keep `com.knowtype.preferencepane` in System Settings cache files
   after the optional pane is removed, leaving an unloadable `KnowType` sidebar
   item.

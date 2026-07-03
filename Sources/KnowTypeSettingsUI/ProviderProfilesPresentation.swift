@@ -123,7 +123,10 @@ struct ProviderProfileDraftPresentation: Equatable, Sendable {
             "settings.provider.kind",
             preferredLanguages: preferredLanguages
         )
-        self.baseURLFieldLabel = "Base URL"
+        self.baseURLFieldLabel = SettingsLocalization.string(
+            "settings.provider.baseURL",
+            preferredLanguages: preferredLanguages
+        )
         self.modelFieldLabel = SettingsLocalization.string(
             "settings.provider.model",
             preferredLanguages: preferredLanguages
@@ -137,8 +140,14 @@ struct ProviderProfileDraftPresentation: Equatable, Sendable {
             preferredLanguages: preferredLanguages
         )
         self.showsCustomHTTPFields = draft.kind == .customHTTP
-        self.customBodyTemplateLabel = "Custom HTTP"
-        self.customResponsePathLabel = "Response Path"
+        self.customBodyTemplateLabel = SettingsLocalization.string(
+            "settings.provider.customHTTP",
+            preferredLanguages: preferredLanguages
+        )
+        self.customResponsePathLabel = SettingsLocalization.string(
+            "settings.provider.responsePath",
+            preferredLanguages: preferredLanguages
+        )
         self.secret = ProviderSecretPresentation(secretName: draft.secretName, preferredLanguages: preferredLanguages)
     }
 }
@@ -150,7 +159,10 @@ struct ProviderSecretPresentation: Equatable, Sendable {
     var helpText: String
 
     init(secretName: String?, preferredLanguages: [String] = Locale.preferredLanguages) {
-        self.sectionTitle = "API Key"
+        self.sectionTitle = SettingsLocalization.string(
+            "settings.provider.apiKey",
+            preferredLanguages: preferredLanguages
+        )
         self.apiKeyFieldPrompt = SettingsLocalization.string(
             "settings.provider.secretPrompt",
             preferredLanguages: preferredLanguages

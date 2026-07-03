@@ -25,10 +25,10 @@ final class InputMethodMenuBuilderTests: XCTestCase {
                 .about
             ]
         )
-        XCTAssertEqual(descriptors[0].title, "AI Continuation")
+        XCTAssertEqual(descriptors[0].title, "AI 续写")
         XCTAssertEqual(descriptors[0].stateRawValue, NSControl.StateValue.on.rawValue)
         XCTAssertEqual(descriptors[0].actionSelectorName, "toggleAIContinuation:")
-        XCTAssertEqual(descriptors[6].title, "KnowType Settings...")
+        XCTAssertEqual(descriptors[6].title, "KnowType 设置...")
         XCTAssertEqual(descriptors[6].actionSelectorName, "showPreferences:")
         XCTAssertEqual(descriptors[6].keyEquivalent, "")
         XCTAssertEqual(descriptors.filter(\.isSeparator).count, 2)
@@ -44,20 +44,20 @@ final class InputMethodMenuBuilderTests: XCTestCase {
         XCTAssertEqual(
             titles,
             [
-                "AI Continuation",
+                "AI 续写",
                 "",
-                "Open Logs...",
-                "Open Support Folder...",
-                "Open Rime User Folder...",
+                "打开日志...",
+                "打开支持目录...",
+                "打开 Rime 用户目录...",
                 "",
-                "KnowType Settings...",
-                "About KnowType..."
+                "KnowType 设置...",
+                "关于 KnowType..."
             ]
         )
         XCTAssertEqual(menu.items[0].state, .off)
         XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(menu.items[0].action)), "toggleAIContinuation:")
 
-        let settingsItem = try XCTUnwrap(menu.items.first { $0.title == "KnowType Settings..." })
+        let settingsItem = try XCTUnwrap(menu.items.first { $0.title == "KnowType 设置..." })
         XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(settingsItem.action)), "showPreferences:")
         XCTAssertEqual(settingsItem.keyEquivalent, "")
     }

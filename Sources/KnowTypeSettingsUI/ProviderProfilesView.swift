@@ -341,7 +341,7 @@ private struct AIProviderSettingsView: View {
                 }
             }
 
-            Section("Provider") {
+            Section(settingsString("settings.provider.section.profile")) {
                 if viewModel.profiles.isEmpty {
                     Text(settingsString("settings.provider.noProfiles"))
                         .foregroundStyle(.secondary)

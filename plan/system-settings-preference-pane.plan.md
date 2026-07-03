@@ -5,7 +5,8 @@
 KnowType now exposes its configuration through Apple-supported system-level settings surfaces instead of relying only on the standalone SwiftPM settings executable:
 
 - `KnowType.prefPane` can be installed into `~/Library/PreferencePanes` for System Settings access.
-- The InputMethodKit menu exposes `KnowType Settings...` through `showPreferences:`.
+- The InputMethodKit menu exposes a localized settings item through
+  `showPreferences:`.
 - The settings app, preference pane, and IMK preferences window share the same SwiftUI root view and shared preference stores.
 
 Apple does not provide a public API for embedding third-party input-method controls inside the Keyboard/Input Sources detail page, so the supported System Settings path is a user-installed PreferencePane.

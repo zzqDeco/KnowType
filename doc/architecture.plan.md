@@ -134,7 +134,7 @@ local-candidate path.
 
 ## Settings Layer
 
-`KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view. The primary UI is a macOS settings surface with a sidebar, search, and grouped-form detail pages for input, candidates, Rime/user data, AI continuation, privacy, and diagnostics. Localized settings strings use Simplified Chinese for Chinese preferred languages and English fallback resources for non-Chinese locales.
+`KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view. The primary UI is a macOS settings surface with a sidebar, search, and grouped-form detail pages for input, candidates, Rime/user data, AI continuation, privacy, and diagnostics. Localized settings strings default to Simplified Chinese; English resources remain available for explicit English locale queries and missing-key fallback.
 
 - `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
@@ -198,7 +198,7 @@ LevelDB state.
   protected selected text and raw input, persists selections through the local
   user-selection history store, and feeds only the active process's recent
   selection cache into lexical profile refresh.
-- The input-method menu follows mature IMK inputs such as McBopomofo: common toggles appear first, user data and diagnostic folders are in the middle, and `KnowType Settings...` calls `showPreferences(_:)` to open the in-bundle settings window.
+- The input-method menu follows mature IMK inputs such as McBopomofo: common toggles appear first, user data and diagnostic folders are in the middle, and the localized settings item calls `showPreferences(_:)` to open the in-bundle settings window.
 - `CandidatePanelRowBuilder` maps candidate-panel state into fixed and pageable
   semantic rows so selection, paging, and rendering share one ordering model.
 - `CandidatePanelRenderer` projects those semantic rows into compact

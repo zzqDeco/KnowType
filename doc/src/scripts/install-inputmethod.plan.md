@@ -73,8 +73,9 @@ Installs the locally built KnowType input method bundle into
   prelaunch the host during TIS or LaunchServices work, the controller and
   Rime/provider/learning stores must remain read-only until real input or an
   explicit maintenance action.
-- The primary settings entry is the input-method menu's
-  `KnowType Settings...`; the script does not install a standalone settings app.
+- The primary settings entry is the input-method menu's localized settings item,
+  defaulting to `KnowType 设置...`; the script does not install a standalone
+  settings app.
 - Default installs remove any previously installed compatibility
   `KnowType.prefPane` so an old pane cannot drift out of version sync with the
   newly installed input-method app. Use `--with-prefpane` to install a matching
