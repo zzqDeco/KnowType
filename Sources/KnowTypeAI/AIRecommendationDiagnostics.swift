@@ -31,6 +31,8 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case dispatchCancelledByNewInput = "dispatch_cancelled_by_new_input"
     case transportStarted = "transport_started"
     case transportLeftStale = "transport_left_stale"
+    case transportCancellationRequested = "transport_cancellation_requested"
+    case transportCancelledByNewInput = "transport_cancelled_by_new_input"
     case cancelPrevious = "cancel_previous"
     case pendingPlaceholder = "pending_placeholder"
     case staleResultDropped = "stale_result_dropped"

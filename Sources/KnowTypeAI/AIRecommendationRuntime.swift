@@ -340,6 +340,16 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .idle
         } catch {
+            if Self.isCancellation(error) {
+                record(
+                    .cancelled,
+                    request: request,
+                    providerName: provider.providerName,
+                    elapsedSince: startedAt,
+                    reason: "transport_cancelled"
+                )
+                return .idle
+            }
             await healthMonitor.recordFailure(error)
             if error is TimeoutError {
                 record(
@@ -497,6 +507,15 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         case .unsupportedKind(let kind):
             return "unsupported_kind_\(kind.rawValue)"
         }
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain
+            && nsError.code == NSURLErrorCancelled
     }
 
     private static func hasUsableRecommendationContext(in request: AIRecommendationRequest) -> Bool {

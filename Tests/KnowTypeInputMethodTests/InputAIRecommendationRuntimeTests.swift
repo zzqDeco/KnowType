@@ -261,7 +261,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
     }
 
     @MainActor
-    func testProviderDispatchAfterNewInputLeavesOldTransportStaleWithoutCancellation() async {
+    func testProviderDispatchAfterNewInputCancelsOldTransportWithoutApplying() async {
         let provider = RecordingRuntimeAIRecommendationProvider(
             response: readyState("旧结果"),
             delayNanoseconds: 300_000_000
@@ -310,17 +310,24 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
                 && $0.requestID == firstRequestID
                 && $0.reason == "new_schedule"
         })
-        let staleDropped = await waitUntil {
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .transportCancellationRequested
+                && $0.requestID == firstRequestID
+                && $0.reason == "new_schedule"
+        })
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .transportCancelledByNewInput
+                && $0.requestID == firstRequestID
+                && $0.reason == "new_schedule"
+        })
+        let cancelled = await waitUntil {
             diagnosticSink.events.contains {
-                $0.stage == .staleResultDropped
+                $0.stage == .cancelled
                     && $0.requestID == firstRequestID
-                    && $0.reason == "request_inactive"
+                    && $0.reason == "task_cancelled_before_apply"
             }
         }
-        XCTAssertTrue(staleDropped, "\(diagnosticSink.events)")
-        XCTAssertFalse(diagnosticSink.events.contains {
-            $0.stage == .cancelled && $0.requestID == firstRequestID
-        })
+        XCTAssertTrue(cancelled, "\(diagnosticSink.events)")
     }
 
     @MainActor

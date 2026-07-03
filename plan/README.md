@@ -46,6 +46,7 @@ when converting a shipped plan into a short record.
 | [input-method-first-key-review-followup.plan.md](input-method-first-key-review-followup.plan.md) | Resolve PR #150 first-key performance review regressions | Active |
 | [input-debug-diagnostics-consolidation.plan.md](input-debug-diagnostics-consolidation.plan.md) | Consolidate privacy-safe debug and performance diagnostics for input hot-path investigations | Active |
 | [ai-recommendation-placeholder-latency.plan.md](ai-recommendation-placeholder-latency.plan.md) | Keep eligible real-time AI recommendation waits visible with a fixed spinner placeholder and shorter debounce | Active |
+| [ai-recommendation-cancellation-sequencing.plan.md](ai-recommendation-cancellation-sequencing.plan.md) | Restore best-effort cancellation for stale started AI transports without poisoning provider health | Active |
 | [settings-chinese-default-copy.plan.md](settings-chinese-default-copy.plan.md) | Use Simplified Chinese as the default Settings and input-method menu copy while retaining explicit English resources | Active |
 | [inputmethod-async-keypath-supervisor.plan.md](inputmethod-async-keypath-supervisor.plan.md) | Fully asynchronous IMK key path with cancellable candidate, AI, anchor, and panel tasks | Active |
 | [rime-conversion-lexical-ai.plan.md](rime-conversion-lexical-ai.plan.md) | Optional librime bridge, synchronous base candidate hot path, and AI lexical profile context | Active |
@@ -133,7 +134,7 @@ when converting a shipped plan into a short record.
 |---|---|---|
 | [release-0.2.3.plan.md](release-0.2.3.plan.md) | Prepare and publish the KnowType v0.2.3 Developer Preview release | Delivered |
 | [input-commit-decision-runtime-refactor.plan.md](input-commit-decision-runtime-refactor.plan.md) | Extract Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions from the coordinator | Delivered |
-| [ai-recommendation-stability-latency.plan.md](ai-recommendation-stability-latency.plan.md) | Debounce input-method AI dispatch and stale-drop older transport results without aborting started provider requests | Delivered |
+| [ai-recommendation-stability-latency.plan.md](ai-recommendation-stability-latency.plan.md) | Original AI dispatch debounce and stale-drop stabilization; later follow-up restores stale transport cancellation | Delivered |
 | [input-composition-lifecycle-runtime-refactor.plan.md](input-composition-lifecycle-runtime-refactor.plan.md) | Extract composition begin/finish lifecycle planning and trace-once state from the coordinator | Delivered |
 | [input-commit-application-runtime-refactor.plan.md](input-commit-application-runtime-refactor.plan.md) | Extract commit-result planning and side-effect context construction from the coordinator | Delivered |
 | [input-refactor-regression-audit.plan.md](input-refactor-regression-audit.plan.md) | Lock coordinator-level behavior after the input-method runtime extraction sequence | Delivered |
