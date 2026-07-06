@@ -290,7 +290,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return false
         }
 
-        let savedDraft = ProviderProfileDraft(profile: profile)
+        var savedDraft = ProviderProfileDraft(profile: profile)
         let connectionValidationErrors = ProviderProfileEditingPolicy.validate(savedDraft)
         guard connectionValidationErrors.isEmpty else {
             validationErrors = ProviderProfileEditingPolicy.mergedValidationErrors(
@@ -302,9 +302,19 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
         validationErrors = ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
 
+        let connectionProfile: ProviderProfile
+        do {
+            connectionProfile = try validatedCurrentServiceProfile(profile)
+            try persistNormalizedSavedProfileIfNeeded(connectionProfile, replacing: profile)
+            savedDraft = ProviderProfileDraft(profile: connectionProfile)
+        } catch {
+            savedConnectionStatus = .failure(error.localizedDescription)
+            return false
+        }
+
         savedConnectionTestGeneration &+= 1
         let generation = savedConnectionTestGeneration
-        let snapshot = SavedConnectionTestSnapshot(profile: profile)
+        let snapshot = SavedConnectionTestSnapshot(profile: connectionProfile)
         do {
             let configuration = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
                 draft: savedDraft,
@@ -372,6 +382,29 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return false
         }
         return host == "example.com" || host.hasSuffix(".example.com")
+    }
+
+    private func persistNormalizedSavedProfileIfNeeded(
+        _ normalizedProfile: ProviderProfile,
+        replacing originalProfile: ProviderProfile
+    ) throws {
+        guard normalizedProfile != originalProfile else {
+            return
+        }
+        let updatedProfiles = profiles.map { profile in
+            profile.id == normalizedProfile.id ? normalizedProfile : profile
+        }
+        var updatedFile = file
+        updatedFile.profiles = updatedProfiles
+        do {
+            try profileStore.saveProfiles(updatedFile)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            throw error
+        }
+        profiles = updatedProfiles
+        file = updatedFile
+        lastErrorMessage = nil
     }
 
     private func reconcileDraftDefaultState(activeProfileID: String) {

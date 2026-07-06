@@ -57,6 +57,10 @@ diagnostics.
   rendered separately. Draft validation and connection-test failures stay inside
   the advanced service configuration disclosure instead of replacing the
   top-level service status.
+- Saved-service connection tests share the same current-service validation and
+  normalization boundary. They reject Custom HTTP example endpoints before any
+  network test, and clear missing optional secret references before reporting a
+  saved local service as connected.
 - Settings directory shortcuts create the target logs/support/Rime folder before
   opening it, so fresh installs expose a usable troubleshooting path.
 - User-facing settings copy defaults to Simplified Chinese. Technical terms such

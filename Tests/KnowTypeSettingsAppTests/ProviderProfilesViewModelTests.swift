@@ -1256,6 +1256,67 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.draftConnectionStatus, .idle)
     }
 
+    func testSavedProfileConnectionRejectsPlaceholderCustomHTTPDefault() async throws {
+        let profile = ProviderProfileTemplates.defaultProfile(kind: .customHTTP, isDefault: true)
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: [profile]))
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: RecordingSecretStore(),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "custom_http", candidateCount: 1)
+            }
+        )
+        let message = SettingsLocalization.string("settings.provider.validation.customHTTPPlaceholder")
+
+        let didConnect = await viewModel.testSavedProfileConnection()
+
+        XCTAssertFalse(didConnect)
+        let configurations = await capture.configurations
+        XCTAssertEqual(configurations, [])
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertEqual(viewModel.savedConnectionStatus, .failure(message))
+    }
+
+    func testSavedProfileConnectionClearsMissingOptionalSecretBeforeTesting() async throws {
+        let profile = ProviderProfile(
+            id: "local-proxy",
+            displayName: "Local Proxy",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+            model: "",
+            secretName: "knowtype.provider.local-proxy.apiKey",
+            isDefault: true
+        )
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: [profile]))
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: RecordingSecretStore(),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+
+        let didConnect = await viewModel.testSavedProfileConnection()
+
+        XCTAssertTrue(didConnect)
+        let configurations = await capture.configurations
+        XCTAssertEqual(configurations, [
+            ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: ""
+            )
+        ])
+        let savedProfile = try XCTUnwrap(store.savedFiles.last?.profiles.first)
+        XCTAssertNil(savedProfile.secretName)
+        XCTAssertNil(viewModel.profiles.first?.secretName)
+        XCTAssertEqual(viewModel.savedConnectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
+    }
+
     func testDraftConnectionStatusDoesNotReplaceSavedServiceStatus() async throws {
         let defaultProfile = ProviderProfile(
             id: "default",

@@ -49,6 +49,9 @@
 - Keep saved-service and draft-editor connection status separate. The top-level
   connection test reports only the saved default provider, while draft
   validation/test results stay inside the advanced service configuration area.
+  Saved-service connection tests reuse the same current-service guard, so they
+  do not send diagnostics traffic to placeholder endpoints and repair missing
+  optional secret references before reporting success.
 - Create local logs/support/Rime directories before opening Settings shortcut
   buttons so fresh installs do not silently no-op.
 - Keep Settings copy Chinese by default while preserving explicit English
