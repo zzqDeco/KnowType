@@ -1034,6 +1034,10 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let saved = try XCTUnwrap(store.savedFiles.last?.profiles)
         XCTAssertEqual(saved.filter(\.isDefault).map(\.id), [targetID])
+        XCTAssertEqual(viewModel.selectedProfileID, targetID)
+        XCTAssertEqual(viewModel.draft.id, targetID)
+        XCTAssertEqual(viewModel.draft.kind, .ollamaNative)
+        XCTAssertTrue(viewModel.draft.isDefault)
     }
 
     func testSetDefaultDoesNotPublishProfilesWhenStoreSaveFails() throws {
@@ -1131,7 +1135,8 @@ final class ProviderProfilesViewModelTests: XCTestCase {
             )
         ])
         XCTAssertTrue(store.savedFiles.isEmpty)
-        XCTAssertEqual(viewModel.connectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
+        XCTAssertEqual(viewModel.savedConnectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
+        XCTAssertEqual(viewModel.draftConnectionStatus, .idle)
     }
 
     func testSavedProfileConnectionRequiresExplicitDefaultProfile() async throws {
@@ -1158,7 +1163,45 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertFalse(didConnect)
         let configurations = await capture.configurations
         XCTAssertEqual(configurations, [])
-        XCTAssertEqual(viewModel.connectionStatus, .failure("未配置服务"))
+        XCTAssertEqual(viewModel.savedConnectionStatus, .failure("未配置服务"))
+        XCTAssertEqual(viewModel.draftConnectionStatus, .idle)
+    }
+
+    func testDraftConnectionStatusDoesNotReplaceSavedServiceStatus() async throws {
+        let defaultProfile = ProviderProfile(
+            id: "default",
+            displayName: "Default",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+            model: "spark",
+            isDefault: true
+        )
+        let editingProfile = ProviderProfile(
+            id: "editing",
+            displayName: "Editing",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:9999/v1")!,
+            model: "draft"
+        )
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: CapturingProfileStore(file: ProviderProfilesFile(profiles: [defaultProfile, editingProfile])),
+            secretStore: RecordingSecretStore(),
+            connectionTester: { _ in
+                ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+
+        let savedDidConnect = await viewModel.testSavedProfileConnection()
+        XCTAssertTrue(savedDidConnect)
+        XCTAssertEqual(viewModel.savedConnectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
+
+        viewModel.selectProfile(id: editingProfile.id)
+        viewModel.draft.baseURL = "not a url"
+        let draftDidConnect = await viewModel.testDraftConnection()
+        XCTAssertFalse(draftDidConnect)
+
+        XCTAssertEqual(viewModel.savedConnectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
+        XCTAssertEqual(viewModel.draftConnectionStatus, .failure("请先修复校验错误再测试连接。"))
     }
 
     func testConnectionTestUsesTransientDraftAPIKeyWithoutPersistingIt() async throws {

@@ -37,7 +37,12 @@
   `isDefault`; the input runtime also treats that state as no active provider.
 - Keep current-service selection separate from advanced profile editing:
   changing the current service persists the default provider, while the advanced
-  edit selector only loads a draft.
+  edit selector only loads a draft. When the current service changes, the
+  advanced draft is reconciled to that newly active provider so the service
+  summary, draft editor, and saved provider remain aligned.
+- Keep saved-service and draft-editor connection status separate. The top-level
+  connection test reports only the saved default provider, while draft
+  validation/test results stay inside the advanced service configuration area.
 - Create local logs/support/Rime directories before opening Settings shortcut
   buttons so fresh installs do not silently no-op.
 - Keep Settings copy Chinese by default while preserving explicit English

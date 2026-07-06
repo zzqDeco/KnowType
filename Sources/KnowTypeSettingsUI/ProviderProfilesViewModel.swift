@@ -12,7 +12,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
     @Published public var draft: ProviderProfileDraft {
         didSet {
             if draft != oldValue {
-                resetConnectionStatus()
+                resetDraftConnectionStatus()
             }
         }
     }
@@ -20,13 +20,16 @@ public final class ProviderProfilesViewModel: ObservableObject {
     @Published public private(set) var lastErrorMessage: String?
     @Published public private(set) var isPersistenceBlocked: Bool
     @Published public private(set) var connectionStatus: ProviderConnectionStatus
+    @Published public private(set) var draftConnectionStatus: ProviderConnectionStatus
+    @Published public private(set) var savedConnectionStatus: ProviderConnectionStatus
 
     private let profileStore: any ProviderProfileStore
     private let secretStore: any SecretStore
     private let connectionTester: ConnectionTester
     private var file: ProviderProfilesFile
     private var persistenceBlockedError: Error?
-    private var connectionTestGeneration: UInt64 = 0
+    private var draftConnectionTestGeneration: UInt64 = 0
+    private var savedConnectionTestGeneration: UInt64 = 0
 
     public init(
         profileStore: any ProviderProfileStore,
@@ -41,6 +44,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
         self.connectionTester = connectionTester
         self.validationErrors = []
         self.connectionStatus = .idle
+        self.draftConnectionStatus = .idle
+        self.savedConnectionStatus = .idle
 
         let resolvedFile: ProviderProfilesFile
         let resolvedProfiles: [ProviderProfile]
@@ -88,7 +93,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         selectedProfileID = id
         draft = ProviderProfileDraft(profile: profile)
         validationErrors = []
-        resetConnectionStatus()
+        resetDraftConnectionStatus()
     }
 
     public func createProfile(kind: ProviderKind) {
@@ -99,7 +104,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         selectedProfileID = profile.id
         draft = ProviderProfileDraft(profile: profile)
         validationErrors = []
-        resetConnectionStatus()
+        resetDraftConnectionStatus()
     }
 
     public func changeDraftKind(_ kind: ProviderKind) {
@@ -123,7 +128,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         draft.customBodyTemplate = template.customBodyTemplate ?? ""
         draft.customResponsePath = template.customResponsePath ?? ""
         validationErrors = []
-        resetConnectionStatus()
+        resetDraftConnectionStatus()
     }
 
     @discardableResult
@@ -202,10 +207,11 @@ public final class ProviderProfilesViewModel: ObservableObject {
         profiles = updatedProfiles
         file = updatedFile
         lastErrorMessage = nil
-        if selectedProfileID == id, let profile = profiles.first(where: { $0.id == id }) {
+        if let profile = profiles.first(where: { $0.id == id }) {
+            selectedProfileID = id
             draft = ProviderProfileDraft(profile: profile)
         }
-        resetConnectionStatus()
+        resetSavedConnectionStatus()
     }
 
     @discardableResult
@@ -213,7 +219,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if let persistenceBlockedError {
             let message = persistenceBlockedError.localizedDescription
             lastErrorMessage = message
-            connectionStatus = .failure(message)
+            setDraftConnectionStatus(.failure(message))
             return false
         }
 
@@ -228,29 +234,31 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 connectionValidationErrors,
                 ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
             )
-            connectionStatus = .failure(SettingsLocalization.string("settings.provider.connection.fixValidationBeforeTesting"))
+            setDraftConnectionStatus(.failure(SettingsLocalization.string("settings.provider.connection.fixValidationBeforeTesting")))
             return false
         }
         validationErrors = ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
 
-        connectionTestGeneration &+= 1
-        let generation = connectionTestGeneration
+        draftConnectionTestGeneration &+= 1
+        let generation = draftConnectionTestGeneration
         do {
             let configuration = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
                 draft: snapshot.draft,
                 profiles: profiles,
                 secretResolver: { try secretStore.secret(named: $0) }
             )
-            connectionStatus = .testing
+            setDraftConnectionStatus(.testing)
             let result = try await connectionTester(configuration)
             guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
                 return false
             }
-            connectionStatus = .success(
-                String(
-                    format: SettingsLocalization.string("settings.provider.connection.success"),
-                    result.providerName,
-                    result.candidateCount
+            setDraftConnectionStatus(
+                .success(
+                    String(
+                        format: SettingsLocalization.string("settings.provider.connection.success"),
+                        result.providerName,
+                        result.candidateCount
+                    )
                 )
             )
             return true
@@ -259,7 +267,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 return false
             }
             let message = error.localizedDescription
-            connectionStatus = .failure(message)
+            setDraftConnectionStatus(.failure(message))
             return false
         }
     }
@@ -269,12 +277,12 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if let persistenceBlockedError {
             let message = persistenceBlockedError.localizedDescription
             lastErrorMessage = message
-            connectionStatus = .failure(message)
+            savedConnectionStatus = .failure(message)
             return false
         }
 
         guard let profile = savedConnectionProfile(id: profileID) else {
-            connectionStatus = .failure(SettingsLocalization.string("settings.provider.serviceSummary.empty"))
+            savedConnectionStatus = .failure(SettingsLocalization.string("settings.provider.serviceSummary.empty"))
             return false
         }
 
@@ -285,13 +293,13 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 connectionValidationErrors,
                 ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
             )
-            connectionStatus = .failure(SettingsLocalization.string("settings.provider.connection.fixValidationBeforeTesting"))
+            savedConnectionStatus = .failure(SettingsLocalization.string("settings.provider.connection.fixValidationBeforeTesting"))
             return false
         }
         validationErrors = ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
 
-        connectionTestGeneration &+= 1
-        let generation = connectionTestGeneration
+        savedConnectionTestGeneration &+= 1
+        let generation = savedConnectionTestGeneration
         let snapshot = SavedConnectionTestSnapshot(profile: profile)
         do {
             let configuration = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
@@ -299,12 +307,12 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 profiles: profiles,
                 secretResolver: { try secretStore.secret(named: $0) }
             )
-            connectionStatus = .testing
+            savedConnectionStatus = .testing
             let result = try await connectionTester(configuration)
             guard isCurrentSavedConnectionTest(generation: generation, snapshot: snapshot) else {
                 return false
             }
-            connectionStatus = .success(
+            savedConnectionStatus = .success(
                 String(
                     format: SettingsLocalization.string("settings.provider.connection.success"),
                     result.providerName,
@@ -317,7 +325,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
                 return false
             }
             let message = error.localizedDescription
-            connectionStatus = .failure(message)
+            savedConnectionStatus = .failure(message)
             return false
         }
     }
@@ -327,15 +335,30 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 
     private func resetConnectionStatus() {
-        connectionTestGeneration &+= 1
-        connectionStatus = .idle
+        resetDraftConnectionStatus()
+        resetSavedConnectionStatus()
+    }
+
+    private func resetDraftConnectionStatus() {
+        draftConnectionTestGeneration &+= 1
+        setDraftConnectionStatus(.idle)
+    }
+
+    private func resetSavedConnectionStatus() {
+        savedConnectionTestGeneration &+= 1
+        savedConnectionStatus = .idle
+    }
+
+    private func setDraftConnectionStatus(_ status: ProviderConnectionStatus) {
+        draftConnectionStatus = status
+        connectionStatus = status
     }
 
     private func isCurrentConnectionTest(
         generation: UInt64,
         snapshot: ConnectionTestSnapshot
     ) -> Bool {
-        generation == connectionTestGeneration
+        generation == draftConnectionTestGeneration
             && selectedProfileID == snapshot.selectedProfileID
             && draft == snapshot.draft
     }
@@ -344,7 +367,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         generation: UInt64,
         snapshot: SavedConnectionTestSnapshot
     ) -> Bool {
-        generation == connectionTestGeneration
+        generation == savedConnectionTestGeneration
             && savedConnectionProfile(id: snapshot.profile.id) == snapshot.profile
     }
 

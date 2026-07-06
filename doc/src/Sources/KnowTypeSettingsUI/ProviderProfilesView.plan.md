@@ -43,6 +43,13 @@ diagnostics.
   disclosure.
 - The current-service picker persists the runtime default. The advanced edit
   selector loads a profile into the draft without switching the active provider.
+- Switching the current service also reconciles the advanced draft to the newly
+  active provider, so a follow-up save or draft connection test cannot
+  accidentally target the previously edited profile.
+- Saved-service connection status and advanced draft connection status are
+  rendered separately. Draft validation and connection-test failures stay inside
+  the advanced service configuration disclosure instead of replacing the
+  top-level service status.
 - Settings directory shortcuts create the target logs/support/Rime folder before
   opening it, so fresh installs expose a usable troubleshooting path.
 - User-facing settings copy defaults to Simplified Chinese. Technical terms such

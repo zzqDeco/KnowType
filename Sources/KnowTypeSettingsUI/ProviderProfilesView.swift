@@ -384,7 +384,8 @@ private struct AIProviderSettingsView: View {
 
     var body: some View {
         let draftPresentation = ProviderProfileDraftPresentation(draft: viewModel.draft)
-        let connectionPresentation = ProviderConnectionStatusPresentation(status: viewModel.connectionStatus)
+        let savedConnectionPresentation = ProviderConnectionStatusPresentation(status: viewModel.savedConnectionStatus)
+        let draftConnectionPresentation = ProviderConnectionStatusPresentation(status: viewModel.draftConnectionStatus)
         let validationPresentation = ProviderValidationPresentation(errors: viewModel.validationErrors)
         let lastErrorPresentation = ProviderLastErrorPresentation(message: viewModel.lastErrorMessage)
 
@@ -428,13 +429,13 @@ private struct AIProviderSettingsView: View {
                         await viewModel.testSavedProfileConnection()
                     }
                 } label: {
-                    Label(connectionPresentation.testButtonLabel, systemImage: "network")
+                    Label(savedConnectionPresentation.testButtonLabel, systemImage: "network")
                 }
-                .disabled(viewModel.isPersistenceBlocked || activeProfileID == nil || connectionPresentation.isTesting)
+                .disabled(viewModel.isPersistenceBlocked || activeProfileID == nil || savedConnectionPresentation.isTesting)
 
-                if connectionPresentation.showsProgress {
+                if savedConnectionPresentation.showsProgress {
                     ProgressView()
-                } else if let message = connectionPresentation.message {
+                } else if let message = savedConnectionPresentation.message {
                     connectionStatusMessage(message)
                 }
             }
@@ -509,9 +510,15 @@ private struct AIProviderSettingsView: View {
                             await viewModel.testDraftConnection()
                         }
                     } label: {
-                        Label(connectionPresentation.testButtonLabel, systemImage: "network")
+                        Label(draftConnectionPresentation.testButtonLabel, systemImage: "network")
                     }
-                    .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
+                    .disabled(viewModel.isPersistenceBlocked || draftConnectionPresentation.isTesting)
+
+                    if draftConnectionPresentation.showsProgress {
+                        ProgressView()
+                    } else if let message = draftConnectionPresentation.message {
+                        connectionStatusMessage(message)
+                    }
 
                     Button {
                         _ = viewModel.saveDraft()

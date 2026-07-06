@@ -286,6 +286,9 @@ final class ProviderProfilesPresentationTests: XCTestCase {
 
         XCTAssertTrue(source.contains("await viewModel.testSavedProfileConnection()"))
         XCTAssertTrue(source.contains("await viewModel.testDraftConnection()"))
+        XCTAssertTrue(source.contains("ProviderConnectionStatusPresentation(status: viewModel.savedConnectionStatus)"))
+        XCTAssertTrue(source.contains("ProviderConnectionStatusPresentation(status: viewModel.draftConnectionStatus)"))
+        XCTAssertFalse(source.contains("ProviderConnectionStatusPresentation(status: viewModel.connectionStatus)"))
         XCTAssertTrue(source.contains("get: { activeProfileID }"))
         XCTAssertTrue(source.contains("editProfileSelectionBinding"))
         XCTAssertTrue(source.contains("settings.provider.editProfile"))
