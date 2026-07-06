@@ -60,7 +60,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .overview:
             ["概览", "首页", "状态", "安装", "可用", "Overview", "status"]
         case .aiProvider:
-            ["AI", "续写", "服务", "Provider", "API Key", "模型", "连接"]
+            ["AI", "续写", "服务", "Provider", "API Key", "模型", "连接", "Custom HTTP", "Base URL"]
         case .input:
             ["输入", "输入体验", "标点", "符号", "前缀", "Input", "punctuation"]
         case .candidates:
@@ -70,7 +70,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .privacy:
             ["隐私", "云端", "本地", "保护", "Privacy"]
         case .advanced:
-            ["高级", "诊断", "安装", "日志", "命令", "Custom HTTP", "Base URL", "Diagnostics", "logs"]
+            ["高级", "诊断", "安装", "日志", "命令", "Diagnostics", "logs"]
         }
     }
 }

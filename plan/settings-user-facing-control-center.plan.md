@@ -29,6 +29,9 @@
 - Put provider editor fields, `Base URL`, `Custom HTTP`, API key, lexicon paths,
   local data paths, and diagnostic commands in advanced disclosures or the
   Advanced page.
+- Route provider-field sidebar search terms such as `Base URL` and
+  `Custom HTTP` to the AI Continuation page, where the advanced service
+  configuration controls actually live.
 - Treat the provider marked `isDefault` as the active AI service shown on
   Overview and tested from the top-level AI service section. The selected
   profile/draft remains the advanced editing target, with draft connection

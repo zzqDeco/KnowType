@@ -22,8 +22,11 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         let lexiconSearch = SettingsSidebarPresentation(searchText: "Rime", preferredLanguages: ["zh-Hans-CN"])
         XCTAssertEqual(lexiconSearch.sections, [.lexicons])
 
-        let advancedSearch = SettingsSidebarPresentation(searchText: "Base URL", preferredLanguages: ["zh-Hans-CN"])
-        XCTAssertEqual(advancedSearch.sections, [.advanced])
+        let baseURLSearch = SettingsSidebarPresentation(searchText: "Base URL", preferredLanguages: ["zh-Hans-CN"])
+        XCTAssertEqual(baseURLSearch.sections, [.aiProvider])
+
+        let customHTTPSearch = SettingsSidebarPresentation(searchText: "Custom HTTP", preferredLanguages: ["zh-Hans-CN"])
+        XCTAssertEqual(customHTTPSearch.sections, [.aiProvider])
 
         let emptySearch = SettingsSidebarPresentation(searchText: "不存在", preferredLanguages: ["zh-Hans-CN"])
         XCTAssertTrue(emptySearch.sections.isEmpty)

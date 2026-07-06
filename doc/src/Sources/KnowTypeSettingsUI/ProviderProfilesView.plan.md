@@ -28,6 +28,10 @@ diagnostics.
   AI continuation, lexicon, and privacy status plus common actions.
 - Provider internals, raw paths, debug commands, and install diagnostics should
   stay under AI advanced configuration or the Advanced troubleshooting page.
+- Sidebar search should route provider-field terms such as `Base URL` and
+  `Custom HTTP` to AI continuation because those controls live in the AI
+  advanced service configuration disclosure, not the Advanced troubleshooting
+  page.
 - Diagnostics includes dynamic read-only install status: app version/build,
   install source, Rime runtime files, AI provider summary, user-data file
   timestamps, backup count, latest backup, and rollback command.
