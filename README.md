@@ -149,8 +149,11 @@ KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
 `KnowType 设置...` (`KnowType Settings...` in the explicit English resource
 path). It opens a macOS-native sidebar and grouped settings window that defaults
-to Simplified Chinese copy. English resources remain available for explicit
-English locale queries and missing-key fallback. The local install does not
+to a user-facing Overview for input-method, AI continuation, lexicon, and
+privacy status. Provider details, Base URL, Custom HTTP, logs, and local paths
+live under AI advanced configuration or the Advanced troubleshooting page.
+Simplified Chinese is the default copy; English resources remain available for
+explicit English locale queries and missing-key fallback. The local install does not
 install a standalone settings app. The default install removes any stale local compatibility
 `KnowType.prefPane` so it cannot drift out of sync. A matching compatibility pane
 is only built and installed when `./scripts/install-inputmethod.sh --with-prefpane`

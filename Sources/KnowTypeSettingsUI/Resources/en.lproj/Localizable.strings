@@ -1,15 +1,38 @@
 "settings.window.title" = "KnowType Settings";
-"settings.section.input" = "Input";
+"settings.section.overview" = "Overview";
+"settings.section.input" = "Input Experience";
 "settings.section.candidates" = "Candidates";
-"settings.section.lexicons" = "Rime & User Data";
+"settings.section.lexicons" = "Lexicons";
 "settings.section.ai" = "AI Continuation";
 "settings.section.privacy" = "Privacy";
 "settings.section.diagnostics" = "Diagnostics";
+"settings.section.advanced" = "Advanced";
 "settings.action.restoreDefaults" = "Restore Defaults";
 "settings.action.testConnection" = "Test Connection";
 "settings.action.save" = "Save";
 "settings.search.prompt" = "Search Settings";
 "settings.sidebar.noMatches" = "No matching settings";
+
+"settings.overview.title" = "Overview";
+"settings.overview.subtitle" = "Check input method, AI continuation, lexicon, and privacy status first; common settings are one click away.";
+"settings.overview.section.status" = "Current Status";
+"settings.overview.section.actions" = "Common Actions";
+"settings.overview.input" = "Input Method";
+"settings.overview.input.installed" = "Installed %@";
+"settings.overview.input.needsCheck" = "Needs install check";
+"settings.overview.ai" = "AI Continuation";
+"settings.overview.ai.enabled" = "Enabled: %@";
+"settings.overview.ai.needsService" = "Enabled, but no service is configured";
+"settings.overview.ai.disabled" = "Off";
+"settings.overview.lexicon" = "Lexicon";
+"settings.overview.lexicon.loaded" = "%d entries loaded";
+"settings.overview.privacy" = "Privacy";
+"settings.overview.privacy.cloudEnabled" = "Cloud continuation is on; protected input stays local";
+"settings.overview.privacy.localOnly" = "Cloud continuation is off";
+"settings.overview.action.checkInstall" = "Check Input Method Status";
+"settings.overview.action.configureAI" = "Configure AI Continuation";
+"settings.overview.action.manageLexicon" = "Manage Lexicons";
+"settings.overview.action.openLogs" = "Open Logs";
 
 "settings.input.section.composition" = "Composition";
 "settings.input.host" = "Input Host";
@@ -33,6 +56,8 @@
 "settings.input.textModeShortcut" = "Text Mode Shortcut";
 "settings.input.section.prefixLock" = "Prefix Lock";
 "settings.input.prefixLock.note" = "Continuation candidates only append after the locked prefix. Prefix rewriting is available only through explicit polish actions.";
+"settings.input.section.behavior" = "How It Works";
+"settings.input.disclosure.workflow" = "Show input and commit rules";
 
 "settings.candidates.section.display" = "Display";
 "settings.candidates.pageSize" = "Candidates Per Page";
@@ -51,6 +76,7 @@
 "settings.candidates.rawInput" = "Raw Input";
 "settings.candidates.rawInput.value" = "Kept only when there are no Chinese candidates";
 "settings.candidates.section.shortcuts" = "Shortcuts";
+"settings.candidates.section.behavior" = "Behavior Reference";
 "settings.candidates.shortcut.space.value" = "Commits the current Rime candidate";
 "settings.candidates.shortcut.number.label" = "Number Keys";
 "settings.candidates.shortcut.number.value" = "Selects the current-page Rime candidate";
@@ -66,6 +92,8 @@
 "settings.lexicon.installingRecommended" = "Installing Recommended Lexicon...";
 "settings.lexicon.createMissingDirectories" = "Create Missing Directories";
 "settings.lexicon.section.local" = "Local Lexicons";
+"settings.lexicon.section.advanced" = "Advanced Lexicon Info";
+"settings.lexicon.disclosure.directories" = "Show directories, paths, and diagnostics";
 "settings.lexicon.section.format" = "Format";
 "settings.lexicon.directory" = "Directory";
 "settings.lexicon.status" = "Status";
@@ -84,7 +112,10 @@
 "settings.lexicon.action.sampleCreated" = "Created %@.";
 "settings.lexicon.action.installedRecommended" = "Installed %@ with %d entries.";
 
-"settings.provider.section.profile" = "Provider";
+"settings.provider.section.profile" = "Service Configuration";
+"settings.provider.section.service" = "Current Service";
+"settings.provider.section.advancedService" = "Advanced Service Configuration";
+"settings.provider.advancedServiceConfig" = "Edit service, API key, and custom endpoint";
 "settings.provider.displayName" = "Display Name";
 "settings.provider.kind" = "Provider Type";
 "settings.provider.baseURL" = "Base URL";
@@ -120,8 +151,11 @@
 "settings.provider.length.long" = "Long";
 "settings.provider.maxCandidates" = "Maximum continuation candidates: %d";
 "settings.provider.noProfiles" = "No provider has been configured.";
+"settings.provider.noProfiles.userFacing" = "No AI service has been configured. Save a default template or add a custom endpoint in advanced service configuration.";
 "settings.provider.currentProfile" = "Current Profile";
 "settings.provider.add" = "Add Provider";
+"settings.provider.serviceSummary" = "Service Summary";
+"settings.provider.serviceSummary.empty" = "No service configured";
 "settings.provider.advancedCustomHTTP" = "Advanced Custom HTTP";
 
 "inputmethod.menu.aiContinuation" = "AI Continuation";
@@ -205,6 +239,11 @@
 "settings.diagnostics.status.yes" = "Yes";
 "settings.diagnostics.status.no" = "No";
 "settings.diagnostics.commands" = "Commands";
+"settings.advanced.subtitle" = "Use these tools to inspect install state, logs, Rime data, AI status, and local files. Daily input settings usually do not need this page.";
+"settings.advanced.section.shortcuts" = "Troubleshooting Shortcuts";
+"settings.advanced.openLogs" = "Open Logs";
+"settings.advanced.openSupportFolder" = "Open Support Folder";
+"settings.advanced.openRimeUserFolder" = "Open Rime User Folder";
 "settings.diagnostics.step.build.title" = "Build and Sign";
 "settings.diagnostics.step.build.detail" = "Run the input-method bundle build script. The script prefers an available Apple Development signing identity and falls back to ad-hoc signing only when no certificate is available.";
 "settings.diagnostics.step.install.title" = "Install Bundle";

@@ -6,7 +6,8 @@
 sidebar/detail layout. Settings copy defaults to Simplified Chinese through
 `SettingsLocalization`; English resources remain for explicit English locale
 queries and missing-key fallback. It covers input behavior, candidate display,
-Rime/user data, AI continuation/provider profiles, privacy, and diagnostics.
+local lexicons, AI continuation/service configuration, privacy, and advanced
+diagnostics.
 
 ## Boundaries
 
@@ -23,13 +24,18 @@ Rime/user data, AI continuation/provider profiles, privacy, and diagnostics.
   provider profiles.
 - The top-level layout is a `NavigationSplitView` with searchable sidebar
   sections. Detail pages use grouped forms and native SwiftUI controls.
+- The default section is `Overview`: a user-facing control center for install,
+  AI continuation, lexicon, and privacy status plus common actions.
+- Provider internals, raw paths, debug commands, and install diagnostics should
+  stay under AI advanced configuration or the Advanced troubleshooting page.
 - Diagnostics includes dynamic read-only install status: app version/build,
   install source, Rime runtime files, AI provider summary, user-data file
   timestamps, backup count, latest backup, and rollback command.
 - Diagnostics must not execute rollback or overwrite the running input-method
   bundle from inside the settings process.
-- The AI provider page is a single grouped form rather than a nested split view;
-  provider technical identifiers remain in English.
+- The AI page should lead with user-facing continuation controls, current
+  service summary, and connection test. Provider technical identifiers remain
+  available only in the advanced service configuration disclosure.
 - User-facing settings copy defaults to Simplified Chinese. Technical terms such
   as API Key, URL, Rime, macOS, and InputMethodKit remain untranslated where that
   is the clearest mixed Chinese copy.

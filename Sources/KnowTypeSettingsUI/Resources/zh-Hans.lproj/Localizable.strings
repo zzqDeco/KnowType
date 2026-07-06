@@ -1,15 +1,38 @@
 "settings.window.title" = "KnowType 设置";
-"settings.section.input" = "输入";
+"settings.section.overview" = "概览";
+"settings.section.input" = "输入体验";
 "settings.section.candidates" = "候选窗";
-"settings.section.lexicons" = "Rime 与用户数据";
+"settings.section.lexicons" = "词库";
 "settings.section.ai" = "AI 续写";
 "settings.section.privacy" = "隐私";
 "settings.section.diagnostics" = "诊断";
+"settings.section.advanced" = "高级";
 "settings.action.restoreDefaults" = "恢复默认设置";
 "settings.action.testConnection" = "测试连接";
 "settings.action.save" = "保存";
 "settings.search.prompt" = "搜索设置";
 "settings.sidebar.noMatches" = "没有匹配的设置";
+
+"settings.overview.title" = "概览";
+"settings.overview.subtitle" = "先确认输入法、AI 续写、词库和隐私状态；常用设置可以从这里直接进入。";
+"settings.overview.section.status" = "当前状态";
+"settings.overview.section.actions" = "常用操作";
+"settings.overview.input" = "输入法";
+"settings.overview.input.installed" = "已安装 %@";
+"settings.overview.input.needsCheck" = "需要检查安装状态";
+"settings.overview.ai" = "AI 续写";
+"settings.overview.ai.enabled" = "已启用：%@";
+"settings.overview.ai.needsService" = "已启用，尚未配置服务";
+"settings.overview.ai.disabled" = "已关闭";
+"settings.overview.lexicon" = "词库";
+"settings.overview.lexicon.loaded" = "已载入 %d 条词条";
+"settings.overview.privacy" = "隐私";
+"settings.overview.privacy.cloudEnabled" = "云端续写开启，受保护输入仍只走本地";
+"settings.overview.privacy.localOnly" = "云端续写已关闭";
+"settings.overview.action.checkInstall" = "检查输入法状态";
+"settings.overview.action.configureAI" = "配置 AI 续写";
+"settings.overview.action.manageLexicon" = "管理词库";
+"settings.overview.action.openLogs" = "打开日志";
 
 "settings.input.section.composition" = "组合输入";
 "settings.input.host" = "输入宿主";
@@ -33,6 +56,8 @@
 "settings.input.textModeShortcut" = "中英模式切换快捷键";
 "settings.input.section.prefixLock" = "前缀锁定";
 "settings.input.prefixLock.note" = "续写候选只会追加在已锁定前缀之后。改写前缀只允许通过显式润色操作触发。";
+"settings.input.section.behavior" = "工作方式";
+"settings.input.disclosure.workflow" = "查看输入与提交规则";
 
 "settings.candidates.section.display" = "显示";
 "settings.candidates.pageSize" = "每页候选数";
@@ -51,6 +76,7 @@
 "settings.candidates.rawInput" = "原始输入";
 "settings.candidates.rawInput.value" = "仅在没有中文候选时保留";
 "settings.candidates.section.shortcuts" = "快捷键";
+"settings.candidates.section.behavior" = "行为参考";
 "settings.candidates.shortcut.space.value" = "提交当前 Rime 候选";
 "settings.candidates.shortcut.number.label" = "数字键";
 "settings.candidates.shortcut.number.value" = "选择当前页 Rime 候选";
@@ -66,6 +92,8 @@
 "settings.lexicon.installingRecommended" = "正在安装推荐词库...";
 "settings.lexicon.createMissingDirectories" = "创建缺失目录";
 "settings.lexicon.section.local" = "本地词库";
+"settings.lexicon.section.advanced" = "高级词库信息";
+"settings.lexicon.disclosure.directories" = "查看目录、路径和诊断";
 "settings.lexicon.section.format" = "格式";
 "settings.lexicon.directory" = "目录";
 "settings.lexicon.status" = "状态";
@@ -84,7 +112,10 @@
 "settings.lexicon.action.sampleCreated" = "已创建 %@。";
 "settings.lexicon.action.installedRecommended" = "已安装 %@，共 %d 条词条。";
 
-"settings.provider.section.profile" = "Provider";
+"settings.provider.section.profile" = "服务配置";
+"settings.provider.section.service" = "当前服务";
+"settings.provider.section.advancedService" = "高级服务配置";
+"settings.provider.advancedServiceConfig" = "编辑服务、API Key 和自定义接口";
 "settings.provider.displayName" = "显示名称";
 "settings.provider.kind" = "Provider 类型";
 "settings.provider.baseURL" = "Base URL";
@@ -120,8 +151,11 @@
 "settings.provider.length.long" = "长";
 "settings.provider.maxCandidates" = "最多续写候选：%d";
 "settings.provider.noProfiles" = "尚未配置 provider。";
+"settings.provider.noProfiles.userFacing" = "尚未配置 AI 服务。可以先使用默认模板保存，或在高级服务配置中添加自定义接口。";
 "settings.provider.currentProfile" = "当前配置";
 "settings.provider.add" = "添加 Provider";
+"settings.provider.serviceSummary" = "服务摘要";
+"settings.provider.serviceSummary.empty" = "未配置服务";
 "settings.provider.advancedCustomHTTP" = "高级 Custom HTTP";
 
 "inputmethod.menu.aiContinuation" = "AI 续写";
@@ -205,6 +239,11 @@
 "settings.diagnostics.status.yes" = "是";
 "settings.diagnostics.status.no" = "否";
 "settings.diagnostics.commands" = "命令";
+"settings.advanced.subtitle" = "这些项目用于排查安装、日志、Rime 数据、AI 状态和本地文件；日常输入设置通常不需要打开这里。";
+"settings.advanced.section.shortcuts" = "故障排查入口";
+"settings.advanced.openLogs" = "打开日志";
+"settings.advanced.openSupportFolder" = "打开支持目录";
+"settings.advanced.openRimeUserFolder" = "打开 Rime 用户目录";
 "settings.diagnostics.step.build.title" = "构建并签名";
 "settings.diagnostics.step.build.detail" = "运行输入法 bundle 构建脚本。脚本会优先选择可用的 Apple Development 签名身份，只有找不到证书时才回退到 ad-hoc 签名。";
 "settings.diagnostics.step.install.title" = "安装 bundle";

@@ -11,12 +11,12 @@
 ## Scope
 
 - Update `KnowTypeSettingsUI` to render a `NavigationSplitView` sidebar with
-  `输入`, `候选窗`, `Rime 与用户数据`, `AI 续写`, `隐私`, and `诊断`.
+  `概览`, `AI 续写`, `输入体验`, `候选窗`, `词库`, `隐私`, and `高级`.
 - Add settings localization resources with `zh-Hans` as the default
   user-facing path. English resources remain for explicit English locale
   lookups and missing-key fallback.
-- Simplify the AI provider page into one grouped form instead of nesting a
-  second split view inside the settings detail.
+- Keep the default page user-facing; provider details, raw paths, logs, and
+  diagnostics belong behind advanced configuration or troubleshooting sections.
 - Update the IMK preferences window title and chrome to use the same localized
   settings title resources as the settings UI.
 
