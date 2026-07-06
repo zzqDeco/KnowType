@@ -64,6 +64,11 @@ Installs the locally built KnowType input method bundle into
   agent refresh, and `TERM`, the installer aborts before replacement unless
   `--force-stop-host` was explicitly passed. The process check matches the full
   process command basename rather than a truncated process name.
+- If source preparation, bundle validation, or another pre-replacement preflight
+  fails after quiescing, the failure trap re-registers/re-enables the existing
+  canonical install, unregisters non-canonical LaunchServices records, and
+  repairs scoped preferences. A failed local build or bad release archive must
+  not leave the previously working input source disabled.
 - Local installs inject a timestamp `CFBundleVersion` by default so
   LaunchServices and TIS do not keep reusing stale metadata from a previous
   development build with the same source-controlled version.

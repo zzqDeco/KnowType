@@ -37,6 +37,12 @@ release payload paths remain registered in LaunchServices.
 - After refreshing `cfprefsd` and text-input menu agents, the installer performs
   one final scoped preference repair before restarting only the menu agents. This
   keeps HIToolbox enabled rows aligned after pre-install disable.
+- If source preparation or validation fails after quiescing but before
+  replacement, the failure trap re-enables the existing canonical install and
+  repairs scoped preferences while also unregistering non-canonical
+  LaunchServices records. This prevents a failed local build, invalid release
+  zip, or codesign validation error from leaving the user's currently working
+  KnowType install disabled or split from the real input menu.
 - Dry-run output reports the quiesce plan without mutating input sources or
   processes.
 - Install summary reports source path, canonical target path, pre-install

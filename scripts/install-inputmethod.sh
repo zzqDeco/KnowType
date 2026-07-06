@@ -23,6 +23,7 @@ QUIESCE_DISABLE_STATUS="not-run"
 QUIESCE_DISABLED_COUNT="0"
 QUIESCE_HOST_STOP_STATUS="not-run"
 QUIESCE_MENU_AGENTS_RESTARTED="no"
+QUIESCE_STARTED=0
 STALE_LAUNCHSERVICES_CLEANUP_COUNT="0"
 
 usage() {
@@ -198,6 +199,32 @@ cleanup_source_temp() {
   fi
 }
 
+restore_existing_input_source_after_failed_quiesce() {
+  if (( QUIESCE_STARTED != 1 || INSTALL_SUCCEEDED == 1 || DRY_RUN == 1 )); then
+    return 0
+  fi
+  if [[ ! -d "$TARGET_PATH" ]]; then
+    return 0
+  fi
+
+  echo "Install failed after quiescing; restoring existing KnowType input-source enablement: $TARGET_PATH" >&2
+  local launchservices_cleanup_output
+  launchservices_cleanup_output="$(knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0)" || true
+  if [[ -n "$launchservices_cleanup_output" ]]; then
+    printf '%s\n' "$launchservices_cleanup_output"
+  fi
+  knowtype_register_launchservices_path "$TARGET_PATH" 0
+  bootstrap_input_source_best_effort || true
+  repair_preferences_best_effort || true
+  killall cfprefsd 2>/dev/null || true
+  killall TextInputMenuAgent 2>/dev/null || true
+  killall TextInputSwitcher 2>/dev/null || true
+  sleep 0.5
+  repair_preferences_best_effort || true
+  killall TextInputMenuAgent 2>/dev/null || true
+  killall TextInputSwitcher 2>/dev/null || true
+}
+
 rollback_failed_install() {
   if (( INSTALL_SUCCEEDED == 1 || DRY_RUN == 1 )); then
     return 0
@@ -246,7 +273,10 @@ rollback_failed_install() {
     fi
     if (( restored_app == 1 )); then
       knowtype_register_launchservices_path "$TARGET_PATH" 0
+      restore_existing_input_source_after_failed_quiesce
     fi
+  else
+    restore_existing_input_source_after_failed_quiesce
   fi
 }
 
@@ -386,6 +416,7 @@ stop_input_method_host_after_quiesce() {
 }
 
 quiesce_before_replace() {
+  QUIESCE_STARTED=1
   switch_away_before_replace
   disable_input_sources_before_replace
   restart_text_input_agents_for_quiesce
