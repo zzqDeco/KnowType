@@ -152,7 +152,8 @@
 "settings.provider.maxCandidates" = "最多续写候选：%d";
 "settings.provider.noProfiles" = "尚未配置 provider。";
 "settings.provider.noProfiles.userFacing" = "尚未配置 AI 服务。可以先使用默认模板保存，或在高级服务配置中添加自定义接口。";
-"settings.provider.currentProfile" = "当前配置";
+"settings.provider.currentProfile" = "当前服务";
+"settings.provider.editProfile" = "编辑配置";
 "settings.provider.add" = "添加 Provider";
 "settings.provider.serviceSummary" = "服务摘要";
 "settings.provider.serviceSummary.empty" = "未配置服务";

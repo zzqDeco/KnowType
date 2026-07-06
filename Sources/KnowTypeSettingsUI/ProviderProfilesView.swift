@@ -430,7 +430,7 @@ private struct AIProviderSettingsView: View {
                 } label: {
                     Label(connectionPresentation.testButtonLabel, systemImage: "network")
                 }
-                .disabled(viewModel.isPersistenceBlocked || viewModel.profiles.isEmpty || connectionPresentation.isTesting)
+                .disabled(viewModel.isPersistenceBlocked || activeProfileID == nil || connectionPresentation.isTesting)
 
                 if connectionPresentation.showsProgress {
                     ProgressView()
@@ -449,6 +449,17 @@ private struct AIProviderSettingsView: View {
                         }
                     } label: {
                         Label(settingsString("settings.provider.add"), systemImage: "plus")
+                    }
+
+                    if !viewModel.profiles.isEmpty {
+                        Picker(settingsString("settings.provider.editProfile"), selection: editProfileSelectionBinding) {
+                            ForEach(viewModel.profiles) { profile in
+                                let item = ProviderProfileListItemPresentation(profile: profile)
+
+                                Text("\(item.title) · \(item.subtitle)")
+                                    .tag(Optional(item.id))
+                            }
+                        }
                     }
 
                     TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
@@ -531,7 +542,7 @@ private struct AIProviderSettingsView: View {
     }
 
     private var currentServiceSummary: String {
-        if let profile = viewModel.profiles.first(where: \.isDefault) ?? viewModel.profiles.first {
+        if let profile = viewModel.profiles.first(where: \.isDefault) {
             return serviceSummary(for: profile)
         }
         return settingsString("settings.provider.serviceSummary.empty")
@@ -547,18 +558,32 @@ private struct AIProviderSettingsView: View {
 
     private var profileSelectionBinding: Binding<String?> {
         Binding(
-            get: { viewModel.profiles.first(where: \.isDefault)?.id ?? viewModel.profiles.first?.id },
+            get: { activeProfileID },
             set: { id in
                 if let id {
                     do {
                         try viewModel.setDefaultProfile(id: id)
-                        viewModel.selectProfile(id: id)
                     } catch {
                         // setDefaultProfile already surfaces the localized persistence error.
                     }
                 }
             }
         )
+    }
+
+    private var editProfileSelectionBinding: Binding<String?> {
+        Binding(
+            get: { viewModel.selectedProfileID },
+            set: { id in
+                if let id {
+                    viewModel.selectProfile(id: id)
+                }
+            }
+        )
+    }
+
+    private var activeProfileID: String? {
+        viewModel.profiles.first(where: \.isDefault)?.id
     }
 
     private var cloudContinuationEnabledBinding: Binding<Bool> {

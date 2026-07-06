@@ -152,7 +152,8 @@
 "settings.provider.maxCandidates" = "Maximum continuation candidates: %d";
 "settings.provider.noProfiles" = "No provider has been configured.";
 "settings.provider.noProfiles.userFacing" = "No AI service has been configured. Save a default template or add a custom endpoint in advanced service configuration.";
-"settings.provider.currentProfile" = "Current Profile";
+"settings.provider.currentProfile" = "Current Service";
+"settings.provider.editProfile" = "Edit Profile";
 "settings.provider.add" = "Add Provider";
 "settings.provider.serviceSummary" = "Service Summary";
 "settings.provider.serviceSummary.empty" = "No service configured";

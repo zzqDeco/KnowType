@@ -37,8 +37,12 @@ diagnostics.
   service summary, and connection test. Provider technical identifiers remain
   available only in the advanced service configuration disclosure.
 - The current service summary and top-level connection test use the saved
-  default provider, matching the input runtime's active service. Unsaved draft
-  edits are tested from the advanced service configuration disclosure.
+  default provider, matching the input runtime's active service. A profiles file
+  with profiles but no explicit default is shown as no configured active service.
+  Unsaved draft edits are tested from the advanced service configuration
+  disclosure.
+- The current-service picker persists the runtime default. The advanced edit
+  selector loads a profile into the draft without switching the active provider.
 - Settings directory shortcuts create the target logs/support/Rime folder before
   opening it, so fresh installs expose a usable troubleshooting path.
 - User-facing settings copy defaults to Simplified Chinese. Technical terms such

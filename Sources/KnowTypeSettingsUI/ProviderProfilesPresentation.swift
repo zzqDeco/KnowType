@@ -144,7 +144,7 @@ struct SettingsOverviewPresentation: Equatable, Sendable {
             inputStatus = SettingsLocalization.string("settings.overview.input.needsCheck", preferredLanguages: preferredLanguages)
         }
 
-        let activeProfile = profiles.first(where: \.isDefault) ?? profiles.first
+        let activeProfile = profiles.first(where: \.isDefault)
         let aiStatus: String
         if runtimePreferences.cloudContinuationEnabled {
             if let activeProfile {

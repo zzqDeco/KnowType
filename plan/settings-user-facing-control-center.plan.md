@@ -33,6 +33,11 @@
   Overview and tested from the top-level AI service section. The selected
   profile/draft remains the advanced editing target, with draft connection
   tests kept next to the advanced editor.
+- Do not fall back to the first saved profile when no profile is marked
+  `isDefault`; the input runtime also treats that state as no active provider.
+- Keep current-service selection separate from advanced profile editing:
+  changing the current service persists the default provider, while the advanced
+  edit selector only loads a draft.
 - Create local logs/support/Rime directories before opening Settings shortcut
   buttons so fresh installs do not silently no-op.
 - Keep Settings copy Chinese by default while preserving explicit English

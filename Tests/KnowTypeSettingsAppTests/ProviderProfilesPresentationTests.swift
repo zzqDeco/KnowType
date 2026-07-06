@@ -138,7 +138,8 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             displayName: "本地代理",
             kind: .openAIChat,
             baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
-            model: "gpt-5.3-codex-spark"
+            model: "gpt-5.3-codex-spark",
+            isDefault: true
         )
         let presentation = SettingsOverviewPresentation(
             profiles: [profile],
@@ -216,6 +217,45 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         )
     }
 
+    func testOverviewPresentationRequiresExplicitDefaultProfileForActiveAIStatus() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-settings-overview-no-default-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let diagnostics = InstallationDiagnosticsStatus(
+            applicationSupportURL: temporaryDirectory.appendingPathComponent("Application Support/KnowType", isDirectory: true),
+            homeDirectoryURL: temporaryDirectory,
+            inputMethodBundleURL: temporaryDirectory.appendingPathComponent("Input Methods/KnowType.app", isDirectory: true),
+            preferencePaneURL: temporaryDirectory.appendingPathComponent("PreferencePanes/KnowType.prefPane", isDirectory: true),
+            runtimePreferences: .standard,
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+        let profile = ProviderProfile(
+            id: "configured-but-not-default",
+            displayName: "未设默认",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+            model: "spark"
+        )
+
+        let presentation = SettingsOverviewPresentation(
+            profiles: [profile],
+            selectedProfileID: profile.id,
+            runtimePreferences: .standard,
+            totalLoadedEntryCount: 0,
+            diagnosticsStatus: diagnostics,
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+
+        XCTAssertEqual(
+            presentation.statusRows.first { $0.label == "AI 续写" }?.value,
+            "已启用，尚未配置服务"
+        )
+    }
+
     func testSettingsDirectoryOpenerCreatesMissingDirectoriesBeforeOpening() throws {
         let temporaryDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("knowtype-settings-open-directory-\(UUID().uuidString)", isDirectory: true)
@@ -246,7 +286,10 @@ final class ProviderProfilesPresentationTests: XCTestCase {
 
         XCTAssertTrue(source.contains("await viewModel.testSavedProfileConnection()"))
         XCTAssertTrue(source.contains("await viewModel.testDraftConnection()"))
-        XCTAssertTrue(source.contains("get: { viewModel.profiles.first(where: \\.isDefault)?.id ?? viewModel.profiles.first?.id }"))
+        XCTAssertTrue(source.contains("get: { activeProfileID }"))
+        XCTAssertTrue(source.contains("editProfileSelectionBinding"))
+        XCTAssertTrue(source.contains("settings.provider.editProfile"))
+        XCTAssertFalse(source.contains("try viewModel.setDefaultProfile(id: id)\n                        viewModel.selectProfile(id: id)"))
     }
 
     func testListItemUsesSavedDisplayNameAndProviderKind() {

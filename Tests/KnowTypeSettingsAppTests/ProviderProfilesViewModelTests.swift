@@ -1134,6 +1134,33 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.connectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
     }
 
+    func testSavedProfileConnectionRequiresExplicitDefaultProfile() async throws {
+        let profile = ProviderProfile(
+            id: "not-default",
+            displayName: "Not Default",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+            model: "spark"
+        )
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: [profile]))
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: RecordingSecretStore(),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+
+        let didConnect = await viewModel.testSavedProfileConnection()
+
+        XCTAssertFalse(didConnect)
+        let configurations = await capture.configurations
+        XCTAssertEqual(configurations, [])
+        XCTAssertEqual(viewModel.connectionStatus, .failure("未配置服务"))
+    }
+
     func testConnectionTestUsesTransientDraftAPIKeyWithoutPersistingIt() async throws {
         let store = CapturingProfileStore(file: ProviderProfilesFile())
         let secrets = RecordingSecretStore()

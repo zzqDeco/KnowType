@@ -352,7 +352,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if let profileID {
             return profiles.first { $0.id == profileID }
         }
-        return profiles.first(where: \.isDefault) ?? profiles.first
+        return profiles.first(where: \.isDefault)
     }
 }
 
