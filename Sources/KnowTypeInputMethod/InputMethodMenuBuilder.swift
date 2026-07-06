@@ -1,5 +1,6 @@
 import Foundation
 import KnowTypeCore
+import KnowTypeSettingsUI
 
 #if canImport(AppKit) && canImport(InputMethodKit)
 import AppKit
@@ -34,7 +35,7 @@ enum KnowTypeInputMethodMenuBuilder {
         [
             .init(
                 kind: .aiContinuation,
-                title: "AI Continuation",
+                title: SettingsLocalization.string("inputmethod.menu.aiContinuation"),
                 actionSelectorName: "toggleAIContinuation:",
                 keyEquivalent: "",
                 stateRawValue: runtimePreferences.cloudContinuationEnabled
@@ -44,21 +45,21 @@ enum KnowTypeInputMethodMenuBuilder {
             separator(),
             .init(
                 kind: .openLogs,
-                title: "Open Logs...",
+                title: SettingsLocalization.string("inputmethod.menu.openLogs"),
                 actionSelectorName: "openKnowTypeLogs:",
                 keyEquivalent: "",
                 stateRawValue: NSControl.StateValue.off.rawValue
             ),
             .init(
                 kind: .openSupportFolder,
-                title: "Open Support Folder...",
+                title: SettingsLocalization.string("inputmethod.menu.openSupportFolder"),
                 actionSelectorName: "openKnowTypeSupportFolder:",
                 keyEquivalent: "",
                 stateRawValue: NSControl.StateValue.off.rawValue
             ),
             .init(
                 kind: .openRimeUserFolder,
-                title: "Open Rime User Folder...",
+                title: SettingsLocalization.string("inputmethod.menu.openRimeUserFolder"),
                 actionSelectorName: "openRimeUserFolder:",
                 keyEquivalent: "",
                 stateRawValue: NSControl.StateValue.off.rawValue
@@ -66,14 +67,14 @@ enum KnowTypeInputMethodMenuBuilder {
             separator(),
             .init(
                 kind: .settings,
-                title: "KnowType Settings...",
+                title: SettingsLocalization.string("inputmethod.menu.settings"),
                 actionSelectorName: "showPreferences:",
                 keyEquivalent: "",
                 stateRawValue: NSControl.StateValue.off.rawValue
             ),
             .init(
                 kind: .about,
-                title: "About KnowType...",
+                title: SettingsLocalization.string("inputmethod.menu.about"),
                 actionSelectorName: "showAbout:",
                 keyEquivalent: "",
                 stateRawValue: NSControl.StateValue.off.rawValue

@@ -15,7 +15,7 @@ public struct ProviderProfilesView: View {
     @StateObject private var lexiconViewModel: LexiconSettingsViewModel
     @StateObject private var inputModeViewModel: InputModePreferencesViewModel
     @StateObject private var runtimePreferencesViewModel: RuntimePreferencesViewModel
-    @State private var selectedSection: SettingsSection = .input
+    @State private var selectedSection: SettingsSection = .overview
     @State private var searchText = ""
 
     public init(
@@ -41,6 +41,18 @@ public struct ProviderProfilesView: View {
     @ViewBuilder
     private func settingsDetail(for section: SettingsSection) -> some View {
         switch section {
+        case .overview:
+            SettingsOverviewView(
+                viewModel: viewModel,
+                lexiconViewModel: lexiconViewModel,
+                runtimePreferencesViewModel: runtimePreferencesViewModel,
+                selectedSection: $selectedSection
+            )
+        case .aiProvider:
+            AIProviderSettingsView(
+                viewModel: viewModel,
+                runtimePreferencesViewModel: runtimePreferencesViewModel
+            )
         case .input:
             InputSettingsView(
                 inputModeViewModel: inputModeViewModel,
@@ -50,14 +62,9 @@ public struct ProviderProfilesView: View {
             CandidateSettingsView(viewModel: runtimePreferencesViewModel)
         case .lexicons:
             LexiconSettingsView(viewModel: lexiconViewModel)
-        case .aiProvider:
-            AIProviderSettingsView(
-                viewModel: viewModel,
-                runtimePreferencesViewModel: runtimePreferencesViewModel
-            )
         case .privacy:
             PrivacySettingsView(runtimePreferencesViewModel: runtimePreferencesViewModel)
-        case .diagnostics:
+        case .advanced:
             DiagnosticsSettingsView()
         }
     }
@@ -87,19 +94,62 @@ private struct SettingsSidebarView: View {
     }
 }
 
+private struct SettingsOverviewView: View {
+    @ObservedObject var viewModel: ProviderProfilesViewModel
+    @ObservedObject var lexiconViewModel: LexiconSettingsViewModel
+    @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
+    @Binding var selectedSection: SettingsSection
+    @State private var status = InstallationDiagnosticsStatus()
+
+    var body: some View {
+        let presentation = SettingsOverviewPresentation(
+            profiles: viewModel.profiles,
+            selectedProfileID: viewModel.selectedProfileID,
+            runtimePreferences: runtimePreferencesViewModel.preferences,
+            totalLoadedEntryCount: lexiconViewModel.totalLoadedEntryCount,
+            diagnosticsStatus: status
+        )
+
+        SettingsForm(title: presentation.title, subtitle: presentation.subtitle) {
+            Section(settingsString("settings.overview.section.status")) {
+                ForEach(presentation.statusRows, id: \.label) { row in
+                    LabeledContent(row.label, value: row.value)
+                }
+            }
+
+            Section(settingsString("settings.overview.section.actions")) {
+                Button {
+                    status = InstallationDiagnosticsStatus()
+                    selectedSection = .advanced
+                } label: {
+                    Label(presentation.checkInstallActionLabel, systemImage: "stethoscope")
+                }
+                Button {
+                    selectedSection = .aiProvider
+                } label: {
+                    Label(presentation.configureAIActionLabel, systemImage: "sparkles")
+                }
+                Button {
+                    selectedSection = .lexicons
+                } label: {
+                    Label(presentation.manageLexiconActionLabel, systemImage: "text.book.closed")
+                }
+                SettingsDirectoryLink(
+                    title: presentation.openLogsActionLabel,
+                    systemImage: "doc.text.magnifyingglass",
+                    url: SettingsSupportURLs.logs
+                )
+            }
+        }
+    }
+}
+
 private struct InputSettingsView: View {
     @ObservedObject var inputModeViewModel: InputModePreferencesViewModel
     @ObservedObject var runtimePreferencesViewModel: RuntimePreferencesViewModel
 
     var body: some View {
         SettingsForm(title: SettingsSection.input.title) {
-            Section(settingsString("settings.input.section.composition")) {
-                LabeledContent(settingsString("settings.input.host"), value: settingsString("settings.input.host.value"))
-                LabeledContent(settingsString("settings.input.compositionMode"), value: settingsString("settings.input.compositionMode.value"))
-                LabeledContent(settingsString("settings.input.basicCommit"), value: settingsString("settings.input.basicCommit.value"))
-                LabeledContent(settingsString("settings.input.continuationCommit"), value: settingsString("settings.input.continuationCommit.value"))
-            }
-
             Section(settingsString("settings.input.section.symbols")) {
                 Picker(settingsString("settings.input.defaultPunctuation"), selection: defaultPunctuationBinding) {
                     Text(settingsString("settings.input.symbol.chinese")).tag(InputSymbolMode.chinese)
@@ -131,9 +181,15 @@ private struct InputSettingsView: View {
                 }
             }
 
-            Section(settingsString("settings.input.section.prefixLock")) {
-                Text(settingsString("settings.input.prefixLock.note"))
-                    .foregroundStyle(.secondary)
+            Section(settingsString("settings.input.section.behavior")) {
+                DisclosureGroup(settingsString("settings.input.disclosure.workflow")) {
+                    LabeledContent(settingsString("settings.input.host"), value: settingsString("settings.input.host.value"))
+                    LabeledContent(settingsString("settings.input.compositionMode"), value: settingsString("settings.input.compositionMode.value"))
+                    LabeledContent(settingsString("settings.input.basicCommit"), value: settingsString("settings.input.basicCommit.value"))
+                    LabeledContent(settingsString("settings.input.continuationCommit"), value: settingsString("settings.input.continuationCommit.value"))
+                    Text(settingsString("settings.input.prefixLock.note"))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -190,18 +246,19 @@ private struct CandidateSettingsView: View {
                 }
             }
 
-            Section(settingsString("settings.candidates.section.order")) {
-                LabeledContent(settingsString("settings.candidates.rimeCandidates"), value: settingsString("settings.candidates.rimeCandidates.value"))
-                LabeledContent(settingsString("settings.candidates.aiContinuation"), value: settingsString("settings.candidates.aiContinuation.value"))
-                LabeledContent(settingsString("settings.candidates.rawInput"), value: settingsString("settings.candidates.rawInput.value"))
-            }
-
-            Section(settingsString("settings.candidates.section.shortcuts")) {
-                LabeledContent("Space", value: settingsString("settings.candidates.shortcut.space.value"))
-                LabeledContent(settingsString("settings.candidates.shortcut.number.label"), value: settingsString("settings.candidates.shortcut.number.value"))
-                LabeledContent("Tab", value: settingsString("settings.candidates.shortcut.tab.value"))
-                LabeledContent("Option + 1...9", value: settingsString("settings.candidates.shortcut.optionNumber.value"))
-                LabeledContent("Option + R", value: settingsString("settings.candidates.shortcut.optionR.value"))
+            Section(settingsString("settings.candidates.section.behavior")) {
+                DisclosureGroup(settingsString("settings.candidates.section.order")) {
+                    LabeledContent(settingsString("settings.candidates.rimeCandidates"), value: settingsString("settings.candidates.rimeCandidates.value"))
+                    LabeledContent(settingsString("settings.candidates.aiContinuation"), value: settingsString("settings.candidates.aiContinuation.value"))
+                    LabeledContent(settingsString("settings.candidates.rawInput"), value: settingsString("settings.candidates.rawInput.value"))
+                }
+                DisclosureGroup(settingsString("settings.candidates.section.shortcuts")) {
+                    LabeledContent("Space", value: settingsString("settings.candidates.shortcut.space.value"))
+                    LabeledContent(settingsString("settings.candidates.shortcut.number.label"), value: settingsString("settings.candidates.shortcut.number.value"))
+                    LabeledContent("Tab", value: settingsString("settings.candidates.shortcut.tab.value"))
+                    LabeledContent("Option + 1...9", value: settingsString("settings.candidates.shortcut.optionNumber.value"))
+                    LabeledContent("Option + R", value: settingsString("settings.candidates.shortcut.optionR.value"))
+                }
             }
         }
     }
@@ -265,48 +322,56 @@ private struct LexiconSettingsView: View {
                 }
             }
 
-            ForEach(presentation.directories) { directory in
-                Section(directory.sectionTitle) {
-                    LabeledContent(directory.status.label, value: directory.status.value)
-                    LabeledContent(directory.resourceFiles.label, value: directory.resourceFiles.value)
-                    LabeledContent(directory.loadedEntries.label, value: directory.loadedEntries.value)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(directory.pathLabel)
-                            .foregroundStyle(.secondary)
-                        MonospacedText(directory.path)
-                    }
-
-                    ForEach(directory.installedPacks) { pack in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(pack.title)
+            Section(settingsString("settings.lexicon.section.advanced")) {
+                DisclosureGroup(settingsString("settings.lexicon.disclosure.directories")) {
+                    ForEach(presentation.directories) { directory in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(directory.sectionTitle)
                                 .font(.headline)
-                            LabeledContent(pack.entries.label, value: pack.entries.value)
-                            LabeledContent(pack.license.label, value: pack.license.value)
-                            LabeledContent(pack.installedAt.label, value: pack.installedAt.value)
+                            LabeledContent(directory.status.label, value: directory.status.value)
+                            LabeledContent(directory.resourceFiles.label, value: directory.resourceFiles.value)
+                            LabeledContent(directory.loadedEntries.label, value: directory.loadedEntries.value)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(pack.source.label)
+                                Text(directory.pathLabel)
                                     .foregroundStyle(.secondary)
-                                MonospacedText(pack.source.value)
+                                MonospacedText(directory.path)
                             }
-                        }
-                    }
 
-                    if !directory.diagnostics.isEmpty {
-                        ForEach(directory.diagnostics) { diagnostic in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(diagnostic.title)
-                                    .font(.headline)
-                                Text(diagnostic.message)
-                                    .foregroundStyle(.red)
+                            ForEach(directory.installedPacks) { pack in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(pack.title)
+                                        .font(.headline)
+                                    LabeledContent(pack.entries.label, value: pack.entries.value)
+                                    LabeledContent(pack.license.label, value: pack.license.value)
+                                    LabeledContent(pack.installedAt.label, value: pack.installedAt.value)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(pack.source.label)
+                                            .foregroundStyle(.secondary)
+                                        MonospacedText(pack.source.value)
+                                    }
+                                }
+                                .padding(.top, 4)
+                            }
+
+                            if !directory.diagnostics.isEmpty {
+                                ForEach(directory.diagnostics) { diagnostic in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(diagnostic.title)
+                                            .font(.headline)
+                                        Text(diagnostic.message)
+                                            .foregroundStyle(.red)
+                                    }
+                                }
                             }
                         }
+                        .padding(.vertical, 4)
                     }
                 }
-            }
 
-            Section(settingsString("settings.lexicon.section.format")) {
-                ForEach(presentation.formatRows, id: \.label) { row in
-                    LabeledContent(row.label, value: row.value)
+                DisclosureGroup(settingsString("settings.lexicon.section.format")) {
+                    ForEach(presentation.formatRows, id: \.label) { row in
+                        LabeledContent(row.label, value: row.value)
+                    }
                 }
             }
         }
@@ -319,7 +384,8 @@ private struct AIProviderSettingsView: View {
 
     var body: some View {
         let draftPresentation = ProviderProfileDraftPresentation(draft: viewModel.draft)
-        let connectionPresentation = ProviderConnectionStatusPresentation(status: viewModel.connectionStatus)
+        let savedConnectionPresentation = ProviderConnectionStatusPresentation(status: viewModel.savedConnectionStatus)
+        let draftConnectionPresentation = ProviderConnectionStatusPresentation(status: viewModel.draftConnectionStatus)
         let validationPresentation = ProviderValidationPresentation(errors: viewModel.validationErrors)
         let lastErrorPresentation = ProviderLastErrorPresentation(message: viewModel.lastErrorMessage)
 
@@ -341,9 +407,9 @@ private struct AIProviderSettingsView: View {
                 }
             }
 
-            Section("Provider") {
+            Section(settingsString("settings.provider.section.service")) {
                 if viewModel.profiles.isEmpty {
-                    Text(settingsString("settings.provider.noProfiles"))
+                    Text(settingsString("settings.provider.noProfiles.userFacing"))
                         .foregroundStyle(.secondary)
                 } else {
                     Picker(settingsString("settings.provider.currentProfile"), selection: profileSelectionBinding) {
@@ -356,80 +422,111 @@ private struct AIProviderSettingsView: View {
                     }
                 }
 
-                Menu {
-                    ForEach(ProviderKind.allCases, id: \.self) { kind in
-                        Button(kind.rawValue) {
-                            viewModel.createProfile(kind: kind)
-                        }
+                LabeledContent(settingsString("settings.provider.serviceSummary"), value: currentServiceSummary)
+
+                Button {
+                    Task {
+                        await viewModel.testSavedProfileConnection()
                     }
                 } label: {
-                    Label(settingsString("settings.provider.add"), systemImage: "plus")
+                    Label(savedConnectionPresentation.testButtonLabel, systemImage: "network")
                 }
+                .disabled(viewModel.isPersistenceBlocked || activeProfileID == nil || savedConnectionPresentation.isTesting)
 
-                TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
-                Picker(
-                    draftPresentation.kindPickerLabel,
-                    selection: Binding(
-                        get: { viewModel.draft.kind },
-                        set: { viewModel.changeDraftKind($0) }
-                    )
-                ) {
-                    ForEach(ProviderKind.allCases, id: \.self) { kind in
-                        Text(kind.rawValue).tag(kind)
+                if savedConnectionPresentation.showsProgress {
+                    ProgressView()
+                } else if let message = savedConnectionPresentation.message {
+                    connectionStatusMessage(message)
+                }
+            }
+
+            Section(settingsString("settings.provider.section.advancedService")) {
+                DisclosureGroup(settingsString("settings.provider.advancedServiceConfig")) {
+                    Menu {
+                        ForEach(ProviderKind.allCases, id: \.self) { kind in
+                            Button(kind.rawValue) {
+                                viewModel.createProfile(kind: kind)
+                            }
+                        }
+                    } label: {
+                        Label(settingsString("settings.provider.add"), systemImage: "plus")
                     }
-                }
-                TextField(draftPresentation.baseURLFieldLabel, text: $viewModel.draft.baseURL)
-                TextField(draftPresentation.modelFieldLabel, text: $viewModel.draft.model)
-                Stepper(value: $viewModel.draft.timeoutSeconds, in: 1...120, step: 1) {
-                    Text(draftPresentation.timeoutLabel)
-                }
-                Toggle(draftPresentation.defaultProviderLabel, isOn: $viewModel.draft.isDefault)
-            }
 
-            Section(draftPresentation.secret.sectionTitle) {
-                SecureField(draftPresentation.secret.apiKeyFieldPrompt, text: $viewModel.draft.apiKey)
-                if let reference = draftPresentation.secret.reference {
-                    LabeledContent(reference.label, value: reference.value)
+                    if !viewModel.profiles.isEmpty {
+                        Picker(settingsString("settings.provider.editProfile"), selection: editProfileSelectionBinding) {
+                            ForEach(viewModel.profiles) { profile in
+                                let item = ProviderProfileListItemPresentation(profile: profile)
+
+                                Text("\(item.title) · \(item.subtitle)")
+                                    .tag(Optional(item.id))
+                            }
+                        }
+                    }
+
+                    TextField(draftPresentation.displayNameFieldLabel, text: $viewModel.draft.displayName)
+                    Picker(
+                        draftPresentation.kindPickerLabel,
+                        selection: Binding(
+                            get: { viewModel.draft.kind },
+                            set: { viewModel.changeDraftKind($0) }
+                        )
+                    ) {
+                        ForEach(ProviderKind.allCases, id: \.self) { kind in
+                            Text(kind.rawValue).tag(kind)
+                        }
+                    }
+                    TextField(draftPresentation.baseURLFieldLabel, text: $viewModel.draft.baseURL)
+                    TextField(draftPresentation.modelFieldLabel, text: $viewModel.draft.model)
+                    Stepper(value: $viewModel.draft.timeoutSeconds, in: 1...120, step: 1) {
+                        Text(draftPresentation.timeoutLabel)
+                    }
+                    Toggle(draftPresentation.defaultProviderLabel, isOn: $viewModel.draft.isDefault)
+
+                    Divider()
+
+                    Text(draftPresentation.secret.sectionTitle)
+                        .font(.headline)
+                    SecureField(draftPresentation.secret.apiKeyFieldPrompt, text: $viewModel.draft.apiKey)
+                    if let reference = draftPresentation.secret.reference {
+                        LabeledContent(reference.label, value: reference.value)
+                            .font(.caption)
+                    }
+                    Text(draftPresentation.secret.helpText)
                         .font(.caption)
-                }
-                Text(draftPresentation.secret.helpText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                        .foregroundStyle(.secondary)
 
-            if draftPresentation.showsCustomHTTPFields {
-                Section {
-                    DisclosureGroup(settingsString("settings.provider.advancedCustomHTTP")) {
+                    if draftPresentation.showsCustomHTTPFields {
+                        Divider()
+                        Text(settingsString("settings.provider.advancedCustomHTTP"))
+                            .font(.headline)
                         TextEditor(text: $viewModel.draft.customBodyTemplate)
                             .font(.system(.body, design: .monospaced))
                             .frame(minHeight: 120)
                         TextField(draftPresentation.customResponsePathLabel, text: $viewModel.draft.customResponsePath)
                     }
-                }
-            }
 
-            Section(connectionPresentation.sectionTitle) {
-                Button {
-                    Task {
-                        await viewModel.testDraftConnection()
+                    Button {
+                        Task {
+                            await viewModel.testDraftConnection()
+                        }
+                    } label: {
+                        Label(draftConnectionPresentation.testButtonLabel, systemImage: "network")
                     }
-                } label: {
-                    Label(connectionPresentation.testButtonLabel, systemImage: "network")
-                }
-                .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
+                    .disabled(viewModel.isPersistenceBlocked || draftConnectionPresentation.isTesting)
 
-                Button {
-                    _ = viewModel.saveDraft()
-                } label: {
-                    Label(SettingsLocalization.string("settings.action.save"), systemImage: "square.and.arrow.down")
-                }
-                .disabled(viewModel.isPersistenceBlocked)
-                .keyboardShortcut("s", modifiers: [.command])
+                    if draftConnectionPresentation.showsProgress {
+                        ProgressView()
+                    } else if let message = draftConnectionPresentation.message {
+                        connectionStatusMessage(message)
+                    }
 
-                if connectionPresentation.showsProgress {
-                    ProgressView()
-                } else if let message = connectionPresentation.message {
-                    connectionStatusMessage(message)
+                    Button {
+                        _ = viewModel.saveDraft()
+                    } label: {
+                        Label(SettingsLocalization.string("settings.action.save"), systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(viewModel.isPersistenceBlocked)
+                    .keyboardShortcut("s", modifiers: [.command])
                 }
             }
 
@@ -451,7 +548,37 @@ private struct AIProviderSettingsView: View {
         }
     }
 
+    private var currentServiceSummary: String {
+        if let profile = viewModel.profiles.first(where: \.isDefault) {
+            return serviceSummary(for: profile)
+        }
+        return settingsString("settings.provider.serviceSummary.empty")
+    }
+
+    private func serviceSummary(for profile: ProviderProfile) -> String {
+        let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else {
+            return profile.displayName
+        }
+        return "\(profile.displayName) · \(model)"
+    }
+
     private var profileSelectionBinding: Binding<String?> {
+        Binding(
+            get: { activeProfileID },
+            set: { id in
+                if let id {
+                    do {
+                        try viewModel.setDefaultProfile(id: id)
+                    } catch {
+                        // setDefaultProfile already surfaces the localized persistence error.
+                    }
+                }
+            }
+        )
+    }
+
+    private var editProfileSelectionBinding: Binding<String?> {
         Binding(
             get: { viewModel.selectedProfileID },
             set: { id in
@@ -460,6 +587,10 @@ private struct AIProviderSettingsView: View {
                 }
             }
         )
+    }
+
+    private var activeProfileID: String? {
+        viewModel.profiles.first(where: \.isDefault)?.id
     }
 
     private var cloudContinuationEnabledBinding: Binding<Bool> {
@@ -542,7 +673,25 @@ private struct DiagnosticsSettingsView: View {
     @State private var status = InstallationDiagnosticsStatus()
 
     var body: some View {
-        SettingsForm(title: SettingsSection.diagnostics.title) {
+        SettingsForm(title: SettingsSection.advanced.title, subtitle: settingsString("settings.advanced.subtitle")) {
+            Section(settingsString("settings.advanced.section.shortcuts")) {
+                SettingsDirectoryLink(
+                    title: settingsString("settings.advanced.openLogs"),
+                    systemImage: "doc.text.magnifyingglass",
+                    url: SettingsSupportURLs.logs
+                )
+                SettingsDirectoryLink(
+                    title: settingsString("settings.advanced.openSupportFolder"),
+                    systemImage: "folder",
+                    url: SettingsSupportURLs.support
+                )
+                SettingsDirectoryLink(
+                    title: settingsString("settings.advanced.openRimeUserFolder"),
+                    systemImage: "keyboard",
+                    url: SettingsSupportURLs.rimeUser
+                )
+            }
+
             Section(settingsString("settings.diagnostics.section.install")) {
                 ForEach(status.installRows, id: \.label) { row in
                     LabeledContent(row.label, value: row.value)
@@ -619,22 +768,77 @@ private struct DiagnosticsSettingsView: View {
     }
 }
 
+private enum SettingsSupportURLs {
+    static var support: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/KnowType", isDirectory: true)
+    }
+
+    static var logs: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/KnowType", isDirectory: true)
+    }
+
+    static var rimeUser: URL {
+        support.appendingPathComponent("Rime", isDirectory: true)
+    }
+}
+
+private struct SettingsDirectoryLink: View {
+    let title: String
+    let systemImage: String
+    let url: URL
+    @Environment(\.openURL) private var openURL
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                do {
+                    errorMessage = nil
+                    let preparedURL = try SettingsDirectoryOpener.prepareDirectoryForOpening(url)
+                    openURL(preparedURL)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            } label: {
+                Label(title, systemImage: systemImage)
+            }
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+}
+
 private struct SettingsForm<Content: View>: View {
     let title: String
+    let subtitle: String?
     let content: Content
 
-    init(title: String, @ViewBuilder content: () -> Content) {
+    init(title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.subtitle = subtitle
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .textSelection(.enabled)
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                    .textSelection(.enabled)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
 
             Form {
                 content

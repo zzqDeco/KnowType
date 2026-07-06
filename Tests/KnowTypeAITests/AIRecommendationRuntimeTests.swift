@@ -467,6 +467,56 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         })
     }
 
+    func testProviderCancellationErrorDoesNotEnterCooldownOrUnavailable() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = FailingLLMProvider(error: CancellationError())
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = cancellableRecommendationRequest()
+
+        let first = await runtime.recommendation(for: request)
+        let second = await runtime.recommendation(for: request)
+        let requestCount = await provider.requestCount
+
+        XCTAssertEqual(first, .idle)
+        XCTAssertEqual(second, .idle)
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .cancelled && $0.reason == "task_cancelled"
+        })
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .providerError })
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .cooldownActive })
+    }
+
+    func testProviderURLErrorCancelledDoesNotEnterCooldownOrUnavailable() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = FailingLLMProvider(error: URLError(.cancelled))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = cancellableRecommendationRequest()
+
+        let first = await runtime.recommendation(for: request)
+        let second = await runtime.recommendation(for: request)
+        let requestCount = await provider.requestCount
+
+        XCTAssertEqual(first, .idle)
+        XCTAssertEqual(second, .idle)
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .cancelled && $0.reason == "transport_cancelled"
+        })
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .providerError })
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .cooldownActive })
+    }
+
     func testRecommendationDiagnosticsRecordStructuredSchemaFallback() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(
@@ -1212,6 +1262,20 @@ private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @un
         lock.unlock()
         return events
     }
+}
+
+private func cancellableRecommendationRequest() -> AIRecommendationRequest {
+    AIRecommendationRequest(
+        rawInput: "nihao",
+        traditionalCandidate: CorrectionCandidate(
+            text: "你好",
+            source: "traditional",
+            confidence: 1,
+            correctionLevel: .contextual
+        ),
+        appBundleID: "com.apple.TextEdit",
+        compositionID: 1
+    )
 }
 
 private func temporaryDirectory() -> URL {

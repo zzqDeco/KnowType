@@ -4,7 +4,9 @@ import KnowTypeProviders
 enum ProviderProfileEditingPolicy {
     typealias SecretResolver = (String) throws -> String?
 
-    static let defaultProviderValidationError = "At least one default provider is required."
+    static var defaultProviderValidationError: String {
+        SettingsLocalization.string("settings.provider.validation.defaultProviderRequired")
+    }
 
     struct SavePlan {
         var profile: ProviderProfile
@@ -38,11 +40,11 @@ enum ProviderProfileEditingPolicy {
     static func validate(_ draft: ProviderProfileDraft) -> [String] {
         var errors: [String] = []
         if draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errors.append("Display name is required.")
+            errors.append(SettingsLocalization.string("settings.provider.validation.displayNameRequired"))
         }
         let validBaseURL = validHTTPURL(draft.baseURL)
         if validBaseURL == nil {
-            errors.append("Base URL must be an HTTP or HTTPS URL.")
+            errors.append(SettingsLocalization.string("settings.provider.validation.baseURLHTTP"))
         }
         if requiresModel(kind: draft.kind, baseURL: validBaseURL) {
             let model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,18 +53,18 @@ enum ProviderProfileEditingPolicy {
                 baseURL: validBaseURL,
                 model: model
             ) {
-                errors.append("Model is required.")
+                errors.append(SettingsLocalization.string("settings.provider.validation.modelRequired"))
             }
         }
         if draft.timeoutSeconds <= 0 {
-            errors.append("Timeout must be greater than zero.")
+            errors.append(SettingsLocalization.string("settings.provider.validation.timeoutPositive"))
         }
         if draft.kind == .customHTTP {
             if draft.customBodyTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                errors.append("Custom HTTP body template is required.")
+                errors.append(SettingsLocalization.string("settings.provider.validation.customHTTPBodyRequired"))
             }
             if draft.customResponsePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                errors.append("Custom HTTP response path is required.")
+                errors.append(SettingsLocalization.string("settings.provider.validation.customHTTPResponsePathRequired"))
             }
         }
         return errors

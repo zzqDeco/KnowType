@@ -104,8 +104,14 @@ swift run knowtype-demo --locale en-US --action tab I thikn this approch
 开发状态，从已安装 app 上下文注册并启用 KnowType parent input method 与可见 `.Hans` 输入模式，并修复 history 但不会把 KnowType 移到当前保留输入源之前；默认安装不改 selected preference，不会启动已安装的输入法 host，不会自动选择 KnowType，也不会在安装阶段初始化
 Rime 用户数据。即使 macOS 在刷新 TIS 或 LaunchServices 状态时预热启动 host，controller 冷启动
 也会把 Rime session、provider profile、AI learning/profile 文件、`ENV.md` 和 `CORRECTION.md`
-延迟到真实输入、AI 请求或显式维护动作时才初始化。如果已有 `KnowTypeInputMethodApp` 进程正在运行，安装脚本会先中止，而不是强杀它，
-因为 host 退出可能会把 Rime 用户数据刷盘。KnowType 使用成熟 macOS IMK 形态：
+延迟到真实输入、AI 请求或显式维护动作时才初始化。推荐用
+`./scripts/install-inputmethod.sh --configuration release` 做本地打字测试，不要直接注册
+`dist/KnowType.app`。安装脚本会把 source bundle 复制到
+`~/Library/Input Methods/KnowType.app`，清理 source、临时解包和 backup 路径上的 stale
+LaunchServices 记录，并且只注册这个 canonical installed target。替换前，安装脚本会先
+switch-away，disable 既有 KnowType 输入源行，重启 text-input menu agents，并对仍在运行的
+`KnowTypeInputMethodApp` 发送 `TERM`。如果 host 仍不退出，请手动退出，或在本地开发时显式传
+`--force-stop-host`。KnowType 使用成熟 macOS IMK 形态：
 `com.knowtype.inputmethod.KnowType` 是不可直接选择的 parent input method，
 `com.knowtype.inputmethod.KnowType.Hans` 是唯一用户可选的可见输入模式；旧 `.Mode`
 记录以及 parent-only selected/history 行只作为历史缓存清理对象。System Settings
@@ -123,9 +129,13 @@ Keychain secret、AI 上下文文档、`~/.knowtype` 或本地词库。用户手
 Rime 初始化属于正常使用行为，不属于安装阶段副作用。
 
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
-macOS 输入法菜单中选中 KnowType，然后点击 `KnowType Settings...`。它会打开
-macOS 原生 sidebar 和 grouped settings 页面；中文 macOS locale 下使用简体中文文案，
-非中文 locale 使用英文 fallback 文案。本地安装默认不安装独立 Settings app。默认安装会移除
+macOS 输入法菜单中选中 KnowType，然后点击 `KnowType 设置...`（显式英文资源路径下为
+`KnowType Settings...`）。它会打开 macOS 原生 sidebar 和 grouped settings 页面；
+默认首页是面向普通用户的“概览”，用于查看输入法、AI 续写、词库和隐私状态；
+Provider、Base URL、Custom HTTP、日志和本地路径等技术项集中在 AI 的高级配置或“高级”
+故障排查页。设置界面默认使用简体中文文案，英文资源仅作为显式英文 locale 查询和缺失 key
+fallback 保留。
+本地安装默认不安装独立 Settings app。默认安装会移除
 本机过期的兼容 `KnowType.prefPane`，避免它和新安装的输入法版本不一致；需要匹配版本的兼容 pane 时，再执行
 `./scripts/install-inputmethod.sh --with-prefpane` 构建并安装。
 如果默认安装后系统设置侧边栏仍显示 `KnowType`，那是 macOS PreferencePane 缓存残留；
@@ -142,6 +152,9 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 ```bash
 ./scripts/select-inputmethod.sh --require-selected
 ```
+
+手动验收必须看真实 macOS 输入法菜单：右上角应有 `K` 图标，菜单里应有 `知键` /
+`KnowType` 条目。只看 helper selection 成功还不够。
 
 移除本地 bundle：
 
@@ -164,7 +177,7 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.4-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.5-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -176,7 +189,7 @@ shasum -a 256 -c KnowType-v0.2.4-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.4-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.5-macos-local-mvp.zip
 ```
 
 ## 配置
@@ -255,6 +268,10 @@ revision、generation、reason、耗时、bundle id、write mode、anchor source
 launchctl setenv KNOWTYPE_PERF_DEBUG 1
 log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType"' --style compact
 ```
+
+排查 AI 请求取消和 token 消耗时，可以用
+`python3 scripts/summarize-ai-debug-log.py /tmp/knowtype-ai-debug.log`
+汇总已捕获日志。
 
 验收结束后清理调试变量：
 

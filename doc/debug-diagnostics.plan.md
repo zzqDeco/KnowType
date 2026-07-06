@@ -48,6 +48,19 @@ launchctl setenv KNOWTYPE_PERF_DEBUG 1
 log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && category == "ai"' --style compact
 ```
 
+AI cancellation and token-cost checks:
+
+```bash
+launchctl setenv KNOWTYPE_AI_DEBUG 1
+launchctl setenv KNOWTYPE_PERF_DEBUG 1
+log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType"' --style compact > /tmp/knowtype-ai-debug.log
+python3 scripts/summarize-ai-debug-log.py /tmp/knowtype-ai-debug.log
+```
+
+Expected healthy cancellation logs show `transport_cancellation_requested` and,
+for continued input, `transport_cancelled_by_new_input`, while
+`provider_error`, `timeout`, and unavailable counts remain zero.
+
 Candidate panel residue or stale frame replay:
 
 ```bash

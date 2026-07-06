@@ -21,6 +21,13 @@ The script does not mutate macOS input-source state. It reports:
 - KnowType's `AppleInputSourceHistory` position, because `Ctrl+Space` normally toggles the current and previous input sources and can skip KnowType if it is buried behind ABC or Apple Pinyin in history;
 - Gatekeeper assessment status, stale LaunchServices records outside `~/Library/Input Methods/KnowType.app`, optional compatibility `KnowType.prefPane` metadata, `KnowTypeInputMethodApp` process status, provider profile, local lexicon directories, AI lexical profile files, and ENV/CORRECTION/LEXICAL_PROFILE document presence.
 
+Strict stale LaunchServices failures are install blockers, not cosmetic
+warnings. Records that still point at `dist/KnowType.app`, release extraction
+directories, or backup paths can make helper-level TIS selection look repaired
+while the real macOS input menu still resolves a different bundle path. The
+local installer must quiesce the old host before replacement and register only
+the canonical `~/Library/Input Methods/KnowType.app` target.
+
 `--json` prints the stable machine-readable subset used by local tooling and settings diagnostics. It includes `install`, `bundle`, `preferencePane`, `rime`, `ai`, `userData`, `backups`, `warnings`, and `failures`, and avoids API keys, user text, candidate text, complete lexicons, and Rime userdb contents.
 
 Use `--strict` only when a failing diagnostic should block a local smoke run. `--legacy-parent-anchor` is retained as a deprecated compatibility flag. Use `--require-selected` only when this diagnostic process's current TIS context is the thing being checked. Use `--logs` when the visible symptom is "the input source is enabled but cannot be selected"; it prints recent KnowType app logs plus `GatekeeperPolicyScanError` and `user-preference-write com.apple.inputsources` entries from unified logging. For manual typing acceptance after diagnostics have already run, run `scripts/select-inputmethod.sh --require-selected --no-diagnose` while the target text app is active as a selection preflight, then type a real probe in that app.
@@ -35,6 +42,6 @@ On first local installation, macOS can show a System Settings authorization prom
 
 `scripts/repair-inputmethod-selection.sh` uses helper `purge-legacy` and `repair-preferences` plus installed app CLI register/enable/select to remove legacy KnowType rows, restore the visible `.Hans` input mode, then restart `cfprefsd`, `TextInputMenuAgent`, and `TextInputSwitcher`. It repairs selected preferences only after installed app selection is verified. It does not start the installed input-method host run loop. Use it after repeated local installs when stale `.Mode`, parent-only selected/history rows, or stale selected/history rows make the menu show duplicates or bounce back to Apple Pinyin or ABC.
 
-`knowtype-inputsource-tool disable` remains available for manual cleanup. The local install script copies the new bundle, refreshes LaunchServices, then uses installed app CLI register/enable plus helper `purge-legacy` and `repair-preferences` without `--include-selected` so cleanup, registration, and enablement do not launch the input-method host run loop.
+`knowtype-inputsource-tool disable` remains available for manual cleanup. The local install script now uses it before replacement: it switches away from KnowType, disables existing KnowType input-source rows, restarts text-input menu agents, asks a remaining host to stop, copies the new bundle, refreshes LaunchServices for the canonical target, then uses installed app CLI register/enable plus helper `purge-legacy` and `repair-preferences` without `--include-selected` so cleanup, registration, and enablement do not launch the input-method host run loop.
 
 CI validates the non-mutating parts of this workflow: shell syntax for all local input-method scripts, helper packaging expectations, help output for the diagnostic and selection helpers, and `scripts/build-inputmethod-bundle.sh` packaging of the executable, `Info.plist`, SwiftPM core resource bundle, and input-source icon. CI does not install or select the input method because those actions mutate runner Text Input Source state.

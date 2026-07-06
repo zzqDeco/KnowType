@@ -646,7 +646,7 @@ if [[ -d "$BUNDLE_PATH" ]]; then
     if [[ -z "$STALE_LS_PATHS" ]]; then
       ok "LaunchServices has no stale KnowType bundle records"
     else
-      fail "LaunchServices has stale KnowType bundle records outside the installed path; run ./scripts/repair-inputmethod-selection.sh"
+      fail "LaunchServices has stale KnowType bundle records outside ~/Library/Input Methods/KnowType.app; dist/KnowType.app, release extraction, or backup paths can split helper selection from the real input menu. Reinstall with ./scripts/install-inputmethod.sh"
       while IFS= read -r path; do
         [[ -n "$path" ]] && info "stale LaunchServices path: $path"
       done <<<"$STALE_LS_PATHS"

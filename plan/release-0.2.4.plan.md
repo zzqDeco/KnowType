@@ -1,5 +1,7 @@
 # KnowType v0.2.4 Developer Preview Release
 
+Status: Delivered
+
 ## Summary
 
 Release `v0.2.4` as a GitHub Developer Preview after the input turn

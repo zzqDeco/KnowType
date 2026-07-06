@@ -116,13 +116,20 @@ context, and repairs history without moving KnowType ahead of the retained
 current source. It does not rewrite selected preferences during install.
 It does not launch the installed input-method host, does not auto-select
 KnowType, and does not initialize Rime user data during install.
+Use `./scripts/install-inputmethod.sh --configuration release` for local typing
+tests and do not register `dist/KnowType.app` directly. The installer copies the
+source bundle to `~/Library/Input Methods/KnowType.app`, unregisters stale
+LaunchServices records for source, temporary, and backup paths, then registers
+only that canonical installed target.
 If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
 controller cold start still keeps Rime sessions, provider profiles, AI learning
 and profile files, `ENV.md`, and `CORRECTION.md` lazy until real input, an AI
 request, or explicit maintenance.
-If an existing `KnowTypeInputMethodApp` process is running, the installer stops
-before replacing files instead of killing it, because host shutdown can flush
-Rime user data.
+Before replacement, the installer switches away from KnowType, disables existing
+KnowType input-source rows, restarts text-input menu agents, and asks a running
+`KnowTypeInputMethodApp` to exit with `TERM`. If the host still does not exit,
+quit it manually or rerun the installer with `--force-stop-host` for local
+development.
 KnowType uses the mature macOS IMK shape: `com.knowtype.inputmethod.KnowType`
 is the non-selectable parent input method, and
 `com.knowtype.inputmethod.KnowType.Hans` is the only user-selectable visible
@@ -147,10 +154,14 @@ use; that is intentionally outside the install step.
 
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
-`KnowType Settings...`. It opens a macOS-native sidebar and grouped settings
-window using Simplified Chinese on Chinese macOS locales and English fallback
-strings on non-Chinese locales. The local install does not install a standalone
-settings app. The default install removes any stale local compatibility
+`KnowType 设置...` (`KnowType Settings...` in the explicit English resource
+path). It opens a macOS-native sidebar and grouped settings window that defaults
+to a user-facing Overview for input-method, AI continuation, lexicon, and
+privacy status. Provider details, Base URL, Custom HTTP, logs, and local paths
+live under AI advanced configuration or the Advanced troubleshooting page.
+Simplified Chinese is the default copy; English resources remain available for
+explicit English locale queries and missing-key fallback. The local install does not
+install a standalone settings app. The default install removes any stale local compatibility
 `KnowType.prefPane` so it cannot drift out of sync. A matching compatibility pane
 is only built and installed when `./scripts/install-inputmethod.sh --with-prefpane`
 is used. If System Settings still shows a `KnowType` sidebar entry after a
@@ -173,6 +184,9 @@ menu, or run the selection helper while that target app is active:
 ```bash
 ./scripts/select-inputmethod.sh --require-selected
 ```
+
+Manual acceptance requires the real macOS input menu to show the `K` icon and a
+`知键` / `KnowType` entry. Helper selection alone is not sufficient.
 
 Remove the local bundle:
 
@@ -197,7 +211,7 @@ For a GitHub Release DMG, verify the downloaded image with the published
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.4-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.5-macos-dev-preview.dmg.sha256
 ```
 
 Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
@@ -211,7 +225,7 @@ sidebar entry unless the matching pane is installed.
 The older local MVP zip can still be installed for developer debugging:
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.4-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.5-macos-local-mvp.zip
 ```
 
 ## Configuration
@@ -300,6 +314,9 @@ switches such as `KNOWTYPE_AI_DEBUG=1`, `KNOWTYPE_PANEL_DEBUG=1`,
 launchctl setenv KNOWTYPE_PERF_DEBUG 1
 log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType"' --style compact
 ```
+
+For AI cancellation and token-cost checks, summarize a captured log with
+`python3 scripts/summarize-ai-debug-log.py /tmp/knowtype-ai-debug.log`.
 
 Clear debug variables after testing:
 

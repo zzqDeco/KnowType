@@ -17,7 +17,14 @@ FROM_RELEASE_ZIP=""
 FROM_DMG_PAYLOAD=""
 BACKUP_ENABLED=1
 VERIFY_ENABLED=1
+FORCE_STOP_HOST=0
 KEEP_BACKUPS="$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
+QUIESCE_DISABLE_STATUS="not-run"
+QUIESCE_DISABLED_COUNT="0"
+QUIESCE_HOST_STOP_STATUS="not-run"
+QUIESCE_MENU_AGENTS_RESTARTED="no"
+QUIESCE_STARTED=0
+STALE_LAUNCHSERVICES_CLEANUP_COUNT="0"
 
 usage() {
   cat <<'EOF'
@@ -26,7 +33,7 @@ Usage: scripts/install-inputmethod.sh [options]
 Builds and installs KnowType.app into ~/Library/Input Methods, then uses the
 dedicated input-source helper to register and enable the input source without
 launching the input method host. KnowType-specific settings are opened from the
-input-method menu's KnowType Settings item.
+input-method menu's KnowType 设置 item (KnowType Settings in explicit English UI).
 
 Options:
   --configuration debug|release  SwiftPM build configuration. Defaults to CONFIGURATION or release.
@@ -37,6 +44,7 @@ Options:
   --no-backup                    Replace without creating an app/prefPane backup.
   --keep-backups N               Keep the newest N app backups. Defaults to 3.
   --no-verify                    Skip codesign verification during preflight.
+  --force-stop-host              After switch-away/disable, send KILL if the input-method host ignores TERM.
   --dry-run                      Print install, backup, and cache actions without changing files.
   -h, --help                     Show this help.
 EOF
@@ -101,6 +109,10 @@ while (($# > 0)); do
       ;;
     --no-verify)
       VERIFY_ENABLED=0
+      shift
+      ;;
+    --force-stop-host)
+      FORCE_STOP_HOST=1
       shift
       ;;
     -h|--help)
@@ -171,10 +183,46 @@ install_state_source() {
   fi
 }
 
+install_source_path_summary() {
+  case "$SOURCE_MODE" in
+    build) printf '%s' "$ROOT_DIR/dist/KnowType.app" ;;
+    bundle) printf '%s' "$FROM_BUNDLE" ;;
+    release-zip) printf '%s' "$FROM_RELEASE_ZIP" ;;
+    dmg-dev-preview) printf '%s' "$FROM_DMG_PAYLOAD" ;;
+    *) printf '%s' "$SOURCE_MODE" ;;
+  esac
+}
+
 cleanup_source_temp() {
   if [[ -n "$SOURCE_TEMP_DIR" && -d "$SOURCE_TEMP_DIR" ]]; then
     rm -rf "$SOURCE_TEMP_DIR"
   fi
+}
+
+restore_existing_input_source_after_failed_quiesce() {
+  if (( QUIESCE_STARTED != 1 || INSTALL_SUCCEEDED == 1 || DRY_RUN == 1 )); then
+    return 0
+  fi
+  if [[ ! -d "$TARGET_PATH" ]]; then
+    return 0
+  fi
+
+  echo "Install failed after quiescing; restoring existing KnowType input-source enablement: $TARGET_PATH" >&2
+  local launchservices_cleanup_output
+  launchservices_cleanup_output="$(knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0)" || true
+  if [[ -n "$launchservices_cleanup_output" ]]; then
+    printf '%s\n' "$launchservices_cleanup_output"
+  fi
+  knowtype_register_launchservices_path "$TARGET_PATH" 0
+  bootstrap_input_source_best_effort || true
+  repair_preferences_best_effort || true
+  killall cfprefsd 2>/dev/null || true
+  killall TextInputMenuAgent 2>/dev/null || true
+  killall TextInputSwitcher 2>/dev/null || true
+  sleep 0.5
+  repair_preferences_best_effort || true
+  killall TextInputMenuAgent 2>/dev/null || true
+  killall TextInputSwitcher 2>/dev/null || true
 }
 
 rollback_failed_install() {
@@ -225,7 +273,10 @@ rollback_failed_install() {
     fi
     if (( restored_app == 1 )); then
       knowtype_register_launchservices_path "$TARGET_PATH" 0
+      restore_existing_input_source_after_failed_quiesce
     fi
+  else
+    restore_existing_input_source_after_failed_quiesce
   fi
 }
 
@@ -241,10 +292,23 @@ inputsource_tool_path() {
 require_input_method_host_stopped() {
   if knowtype_input_method_host_is_running; then
     echo "error: KnowTypeInputMethodApp is running." >&2
-    echo "Switch to another input source and quit the running KnowType host, then rerun install." >&2
-    echo "The default installer will not kill the host because process shutdown can flush Rime user data." >&2
+    echo "The installer already switched away from KnowType, disabled its old input-source rows, and requested TERM." >&2
+    echo "Quit the remaining host process manually, or rerun with --force-stop-host for local development." >&2
+    echo "The default installer will not KILL the host because process shutdown can flush Rime user data." >&2
     exit 1
   fi
+}
+
+knowtype_input_method_host_pids() {
+  local pid command
+  while read -r pid command; do
+    [[ -n "${pid:-}" && -n "${command:-}" ]] || continue
+    case "$command" in
+      KnowTypeInputMethodApp|KnowTypeInputMethodApp\ *|*/KnowTypeInputMethodApp|*/KnowTypeInputMethodApp\ *)
+        printf '%s\n' "$pid"
+        ;;
+    esac
+  done < <(ps -axo pid=,command= 2>/dev/null)
 }
 
 knowtype_input_method_host_is_running() {
@@ -274,6 +338,90 @@ switch_away_before_replace() {
     args+=(--legacy-mode-id "$legacy_id")
   done
   "$tool" "${args[@]}" >/dev/null 2>&1 || true
+}
+
+disable_input_sources_before_replace() {
+  local tool output count
+  if ! tool="$(inputsource_tool_path)"; then
+    QUIESCE_DISABLE_STATUS="helper-unavailable"
+    echo "warning: input-source helper is unavailable; continuing without pre-install disable" >&2
+    return 0
+  fi
+
+  if output="$("$tool" disable --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" 2>&1)"; then
+    count="$(printf '%s\n' "$output" | awk -F= '/^disabled.count=/{print $2; exit}')"
+    QUIESCE_DISABLED_COUNT="${count:-unknown}"
+    QUIESCE_DISABLE_STATUS="ok"
+    echo "Disabled existing KnowType input-source rows before install: ${QUIESCE_DISABLED_COUNT}"
+  else
+    QUIESCE_DISABLE_STATUS="warning"
+    echo "warning: input-source disable failed before install; continuing so diagnostics can report state" >&2
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+  fi
+}
+
+restart_text_input_agents_for_quiesce() {
+  killall cfprefsd 2>/dev/null || true
+  killall TextInputMenuAgent 2>/dev/null || true
+  killall TextInputSwitcher 2>/dev/null || true
+  QUIESCE_MENU_AGENTS_RESTARTED="yes"
+  sleep 0.5
+}
+
+stop_input_method_host_after_quiesce() {
+  if ! knowtype_input_method_host_is_running; then
+    if [[ "$QUIESCE_HOST_STOP_STATUS" == "not-run" ]]; then
+      QUIESCE_HOST_STOP_STATUS="not-running"
+    fi
+    return 0
+  fi
+
+  local pids=""
+  pids="$(knowtype_input_method_host_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  if [[ -z "$pids" ]]; then
+    QUIESCE_HOST_STOP_STATUS="unknown-running"
+    return 0
+  fi
+
+  echo "Requesting KnowTypeInputMethodApp shutdown after switch-away/disable: $pids"
+  # shellcheck disable=SC2086
+  kill -TERM $pids 2>/dev/null || true
+  QUIESCE_HOST_STOP_STATUS="term-sent"
+
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 0.2
+    if ! knowtype_input_method_host_is_running; then
+      QUIESCE_HOST_STOP_STATUS="stopped"
+      return 0
+    fi
+  done
+
+  if (( FORCE_STOP_HOST == 1 )); then
+    pids="$(knowtype_input_method_host_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    if [[ -n "$pids" ]]; then
+      echo "Force-stopping KnowTypeInputMethodApp after TERM did not exit: $pids"
+      # shellcheck disable=SC2086
+      kill -KILL $pids 2>/dev/null || true
+    fi
+    QUIESCE_HOST_STOP_STATUS="kill-sent"
+    for attempt in 1 2 3 4 5; do
+      sleep 0.2
+      if ! knowtype_input_method_host_is_running; then
+        QUIESCE_HOST_STOP_STATUS="force-stopped"
+        return 0
+      fi
+    done
+  fi
+}
+
+quiesce_before_replace() {
+  QUIESCE_STARTED=1
+  switch_away_before_replace
+  disable_input_sources_before_replace
+  restart_text_input_agents_for_quiesce
+  stop_input_method_host_after_quiesce
+  require_input_method_host_stopped
 }
 
 purge_legacy_best_effort() {
@@ -554,6 +702,7 @@ if (( DRY_RUN == 1 )); then
   fi
   echo "KnowType input-method install dry run"
   echo "Source mode: $(install_state_source)"
+  echo "Source path: $(install_source_path_summary)"
   [[ -n "$FROM_BUNDLE" ]] && echo "Source bundle: $FROM_BUNDLE"
   [[ -n "$FROM_RELEASE_ZIP" ]] && echo "Source release zip: $FROM_RELEASE_ZIP"
   [[ -n "$FROM_DMG_PAYLOAD" ]] && echo "Source DMG payload: $FROM_DMG_PAYLOAD"
@@ -561,6 +710,10 @@ if (( DRY_RUN == 1 )); then
   [[ -n "$SOURCE_GIT_TAG" ]] && echo "Release tag: $SOURCE_GIT_TAG"
   [[ -n "$SOURCE_GIT_COMMIT" ]] && echo "Release commit: $SOURCE_GIT_COMMIT"
   echo "Target bundle: $TARGET_PATH"
+  echo "Quiesce plan: switch away from KnowType, disable old KnowType input-source rows, restart text-input agents, then TERM the host if it is still running."
+  if (( FORCE_STOP_HOST == 1 )); then
+    echo "Quiesce plan: --force-stop-host would KILL the host only after TERM fails."
+  fi
   echo "Install state: $(knowtype_install_state_path)"
   echo "Backup root: $(knowtype_backup_root_dir)"
   if (( BACKUP_ENABLED == 1 )); then
@@ -584,10 +737,16 @@ if (( DRY_RUN == 1 )); then
   echo
   echo "LaunchServices records that would be unregistered:"
   ls_count=0
+  canonical_target_path="$(knowtype_canonical_bundle_path "$TARGET_PATH")"
   while IFS= read -r bundle_path; do
     [[ -n "$bundle_path" ]] || continue
+    expanded_bundle_path="$(knowtype_expand_home_path "$(knowtype_strip_lsregister_suffix "$bundle_path")")"
+    canonical_bundle_path="$(knowtype_canonical_bundle_path "$expanded_bundle_path")"
+    if [[ -n "$canonical_target_path" && "$canonical_bundle_path" == "$canonical_target_path" ]]; then
+      continue
+    fi
     ls_count=$((ls_count + 1))
-    echo "  $(knowtype_expand_home_path "$(knowtype_strip_lsregister_suffix "$bundle_path")")"
+    echo "  $expanded_bundle_path"
   done < <(knowtype_launchservices_paths_for_identity)
   if (( ls_count == 0 )); then
     echo "  <none>"
@@ -617,11 +776,13 @@ if (( DRY_RUN == 1 )); then
   knowtype_quit_system_settings_if_running 1
   echo
   echo "Text Input Source preference rows would be repaired and menu agents would be restarted."
+  echo "Only the canonical installed app would be registered with LaunchServices: $TARGET_PATH"
+  echo "Menu acceptance would still require the real macOS input menu to show the K icon and 知键 entry."
   exit 0
 fi
 
 if (( DRY_RUN == 0 )); then
-  require_input_method_host_stopped
+  quiesce_before_replace
 fi
 
 prepare_source_artifacts
@@ -631,8 +792,7 @@ if (( WITH_PREFPANE == 1 )); then
   mkdir -p "$PREFPANE_TARGET_DIR"
 fi
 
-switch_away_before_replace
-sleep 0.2
+stop_input_method_host_after_quiesce
 require_input_method_host_stopped
 
 if (( BACKUP_ENABLED == 1 )); then
@@ -672,7 +832,11 @@ if command -v xattr >/dev/null 2>&1; then
   fi
 fi
 
-knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0
+launchservices_cleanup_output="$(knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0)"
+if [[ -n "$launchservices_cleanup_output" ]]; then
+  printf '%s\n' "$launchservices_cleanup_output"
+fi
+STALE_LAUNCHSERVICES_CLEANUP_COUNT="$(printf '%s\n' "$launchservices_cleanup_output" | awk '/^Unregistered LaunchServices record:/{count++} END{print count+0}')"
 knowtype_register_launchservices_path "$TARGET_PATH" 0
 
 purge_legacy_best_effort
@@ -682,6 +846,10 @@ repair_preferences_best_effort
 
 sleep 0.75
 killall cfprefsd 2>/dev/null || true
+killall TextInputMenuAgent 2>/dev/null || true
+killall TextInputSwitcher 2>/dev/null || true
+sleep 0.5
+repair_preferences_best_effort
 killall TextInputMenuAgent 2>/dev/null || true
 killall TextInputSwitcher 2>/dev/null || true
 sleep 0.5
@@ -725,18 +893,23 @@ fi
 echo
 echo "KnowType install summary"
 printf '  %-18s %s\n' "Source:" "$(install_state_source)"
+printf '  %-18s %s\n' "Source path:" "$(install_source_path_summary)"
 printf '  %-18s %s\n' "Version:" "${installed_version:-<unknown>}"
 printf '  %-18s %s\n' "Build:" "${installed_build:-<unknown>}"
 printf '  %-18s %s\n' "Target:" "$TARGET_PATH"
+printf '  %-18s %s\n' "Canonical target:" "$TARGET_PATH"
 printf '  %-18s %s\n' "Install state:" "$(knowtype_install_state_path)"
 printf '  %-18s %s\n' "Backup:" "${BACKUP_ID:-<none>}"
 printf '  %-18s %s\n' "Postflight:" "$postflight_result"
+printf '  %-18s disable=%s disabledCount=%s hostStop=%s menuAgentsRestarted=%s\n' \
+  "Quiesce:" "$QUIESCE_DISABLE_STATUS" "$QUIESCE_DISABLED_COUNT" "$QUIESCE_HOST_STOP_STATUS" "$QUIESCE_MENU_AGENTS_RESTARTED"
+printf '  %-18s %s\n' "Stale LS cleanup:" "$STALE_LAUNCHSERVICES_CLEANUP_COUNT"
 
 if (( WITH_PREFPANE == 1 )); then
   echo "Installed KnowType compatibility PreferencePane to: $PREFPANE_TARGET_PATH"
   echo "System Settings may show the compatibility KnowType pane after reopening."
 else
-  echo "KnowType settings are available from the input-method menu: KnowType Settings..."
+  echo "KnowType settings are available from the input-method menu: KnowType 设置... (KnowType Settings... in explicit English UI)"
   echo "Default install keeps System Settings free of stale KnowType PreferencePane entries."
   if (( REMOVED_STALE_PREFPANE == 1 )); then
     echo "Removed stale KnowType compatibility PreferencePane from: $PREFPANE_TARGET_PATH"
@@ -748,6 +921,7 @@ echo "Postflight uses the JSON install snapshot only; run ./scripts/diagnose-inp
 if [[ -n "$BACKUP_ID" ]]; then
   echo "Rollback command: ./scripts/rollback-inputmethod.sh --to $BACKUP_ID"
 fi
+echo "Menu acceptance required: the real macOS input menu must show the K icon and a 知键/KnowType entry; helper selection alone is not sufficient."
 echo "Activate the target text app, select KnowType or run ./scripts/select-inputmethod.sh --require-selected, then type a real probe before manual acceptance."
 echo "If System Settings asks to allow 知键/KnowType as an input method, click Allow before testing selection."
 echo "If diagnostics show HIToolbox selected preference is still another source, choose KnowType from the active app's input menu/System Settings."

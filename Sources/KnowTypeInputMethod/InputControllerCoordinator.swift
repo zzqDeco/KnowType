@@ -381,7 +381,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     resetAnchorState()
                 }
             }
-            invalidateSuggestion()
+            invalidateSuggestion(reason: "input_changed")
             publishLocalSuggestion(client: client)
             return true
         case .action(let action):
@@ -472,7 +472,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         compositionStateRuntime.appendText(text)
         _ = conversionEngine.process(.text(text))
         aiRecommendationState = .idle
-        invalidateSuggestion()
+        invalidateSuggestion(reason: "input_changed")
         publishLocalSuggestion(client: client)
         return true
     }
@@ -1574,7 +1574,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         runtimePreferences = preferences
         aiAcceptanceRuntime.updateRuntimePreferences(preferences)
         sessionController = Self.polishOnlySessionController()
-        invalidateSuggestion()
+        invalidateSuggestion(reason: "runtime_preferences_changed")
         return true
     }
 
@@ -1588,13 +1588,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
         anchorResolver.reset()
     }
 
-    private func invalidateSuggestion() {
+    private func invalidateSuggestion(reason: String = "composition_invalidated") {
         suggestionStateRuntime.invalidate()
         nativeCandidateNavigationRuntime.clearSelectedCandidate()
         aiRecommendationState = aiRecommendationRuntime.reset(
             compositionID: compositionID,
             rawLength: rawBuffer.count,
-            reason: "composition_invalidated"
+            reason: reason
         )
     }
 
