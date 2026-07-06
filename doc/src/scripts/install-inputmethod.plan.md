@@ -35,22 +35,35 @@ Installs the locally built KnowType input method bundle into
   that backup before exiting.
 - The script keeps the newest three backups by default. Use `--keep-backups N`
   to adjust retention.
-- The script switches away from any current KnowType source, replaces
+- The script switches away from any current KnowType source, disables existing
+  KnowType TIS rows, restarts text-input menu agents, asks a remaining
+  `KnowTypeInputMethodApp` to exit with `TERM`, replaces
   `~/Library/Input Methods/KnowType.app`, clears quarantine, and refreshes the
   installed path with `lsregister -f`.
+- `--force-stop-host` is an explicit development escape hatch. The default path
+  never sends `KILL`; if `TERM` does not quiesce the host, the install fails
+  with instructions instead of risking an unplanned process kill.
+- The postflight unregisters stale LaunchServices records for source,
+  `dist/KnowType.app`, release extraction, and backup paths, then registers only
+  the canonical installed app at `~/Library/Input Methods/KnowType.app`.
+  Registering `dist/KnowType.app` directly is not a supported local install
+  state because it can split helper/TIS state from the real menu-bar state.
 - It switches away, disables stale `.Mode` TIS modes, registers/enables the
   parent anchor and visible `.Hans` mode from the installed app CLI context, and
   repairs scoped preference rows through `knowtype-inputsource-tool`.
   These default install steps return before the app run loop starts and do not
   select KnowType.
+- After the post-registration `cfprefsd` and menu-agent refresh, it runs one
+  final scoped preference repair and restarts only the menu agents. This keeps
+  HIToolbox enabled rows from being overwritten by stale `cfprefsd` cache after
+  a pre-install disable.
 - The switch-away helper also removes KnowType from HIToolbox
   `AppleSelectedInputSources`; otherwise macOS can relaunch the host from stale
   selected preferences even when the live current source is ABC.
-- If `KnowTypeInputMethodApp` is already running, the installer aborts before the
-  build/replace phase instead of killing it, because process shutdown can flush
-  Rime user data and would violate the install/user-data boundary. The check
-  matches the full process command basename rather than a truncated process
-  name.
+- If `KnowTypeInputMethodApp` keeps running after switch-away, disable, menu
+  agent refresh, and `TERM`, the installer aborts before replacement unless
+  `--force-stop-host` was explicitly passed. The process check matches the full
+  process command basename rather than a truncated process name.
 - Local installs inject a timestamp `CFBundleVersion` by default so
   LaunchServices and TIS do not keep reusing stale metadata from a previous
   development build with the same source-controlled version.

@@ -65,6 +65,7 @@ when converting a shipped plan into a short record.
 | [system-settings-prefpane-cache-cleanup.plan.md](system-settings-prefpane-cache-cleanup.plan.md) | Remove stale System Settings prefPane cache after default local installs | Active |
 | [install-upgrade-rollback-experience.plan.md](install-upgrade-rollback-experience.plan.md) | Traceable local installs, app backups, rollback, and dynamic diagnostics status | Active |
 | [install-user-data-isolation.plan.md](install-user-data-isolation.plan.md) | Keep local install, rollback, and repair from launching the host or mutating user data | Active |
+| [inputmethod-install-canonical-registration.plan.md](inputmethod-install-canonical-registration.plan.md) | Quiesce the old IMK host before local installs and register only the canonical installed app path | Active |
 | [imk-host-cold-start-no-userdata-write.plan.md](imk-host-cold-start-no-userdata-write.plan.md) | Keep IMK host prelaunch from initializing Rime, provider, or AI learning user data | Active |
 | [input-source-layer-model.plan.md](input-source-layer-model.plan.md) | Earlier parent/mode separation plan, superseded by menu-visible mode registration | Absorbed |
 | [input-source-parent-anchor-registration.plan.md](input-source-parent-anchor-registration.plan.md) | Earlier parent-anchor enablement plan, superseded by menu-visible mode registration | Absorbed |
