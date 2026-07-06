@@ -188,8 +188,14 @@ public final class ProviderProfilesViewModel: ObservableObject {
             throw persistenceBlockedError
         }
 
-        guard profiles.contains(where: { $0.id == id }) else {
+        guard let profile = profiles.first(where: { $0.id == id }) else {
             return
+        }
+        do {
+            try validateCurrentServiceCandidate(profile)
+        } catch {
+            savedConnectionStatus = .failure(error.localizedDescription)
+            throw error
         }
         let updatedProfiles = profiles.map { profile in
             var updated = profile
@@ -207,10 +213,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         profiles = updatedProfiles
         file = updatedFile
         lastErrorMessage = nil
-        if let profile = profiles.first(where: { $0.id == id }) {
-            selectedProfileID = id
-            draft = ProviderProfileDraft(profile: profile)
-        }
+        reconcileDraftDefaultState(activeProfileID: id)
         resetSavedConnectionStatus()
     }
 
@@ -339,6 +342,25 @@ public final class ProviderProfilesViewModel: ObservableObject {
         resetSavedConnectionStatus()
     }
 
+    private func validateCurrentServiceCandidate(_ profile: ProviderProfile) throws {
+        let savedDraft = ProviderProfileDraft(profile: profile)
+        if let message = ProviderProfileEditingPolicy.validate(savedDraft).first {
+            throw ProviderProfilesViewModelError.validationFailed(message)
+        }
+        _ = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
+            draft: savedDraft,
+            profiles: profiles,
+            secretResolver: { try secretStore.secret(named: $0) }
+        )
+    }
+
+    private func reconcileDraftDefaultState(activeProfileID: String) {
+        let shouldBeDefault = draft.id == activeProfileID
+        if draft.isDefault != shouldBeDefault {
+            draft.isDefault = shouldBeDefault
+        }
+    }
+
     private func resetDraftConnectionStatus() {
         draftConnectionTestGeneration &+= 1
         setDraftConnectionStatus(.idle)
@@ -392,6 +414,7 @@ public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
     case loadFailed(String)
     case missingAPIKey
     case rollbackFailed(secretMutation: String, rollback: String)
+    case validationFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -405,6 +428,8 @@ public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
                 secretMutation,
                 rollback
             )
+        case .validationFailed(let message):
+            return message
         }
     }
 }

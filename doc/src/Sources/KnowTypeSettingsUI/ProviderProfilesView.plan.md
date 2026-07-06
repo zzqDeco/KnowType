@@ -43,9 +43,13 @@ diagnostics.
   disclosure.
 - The current-service picker persists the runtime default. The advanced edit
   selector loads a profile into the draft without switching the active provider.
-- Switching the current service also reconciles the advanced draft to the newly
-  active provider, so a follow-up save or draft connection test cannot
-  accidentally target the previously edited profile.
+- Switching the current service first validates that the saved profile can build
+  a runtime provider configuration, including required Keychain secret
+  availability. Invalid remote templates are rejected before they can become the
+  active runtime default.
+- Switching the current service reconciles the advanced draft's default flag
+  without replacing the rest of the draft, so unsaved advanced edits are not
+  discarded and a later save cannot silently flip back to the old default.
 - Saved-service connection status and advanced draft connection status are
   rendered separately. Draft validation and connection-test failures stay inside
   the advanced service configuration disclosure instead of replacing the

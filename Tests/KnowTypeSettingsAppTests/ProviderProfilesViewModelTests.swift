@@ -1023,6 +1023,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
     func testSetDefaultPersistsDefaultProviderChoice() throws {
         let profiles = ProviderProfileTemplates.defaultProfiles()
+        let originalDraftID = try XCTUnwrap(profiles.first(where: \.isDefault)?.id)
         let targetID = try XCTUnwrap(profiles.first(where: { $0.kind == .ollamaNative })?.id)
         let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: profiles))
         let viewModel = ProviderProfilesViewModel(
@@ -1034,10 +1035,46 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let saved = try XCTUnwrap(store.savedFiles.last?.profiles)
         XCTAssertEqual(saved.filter(\.isDefault).map(\.id), [targetID])
+        XCTAssertEqual(viewModel.selectedProfileID, originalDraftID)
+        XCTAssertEqual(viewModel.draft.id, originalDraftID)
+        XCTAssertFalse(viewModel.draft.isDefault)
+    }
+
+    func testSetDefaultPreservesDraftEditsForSelectedProfile() throws {
+        let profiles = ProviderProfileTemplates.defaultProfiles()
+        let targetID = try XCTUnwrap(profiles.first(where: { $0.kind == .ollamaNative })?.id)
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: profiles))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore()
+        )
+        viewModel.selectProfile(id: targetID)
+        viewModel.draft.displayName = "Unsaved Ollama Name"
+
+        try viewModel.setDefaultProfile(id: targetID)
+
         XCTAssertEqual(viewModel.selectedProfileID, targetID)
         XCTAssertEqual(viewModel.draft.id, targetID)
-        XCTAssertEqual(viewModel.draft.kind, .ollamaNative)
+        XCTAssertEqual(viewModel.draft.displayName, "Unsaved Ollama Name")
         XCTAssertTrue(viewModel.draft.isDefault)
+    }
+
+    func testSetDefaultRejectsRemoteServiceWithoutRequiredSecret() throws {
+        let profiles = ProviderProfileEditingPolicy.profileScopedSecrets(ProviderProfileTemplates.defaultProfiles())
+        let originalDefaultIDs = profiles.filter(\.isDefault).map(\.id)
+        let targetID = try XCTUnwrap(profiles.first(where: { $0.kind == .openAIResponses })?.id)
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: profiles))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore()
+        )
+
+        XCTAssertThrowsError(try viewModel.setDefaultProfile(id: targetID)) { error in
+            XCTAssertEqual(error as? ProviderProfilesViewModelError, .missingAPIKey)
+        }
+        XCTAssertEqual(viewModel.profiles.filter(\.isDefault).map(\.id), originalDefaultIDs)
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertEqual(viewModel.savedConnectionStatus, .failure("此 provider 需要 API Key。"))
     }
 
     func testSetDefaultDoesNotPublishProfilesWhenStoreSaveFails() throws {

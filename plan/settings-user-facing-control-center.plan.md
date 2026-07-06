@@ -38,8 +38,11 @@
 - Keep current-service selection separate from advanced profile editing:
   changing the current service persists the default provider, while the advanced
   edit selector only loads a draft. When the current service changes, the
-  advanced draft is reconciled to that newly active provider so the service
-  summary, draft editor, and saved provider remain aligned.
+  advanced draft's default flag is reconciled to the newly active provider
+  without discarding unsaved draft edits.
+- Validate a saved profile before making it current. Remote provider templates
+  without an available Keychain secret are rejected before `providers.json` is
+  rewritten as the runtime default.
 - Keep saved-service and draft-editor connection status separate. The top-level
   connection test reports only the saved default provider, while draft
   validation/test results stay inside the advanced service configuration area.
