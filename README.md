@@ -116,13 +116,20 @@ context, and repairs history without moving KnowType ahead of the retained
 current source. It does not rewrite selected preferences during install.
 It does not launch the installed input-method host, does not auto-select
 KnowType, and does not initialize Rime user data during install.
+Use `./scripts/install-inputmethod.sh --configuration release` for local typing
+tests and do not register `dist/KnowType.app` directly. The installer copies the
+source bundle to `~/Library/Input Methods/KnowType.app`, unregisters stale
+LaunchServices records for source, temporary, and backup paths, then registers
+only that canonical installed target.
 If macOS prelaunches the host while refreshing TIS or LaunchServices state, the
 controller cold start still keeps Rime sessions, provider profiles, AI learning
 and profile files, `ENV.md`, and `CORRECTION.md` lazy until real input, an AI
 request, or explicit maintenance.
-If an existing `KnowTypeInputMethodApp` process is running, the installer stops
-before replacing files instead of killing it, because host shutdown can flush
-Rime user data.
+Before replacement, the installer switches away from KnowType, disables existing
+KnowType input-source rows, restarts text-input menu agents, and asks a running
+`KnowTypeInputMethodApp` to exit with `TERM`. If the host still does not exit,
+quit it manually or rerun the installer with `--force-stop-host` for local
+development.
 KnowType uses the mature macOS IMK shape: `com.knowtype.inputmethod.KnowType`
 is the non-selectable parent input method, and
 `com.knowtype.inputmethod.KnowType.Hans` is the only user-selectable visible
@@ -177,6 +184,9 @@ menu, or run the selection helper while that target app is active:
 ```bash
 ./scripts/select-inputmethod.sh --require-selected
 ```
+
+Manual acceptance requires the real macOS input menu to show the `K` icon and a
+`知键` / `KnowType` entry. Helper selection alone is not sufficient.
 
 Remove the local bundle:
 
