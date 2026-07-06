@@ -139,6 +139,7 @@
 "settings.provider.validation.customHTTPBodyRequired" = "Custom HTTP 请求体模板不能为空。";
 "settings.provider.validation.customHTTPResponsePathRequired" = "Custom HTTP 响应路径不能为空。";
 "settings.provider.validation.defaultProviderRequired" = "至少需要保留一个默认 provider。";
+"settings.provider.validation.customHTTPPlaceholder" = "请先在高级服务配置中完成 Custom HTTP 的 Base URL 后再设为当前服务。";
 "settings.provider.lastError" = "最近错误";
 "settings.provider.error.missingAPIKey" = "此 provider 需要 API Key。";
 "settings.provider.error.rollbackFailed" = "更新 provider secret 失败：%@。同时恢复 providers.json 失败：%@。Provider 元数据可能已经暂存到磁盘。";

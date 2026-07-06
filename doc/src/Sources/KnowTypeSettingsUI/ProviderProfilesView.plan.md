@@ -47,6 +47,9 @@ diagnostics.
   a runtime provider configuration, including required Keychain secret
   availability. Invalid remote templates are rejected before they can become the
   active runtime default.
+- Unconfigured Custom HTTP example endpoints are not valid current services.
+  When an optional secret reference points to a missing Keychain item, Settings
+  clears that stale reference before saving the profile as the runtime default.
 - Switching the current service reconciles the advanced draft's default flag
   without replacing the rest of the draft, so unsaved advanced edits are not
   discarded and a later save cannot silently flip back to the old default.

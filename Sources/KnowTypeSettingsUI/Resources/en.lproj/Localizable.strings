@@ -139,6 +139,7 @@
 "settings.provider.validation.customHTTPBodyRequired" = "Custom HTTP body template is required.";
 "settings.provider.validation.customHTTPResponsePathRequired" = "Custom HTTP response path is required.";
 "settings.provider.validation.defaultProviderRequired" = "At least one default provider is required.";
+"settings.provider.validation.customHTTPPlaceholder" = "Finish the Custom HTTP Base URL in Advanced Service Configuration before making it current.";
 "settings.provider.lastError" = "Last Error";
 "settings.provider.error.missingAPIKey" = "API key is required for this provider.";
 "settings.provider.error.rollbackFailed" = "Failed to update provider secret: %@. Also failed to restore providers.json: %@. Provider metadata may be staged on disk.";

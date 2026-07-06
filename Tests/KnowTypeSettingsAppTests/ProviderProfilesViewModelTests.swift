@@ -1077,6 +1077,58 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.savedConnectionStatus, .failure("此 provider 需要 API Key。"))
     }
 
+    func testSetDefaultRejectsPlaceholderCustomHTTPTemplate() throws {
+        let profiles = ProviderProfileEditingPolicy.profileScopedSecrets(ProviderProfileTemplates.defaultProfiles())
+        let originalDefaultIDs = profiles.filter(\.isDefault).map(\.id)
+        let targetID = try XCTUnwrap(profiles.first(where: { $0.kind == .customHTTP })?.id)
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: profiles))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore()
+        )
+        let message = SettingsLocalization.string("settings.provider.validation.customHTTPPlaceholder")
+
+        XCTAssertThrowsError(try viewModel.setDefaultProfile(id: targetID)) { error in
+            XCTAssertEqual(error as? ProviderProfilesViewModelError, .validationFailed(message))
+        }
+        XCTAssertEqual(viewModel.profiles.filter(\.isDefault).map(\.id), originalDefaultIDs)
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertEqual(viewModel.savedConnectionStatus, .failure(message))
+    }
+
+    func testSetDefaultClearsMissingOptionalSecretBeforeSavingCurrentService() throws {
+        let current = ProviderProfile(
+            id: "current",
+            displayName: "Current Local Ollama",
+            kind: .ollamaNative,
+            baseURL: URL(string: "http://localhost:11434")!,
+            model: "llama3.2",
+            isDefault: true
+        )
+        let target = ProviderProfile(
+            id: "local-proxy",
+            displayName: "Local Proxy",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+            model: "",
+            secretName: "knowtype.provider.local-proxy.apiKey"
+        )
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: [current, target]))
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore()
+        )
+
+        try viewModel.setDefaultProfile(id: target.id)
+
+        let savedProfiles = try XCTUnwrap(store.savedFiles.last?.profiles)
+        let savedTarget = try XCTUnwrap(savedProfiles.first(where: { $0.id == target.id }))
+        XCTAssertTrue(savedTarget.isDefault)
+        XCTAssertNil(savedTarget.secretName)
+        XCTAssertEqual(savedProfiles.filter(\.isDefault).map(\.id), [target.id])
+        XCTAssertNil(viewModel.profiles.first(where: { $0.id == target.id })?.secretName)
+    }
+
     func testSetDefaultDoesNotPublishProfilesWhenStoreSaveFails() throws {
         let profiles = ProviderProfileTemplates.defaultProfiles()
         let originalDefaultIDs = profiles.filter(\.isDefault).map(\.id)

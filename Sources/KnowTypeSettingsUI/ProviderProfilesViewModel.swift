@@ -191,14 +191,15 @@ public final class ProviderProfilesViewModel: ObservableObject {
         guard let profile = profiles.first(where: { $0.id == id }) else {
             return
         }
+        let activatedProfile: ProviderProfile
         do {
-            try validateCurrentServiceCandidate(profile)
+            activatedProfile = try validatedCurrentServiceProfile(profile)
         } catch {
             savedConnectionStatus = .failure(error.localizedDescription)
             throw error
         }
         let updatedProfiles = profiles.map { profile in
-            var updated = profile
+            var updated = profile.id == id ? activatedProfile : profile
             updated.isDefault = profile.id == id
             return updated
         }
@@ -342,16 +343,35 @@ public final class ProviderProfilesViewModel: ObservableObject {
         resetSavedConnectionStatus()
     }
 
-    private func validateCurrentServiceCandidate(_ profile: ProviderProfile) throws {
+    private func validatedCurrentServiceProfile(_ profile: ProviderProfile) throws -> ProviderProfile {
         let savedDraft = ProviderProfileDraft(profile: profile)
         if let message = ProviderProfileEditingPolicy.validate(savedDraft).first {
             throw ProviderProfilesViewModelError.validationFailed(message)
         }
-        _ = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
+        if isPlaceholderCustomHTTPProfile(profile) {
+            throw ProviderProfilesViewModelError.validationFailed(
+                SettingsLocalization.string("settings.provider.validation.customHTTPPlaceholder")
+            )
+        }
+        let configuration = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
             draft: savedDraft,
             profiles: profiles,
             secretResolver: { try secretStore.secret(named: $0) }
         )
+        var normalizedProfile = profile
+        if ProviderProfileEditingPolicy.acceptsOptionalSecret(profile),
+           configuration.apiKey == nil {
+            normalizedProfile.secretName = nil
+        }
+        return normalizedProfile
+    }
+
+    private func isPlaceholderCustomHTTPProfile(_ profile: ProviderProfile) -> Bool {
+        guard profile.kind == .customHTTP,
+              let host = profile.baseURL.host(percentEncoded: false)?.lowercased() else {
+            return false
+        }
+        return host == "example.com" || host.hasSuffix(".example.com")
     }
 
     private func reconcileDraftDefaultState(activeProfileID: String) {

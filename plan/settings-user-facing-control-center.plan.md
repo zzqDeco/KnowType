@@ -43,6 +43,9 @@
 - Validate a saved profile before making it current. Remote provider templates
   without an available Keychain secret are rejected before `providers.json` is
   rewritten as the runtime default.
+- Reject unconfigured Custom HTTP example endpoints before they can become the
+  current service, and clear missing optional secret references from local
+  OpenAI-compatible or Custom HTTP profiles before persisting them as default.
 - Keep saved-service and draft-editor connection status separate. The top-level
   connection test reports only the saved default provider, while draft
   validation/test results stay inside the advanced service configuration area.
