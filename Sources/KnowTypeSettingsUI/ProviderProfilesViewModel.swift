@@ -205,6 +205,7 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if selectedProfileID == id, let profile = profiles.first(where: { $0.id == id }) {
             draft = ProviderProfileDraft(profile: profile)
         }
+        resetConnectionStatus()
     }
 
     @discardableResult
@@ -263,6 +264,64 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    public func testSavedProfileConnection(id profileID: String? = nil) async -> Bool {
+        if let persistenceBlockedError {
+            let message = persistenceBlockedError.localizedDescription
+            lastErrorMessage = message
+            connectionStatus = .failure(message)
+            return false
+        }
+
+        guard let profile = savedConnectionProfile(id: profileID) else {
+            connectionStatus = .failure(SettingsLocalization.string("settings.provider.serviceSummary.empty"))
+            return false
+        }
+
+        let savedDraft = ProviderProfileDraft(profile: profile)
+        let connectionValidationErrors = ProviderProfileEditingPolicy.validate(savedDraft)
+        guard connectionValidationErrors.isEmpty else {
+            validationErrors = ProviderProfileEditingPolicy.mergedValidationErrors(
+                connectionValidationErrors,
+                ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
+            )
+            connectionStatus = .failure(SettingsLocalization.string("settings.provider.connection.fixValidationBeforeTesting"))
+            return false
+        }
+        validationErrors = ProviderProfileEditingPolicy.saveOnlyValidationErrors(from: validationErrors)
+
+        connectionTestGeneration &+= 1
+        let generation = connectionTestGeneration
+        let snapshot = SavedConnectionTestSnapshot(profile: profile)
+        do {
+            let configuration = try ProviderProfileEditingPolicy.makeConnectionConfiguration(
+                draft: savedDraft,
+                profiles: profiles,
+                secretResolver: { try secretStore.secret(named: $0) }
+            )
+            connectionStatus = .testing
+            let result = try await connectionTester(configuration)
+            guard isCurrentSavedConnectionTest(generation: generation, snapshot: snapshot) else {
+                return false
+            }
+            connectionStatus = .success(
+                String(
+                    format: SettingsLocalization.string("settings.provider.connection.success"),
+                    result.providerName,
+                    result.candidateCount
+                )
+            )
+            return true
+        } catch {
+            guard isCurrentSavedConnectionTest(generation: generation, snapshot: snapshot) else {
+                return false
+            }
+            let message = error.localizedDescription
+            connectionStatus = .failure(message)
+            return false
+        }
+    }
+
     public func validate(_ draft: ProviderProfileDraft) -> [String] {
         ProviderProfileEditingPolicy.validate(draft)
     }
@@ -280,11 +339,30 @@ public final class ProviderProfilesViewModel: ObservableObject {
             && selectedProfileID == snapshot.selectedProfileID
             && draft == snapshot.draft
     }
+
+    private func isCurrentSavedConnectionTest(
+        generation: UInt64,
+        snapshot: SavedConnectionTestSnapshot
+    ) -> Bool {
+        generation == connectionTestGeneration
+            && savedConnectionProfile(id: snapshot.profile.id) == snapshot.profile
+    }
+
+    private func savedConnectionProfile(id profileID: String?) -> ProviderProfile? {
+        if let profileID {
+            return profiles.first { $0.id == profileID }
+        }
+        return profiles.first(where: \.isDefault) ?? profiles.first
+    }
 }
 
 private struct ConnectionTestSnapshot: Equatable {
     var selectedProfileID: String?
     var draft: ProviderProfileDraft
+}
+
+private struct SavedConnectionTestSnapshot: Equatable {
+    var profile: ProviderProfile
 }
 
 public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {

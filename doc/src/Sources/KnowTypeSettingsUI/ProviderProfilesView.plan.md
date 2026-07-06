@@ -36,6 +36,11 @@ diagnostics.
 - The AI page should lead with user-facing continuation controls, current
   service summary, and connection test. Provider technical identifiers remain
   available only in the advanced service configuration disclosure.
+- The current service summary and top-level connection test use the saved
+  default provider, matching the input runtime's active service. Unsaved draft
+  edits are tested from the advanced service configuration disclosure.
+- Settings directory shortcuts create the target logs/support/Rime folder before
+  opening it, so fresh installs expose a usable troubleshooting path.
 - User-facing settings copy defaults to Simplified Chinese. Technical terms such
   as API Key, URL, Rime, macOS, and InputMethodKit remain untranslated where that
   is the clearest mixed Chinese copy.

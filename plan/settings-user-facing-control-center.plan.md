@@ -29,6 +29,12 @@
 - Put provider editor fields, `Base URL`, `Custom HTTP`, API key, lexicon paths,
   local data paths, and diagnostic commands in advanced disclosures or the
   Advanced page.
+- Treat the provider marked `isDefault` as the active AI service shown on
+  Overview and tested from the top-level AI service section. The selected
+  profile/draft remains the advanced editing target, with draft connection
+  tests kept next to the advanced editor.
+- Create local logs/support/Rime directories before opening Settings shortcut
+  buttons so fresh installs do not silently no-op.
 - Keep Settings copy Chinese by default while preserving explicit English
   localization resources and missing-key fallback.
 

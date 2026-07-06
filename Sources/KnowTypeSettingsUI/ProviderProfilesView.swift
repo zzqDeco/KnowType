@@ -425,12 +425,12 @@ private struct AIProviderSettingsView: View {
 
                 Button {
                     Task {
-                        await viewModel.testDraftConnection()
+                        await viewModel.testSavedProfileConnection()
                     }
                 } label: {
                     Label(connectionPresentation.testButtonLabel, systemImage: "network")
                 }
-                .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
+                .disabled(viewModel.isPersistenceBlocked || viewModel.profiles.isEmpty || connectionPresentation.isTesting)
 
                 if connectionPresentation.showsProgress {
                     ProgressView()
@@ -494,6 +494,15 @@ private struct AIProviderSettingsView: View {
                     }
 
                     Button {
+                        Task {
+                            await viewModel.testDraftConnection()
+                        }
+                    } label: {
+                        Label(connectionPresentation.testButtonLabel, systemImage: "network")
+                    }
+                    .disabled(viewModel.isPersistenceBlocked || connectionPresentation.isTesting)
+
+                    Button {
                         _ = viewModel.saveDraft()
                     } label: {
                         Label(SettingsLocalization.string("settings.action.save"), systemImage: "square.and.arrow.down")
@@ -522,10 +531,6 @@ private struct AIProviderSettingsView: View {
     }
 
     private var currentServiceSummary: String {
-        if let selectedProfileID = viewModel.selectedProfileID,
-           let profile = viewModel.profiles.first(where: { $0.id == selectedProfileID }) {
-            return serviceSummary(for: profile)
-        }
         if let profile = viewModel.profiles.first(where: \.isDefault) ?? viewModel.profiles.first {
             return serviceSummary(for: profile)
         }
@@ -542,10 +547,15 @@ private struct AIProviderSettingsView: View {
 
     private var profileSelectionBinding: Binding<String?> {
         Binding(
-            get: { viewModel.selectedProfileID },
+            get: { viewModel.profiles.first(where: \.isDefault)?.id ?? viewModel.profiles.first?.id },
             set: { id in
                 if let id {
-                    viewModel.selectProfile(id: id)
+                    do {
+                        try viewModel.setDefaultProfile(id: id)
+                        viewModel.selectProfile(id: id)
+                    } catch {
+                        // setDefaultProfile already surfaces the localized persistence error.
+                    }
                 }
             }
         )
@@ -747,12 +757,26 @@ private struct SettingsDirectoryLink: View {
     let systemImage: String
     let url: URL
     @Environment(\.openURL) private var openURL
+    @State private var errorMessage: String?
 
     var body: some View {
-        Button {
-            openURL(url)
-        } label: {
-            Label(title, systemImage: systemImage)
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                do {
+                    errorMessage = nil
+                    let preparedURL = try SettingsDirectoryOpener.prepareDirectoryForOpening(url)
+                    openURL(preparedURL)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            } label: {
+                Label(title, systemImage: systemImage)
+            }
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
         }
     }
 }

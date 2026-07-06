@@ -1089,6 +1089,51 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(store.savedFiles.isEmpty)
     }
 
+    func testSavedProfileConnectionUsesDefaultProfileInsteadOfUnsavedDraft() async throws {
+        let defaultProfile = ProviderProfile(
+            id: "default",
+            displayName: "Default",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+            model: "spark",
+            isDefault: true
+        )
+        let editingProfile = ProviderProfile(
+            id: "editing",
+            displayName: "Editing",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:9999/v1")!,
+            model: "draft"
+        )
+        let store = CapturingProfileStore(file: ProviderProfilesFile(profiles: [defaultProfile, editingProfile]))
+        let capture = ConfigurationRecorder()
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: RecordingSecretStore(),
+            connectionTester: { configuration in
+                await capture.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "openai_chat", candidateCount: 1)
+            }
+        )
+        viewModel.selectProfile(id: editingProfile.id)
+        viewModel.draft.baseURL = "http://127.0.0.1:7777/v1"
+        viewModel.draft.model = "unsaved-draft"
+
+        let didConnect = await viewModel.testSavedProfileConnection()
+
+        XCTAssertTrue(didConnect)
+        let configurations = await capture.configurations
+        XCTAssertEqual(configurations, [
+            ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+                model: "spark"
+            )
+        ])
+        XCTAssertTrue(store.savedFiles.isEmpty)
+        XCTAssertEqual(viewModel.connectionStatus, .success("已连接 openai_chat，收到 1 条候选。"))
+    }
+
     func testConnectionTestUsesTransientDraftAPIKeyWithoutPersistingIt() async throws {
         let store = CapturingProfileStore(file: ProviderProfilesFile())
         let secrets = RecordingSecretStore()

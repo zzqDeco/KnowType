@@ -169,6 +169,86 @@ final class ProviderProfilesPresentationTests: XCTestCase {
         XCTAssertFalse(reflected.contains("API Key"))
     }
 
+    func testOverviewPresentationUsesDefaultProfileForActiveAIStatus() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-settings-overview-default-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+
+        let diagnostics = InstallationDiagnosticsStatus(
+            applicationSupportURL: temporaryDirectory.appendingPathComponent("Application Support/KnowType", isDirectory: true),
+            homeDirectoryURL: temporaryDirectory,
+            inputMethodBundleURL: temporaryDirectory.appendingPathComponent("Input Methods/KnowType.app", isDirectory: true),
+            preferencePaneURL: temporaryDirectory.appendingPathComponent("PreferencePanes/KnowType.prefPane", isDirectory: true),
+            runtimePreferences: .standard,
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+        let defaultProfile = ProviderProfile(
+            id: "runtime-default",
+            displayName: "当前运行服务",
+            kind: .openAIChat,
+            baseURL: URL(string: "http://127.0.0.1:8317/v1")!,
+            model: "spark",
+            isDefault: true
+        )
+        let editingProfile = ProviderProfile(
+            id: "editing-only",
+            displayName: "正在编辑的服务",
+            kind: .customHTTP,
+            baseURL: URL(string: "http://127.0.0.1:8318/complete")!,
+            model: ""
+        )
+
+        let presentation = SettingsOverviewPresentation(
+            profiles: [defaultProfile, editingProfile],
+            selectedProfileID: editingProfile.id,
+            runtimePreferences: .standard,
+            totalLoadedEntryCount: 0,
+            diagnosticsStatus: diagnostics,
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+
+        XCTAssertEqual(
+            presentation.statusRows.first { $0.label == "AI 续写" }?.value,
+            "已启用：当前运行服务"
+        )
+    }
+
+    func testSettingsDirectoryOpenerCreatesMissingDirectoriesBeforeOpening() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-settings-open-directory-\(UUID().uuidString)", isDirectory: true)
+        let target = temporaryDirectory
+            .appendingPathComponent("Library/Logs/KnowType", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryDirectory)
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        let prepared = try SettingsDirectoryOpener.prepareDirectoryForOpening(target)
+
+        XCTAssertEqual(prepared, target)
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+    }
+
+    func testSettingsViewSeparatesSavedServiceAndDraftConnectionTests() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeSettingsUI/ProviderProfilesView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("await viewModel.testSavedProfileConnection()"))
+        XCTAssertTrue(source.contains("await viewModel.testDraftConnection()"))
+        XCTAssertTrue(source.contains("get: { viewModel.profiles.first(where: \\.isDefault)?.id ?? viewModel.profiles.first?.id }"))
+    }
+
     func testListItemUsesSavedDisplayNameAndProviderKind() {
         let profile = ProviderProfile(
             id: "work",

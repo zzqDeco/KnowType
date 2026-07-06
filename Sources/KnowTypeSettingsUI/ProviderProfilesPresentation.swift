@@ -144,15 +144,13 @@ struct SettingsOverviewPresentation: Equatable, Sendable {
             inputStatus = SettingsLocalization.string("settings.overview.input.needsCheck", preferredLanguages: preferredLanguages)
         }
 
-        let selectedProfile = selectedProfileID.flatMap { id in
-            profiles.first { $0.id == id }
-        } ?? profiles.first(where: \.isDefault) ?? profiles.first
+        let activeProfile = profiles.first(where: \.isDefault) ?? profiles.first
         let aiStatus: String
         if runtimePreferences.cloudContinuationEnabled {
-            if let selectedProfile {
+            if let activeProfile {
                 aiStatus = String(
                     format: SettingsLocalization.string("settings.overview.ai.enabled", preferredLanguages: preferredLanguages),
-                    selectedProfile.displayName
+                    activeProfile.displayName
                 )
             } else {
                 aiStatus = SettingsLocalization.string("settings.overview.ai.needsService", preferredLanguages: preferredLanguages)
@@ -193,6 +191,13 @@ struct SettingsOverviewPresentation: Equatable, Sendable {
 struct SettingsKeyValuePresentation: Equatable, Sendable {
     var label: String
     var value: String
+}
+
+enum SettingsDirectoryOpener {
+    static func prepareDirectoryForOpening(_ url: URL, fileManager: FileManager = .default) throws -> URL {
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
 }
 
 struct ProviderProfileListItemPresentation: Equatable, Identifiable, Sendable {
