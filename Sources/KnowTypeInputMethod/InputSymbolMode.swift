@@ -34,7 +34,7 @@ public struct InputSymbolTransformer: Sendable {
         return asciiSymbolInputs.contains(input)
     }
 
-    private static let asciiSymbolInputs: Set<String> = Set(chineseSymbolMap.keys)
+    private static let asciiSymbolInputs: Set<String> = Set(fullWidthSymbolMap.keys)
 
     private func symbolWithWidth(for input: String, width: InputSymbolWidth) -> String {
         switch width {
@@ -56,28 +56,9 @@ public struct InputSymbolTransformer: Sendable {
         ")": "）",
         "[": "【",
         "]": "】",
-        "{": "「",
-        "}": "」",
         "<": "《",
         ">": "》",
-        "\"": "”",
-        "'": "’",
-        "/": "、",
-        "\\": "、",
-        "-": "－",
-        "_": "——",
-        "~": "～",
-        "`": "·",
-        "@": "@",
-        "#": "#",
-        "$": "$",
-        "%": "%",
-        "^": "^",
-        "&": "&",
-        "*": "*",
-        "+": "+",
-        "=": "=",
-        "|": "|"
+        "/": "、"
     ]
 
     private static let fullWidthSymbolMap: [String: String] = [
