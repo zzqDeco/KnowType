@@ -8,6 +8,7 @@ import AppKit
 
 enum KnowTypeInputMethodMenuItemKind: Equatable {
     case aiContinuation
+    case modeStatus
     case separator
     case openLogs
     case openSupportFolder
@@ -30,7 +31,8 @@ struct KnowTypeInputMethodMenuItemDescriptor: Equatable {
 
 enum KnowTypeInputMethodMenuBuilder {
     static func descriptors(
-        runtimePreferences: InputMethodRuntimePreferences
+        runtimePreferences: InputMethodRuntimePreferences,
+        inputModeState: InputModeState = InputModePreferences.standard.defaultState
     ) -> [KnowTypeInputMethodMenuItemDescriptor] {
         [
             .init(
@@ -41,6 +43,13 @@ enum KnowTypeInputMethodMenuBuilder {
                 stateRawValue: runtimePreferences.cloudContinuationEnabled
                     ? NSControl.StateValue.on.rawValue
                     : NSControl.StateValue.off.rawValue
+            ),
+            .init(
+                kind: .modeStatus,
+                title: modeStatusTitle(for: inputModeState),
+                actionSelectorName: nil,
+                keyEquivalent: "",
+                stateRawValue: NSControl.StateValue.off.rawValue
             ),
             separator(),
             .init(
@@ -84,10 +93,11 @@ enum KnowTypeInputMethodMenuBuilder {
 
     static func makeMenu(
         target: AnyObject,
-        runtimePreferences: InputMethodRuntimePreferences
+        runtimePreferences: InputMethodRuntimePreferences,
+        inputModeState: InputModeState = InputModePreferences.standard.defaultState
     ) -> NSMenu {
         let menu = NSMenu(title: "KnowType")
-        for descriptor in descriptors(runtimePreferences: runtimePreferences) {
+        for descriptor in descriptors(runtimePreferences: runtimePreferences, inputModeState: inputModeState) {
             if descriptor.isSeparator {
                 menu.addItem(.separator())
                 continue
@@ -99,6 +109,7 @@ enum KnowTypeInputMethodMenuBuilder {
             )
             item.target = target
             item.state = NSControl.StateValue(rawValue: descriptor.stateRawValue)
+            item.isEnabled = descriptor.actionSelectorName != nil
             menu.addItem(item)
         }
         return menu
@@ -122,6 +133,13 @@ enum KnowTypeInputMethodMenuBuilder {
             keyEquivalent: "",
             stateRawValue: NSControl.StateValue.off.rawValue
         )
+    }
+
+    private static func modeStatusTitle(for state: InputModeState) -> String {
+        let textMode = state.textMode == .chinese ? "中文输入" : "ASCII 输入"
+        let punctuationMode = state.punctuationMode == .chinese ? "中文标点" : "英文标点"
+        let width = state.symbolWidth == .halfWidth ? "半角" : "全角"
+        return "\(textMode) · \(punctuationMode) · \(width)"
     }
 }
 #endif

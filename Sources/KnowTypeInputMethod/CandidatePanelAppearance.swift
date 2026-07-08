@@ -55,9 +55,9 @@ struct CandidatePanelAppearance {
 
     func font(for role: CandidatePanelVisualRole) -> NSFont {
         switch role {
-        case .lockedPrefix, .aiRecommendation, .continuation:
+        case .lockedPrefix, .aiRecommendation, .continuation, .symbolCandidate:
             return .systemFont(ofSize: textFontSize, weight: .regular)
-        case .rawInput:
+        case .rawInput, .status:
             return .monospacedSystemFont(ofSize: rawFontSize, weight: .regular)
         }
     }
@@ -101,7 +101,7 @@ struct CandidatePanelAppearance {
             )
         }
         switch role {
-        case .lockedPrefix:
+        case .lockedPrefix, .symbolCandidate:
             return color(
                 .labelColor,
                 snapshot: NSColor(calibratedWhite: 0.08, alpha: 1),
@@ -113,7 +113,7 @@ struct CandidatePanelAppearance {
                 snapshot: NSColor(calibratedWhite: 0.32, alpha: 1),
                 darkSnapshot: NSColor(calibratedWhite: 0.74, alpha: 1)
             )
-        case .rawInput:
+        case .rawInput, .status:
             return color(
                 .tertiaryLabelColor,
                 snapshot: NSColor(calibratedWhite: 0.45, alpha: 1),
@@ -134,13 +134,13 @@ struct CandidatePanelAppearance {
             )
         }
         switch role {
-        case .lockedPrefix:
+        case .lockedPrefix, .symbolCandidate:
             return color(
                 .secondaryLabelColor,
                 snapshot: NSColor(calibratedWhite: 0.32, alpha: 1),
                 darkSnapshot: NSColor(calibratedWhite: 0.74, alpha: 1)
             )
-        case .aiRecommendation, .continuation, .rawInput:
+        case .aiRecommendation, .continuation, .rawInput, .status:
             return color(
                 .tertiaryLabelColor,
                 snapshot: NSColor(calibratedWhite: 0.45, alpha: 1),

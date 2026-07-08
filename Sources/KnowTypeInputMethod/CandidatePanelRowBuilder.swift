@@ -84,11 +84,25 @@ public struct CandidatePanelRowBuilder: Sendable {
     }
 
     private func fixedRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRowItem] {
+        var rows: [CandidatePanelRowItem] = []
+        if let modeStatusText = viewModel.modeStatusText,
+           !modeStatusText.isEmpty {
+            rows.append(
+                CandidatePanelRowItem(
+                    selection: nil,
+                    kind: .modeStatus,
+                    text: modeStatusText,
+                    visualRole: .status,
+                    accessibilityLabel: "输入模式，\(modeStatusText)",
+                    isEnabled: false
+                )
+            )
+        }
         guard let preeditDisplayText = viewModel.preeditDisplayText,
               !preeditDisplayText.isEmpty else {
-            return []
+            return rows
         }
-        return [
+        rows.append(
             CandidatePanelRowItem(
                 selection: nil,
                 kind: .preedit,
@@ -96,7 +110,8 @@ public struct CandidatePanelRowBuilder: Sendable {
                 visualRole: .rawInput,
                 accessibilityLabel: "预编辑，\(preeditDisplayText)"
             )
-        ]
+        )
+        return rows
     }
 
     private func pageableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRowItem] {
@@ -104,7 +119,21 @@ public struct CandidatePanelRowBuilder: Sendable {
         let hasSuggestions = !viewModel.prefixCandidates.isEmpty
             || !viewModel.continuationCandidates.isEmpty
             || viewModel.aiRecommendation.displayText != nil
+            || !viewModel.symbolCandidates.isEmpty
         let hasPreeditDisplayText = viewModel.preeditDisplayText?.isEmpty == false
+
+        if !viewModel.symbolCandidates.isEmpty {
+            return viewModel.symbolCandidates.enumerated().map { index, candidate in
+                CandidatePanelRowItem(
+                    selection: .symbolCandidate(index),
+                    kind: .symbolCandidate,
+                    text: candidate.label,
+                    visualRole: .symbolCandidate,
+                    accessibilityLabel: "符号，\(index + 1)，\(candidate.label)",
+                    isNumberShortcutEligible: true
+                )
+            }
+        }
 
         if !viewModel.rawInput.isEmpty && !hasSuggestions && !hasPreeditDisplayText {
             rows.append(

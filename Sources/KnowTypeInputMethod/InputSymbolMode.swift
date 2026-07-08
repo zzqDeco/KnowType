@@ -1,6 +1,191 @@
 import Foundation
 import KnowTypeCore
 
+public struct InputSymbolCandidate: Sendable, Equatable {
+    public var text: String
+    public var label: String
+
+    public init(text: String, label: String? = nil) {
+        self.text = text
+        self.label = label ?? text
+    }
+}
+
+public struct InputSymbolCandidateSession: Sendable, Equatable {
+    public var trigger: String
+    public var candidates: [InputSymbolCandidate]
+
+    public init(trigger: String, candidates: [InputSymbolCandidate]) {
+        self.trigger = trigger
+        self.candidates = candidates
+    }
+}
+
+public enum InputPunctuatorDecision: Sendable, Equatable {
+    case commit(String)
+    case showCandidates(InputSymbolCandidateSession)
+    case passThrough(String)
+}
+
+public struct InputPunctuatorRuntime: Sendable {
+    private var nextDoubleQuoteIsOpening = true
+    private var nextSingleQuoteIsOpening = true
+
+    public init() {}
+
+    public mutating func resetPairingState() {
+        nextDoubleQuoteIsOpening = true
+        nextSingleQuoteIsOpening = true
+    }
+
+    public mutating func decision(
+        for input: String,
+        state: InputModeState,
+        prefersCandidateList: Bool = true
+    ) -> InputPunctuatorDecision? {
+        guard InputSymbolTransformer.isSymbolInput(input) else {
+            return nil
+        }
+        guard state.punctuationMode == .chinese else {
+            return .commit(InputSymbolTransformer.symbolWithWidth(for: input, width: state.symbolWidth))
+        }
+        if state.symbolWidth == .fullWidth,
+           let mapped = InputSymbolTransformer.fullWidthSymbol(for: input) {
+            return .commit(mapped)
+        }
+        if let direct = directChinesePunctuation(for: input) {
+            return .commit(direct)
+        }
+        if input == "\"" {
+            let text = nextDoubleQuoteIsOpening ? "“" : "”"
+            nextDoubleQuoteIsOpening.toggle()
+            return .commit(text)
+        }
+        if input == "'" {
+            let text = nextSingleQuoteIsOpening ? "‘" : "’"
+            nextSingleQuoteIsOpening.toggle()
+            return .commit(text)
+        }
+        if prefersCandidateList,
+           let candidates = Self.symbolCandidates[input] {
+            return .showCandidates(InputSymbolCandidateSession(trigger: input, candidates: candidates))
+        }
+        return .commit(input)
+    }
+
+    private func directChinesePunctuation(for input: String) -> String? {
+        switch input {
+        case ",":
+            return "，"
+        case ".":
+            return "。"
+        case "?":
+            return "？"
+        case "!":
+            return "！"
+        case ":":
+            return "："
+        case ";":
+            return "；"
+        case "(":
+            return "（"
+        case ")":
+            return "）"
+        case "^":
+            return "……"
+        case "_":
+            return "——"
+        default:
+            return nil
+        }
+    }
+
+    private static let symbolCandidates: [String: [InputSymbolCandidate]] = [
+        "/": [
+            InputSymbolCandidate(text: "、"),
+            InputSymbolCandidate(text: "/"),
+            InputSymbolCandidate(text: "／"),
+            InputSymbolCandidate(text: "÷")
+        ],
+        "\\": [
+            InputSymbolCandidate(text: "、"),
+            InputSymbolCandidate(text: "\\"),
+            InputSymbolCandidate(text: "＼")
+        ],
+        "<": [
+            InputSymbolCandidate(text: "《"),
+            InputSymbolCandidate(text: "〈"),
+            InputSymbolCandidate(text: "«"),
+            InputSymbolCandidate(text: "‹")
+        ],
+        ">": [
+            InputSymbolCandidate(text: "》"),
+            InputSymbolCandidate(text: "〉"),
+            InputSymbolCandidate(text: "»"),
+            InputSymbolCandidate(text: "›")
+        ],
+        "[": [
+            InputSymbolCandidate(text: "【"),
+            InputSymbolCandidate(text: "「"),
+            InputSymbolCandidate(text: "〖"),
+            InputSymbolCandidate(text: "〔"),
+            InputSymbolCandidate(text: "［")
+        ],
+        "]": [
+            InputSymbolCandidate(text: "】"),
+            InputSymbolCandidate(text: "」"),
+            InputSymbolCandidate(text: "〗"),
+            InputSymbolCandidate(text: "〕"),
+            InputSymbolCandidate(text: "］")
+        ],
+        "{": [
+            InputSymbolCandidate(text: "「"),
+            InputSymbolCandidate(text: "『"),
+            InputSymbolCandidate(text: "〖"),
+            InputSymbolCandidate(text: "｛")
+        ],
+        "}": [
+            InputSymbolCandidate(text: "」"),
+            InputSymbolCandidate(text: "』"),
+            InputSymbolCandidate(text: "〗"),
+            InputSymbolCandidate(text: "｝")
+        ],
+        "$": [
+            InputSymbolCandidate(text: "￥"),
+            InputSymbolCandidate(text: "$"),
+            InputSymbolCandidate(text: "€"),
+            InputSymbolCandidate(text: "£"),
+            InputSymbolCandidate(text: "¥")
+        ],
+        "%": [
+            InputSymbolCandidate(text: "%"),
+            InputSymbolCandidate(text: "％"),
+            InputSymbolCandidate(text: "°"),
+            InputSymbolCandidate(text: "℃")
+        ],
+        "*": [
+            InputSymbolCandidate(text: "*"),
+            InputSymbolCandidate(text: "＊"),
+            InputSymbolCandidate(text: "·"),
+            InputSymbolCandidate(text: "×"),
+            InputSymbolCandidate(text: "※")
+        ],
+        "|": [
+            InputSymbolCandidate(text: "·"),
+            InputSymbolCandidate(text: "|"),
+            InputSymbolCandidate(text: "｜"),
+            InputSymbolCandidate(text: "§"),
+            InputSymbolCandidate(text: "¦")
+        ],
+        "~": [
+            InputSymbolCandidate(text: "~"),
+            InputSymbolCandidate(text: "〜"),
+            InputSymbolCandidate(text: "～"),
+            InputSymbolCandidate(text: "〰")
+        ]
+    ]
+}
+
 public struct InputSymbolTransformer: Sendable {
     public init() {}
 
@@ -21,9 +206,9 @@ public struct InputSymbolTransformer: Sendable {
             if let symbol = Self.chineseSymbolMap[input], symbol != input {
                 return symbol
             }
-            return symbolWithWidth(for: input, width: state.symbolWidth)
+            return Self.symbolWithWidth(for: input, width: state.symbolWidth)
         case .english:
-            return symbolWithWidth(for: input, width: state.symbolWidth)
+            return Self.symbolWithWidth(for: input, width: state.symbolWidth)
         }
     }
 
@@ -36,13 +221,17 @@ public struct InputSymbolTransformer: Sendable {
 
     private static let asciiSymbolInputs: Set<String> = Set(fullWidthSymbolMap.keys)
 
-    private func symbolWithWidth(for input: String, width: InputSymbolWidth) -> String {
+    public static func symbolWithWidth(for input: String, width: InputSymbolWidth) -> String {
         switch width {
         case .halfWidth:
             return input
         case .fullWidth:
             return Self.fullWidthSymbolMap[input] ?? input
         }
+    }
+
+    public static func fullWidthSymbol(for input: String) -> String? {
+        fullWidthSymbolMap[input]
     }
 
     private static let chineseSymbolMap: [String: String] = [

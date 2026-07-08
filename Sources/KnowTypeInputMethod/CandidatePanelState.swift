@@ -85,6 +85,8 @@ public struct CandidatePanelState: Sendable, Equatable {
         placementPreference: CandidatePanelPlacementPreference = .automatic,
         preeditDisplayText: String? = nil,
         aiRecommendation: AIRecommendationState = .idle,
+        modeStatusText: String? = nil,
+        symbolCandidates: [InputSymbolCandidate] = [],
         preferredSelection: CandidatePanelSelection? = nil
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
@@ -95,9 +97,11 @@ public struct CandidatePanelState: Sendable, Equatable {
         let viewModel = CandidatePanelViewModel(
             rawInput: rawInput,
             preeditDisplayText: normalizedPreeditDisplayText,
+            modeStatusText: modeStatusText,
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates,
-            aiRecommendation: aiRecommendation
+            aiRecommendation: aiRecommendation,
+            symbolCandidates: symbolCandidates
         )
         let hasRows = !CandidatePanelRowBuilder().buildRows(in: viewModel).isEmpty
         let isVisible = isDisplayable && hasRows
@@ -251,6 +255,12 @@ public struct CandidatePanelState: Sendable, Equatable {
         case .aiRecommendation:
             return windowState.viewModel.aiRecommendation == viewModel.aiRecommendation
                 && viewModel.aiRecommendation.isSelectableRecommendation
+        case .symbolCandidate(let index):
+            guard windowState.viewModel.symbolCandidates.indices.contains(index),
+                  viewModel.symbolCandidates.indices.contains(index) else {
+                return false
+            }
+            return windowState.viewModel.symbolCandidates[index] == viewModel.symbolCandidates[index]
         }
     }
 

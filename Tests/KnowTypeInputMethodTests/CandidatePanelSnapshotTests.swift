@@ -349,7 +349,9 @@ private struct SnapshotCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
             return min(CGFloat(row.text.count) * 15, 290)
         case .continuation:
             return min(CGFloat(row.text.count) * 15, 230)
-        case .rawInput:
+        case .symbolCandidate:
+            return min(CGFloat(row.text.count) * 16, 180)
+        case .rawInput, .status:
             return min(CGFloat(row.text.count) * 10, 180)
         }
     }

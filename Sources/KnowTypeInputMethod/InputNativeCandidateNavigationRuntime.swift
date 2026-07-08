@@ -127,6 +127,14 @@ final class InputNativeCandidateNavigationRuntime: @unchecked Sendable {
                 return nil
             }
             return InputCandidateSelection(text: text, kind: .aiRecommendation)
+        case .symbolCandidate(let index):
+            guard viewModel.symbolCandidates.indices.contains(index) else {
+                return nil
+            }
+            return InputCandidateSelection(
+                text: viewModel.symbolCandidates[index].text,
+                kind: .symbolCandidate(index: index)
+            )
         }
     }
 
@@ -256,6 +264,10 @@ final class InputNativeCandidateNavigationRuntime: @unchecked Sendable {
         )
     }
 
+    static func isPagingSymbol(_ text: String) -> Bool {
+        pagingSymbolNavigation(for: text) != nil
+    }
+
     func moveNativeCandidateSelection(
         _ navigation: InputCandidateNavigation,
         rawInput: String,
@@ -309,7 +321,7 @@ final class InputNativeCandidateNavigationRuntime: @unchecked Sendable {
         switch selection.kind {
         case .prefixCandidate, .fullCandidate:
             return true
-        case .rawInput, .segmentCandidate, .continuationCandidate, .aiRecommendation:
+        case .rawInput, .segmentCandidate, .continuationCandidate, .aiRecommendation, .symbolCandidate:
             return false
         }
     }

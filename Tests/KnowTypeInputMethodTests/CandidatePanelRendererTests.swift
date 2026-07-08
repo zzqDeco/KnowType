@@ -152,6 +152,49 @@ final class CandidatePanelRendererTests: XCTestCase {
         XCTAssertEqual(rendered.rows[0].accessibilityLabel, "预编辑，ni")
     }
 
+    func testRendersModeStatusBeforeCandidatesWithoutShortcut() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "ni",
+            modeStatusText: "中 · 中文标点 · 半角",
+            prefixCandidates: prefixCandidates,
+            continuationCandidates: []
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(viewModel)
+
+        XCTAssertEqual(rendered.rows.map(\.kind), [.modeStatus, .prefixCandidate, .prefixCandidate])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), [nil, "1", "2"])
+        XCTAssertEqual(rendered.rows[0].text, "中 · 中文标点 · 半角")
+        XCTAssertEqual(rendered.rows[0].visualRole, .status)
+        XCTAssertFalse(rendered.rows[0].isEnabled)
+        XCTAssertEqual(rendered.rows[0].accessibilityLabel, "输入模式，中 · 中文标点 · 半角")
+    }
+
+    func testRendersSymbolCandidatesWithNumberShortcuts() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "",
+            prefixCandidates: [],
+            continuationCandidates: [],
+            symbolCandidates: [
+                InputSymbolCandidate(text: "、"),
+                InputSymbolCandidate(text: "/"),
+                InputSymbolCandidate(text: "／")
+            ]
+        )
+
+        let rendered = CandidatePanelRenderer(locale: .zhCN).render(
+            viewModel,
+            selected: .symbolCandidate(1)
+        )
+
+        XCTAssertEqual(rendered.rows.map(\.kind), [.symbolCandidate, .symbolCandidate, .symbolCandidate])
+        XCTAssertEqual(rendered.rows.map(\.shortcutLabel), ["1", "2", "3"])
+        XCTAssertEqual(rendered.rows.map(\.text), ["、", "/", "／"])
+        XCTAssertEqual(rendered.rows.map(\.selection), [.symbolCandidate(0), .symbolCandidate(1), .symbolCandidate(2)])
+        XCTAssertTrue(rendered.rows[1].isSelected)
+        XCTAssertEqual(rendered.rows[1].accessibilityLabel, "符号，2，/")
+    }
+
     func testPreeditRowDoesNotConsumeCandidatePagingSlots() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "hou xuan",

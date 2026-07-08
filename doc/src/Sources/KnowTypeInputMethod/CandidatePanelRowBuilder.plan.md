@@ -7,9 +7,10 @@ ordering and row selection identity.
 
 It converts a `CandidatePanelViewModel` into:
 
-- fixed rows, currently commit-only preedit rows that do not consume paging slots
-- pageable rows, including raw input, prefix candidates, AI rows, and legacy
-  continuation rows
+- fixed rows, including transient mode-status rows and commit-only preedit rows
+  that do not consume paging slots
+- pageable rows, including symbol candidates, raw input, prefix candidates, AI
+  rows, and legacy continuation rows
 
 ## Boundaries
 
@@ -25,6 +26,11 @@ It converts a `CandidatePanelViewModel` into:
 
 - Preedit rows are fixed rows with no `CandidatePanelSelection`, no numeric
   shortcut eligibility, and no default selection.
+- Mode-status rows are fixed disabled rows with no numeric shortcut and a
+  privacy-safe accessibility label.
+- Symbol-candidate sessions temporarily replace ordinary pageable rows with
+  selectable symbol rows. They are number-shortcut eligible and commit through
+  `CandidatePanelSelection.symbolCandidate`.
 - Raw input is a pageable row only when there are no visible suggestions or
   preedit rows.
 - The AI row appears after the first prefix row when prefixes exist, or as the
@@ -38,7 +44,7 @@ It converts a `CandidatePanelViewModel` into:
   accept them through Tab, Option-number, click, hover, or another explicit
   selection action rather than ordinary Space accidentally committing an
   auto-selected AI row.
-- Prefix rows are the only rows marked number-shortcut eligible.
+- Prefix rows and symbol-candidate rows are number-shortcut eligible.
 - Full and segment candidate selection identity is derived from the candidate
   raw range in the builder so state and rendering cannot drift.
 

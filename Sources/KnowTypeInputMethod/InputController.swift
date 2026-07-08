@@ -162,7 +162,8 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     public override func menu() -> NSMenu! {
         KnowTypeInputMethodMenuBuilder.makeMenu(
             target: self,
-            runtimePreferences: runtimePreferenceStore.loadPreferences()
+            runtimePreferences: runtimePreferenceStore.loadPreferences(),
+            inputModeState: coordinator.currentInputModeState()
         )
     }
 

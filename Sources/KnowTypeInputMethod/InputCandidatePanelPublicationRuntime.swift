@@ -19,6 +19,8 @@ struct InputCandidatePanelPublicationRequest: Sendable, Equatable {
     var placementPreference: CandidatePanelPlacementPreference
     var preeditDisplayText: String?
     var aiRecommendation: AIRecommendationState
+    var modeStatusText: String? = nil
+    var symbolCandidates: [InputSymbolCandidate] = []
     var savedPageSize: Int
     var effectivePageSize: Int
     var layoutMode: CandidatePanelLayoutMode
@@ -37,6 +39,19 @@ struct InputCandidatePanelPublicationResult: Sendable, Equatable {
     var isVisible: Bool
     var visibilityReason: CandidatePanelVisibilityReason
     var didHide: Bool
+}
+
+struct InputCandidatePanelOverlayRequest: Sendable, Equatable {
+    var rawInput: String
+    var compositionID: Int
+    var rawRevision: Int
+    var anchorResult: CandidateAnchorResult
+    var placementPreference: CandidatePanelPlacementPreference
+    var modeStatusText: String?
+    var symbolCandidates: [InputSymbolCandidate]
+    var pageSize: Int
+    var layoutMode: CandidatePanelLayoutMode
+    var preferredSelection: CandidatePanelSelection?
 }
 
 final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
@@ -192,6 +207,48 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
     }
 
     @discardableResult
+    func publishOverlay(
+        request: InputCandidatePanelOverlayRequest,
+        locale: KnowTypeLocale
+    ) -> InputCandidatePanelPublicationResult {
+        let generation = nextPanelGeneration()
+        panelUpdateTask?.cancel()
+        panelUpdateTask = nil
+        taskSupervisor.cancel(.panelRender)
+        let isDisplayable = request.anchorResult.source != .none
+        panelState.update(
+            rawInput: request.rawInput,
+            suggestion: nil,
+            anchorRect: request.anchorResult.rect,
+            anchorSource: request.anchorResult.source,
+            isDisplayable: isDisplayable,
+            pageSize: request.pageSize,
+            layoutMode: request.layoutMode,
+            placementPreference: request.placementPreference,
+            aiRecommendation: .idle,
+            modeStatusText: request.modeStatusText,
+            symbolCandidates: request.symbolCandidates,
+            preferredSelection: request.preferredSelection
+        )
+        let reason: CandidatePanelVisibilityReason = panelState.windowState.isVisible
+            ? .compositionActive
+            : .layoutImpossible
+        presenter.apply(
+            CandidatePanelFrame(
+                presentationGeneration: generation,
+                compositionID: request.compositionID,
+                rawRevision: request.rawRevision,
+                rawLength: request.rawInput.count,
+                panelModel: panelState,
+                anchorSource: panelState.windowState.anchorSource,
+                visibilityReason: reason
+            ),
+            locale: locale
+        )
+        return result(reason: reason, didHide: false)
+    }
+
+    @discardableResult
     private func applyHiddenFrame(
         reason: CandidatePanelVisibilityReason,
         presentationGeneration: Int,
@@ -311,6 +368,8 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             placementPreference: request.placementPreference,
             preeditDisplayText: request.preeditDisplayText,
             aiRecommendation: request.aiRecommendation,
+            modeStatusText: request.modeStatusText,
+            symbolCandidates: request.symbolCandidates,
             preferredSelection: request.preferredSelection
         )
         traceCandidatePanelUpdate(

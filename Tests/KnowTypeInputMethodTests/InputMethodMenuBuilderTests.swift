@@ -16,6 +16,7 @@ final class InputMethodMenuBuilderTests: XCTestCase {
             descriptors.map(\.kind),
             [
                 .aiContinuation,
+                .modeStatus,
                 .separator,
                 .openLogs,
                 .openSupportFolder,
@@ -28,10 +29,26 @@ final class InputMethodMenuBuilderTests: XCTestCase {
         XCTAssertEqual(descriptors[0].title, "AI 续写")
         XCTAssertEqual(descriptors[0].stateRawValue, NSControl.StateValue.on.rawValue)
         XCTAssertEqual(descriptors[0].actionSelectorName, "toggleAIContinuation:")
-        XCTAssertEqual(descriptors[6].title, "KnowType 设置...")
-        XCTAssertEqual(descriptors[6].actionSelectorName, "showPreferences:")
-        XCTAssertEqual(descriptors[6].keyEquivalent, "")
+        XCTAssertEqual(descriptors[1].title, "中文输入 · 中文标点 · 半角")
+        XCTAssertNil(descriptors[1].actionSelectorName)
+        XCTAssertEqual(descriptors[7].title, "KnowType 设置...")
+        XCTAssertEqual(descriptors[7].actionSelectorName, "showPreferences:")
+        XCTAssertEqual(descriptors[7].keyEquivalent, "")
         XCTAssertEqual(descriptors.filter(\.isSeparator).count, 2)
+    }
+
+    func testDescriptorsCanShowAsciiEnglishFullWidthModeStatus() {
+        let descriptors = KnowTypeInputMethodMenuBuilder.descriptors(
+            runtimePreferences: InputMethodRuntimePreferences(),
+            inputModeState: InputModeState(
+                textMode: .ascii,
+                punctuationMode: .english,
+                symbolWidth: .fullWidth
+            )
+        )
+
+        XCTAssertEqual(descriptors[1].kind, .modeStatus)
+        XCTAssertEqual(descriptors[1].title, "ASCII 输入 · 英文标点 · 全角")
     }
 
     func testMenuItemsUseExpectedSelectorsAndNoBareCharacterShortcut() throws {
@@ -45,6 +62,7 @@ final class InputMethodMenuBuilderTests: XCTestCase {
             titles,
             [
                 "AI 续写",
+                "中文输入 · 中文标点 · 半角",
                 "",
                 "打开日志...",
                 "打开支持目录...",
@@ -56,6 +74,7 @@ final class InputMethodMenuBuilderTests: XCTestCase {
         )
         XCTAssertEqual(menu.items[0].state, .off)
         XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(menu.items[0].action)), "toggleAIContinuation:")
+        XCTAssertFalse(menu.items[1].isEnabled)
 
         let settingsItem = try XCTUnwrap(menu.items.first { $0.title == "KnowType 设置..." })
         XCTAssertEqual(NSStringFromSelector(try XCTUnwrap(settingsItem.action)), "showPreferences:")
