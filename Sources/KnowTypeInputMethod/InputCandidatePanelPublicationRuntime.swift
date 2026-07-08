@@ -293,6 +293,14 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
     }
 
     @discardableResult
+    func selectVisibleNumberShortcut(_ number: Int) -> InputCandidatePanelPublicationResult? {
+        guard panelState.selectVisibleNumberShortcut(number) != nil else {
+            return nil
+        }
+        return result(reason: .compositionActive, didHide: false)
+    }
+
+    @discardableResult
     func moveLocalSelection(_ navigation: InputCandidateNavigation) -> InputCandidatePanelPublicationResult? {
         guard panelState.moveSelection(navigation) else {
             return nil

@@ -520,9 +520,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .action(.space):
             return commitSelectedSymbolCandidate(client: client)
         case .selectCandidate(let number) where number > 0:
-            return commitSymbolCandidate(at: number - 1, client: client)
+            guard let selectionResult = candidatePanelPublicationRuntime.selectVisibleNumberShortcut(number),
+                  case .symbolCandidate(let index) = selectionResult.selection else {
+                clearSymbolCandidateSessionBeforeFallthrough(client: client)
+                return nil
+            }
+            return commitSymbolCandidate(at: index, client: client)
         case .selectCandidate:
-            clearSymbolCandidateSession()
+            clearSymbolCandidateSessionBeforeFallthrough(client: client)
             return nil
         case .moveCandidateSelection(let navigation):
             if let result = candidatePanelPublicationRuntime.moveLocalSelection(navigation) {
@@ -547,7 +552,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .ignored:
             return false
         default:
-            clearSymbolCandidateSession()
+            clearSymbolCandidateSessionBeforeFallthrough(client: client)
             return nil
         }
     }
@@ -606,6 +611,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func clearSymbolCandidateSession() {
         symbolCandidateSession = nil
+    }
+
+    private func clearSymbolCandidateSessionBeforeFallthrough(client: InputControllerClient?) {
+        guard symbolCandidateSession != nil else {
+            return
+        }
+        clearSymbolCandidateSession()
+        guard !hasActiveTextComposition() else {
+            return
+        }
+        hideCandidatePanel(reason: .escape)
     }
 
     private func commitSymbol(_ symbol: String, client: InputControllerClient?) -> Bool {
@@ -1803,7 +1819,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
                     client: client
                 )
-            } else if self.symbolCandidateSession == nil {
+            } else if let symbolCandidateSession = self.symbolCandidateSession {
+                let selection = self.candidatePanelPublicationRuntime.state.windowState.selection
+                    ?? CandidatePanelSelection.symbolCandidate(0)
+                self.publishPanelOverlay(
+                    modeStatusText: nil,
+                    symbolCandidates: symbolCandidateSession.candidates,
+                    preferredSelection: selection,
+                    client: client
+                )
+            } else {
                 self.hideCandidatePanel(reason: .compositionEnded)
             }
         }
