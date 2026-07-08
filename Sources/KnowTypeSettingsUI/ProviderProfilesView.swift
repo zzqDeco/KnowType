@@ -167,6 +167,9 @@ private struct InputSettingsView: View {
                     Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
                     Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
                 }
+                Text(settingsString("settings.input.symbolPolicy.note"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 LabeledContent(settingsString("settings.input.punctuationShortcut"), value: "Option + .")
                 LabeledContent(settingsString("settings.input.textModeShortcut"), value: "Option + /")
                 Button {

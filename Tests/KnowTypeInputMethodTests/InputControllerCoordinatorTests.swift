@@ -1499,11 +1499,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
     }
 
-    func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {
+    func testCodeAppDefaultKeepsIdleOperatorsAsciiWhileAllowingChineseComposition() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handleText("-", client: client))
+        XCTAssertTrue(coordinator.handleText("_", client: client))
+        XCTAssertTrue(coordinator.handleText("{", client: client))
+        XCTAssertTrue(coordinator.handleText("}", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["/", "-", "_", "{", "}"])
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "n")
+    }
+
+    func testCodeAppSavedChinesePunctuationPreferenceIsNotOverridden() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"
         let preferences = InputModePreferences(
-            codeAppState: InputModeState(punctuationMode: .english, symbolWidth: .halfWidth)
+            codeAppState: InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
         )
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -1512,7 +1530,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
     }
 
     func testMissingClientPrintableInputPassesThroughWithoutComposition() {
@@ -3775,7 +3793,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页一－")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页一-")
     }
 
     private func makeCoordinator(

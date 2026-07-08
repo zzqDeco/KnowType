@@ -90,7 +90,7 @@ public struct InputModePreferences: Codable, Sendable, Equatable {
         defaultState: InputModeState = InputModeState(),
         codeAppState: InputModeState = InputModeState(
             textMode: .ascii,
-            punctuationMode: .chinese,
+            punctuationMode: .english,
             symbolWidth: .halfWidth
         )
     ) {

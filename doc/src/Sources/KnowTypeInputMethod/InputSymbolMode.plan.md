@@ -8,7 +8,7 @@
 - `InputModeState` groups text mode, punctuation mode, and symbol width as input attributes.
 - `InputModePreferences` stores normal-app and code-app default states.
 - `InputModePreferenceRuntime` owns the active controller state, reloads defaults when saved preferences or app context change, and preserves session-local toggles when saved preferences are unchanged.
-- `InputModeAppPolicy` applies those preferences; code and terminal contexts use the separate code-app preference path, whose built-in default is Chinese punctuation unless the user changes the code-app preference.
-- `InputSymbolTransformer` maps ASCII punctuation through `InputModeState`, using Chinese punctuation in Chinese mode, preserving ASCII in English half-width mode, and supporting full-width symbol output.
+- `InputModeAppPolicy` applies those preferences; code and terminal contexts use the separate code-app preference path. The built-in code-app default keeps symbols half-width and punctuation English unless the user changes the code-app preference; non-terminal code apps still inherit the normal Chinese text-mode default so composition can start immediately.
+- `InputSymbolTransformer` maps ASCII punctuation through `InputModeState`, using Chinese sentence punctuation, brackets, and book-title marks in Chinese punctuation mode, preserving code/path/operator symbols as ASCII in half-width mode, and supporting full-width symbol output only when `InputSymbolWidth.fullWidth` is active.
 - `InputSymbolCommitPolicy` appends punctuation to the committed candidate text, or to raw input when no candidate commit is available.
 - The IMK controller loads persisted preferences at startup and refreshes them at the next composition or direct symbol input. `Option + .` toggles the session state without rewriting saved preferences.

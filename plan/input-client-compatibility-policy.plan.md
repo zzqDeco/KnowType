@@ -32,7 +32,7 @@
 - `InputClientCompatibilityPolicy` maps bundle id, input mode state, active
   composition, and client availability to `InputClientWriteMode`.
 - `InputModePreferences.standard.codeAppState` defaults to ASCII text mode,
-  Chinese punctuation, and half-width symbols. App policy applies that text mode
+  English punctuation, and half-width symbols. App policy applies that text mode
   only to terminal-style hosts; non-terminal code-app entries keep the normal
   text-mode default while still using code-app punctuation and symbol width.
 - Idle printable ASCII returns `false` in passthrough or disabled modes so the

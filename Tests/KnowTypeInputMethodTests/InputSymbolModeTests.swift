@@ -3,16 +3,35 @@ import KnowTypeCore
 @testable import KnowTypeInputMethod
 
 final class InputSymbolModeTests: XCTestCase {
-    func testChineseModeMapsCommonAsciiPunctuation() {
+    func testChineseModeMapsSentenceBracketsBookTitleAndDunhaoPunctuation() {
         let transformer = InputSymbolTransformer()
 
         XCTAssertEqual(transformer.text(for: ",", mode: .chinese), "，")
         XCTAssertEqual(transformer.text(for: ".", mode: .chinese), "。")
         XCTAssertEqual(transformer.text(for: "?", mode: .chinese), "？")
+        XCTAssertEqual(transformer.text(for: "!", mode: .chinese), "！")
+        XCTAssertEqual(transformer.text(for: ":", mode: .chinese), "：")
+        XCTAssertEqual(transformer.text(for: ";", mode: .chinese), "；")
+        XCTAssertEqual(transformer.text(for: "(", mode: .chinese), "（")
+        XCTAssertEqual(transformer.text(for: ")", mode: .chinese), "）")
+        XCTAssertEqual(transformer.text(for: "[", mode: .chinese), "【")
+        XCTAssertEqual(transformer.text(for: "]", mode: .chinese), "】")
         XCTAssertEqual(transformer.text(for: "/", mode: .chinese), "、")
         XCTAssertEqual(transformer.text(for: "<", mode: .chinese), "《")
         XCTAssertEqual(transformer.text(for: ">", mode: .chinese), "》")
-        XCTAssertEqual(transformer.text(for: "@", mode: .chinese), "@")
+    }
+
+    func testChineseHalfWidthModeKeepsCodePathAndOperatorSymbolsAscii() {
+        let transformer = InputSymbolTransformer()
+        let state = InputModeState(
+            textMode: .chinese,
+            punctuationMode: .chinese,
+            symbolWidth: .halfWidth
+        )
+
+        for symbol in ["-", "_", "+", "=", "\\", "@", "#", "$", "%", "^", "&", "*", "|", "~", "`", "{", "}"] {
+            XCTAssertEqual(transformer.text(for: symbol, state: state), symbol)
+        }
     }
 
     func testEnglishModeKeepsAsciiPunctuation() {
@@ -50,6 +69,7 @@ final class InputSymbolModeTests: XCTestCase {
         )
 
         XCTAssertEqual(transformer.text(for: ",", state: state), "，")
+        XCTAssertEqual(transformer.text(for: "-", state: state), "－")
         XCTAssertEqual(transformer.text(for: "@", state: state), "＠")
         XCTAssertEqual(transformer.text(for: "+", state: state), "＋")
     }
@@ -71,7 +91,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.apple.Terminal"),
             InputModeState(
                 textMode: .ascii,
-                punctuationMode: .chinese,
+                punctuationMode: .english,
                 symbolWidth: .halfWidth
             )
         )
@@ -79,7 +99,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.googlecode.iterm2"),
             InputModeState(
                 textMode: .ascii,
-                punctuationMode: .chinese,
+                punctuationMode: .english,
                 symbolWidth: .halfWidth
             )
         )
@@ -87,7 +107,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "org.vim.MacVim"),
             InputModeState(
                 textMode: .ascii,
-                punctuationMode: .chinese,
+                punctuationMode: .english,
                 symbolWidth: .halfWidth
             )
         )
@@ -95,7 +115,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.apple.dt.Xcode"),
             InputModeState(
                 textMode: .chinese,
-                punctuationMode: .chinese,
+                punctuationMode: .english,
                 symbolWidth: .halfWidth
             )
         )
@@ -103,7 +123,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex"),
             InputModeState(
                 textMode: .chinese,
-                punctuationMode: .chinese,
+                punctuationMode: .english,
                 symbolWidth: .halfWidth
             )
         )
@@ -111,7 +131,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij"),
             InputModeState(
                 textMode: .chinese,
-                punctuationMode: .chinese,
+                punctuationMode: .english,
                 symbolWidth: .halfWidth
             )
         )
@@ -119,7 +139,7 @@ final class InputSymbolModeTests: XCTestCase {
             InputModeAppPolicy.defaultState(appBundleID: "com.todesktop.app.example"),
             InputModeState(
                 textMode: .chinese,
-                punctuationMode: .chinese,
+                punctuationMode: .english,
                 symbolWidth: .halfWidth
             )
         )

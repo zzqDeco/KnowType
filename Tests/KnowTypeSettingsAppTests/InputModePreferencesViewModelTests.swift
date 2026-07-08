@@ -45,6 +45,10 @@ final class InputModePreferencesViewModelTests: XCTestCase {
         viewModel.resetToDefaults()
 
         XCTAssertEqual(viewModel.preferences, .standard)
+        XCTAssertEqual(viewModel.preferences.defaultState.punctuationMode, .chinese)
+        XCTAssertEqual(viewModel.preferences.defaultState.symbolWidth, .halfWidth)
+        XCTAssertEqual(viewModel.preferences.codeAppState.punctuationMode, .english)
+        XCTAssertEqual(viewModel.preferences.codeAppState.symbolWidth, .halfWidth)
         XCTAssertEqual(store.loadPreferences(), .standard)
     }
 

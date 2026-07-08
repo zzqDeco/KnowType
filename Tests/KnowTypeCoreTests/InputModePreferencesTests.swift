@@ -2,6 +2,14 @@ import XCTest
 @testable import KnowTypeCore
 
 final class InputModePreferencesTests: XCTestCase {
+    func testStandardPreferencesUseEnglishPunctuationForCodeAppState() {
+        XCTAssertEqual(InputModePreferences.standard.defaultState.punctuationMode, .chinese)
+        XCTAssertEqual(InputModePreferences.standard.defaultState.symbolWidth, .halfWidth)
+        XCTAssertEqual(InputModePreferences.standard.codeAppState.textMode, .ascii)
+        XCTAssertEqual(InputModePreferences.standard.codeAppState.punctuationMode, .english)
+        XCTAssertEqual(InputModePreferences.standard.codeAppState.symbolWidth, .halfWidth)
+    }
+
     func testUserDefaultsStoreReturnsStandardPreferencesWhenUnset() {
         let suiteName = "KnowTypeInputModePreferencesTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

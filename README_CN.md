@@ -304,6 +304,11 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
+中文标点和全角字符是两个独立控制。中文标点会转换句读、中文括号和书名号，
+并保留 `/` 作为顿号入口；代码、路径和运算类符号在半角宽度下保持 ASCII，
+只有显式开启全角字符时才会变为全角。代码类 app 默认使用中文组合输入、
+英文标点和半角符号。
+
 宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
 IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
 因此 raw preedit 会显示在当前宿主输入框内。Terminal、iTerm、MacVim 和 Emacs

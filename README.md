@@ -350,6 +350,12 @@ placement.
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
+Chinese punctuation and full-width symbols are separate controls. Chinese
+punctuation maps sentence punctuation, Chinese brackets and book-title marks,
+and `/` as the dunhao entry, while code/path/operator symbols stay half-width
+unless full-width symbols are explicitly enabled. Code-style apps default to
+Chinese composition with English punctuation and half-width symbols.
+
 Host compatibility is conservative. Standard AppKit-style text fields, browsers,
 editors, IDEs, Electron shells, and unknown clients use inline composition with
 attributed marked text by default, so raw preedit appears in the focused text
