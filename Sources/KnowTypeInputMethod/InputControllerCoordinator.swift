@@ -657,6 +657,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func commitSymbol(_ symbol: String, client: InputControllerClient?) -> Bool {
         guard !rawBuffer.isEmpty else {
+            hideCandidatePanelIfVisible(reason: .compositionEnded)
             insert(symbol, client: client)
             return true
         }
@@ -1879,6 +1880,18 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         taskSupervisor.cancel(.modeStatusClear)
         modeStatusText = nil
+        if intent.hidesModeStatusWhenNoReplacementFrame,
+           !hasActiveTextComposition(),
+           symbolCandidateSession == nil {
+            hideCandidatePanelIfVisible(reason: .compositionEnded)
+        }
+    }
+
+    private func hideCandidatePanelIfVisible(reason: CandidatePanelVisibilityReason) {
+        guard candidatePanelPublicationRuntime.state.windowState.isVisible else {
+            return
+        }
+        hideCandidatePanel(reason: reason)
     }
 
     private func modeStatusDescription(for state: InputModeState) -> String {
@@ -2196,6 +2209,17 @@ private extension InputKeyIntent {
             return false
         default:
             return true
+        }
+    }
+
+    var hidesModeStatusWhenNoReplacementFrame: Bool {
+        switch self {
+        case .deleteBackward, .cancelComposition, .moveCandidateSelection:
+            return true
+        case .action(.space), .action(.tab), .action(.optionNumber), .action(.optionR), .action(.commitRaw):
+            return true
+        default:
+            return false
         }
     }
 }

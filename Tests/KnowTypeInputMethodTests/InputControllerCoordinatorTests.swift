@@ -4141,6 +4141,43 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(windowState?.isVisible, true)
     }
 
+    func testIdleEscapeClearsTransientModeStatusOverlay() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, true)
+
+        XCTAssertFalse(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
+
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
+    func testIdleDirectPunctuationCommitClearsTransientModeStatusOverlay() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, true)
+
+        XCTAssertTrue(coordinator.handleText(",", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "，")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
     @MainActor
     func testModeStatusClearKeepsActiveCompositionAnchoredToCurrentClient() async {
         let statusClient = FakeInputControllerClient()
