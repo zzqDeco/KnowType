@@ -31,4 +31,4 @@ model.
   at the next composition or direct symbol input. `Option + .` toggles the
   session punctuation state, `Option + /` toggles text mode, and
   `Shift + Space` toggles symbol width without rewriting saved preferences; all
-  publish a transient mode-status row.
+  publish a transient mode-status row that clears on the next real input key.

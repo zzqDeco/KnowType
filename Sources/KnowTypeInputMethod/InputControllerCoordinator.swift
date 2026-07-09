@@ -347,6 +347,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
         let client = client ?? (hasActiveTextComposition() ? host?.currentClient : nil)
+        clearTransientModeStatusBeforeUserInputIfNeeded(intent)
         if symbolCandidateSession != nil,
            let handled = handleActiveSymbolCandidateIntent(intent, client: client) {
             return handled
@@ -936,12 +937,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         reason: String
     ) -> Bool {
-        inputClientCompositionWriter.shouldPassThroughIdleText(
+        let shouldPassThrough = inputClientCompositionWriter.shouldPassThroughIdleText(
             text,
             client: client,
             state: writeState(hasActiveComposition: false),
             reason: reason
         )
+        if shouldPassThrough {
+            hideCandidatePanel(reason: .compositionEnded)
+        }
+        return shouldPassThrough
     }
 
     private func candidatePanelPlacementPreference(
@@ -1805,7 +1810,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 rawRevision: rawRevision,
                 anchorResult: candidateAnchorResult(client: client),
                 placementPreference: candidatePanelPlacementPreference(client: client),
-                preeditDisplayText: candidatePanelPreeditDisplayText(client: client),
+                preeditDisplayText: rawBuffer.isEmpty ? nil : candidatePanelPreeditDisplayText(client: client),
                 modeStatusText: modeStatusText,
                 symbolCandidates: symbolCandidates,
                 pageSize: runtimePreferences.effectiveCandidatePageSize,
@@ -1844,11 +1849,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
                   self.modeStatusText == visibleStatus else {
                 return
             }
+            let effectiveClient = self.host?.currentClient ?? client
             self.modeStatusText = nil
             if self.hasActiveTextComposition() {
                 self.updateCandidatePanelImmediately(
                     suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
-                    client: client
+                    client: effectiveClient
                 )
             } else if let symbolCandidateSession = self.symbolCandidateSession {
                 let selection = self.candidatePanelPublicationRuntime.state.windowState.selection
@@ -1857,13 +1863,22 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     modeStatusText: nil,
                     symbolCandidates: symbolCandidateSession.candidates,
                     preferredSelection: selection,
-                    client: client
+                    client: effectiveClient
                 )
             } else {
                 self.hideCandidatePanel(reason: .compositionEnded)
             }
         }
         taskSupervisor.replace(.modeStatusClear, with: task)
+    }
+
+    private func clearTransientModeStatusBeforeUserInputIfNeeded(_ intent: InputKeyIntent) {
+        guard modeStatusText != nil,
+              intent.clearsTransientModeStatus else {
+            return
+        }
+        taskSupervisor.cancel(.modeStatusClear)
+        modeStatusText = nil
     }
 
     private func modeStatusDescription(for state: InputModeState) -> String {
@@ -2168,6 +2183,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private static func isDirectPassthroughDigitText(_ text: String) -> Bool {
         !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
             scalar.value >= 48 && scalar.value <= 57
+        }
+    }
+}
+
+private extension InputKeyIntent {
+    var clearsTransientModeStatus: Bool {
+        switch self {
+        case .modifierFlagsChanged, .ignored:
+            return false
+        case .action(.toggleSymbolMode), .action(.toggleTextMode), .action(.toggleSymbolWidth):
+            return false
+        default:
+            return true
         }
     }
 }

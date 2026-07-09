@@ -358,7 +358,9 @@ ellipsis, em dash, brackets, and symbol-candidate entries such as `/` for
 dunhao, while code/path/operator symbols stay half-width unless full-width
 symbols are explicitly enabled. Code-style apps default to Chinese composition
 with English punctuation and half-width symbols. Mode changes briefly show a
-status row such as `中 · 中文标点 · 半角`.
+status row such as `中 · 中文标点 · 半角`; the row clears as soon as the next
+real input key starts a composition, symbol candidate session, commit, or
+passthrough.
 
 Host compatibility is conservative. Standard AppKit-style text fields, browsers,
 editors, IDEs, Electron shells, and unknown clients use inline composition with

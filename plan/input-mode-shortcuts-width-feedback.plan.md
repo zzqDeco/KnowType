@@ -15,7 +15,9 @@ and the transient mode-status row shows the full current state.
 - `Option + .` toggles Chinese/English punctuation only.
 - `Shift + Space` toggles half-width/full-width symbols only.
 - Every mode toggle resets punctuator pairing state and publishes the existing
-  mode-status row, for example `中 · 中文标点 · 全角`.
+  transient mode-status row, for example `中 · 中文标点 · 全角`; the row clears
+  when the next real input key starts composition, symbol candidates, commit, or
+  passthrough.
 - Plain `Space` remains candidate commit or normal space; Command/Control
   modified Space stays unhandled so system shortcuts are not consumed.
 
