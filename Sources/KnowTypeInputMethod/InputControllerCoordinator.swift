@@ -24,6 +24,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private var runtimePreferences: InputMethodRuntimePreferences
     private let nativeCandidateNavigationRuntime = InputNativeCandidateNavigationRuntime()
     private var symbolCandidateSession: InputSymbolCandidateSession?
+    private var aiRecommendationStateBeforeSymbolCandidate: AIRecommendationState?
     private var modeStatusText: String?
     private let lexicalCommitRuntime: InputLexicalCommitRuntime
     private let commitApplicationRuntime = InputCommitApplicationRuntime()
@@ -307,6 +308,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func hidePalettes() {
+        clearSymbolCandidateSession(restoringAIRecommendation: true)
         hideCandidatePanel(reason: .escape)
     }
 
@@ -318,6 +320,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
+        clearSymbolCandidateSession()
         aiRecommendationState = aiRecommendationRuntime.reset(
             compositionID: compositionID,
             rawLength: rawBuffer.count,
@@ -583,6 +586,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ session: InputSymbolCandidateSession,
         client: InputControllerClient?
     ) {
+        if symbolCandidateSession == nil {
+            aiRecommendationStateBeforeSymbolCandidate = aiRecommendationState
+        }
         symbolCandidateSession = session
         aiRecommendationState = aiRecommendationRuntime.reset(
             compositionID: compositionID,
@@ -598,30 +604,45 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func cancelSymbolCandidateSession(client: InputControllerClient?) {
+        restoreCompositionPanelAfterSymbolCandidate(client: client)
+    }
+
+    private func restoreCompositionPanelAfterSymbolCandidate(client: InputControllerClient?) {
+        let savedAIRecommendationState = aiRecommendationStateBeforeSymbolCandidate
         clearSymbolCandidateSession()
         guard hasActiveTextComposition() else {
             hideCandidatePanel(reason: .escape)
             return
         }
-        updateCandidatePanelImmediately(
-            suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
-            client: client
-        )
+        let suggestion = suggestionStateRuntime.currentSnapshot().suggestion
+        guard let savedAIRecommendationState else {
+            updateCandidatePanelImmediately(suggestion: suggestion, client: client)
+            return
+        }
+        if savedAIRecommendationState.isPendingRecommendation,
+           let suggestion {
+            scheduleAIRecommendation(for: suggestion, client: client)
+        } else {
+            aiRecommendationState = savedAIRecommendationState
+            updateCandidatePanelImmediately(suggestion: suggestion, client: client)
+        }
     }
 
-    private func clearSymbolCandidateSession() {
+    private func clearSymbolCandidateSession(restoringAIRecommendation: Bool = false) {
         symbolCandidateSession = nil
+        if restoringAIRecommendation,
+           let savedAIRecommendationState = aiRecommendationStateBeforeSymbolCandidate,
+           !savedAIRecommendationState.isPendingRecommendation {
+            aiRecommendationState = savedAIRecommendationState
+        }
+        aiRecommendationStateBeforeSymbolCandidate = nil
     }
 
     private func clearSymbolCandidateSessionBeforeFallthrough(client: InputControllerClient?) {
         guard symbolCandidateSession != nil else {
             return
         }
-        clearSymbolCandidateSession()
-        guard !hasActiveTextComposition() else {
-            return
-        }
-        hideCandidatePanel(reason: .escape)
+        restoreCompositionPanelAfterSymbolCandidate(client: client)
     }
 
     private func commitSymbol(_ symbol: String, client: InputControllerClient?) -> Bool {
@@ -1775,6 +1796,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 rawRevision: rawRevision,
                 anchorResult: candidateAnchorResult(client: client),
                 placementPreference: candidatePanelPlacementPreference(client: client),
+                preeditDisplayText: candidatePanelPreeditDisplayText(client: client),
                 modeStatusText: modeStatusText,
                 symbolCandidates: symbolCandidates,
                 pageSize: runtimePreferences.effectiveCandidatePageSize,

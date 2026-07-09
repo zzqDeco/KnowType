@@ -3904,6 +3904,102 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
+    func testHidePalettesClearsHiddenIdleSymbolSession() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        coordinator.hidePalettes()
+        _ = coordinator.handleText(" ", client: client)
+
+        XCTAssertFalse(client.insertTextWrites.contains { $0.text == "、" })
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testActiveSymbolCandidateFallthroughRestoresCompositionPanel() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+
+        _ = coordinator.handle(
+            stroke: InputKeyStroke(text: "9", keyCode: keyCode(forNumber: 9)),
+            client: client
+        )
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertEqual(viewModel?.rawInput, "ni")
+        XCTAssertEqual(viewModel?.symbolCandidates, [])
+        XCTAssertFalse(viewModel?.prefixCandidates.isEmpty ?? true)
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+    }
+
+    func testActiveSymbolCandidateOverlayPreservesCommitOnlyPreedit() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let preferences = InputModePreferences(
+            codeAppState: InputModeState(
+                textMode: .chinese,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            inputModePreferences: preferences
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertEqual(viewModel?.preeditDisplayText, "ni")
+        XCTAssertEqual(viewModel?.symbolCandidates.map(\.text), ["、", "/", "／", "÷"])
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+    }
+
+    @MainActor
+    func testActiveSymbolCandidateCancelRestoresReadyAIRecommendation() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "api" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText)
+
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertEqual(viewModel?.rawInput, "api")
+        XCTAssertEqual(viewModel?.symbolCandidates, [])
+        XCTAssertEqual(viewModel?.aiRecommendation.displayText, "继续推进")
+    }
+
     func testSymbolCandidateEscapeCancelsWithoutCommitting() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)

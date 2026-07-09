@@ -47,6 +47,7 @@ struct InputCandidatePanelOverlayRequest: Sendable, Equatable {
     var rawRevision: Int
     var anchorResult: CandidateAnchorResult
     var placementPreference: CandidatePanelPlacementPreference
+    var preeditDisplayText: String?
     var modeStatusText: String?
     var symbolCandidates: [InputSymbolCandidate]
     var pageSize: Int
@@ -225,6 +226,7 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             pageSize: request.pageSize,
             layoutMode: request.layoutMode,
             placementPreference: request.placementPreference,
+            preeditDisplayText: request.preeditDisplayText,
             aiRecommendation: .idle,
             modeStatusText: request.modeStatusText,
             symbolCandidates: request.symbolCandidates,
