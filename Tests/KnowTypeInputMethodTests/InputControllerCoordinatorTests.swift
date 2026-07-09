@@ -1481,6 +1481,23 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(textClient.markedTextWrites.last?.text, "n")
     }
 
+    func testModeToggleReloadsDefaultsWhenFocusedBundleChanges() {
+        let codeClient = FakeInputControllerClient()
+        codeClient.bundleIdentifier = "com.apple.Terminal"
+        let textClient = FakeInputControllerClient()
+        textClient.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, host, _) = makeCoordinator(client: codeClient)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: textClient
+            )
+        )
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+    }
+
     func testTextEditInlineCompositionUsesAttributedMarkedTextCarrier() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.TextEdit"

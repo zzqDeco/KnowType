@@ -404,6 +404,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             publishLocalSuggestion(client: client)
             return true
         case .action(let action):
+            if action == .toggleSymbolMode || action == .toggleTextMode || action == .toggleSymbolWidth {
+                reloadInputModeDefaultsIfNeeded(client: client)
+            }
             if action == .toggleSymbolMode {
                 inputModeRuntime.togglePunctuationMode()
                 punctuatorRuntime.resetPairingState()
