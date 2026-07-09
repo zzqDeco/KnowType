@@ -4,6 +4,7 @@ import KnowTypeCore
 enum InputTaskKind: Hashable, Sendable {
     case panelRender
     case runtimeLexiconReload
+    case modeStatusClear
 }
 
 final class InputTaskSupervisor: @unchecked Sendable {

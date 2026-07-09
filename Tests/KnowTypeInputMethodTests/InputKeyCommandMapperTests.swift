@@ -48,6 +48,13 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
     }
 
+    func testMapsShiftSpaceToSymbolWidthToggle() {
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift])),
+            .action(.toggleSymbolWidth)
+        )
+    }
+
     func testPlainTextAppendsToComposition() {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "w", keyCode: 13)), .append("w"))
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "中", keyCode: -1)), .append("中"))
@@ -120,6 +127,10 @@ final class InputKeyCommandMapperTests: XCTestCase {
             mapper.intent(for: InputKeyStroke(text: "", keyCode: 58, modifiers: [.option], eventKind: .flagsChanged)),
             .modifierFlagsChanged([.option])
         )
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: "", keyCode: 56, modifiers: [.shift], eventKind: .flagsChanged)),
+            .modifierFlagsChanged([.shift])
+        )
     }
 
     func testCommandAndControlModifiedInputIsIgnored() {
@@ -129,6 +140,14 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: "v", keyCode: 9, modifiers: [.control])),
+            .ignored
+        )
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.command])),
+            .ignored
+        )
+        XCTAssertEqual(
+            mapper.intent(for: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.control])),
             .ignored
         )
     }

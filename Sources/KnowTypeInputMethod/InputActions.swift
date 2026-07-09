@@ -9,6 +9,7 @@ public enum InputAction: Sendable, Equatable {
     case optionR
     case toggleSymbolMode
     case toggleTextMode
+    case toggleSymbolWidth
     case commitRaw
 }
 
@@ -22,24 +23,30 @@ public struct CandidatePanelViewModel: Sendable, Equatable {
     public var title: String
     public var rawInput: String
     public var preeditDisplayText: String?
+    public var modeStatusText: String?
     public var prefixCandidates: [CorrectionCandidate]
     public var continuationCandidates: [ContinuationCandidate]
     public var aiRecommendation: AIRecommendationState
+    public var symbolCandidates: [InputSymbolCandidate]
 
     public init(
         title: String = "KnowType",
         rawInput: String,
         preeditDisplayText: String? = nil,
+        modeStatusText: String? = nil,
         prefixCandidates: [CorrectionCandidate],
         continuationCandidates: [ContinuationCandidate],
-        aiRecommendation: AIRecommendationState = .idle
+        aiRecommendation: AIRecommendationState = .idle,
+        symbolCandidates: [InputSymbolCandidate] = []
     ) {
         self.title = title
         self.rawInput = rawInput
         self.preeditDisplayText = preeditDisplayText
+        self.modeStatusText = modeStatusText
         self.prefixCandidates = prefixCandidates
         self.continuationCandidates = continuationCandidates
         self.aiRecommendation = aiRecommendation
+        self.symbolCandidates = symbolCandidates
     }
 
     public var lockedPreview: String? {
@@ -91,6 +98,8 @@ public struct InputCompositionController: Sendable {
         case .toggleSymbolMode:
             return .noAction
         case .toggleTextMode:
+            return .noAction
+        case .toggleSymbolWidth:
             return .noAction
         case .commitRaw:
             return .commit(originalText)

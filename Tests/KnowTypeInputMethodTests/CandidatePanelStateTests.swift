@@ -79,6 +79,24 @@ final class CandidatePanelStateTests: XCTestCase {
         XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
     }
 
+    func testClearingModeStatusPreservesCompositionRows() {
+        var state = CandidatePanelState()
+
+        state.update(
+            rawInput: "ni",
+            suggestion: suggestion(prefixTexts: ["你", "呢"]),
+            preeditDisplayText: "ni",
+            modeStatusText: "中 · 中文标点 · 半角"
+        )
+
+        XCTAssertTrue(state.clearModeStatusText())
+        XCTAssertNil(state.windowState.viewModel.modeStatusText)
+        XCTAssertEqual(state.windowState.viewModel.preeditDisplayText, "ni")
+        XCTAssertEqual(state.windowState.viewModel.prefixCandidates.map(\.text), ["你", "呢"])
+        XCTAssertTrue(state.windowState.isVisible)
+        XCTAssertEqual(state.windowState.selection, .prefixCandidate(0))
+    }
+
     func testPreeditOnlyStateIsVisibleWithoutSelectableRawFallback() {
         var state = CandidatePanelState()
 

@@ -14,8 +14,11 @@ InputMethodKit menu.
 
 ## Behavior Notes
 
-- Menu order follows mature IMK input methods: common toggle, data/diagnostic
-  folder entries, then the localized KnowType settings item and About.
+- Menu order follows mature IMK input methods: common toggle, current mode
+  status, data/diagnostic folder entries, then the localized KnowType settings
+  item and About.
+- The mode-status item is read-only and reports text mode, punctuation style,
+  and character width at menu-open time.
 - Menu titles resolve through `SettingsLocalization`, so the default visible
   menu copy is Simplified Chinese while explicit English resources remain
   available.

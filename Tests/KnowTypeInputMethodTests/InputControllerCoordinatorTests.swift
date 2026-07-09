@@ -1441,14 +1441,16 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("i", client: client))
         let windowState = host.panelStates.last?.windowState
         XCTAssertEqual(windowState?.viewModel.preeditDisplayText, "ni")
-        let firstRenderedKind = windowState.flatMap {
+        let renderedKinds = windowState.map {
             CandidatePanelRenderer(locale: .zhCN).render(
                 $0.viewModel,
                 selected: $0.selection,
                 paging: $0.paging
-            ).rows.first?.kind
+            ).rows.map(\.kind)
         }
-        XCTAssertEqual(firstRenderedKind, .preedit)
+        XCTAssertEqual(renderedKinds?.first, .preedit)
+        XCTAssertFalse(renderedKinds?.contains(.modeStatus) == true)
+        XCTAssertTrue(renderedKinds?.contains(.preedit) == true)
         let firstCandidate = windowState?.viewModel.prefixCandidates.first?.text
         XCTAssertNotNil(firstCandidate)
 
@@ -1480,6 +1482,23 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(textClient.markedTextWrites.last?.text, "n")
     }
 
+    func testModeToggleReloadsDefaultsWhenFocusedBundleChanges() {
+        let codeClient = FakeInputControllerClient()
+        codeClient.bundleIdentifier = "com.apple.Terminal"
+        let textClient = FakeInputControllerClient()
+        textClient.bundleIdentifier = "com.apple.TextEdit"
+        let (coordinator, host, _) = makeCoordinator(client: codeClient)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: textClient
+            )
+        )
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+    }
+
     func testTextEditInlineCompositionUsesAttributedMarkedTextCarrier() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.TextEdit"
@@ -1499,11 +1518,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
     }
 
-    func testCodeAppPunctuationPreferenceCanOverrideDefaultToEnglish() {
+    func testCodeAppDefaultKeepsIdleOperatorsAsciiWhileAllowingChineseComposition() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.openai.codex"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handleText("-", client: client))
+        XCTAssertTrue(coordinator.handleText("_", client: client))
+        XCTAssertTrue(coordinator.handleText("{", client: client))
+        XCTAssertTrue(coordinator.handleText("}", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["/", "-", "_", "{", "}"])
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(client.markedTextWrites.last?.text, "n")
+    }
+
+    func testCodeAppSavedChinesePunctuationPreferenceIsNotOverridden() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"
         let preferences = InputModePreferences(
-            codeAppState: InputModeState(punctuationMode: .english, symbolWidth: .halfWidth)
+            codeAppState: InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
         )
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -1512,7 +1549,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
     }
 
     func testMissingClientPrintableInputPassesThroughWithoutComposition() {
@@ -1639,6 +1676,101 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+    }
+
+    func testShiftSpaceTogglesCurrentSessionSymbolWidth() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+
+        XCTAssertTrue(coordinator.handleText("@", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, "＠")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 半角")
+
+        XCTAssertTrue(coordinator.handleText("@", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, "@")
+    }
+
+    func testModeTogglesPreserveOtherModeDimensions() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 英文标点 · 全角")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "英 · 英文标点 · 全角")
+    }
+
+    func testShiftSpaceDuringCompositionDoesNotCommitText() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "n")
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+    }
+
+    func testShiftSpaceDuringSymbolCandidatesTogglesWidthWithoutCommittingSymbol() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.symbolCandidates, [])
     }
 
     @MainActor
@@ -2969,7 +3101,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
 
         XCTAssertTrue(coordinator.handleText("s", client: client))
-        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, false)
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
 
         XCTAssertTrue(
             coordinator.handle(
@@ -3076,7 +3208,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
 
         XCTAssertTrue(coordinator.handleText("s", client: client))
-        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, false)
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
         XCTAssertTrue(
             coordinator.handle(
                 stroke: InputKeyStroke(text: "2", keyCode: keyCode(forNumber: 2)),
@@ -3775,7 +3907,395 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页一－")
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页一-")
+    }
+
+    func testCommaAndPeriodFallbackToChinesePunctuationAtNativePageBoundary() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PagedNativeConversionEngine()
+        )
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: ",", keyCode: -1), client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第一页一，")
+
+        XCTAssertTrue(coordinator.handleText("s", client: client))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "=", keyCode: -1), client: client))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: ".", keyCode: -1), client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "第二页一。")
+    }
+
+    func testIdleSlashShowsSymbolCandidatesAndSpaceCommitsDunhao() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertEqual(viewModel?.symbolCandidates.map(\.text), ["、", "/", "／", "÷"])
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "、")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testIdleSlashSymbolCandidateNumberTwoCommitsAsciiSlash() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "2", keyCode: 19), client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "/")
+    }
+
+    func testSymbolCandidateDigitUsesVisiblePageShortcut() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            runtimePreferences: InputMethodRuntimePreferences(
+                candidatePageSize: 2,
+                candidateLayoutMode: .verticalPreferred
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("[", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["【", "「", "〖", "〔", "［"]
+        )
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 121),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.paging.currentPage, 1)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: keyCode(forNumber: 1)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "〖")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testSymbolCandidateInvalidDigitFallsThroughAsIdleDigit() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "9", keyCode: keyCode(forNumber: 9)),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "9")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testSymbolCandidatePrintableFallbackHidesIdlePanelBeforeNormalHandling() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testHidePalettesClearsHiddenIdleSymbolSession() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        coordinator.hidePalettes()
+        _ = coordinator.handleText(" ", client: client)
+
+        XCTAssertFalse(client.insertTextWrites.contains { $0.text == "、" })
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testActiveSymbolCandidateFallthroughRestoresCompositionPanel() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+
+        _ = coordinator.handle(
+            stroke: InputKeyStroke(text: "9", keyCode: keyCode(forNumber: 9)),
+            client: client
+        )
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertEqual(viewModel?.rawInput, "ni")
+        XCTAssertEqual(viewModel?.symbolCandidates, [])
+        XCTAssertFalse(viewModel?.prefixCandidates.isEmpty ?? true)
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+    }
+
+    func testActiveSymbolCandidateOverlayPreservesCommitOnlyPreedit() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let preferences = InputModePreferences(
+            codeAppState: InputModeState(
+                textMode: .chinese,
+                punctuationMode: .chinese,
+                symbolWidth: .halfWidth
+            )
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            inputModePreferences: preferences
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertEqual(viewModel?.preeditDisplayText, "ni")
+        XCTAssertEqual(viewModel?.symbolCandidates.map(\.text), ["、", "/", "／", "÷"])
+        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+    }
+
+    @MainActor
+    func testActiveSymbolCandidateCancelRestoresReadyAIRecommendation() async {
+        let client = FakeInputControllerClient()
+        let provider = RecordingContinuationProvider()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            provider: provider,
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true
+        )
+
+        for character in "api" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        let hasAIRecommendation = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
+        }
+        XCTAssertTrue(hasAIRecommendation)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText)
+
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
+
+        let viewModel = host.panelStates.last?.windowState.viewModel
+        XCTAssertEqual(viewModel?.rawInput, "api")
+        XCTAssertEqual(viewModel?.symbolCandidates, [])
+        XCTAssertEqual(viewModel?.aiRecommendation.displayText, "继续推进")
+    }
+
+    func testSymbolCandidateEscapeCancelsWithoutCommitting() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
+
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testOptionPeriodShowsTransientModeStatusRow() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+
+        let windowState = host.panelStates.last?.windowState
+        XCTAssertEqual(windowState?.viewModel.modeStatusText, "中 · 英文标点 · 半角")
+        XCTAssertEqual(windowState?.viewModel.symbolCandidates, [])
+        XCTAssertEqual(windowState?.isVisible, true)
+    }
+
+    func testIdleEscapeClearsTransientModeStatusOverlay() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, true)
+
+        XCTAssertFalse(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
+
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
+    func testIdleDirectPunctuationCommitClearsTransientModeStatusOverlay() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, true)
+
+        XCTAssertTrue(coordinator.handleText(",", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "，")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
+    func testCandidateNavigationClearsTransientModeStatusFromPublishedPanel() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 英文标点 · 半角")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F701}", keyCode: 125),
+                client: client
+            )
+        )
+
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.modeStatusText)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.rawInput, "n")
+        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
+    }
+
+    func testNoOpOptionNumberClearsTransientModeStatusFromActivePanel() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 英文标点 · 半角")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "9", keyCode: 25, modifiers: [.option]),
+                client: client
+            )
+        )
+
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.modeStatusText)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.rawInput, "n")
+        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
+    }
+
+    func testIdlePassthroughWithoutVisibleOverlayDoesNotHideCandidatePanel() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertFalse(coordinator.handleText("a", client: client))
+
+        XCTAssertEqual(host.hideCandidatePanelCount, 0)
+        XCTAssertTrue(host.candidatePanelFrames.isEmpty)
+    }
+
+    @MainActor
+    func testModeStatusClearKeepsActiveCompositionAnchoredToCurrentClient() async {
+        let statusClient = FakeInputControllerClient()
+        statusClient.firstRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
+        statusClient.lineHeightRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
+        let typingClient = FakeInputControllerClient()
+        typingClient.firstRectValue = CGRect(x: 220, y: 500, width: 0, height: 18)
+        typingClient.lineHeightRectValue = CGRect(x: 220, y: 500, width: 0, height: 18)
+        let (coordinator, host, _) = makeCoordinator(client: statusClient)
+        host.currentClientValue = statusClient
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: statusClient
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.anchorRect.minX, 40)
+
+        host.currentClientValue = typingClient
+        XCTAssertTrue(coordinator.handleText("n", client: typingClient))
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.modeStatusText)
+        XCTAssertEqual(host.panelStates.last?.windowState.anchorRect.minX, 220)
+
+        let didClearStatus = await waitUntilOnMainActor(timeout: 2) {
+            host.panelStates.last?.windowState.viewModel.modeStatusText == nil
+        }
+
+        XCTAssertTrue(didClearStatus)
+        XCTAssertEqual(coordinator.composedString() as? String, "n")
+        XCTAssertEqual(host.panelStates.last?.windowState.anchorRect.minX, 220)
+    }
+
+    @MainActor
+    func testImmediateSymbolInputClearsModeStatusBeforePublishingCandidates() async {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.modeStatusText)
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
     }
 
     private func makeCoordinator(

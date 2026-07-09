@@ -149,7 +149,7 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
                 )
             case .optionR:
                 return .result(.polishRequested(context.compositionBuffer.commitText))
-            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .commitRaw:
+            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth, .commitRaw:
                 break
             }
         }
@@ -208,6 +208,8 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
             return .result(aiRecommendationCommitResult(state: context.aiRecommendationState))
         case .rawInput:
             return .result(context.rawInput.isEmpty ? .noAction : .commit(context.rawInput))
+        case .symbolCandidate:
+            return .result(.noAction)
         case .prefixCandidate, .fullCandidate, .continuationCandidate:
             if context.isNativeActive,
                InputNativeCandidateNavigationRuntime.isNativeSelectablePrefixOrFull(selection) {
@@ -274,6 +276,8 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
                 return nil
             case .continuationCandidate:
                 return suggestion?.prefixCandidates.first?.text
+            case .symbolCandidate:
+                return nil
             }
         }
 
@@ -286,6 +290,8 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
             return nil
         case .continuationCandidate:
             return suggestion?.prefixCandidates.first?.text
+        case .symbolCandidate:
+            return nil
         case .rawInput, .none:
             return suggestion?.prefixCandidates.first?.text
         }
@@ -339,7 +345,7 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
         switch selection.kind {
         case .prefixCandidate, .fullCandidate:
             return false
-        case .rawInput, .segmentCandidate, .aiRecommendation, .continuationCandidate:
+        case .rawInput, .segmentCandidate, .aiRecommendation, .continuationCandidate, .symbolCandidate:
             return true
         }
     }
@@ -366,6 +372,8 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
             return nil
         case .continuationCandidate(let index):
             return .continuationCandidate(index: index)
+        case .symbolCandidate:
+            return nil
         }
     }
 

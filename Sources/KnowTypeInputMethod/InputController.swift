@@ -162,7 +162,8 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     public override func menu() -> NSMenu! {
         KnowTypeInputMethodMenuBuilder.makeMenu(
             target: self,
-            runtimePreferences: runtimePreferenceStore.loadPreferences()
+            runtimePreferences: runtimePreferenceStore.loadPreferences(),
+            inputModeState: coordinator.currentInputModeState()
         )
     }
 
@@ -305,6 +306,9 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     private func modifierSet(from flags: Int) -> Set<InputModifier> {
         let eventFlags = NSEvent.ModifierFlags(rawValue: UInt(flags))
         var modifiers: Set<InputModifier> = []
+        if eventFlags.contains(.shift) {
+            modifiers.insert(.shift)
+        }
         if eventFlags.contains(.option) {
             modifiers.insert(.option)
         }

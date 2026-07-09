@@ -24,7 +24,8 @@ and the input-method runtime.
   bundles, keep the code-app ASCII text default. Editor, Codex, Electron, and
   JetBrains-style apps inherit the normal text-mode default so Chinese
   composition can start immediately while still using code-app punctuation and
-  symbol-width defaults.
+  symbol-width defaults. The built-in code-app punctuation default is English
+  and symbol width remains half-width unless saved preferences override it.
 - The ASCII text pipeline remains available when the active session switches
   through the session-local text-mode toggle.
 

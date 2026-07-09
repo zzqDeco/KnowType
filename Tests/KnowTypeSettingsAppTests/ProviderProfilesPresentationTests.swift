@@ -57,6 +57,26 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             SettingsLocalization.string("settings.action.testConnection", localeIdentifier: "fr-FR"),
             "测试连接"
         )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.input.symbol.chinese", preferredLanguages: ["zh-Hans-CN"]),
+            "中文标点"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.input.symbol.english", preferredLanguages: ["zh-Hans-CN"]),
+            "英文标点"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.input.widthShortcut", preferredLanguages: ["zh-Hans-CN"]),
+            "全半角切换快捷键"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.input.symbol.chinese", localeIdentifier: "en"),
+            "Chinese Punctuation"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.input.widthShortcut", localeIdentifier: "en"),
+            "Width Shortcut"
+        )
     }
 
     func testSettingsLocalizationFallsBackWhenPreferredBundleLacksKey() throws {

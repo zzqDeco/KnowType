@@ -81,10 +81,12 @@ IMK composition and candidate anchor alive. The host text field sees only that
 placeholder; the candidate panel receives the real raw/preedit display text as a
 non-selectable preedit row above candidates, then commits with `insertText`.
 `Option + /` toggles the session text mode; ASCII mode passes idle printable
-input back to the focused app. Missing clients use `disabled`; printable idle
-input is returned as unhandled so the host can keep normal typing behavior. All
-write modes keep replacement ranges as `{NSNotFound, NSNotFound}` unless a
-future reconversion feature introduces an explicit owned range.
+input back to the focused app. `Option + .` toggles punctuation language and
+`Shift + Space` toggles half-width/full-width symbols without changing text
+mode. Missing clients use `disabled`; printable idle input is returned as
+unhandled so the host can keep normal typing behavior. All write modes keep
+replacement ranges as `{NSNotFound, NSNotFound}` unless a future reconversion
+feature introduces an explicit owned range.
 `InputClientCompositionWriter` is the internal boundary that applies this mode
 to inline marked text, placeholder marked text, idle passthrough, and owned
 marked-text cleanup. `InputClientWriteCoordinator` remains the lower-level
@@ -375,7 +377,7 @@ Current write contract:
   selected range, reported marked range, chosen replacement range, and reason
   without logging user text
 - Arrow navigation updates Rime's current-page highlight. Right/down at the current page end moves to the next page and highlights row 1; left/up at the current page start moves to the previous page and highlights its last row.
-- Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, the key falls back to the normal punctuation commit path so page shortcuts do not swallow punctuation at page boundaries.
+- Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, comma and period fall back to the local punctuator commit path so page shortcuts do not swallow `，`/`。` at page boundaries.
 - Other composing ASCII symbols are offered to Rime before KnowType punctuation fallback so schema keys such as apostrophe, semicolon, and slash can be handled by the engine.
 - Explicit `PageUp`/`PageDown` are forwarded to the native engine whenever composition is active, even if the custom panel is hidden because anchoring failed.
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
@@ -459,14 +461,16 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - `0` commits raw composition when correction candidates are visible.
 - visible numeric shortcuts commit rows on the current Rime candidate page only; after the AI slot, native alternatives keep their visible row numbers.
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
-- plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition.
-- `Option + .` toggles Chinese/English punctuation for the active controller session.
-- `Option + /` toggles Chinese/ASCII text mode for the active controller session; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
+- plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, paired Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao, but keeps code/path/operator symbols half-width unless full-width symbols are explicitly enabled.
+- symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
+- `Option + .` toggles Chinese/English punctuation for the active controller session and publishes a transient mode-status row.
+- `Option + /` toggles Chinese/ASCII text mode for the active controller session, also publishing a transient mode-status row; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
+- `Shift + Space` toggles half-width/full-width symbols for the active controller session and publishes the same transient mode-status row; plain `Space` still commits candidates or inserts/passes through a normal space. The transient row is cleared before the next real input key publishes composition, symbol candidates, commit, or passthrough output, so it does not remain mixed into active candidate content.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
 
-Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app punctuation default is Chinese unless saved preferences override it. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries, bypasses the normal reload throttle when the focused app bundle changes, and preserves session-local toggles while preferences and app context are unchanged.
+Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so Chinese punctuation does not imply full-width symbols and half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app default uses English punctuation and half-width symbols unless saved preferences override it, while non-terminal code apps still inherit the normal Chinese text-mode default. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries, bypasses the normal reload throttle when the focused app bundle changes, and preserves session-local toggles while preferences and app context are unchanged.
 
 Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation preference for legacy paths, continuation length, and continuation count. These preferences use the same shared defaults domain and are read by the input method at startup and new composition boundaries. The Rime-only settings UI no longer exposes the legacy input-scheme picker; production conversion uses the bundled Rime full-pinyin schema. Defaults preserve the current production behavior: six adaptive candidates per page, adaptive horizontal panel layout, cloud continuation enabled, medium continuation length, and six continuation candidates. If an older preference stores nine candidates per page, adaptive layout caps the effective page size at six; vertical-list mode uses the saved page size.
 
