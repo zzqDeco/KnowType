@@ -9,7 +9,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let canRequestAIRecommendations: Bool
     private var conversionEngine: any KnowTypeConversionEngine
     private let keyMapper = InputKeyCommandMapper()
-    private let symbolTransformer = InputSymbolTransformer()
+    private var punctuatorRuntime = InputPunctuatorRuntime()
     private let candidateListBuilder = InputCandidateListBuilder()
     private let anchorResolver: CandidateAnchorResolver
     private weak var host: InputControllerHost?
@@ -23,6 +23,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let runtimePreferenceStore: any InputMethodRuntimePreferenceStore
     private var runtimePreferences: InputMethodRuntimePreferences
     private let nativeCandidateNavigationRuntime = InputNativeCandidateNavigationRuntime()
+    private var symbolCandidateSession: InputSymbolCandidateSession?
+    private var aiRecommendationStateBeforeSymbolCandidate: AIRecommendationState?
+    private var modeStatusText: String?
     private let lexicalCommitRuntime: InputLexicalCommitRuntime
     private let commitApplicationRuntime = InputCommitApplicationRuntime()
     private let commitDecisionRuntime = InputCommitDecisionRuntime()
@@ -196,6 +199,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         NSAttributedString(string: rawBuffer)
     }
 
+    func currentInputModeState() -> InputModeState {
+        inputModeRuntime.state
+    }
+
     func candidates() -> [Any] {
         let selections = candidateListBuilder.candidateSelections(
             rawInput: rawBuffer,
@@ -249,6 +256,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func commitCandidatePanelSelection(_ selection: CandidatePanelSelection, client: InputControllerClient?) {
+        if case .symbolCandidate(let index) = selection {
+            _ = commitSymbolCandidate(at: index, client: client)
+            return
+        }
         guard let publicationResult = candidatePanelPublicationRuntime.selectVisibleRow(selection),
               let inputSelection = nativeCandidateNavigationRuntime.inputCandidateSelection(
                   for: publicationResult.selection,
@@ -297,6 +308,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func hidePalettes() {
+        clearSymbolCandidateSession(restoringAIRecommendation: true)
         hideCandidatePanel(reason: .escape)
     }
 
@@ -308,6 +320,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
+        clearSymbolCandidateSession()
         aiRecommendationState = aiRecommendationRuntime.reset(
             compositionID: compositionID,
             rawLength: rawBuffer.count,
@@ -334,6 +347,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
         let client = client ?? (hasActiveTextComposition() ? host?.currentClient : nil)
+        if symbolCandidateSession != nil,
+           let handled = handleActiveSymbolCandidateIntent(intent, client: client) {
+            return handled
+        }
         switch intent {
         case .append(let text):
             if !hasActiveTextComposition() {
@@ -349,12 +366,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .symbol(let text):
             if conversionEngine.isNativeActive,
                !rawBuffer.isEmpty {
-                let result = conversionEngine.process(.text(text))
-                if result.handled {
-                    return handleNativeConversionResult(result, client: client)
-                }
                 if handleNativePagingSymbol(text, client: client) {
                     return true
+                }
+                if !InputNativeCandidateNavigationRuntime.isPagingSymbol(text) {
+                    let result = conversionEngine.process(.text(text))
+                    if result.handled {
+                        return handleNativeConversionResult(result, client: client)
+                    }
                 }
             }
             if rawBuffer.isEmpty {
@@ -363,10 +382,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     return false
                 }
             }
-            guard let symbol = symbolTransformer.text(for: text, state: inputModeRuntime.state) else {
+            guard let decision = punctuatorRuntime.decision(for: text, state: inputModeRuntime.state) else {
                 return appendComposition(text, client: client)
             }
-            return commitSymbol(symbol, client: client)
+            return handlePunctuatorDecision(decision, client: client)
         case .deleteBackward:
             guard !rawBuffer.isEmpty else {
                 _ = aiAcceptanceRuntime.observeDeleteBackward(client: client)
@@ -387,10 +406,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .action(let action):
             if action == .toggleSymbolMode {
                 inputModeRuntime.togglePunctuationMode()
+                punctuatorRuntime.resetPairingState()
+                showModeStatus(client: client)
                 return true
             }
             if action == .toggleTextMode {
                 inputModeRuntime.toggleTextMode()
+                punctuatorRuntime.resetPairingState()
+                showModeStatus(client: client)
                 return true
             }
             if action == .space,
@@ -475,6 +498,151 @@ final class InputControllerCoordinator: @unchecked Sendable {
         invalidateSuggestion(reason: "input_changed")
         publishLocalSuggestion(client: client)
         return true
+    }
+
+    private func handlePunctuatorDecision(
+        _ decision: InputPunctuatorDecision,
+        client: InputControllerClient?
+    ) -> Bool {
+        switch decision {
+        case .commit(let text):
+            return commitSymbol(text, client: client)
+        case .passThrough(let text):
+            return insertDirectPassthroughText(text, client: client)
+        case .showCandidates(let session):
+            publishSymbolCandidateSession(session, client: client)
+            return true
+        }
+    }
+
+    private func handleActiveSymbolCandidateIntent(
+        _ intent: InputKeyIntent,
+        client: InputControllerClient?
+    ) -> Bool? {
+        switch intent {
+        case .action(.space):
+            return commitSelectedSymbolCandidate(client: client)
+        case .selectCandidate(let number) where number > 0:
+            guard let selectionResult = candidatePanelPublicationRuntime.selectVisibleNumberShortcut(number),
+                  case .symbolCandidate(let index) = selectionResult.selection else {
+                clearSymbolCandidateSessionBeforeFallthrough(client: client)
+                return nil
+            }
+            return commitSymbolCandidate(at: index, client: client)
+        case .selectCandidate:
+            clearSymbolCandidateSessionBeforeFallthrough(client: client)
+            return nil
+        case .moveCandidateSelection(let navigation):
+            if let result = candidatePanelPublicationRuntime.moveLocalSelection(navigation) {
+                nativeCandidateNavigationRuntime.updateSelectedCandidate(
+                    for: result.selection,
+                    in: result.state.windowState.viewModel
+                )
+                candidatePanelPublicationRuntime.applyCurrentFrame(
+                    reason: .compositionActive,
+                    compositionID: compositionID,
+                    rawRevision: rawRevision,
+                    rawLength: rawBuffer.count,
+                    locale: locale
+                )
+            }
+            return true
+        case .cancelComposition:
+            cancelSymbolCandidateSession(client: client)
+            return true
+        case .modifierFlagsChanged:
+            return false
+        case .ignored:
+            return false
+        default:
+            clearSymbolCandidateSessionBeforeFallthrough(client: client)
+            return nil
+        }
+    }
+
+    private func commitSelectedSymbolCandidate(client: InputControllerClient?) -> Bool {
+        if case .symbolCandidate(let index) = candidatePanelPublicationRuntime.state.windowState.selection {
+            return commitSymbolCandidate(at: index, client: client)
+        }
+        return commitSymbolCandidate(at: 0, client: client)
+    }
+
+    private func commitSymbolCandidate(at index: Int, client: InputControllerClient?) -> Bool {
+        guard let session = symbolCandidateSession,
+              session.candidates.indices.contains(index) else {
+            return true
+        }
+        let symbol = session.candidates[index].text
+        let hadActiveComposition = hasActiveTextComposition()
+        clearSymbolCandidateSession()
+        let handled = commitSymbol(symbol, client: client)
+        if !hadActiveComposition {
+            hideCandidatePanel(reason: .compositionEnded)
+        }
+        return handled
+    }
+
+    private func publishSymbolCandidateSession(
+        _ session: InputSymbolCandidateSession,
+        client: InputControllerClient?
+    ) {
+        if symbolCandidateSession == nil {
+            aiRecommendationStateBeforeSymbolCandidate = aiRecommendationState
+        }
+        symbolCandidateSession = session
+        aiRecommendationState = aiRecommendationRuntime.reset(
+            compositionID: compositionID,
+            rawLength: rawBuffer.count,
+            reason: "symbol_candidate"
+        )
+        publishPanelOverlay(
+            modeStatusText: modeStatusText,
+            symbolCandidates: session.candidates,
+            preferredSelection: .symbolCandidate(0),
+            client: client
+        )
+    }
+
+    private func cancelSymbolCandidateSession(client: InputControllerClient?) {
+        restoreCompositionPanelAfterSymbolCandidate(client: client)
+    }
+
+    private func restoreCompositionPanelAfterSymbolCandidate(client: InputControllerClient?) {
+        let savedAIRecommendationState = aiRecommendationStateBeforeSymbolCandidate
+        clearSymbolCandidateSession()
+        guard hasActiveTextComposition() else {
+            hideCandidatePanel(reason: .escape)
+            return
+        }
+        let suggestion = suggestionStateRuntime.currentSnapshot().suggestion
+        guard let savedAIRecommendationState else {
+            updateCandidatePanelImmediately(suggestion: suggestion, client: client)
+            return
+        }
+        if savedAIRecommendationState.isPendingRecommendation,
+           let suggestion {
+            scheduleAIRecommendation(for: suggestion, client: client)
+        } else {
+            aiRecommendationState = savedAIRecommendationState
+            updateCandidatePanelImmediately(suggestion: suggestion, client: client)
+        }
+    }
+
+    private func clearSymbolCandidateSession(restoringAIRecommendation: Bool = false) {
+        symbolCandidateSession = nil
+        if restoringAIRecommendation,
+           let savedAIRecommendationState = aiRecommendationStateBeforeSymbolCandidate,
+           !savedAIRecommendationState.isPendingRecommendation {
+            aiRecommendationState = savedAIRecommendationState
+        }
+        aiRecommendationStateBeforeSymbolCandidate = nil
+    }
+
+    private func clearSymbolCandidateSessionBeforeFallthrough(client: InputControllerClient?) {
+        guard symbolCandidateSession != nil else {
+            return
+        }
+        restoreCompositionPanelAfterSymbolCandidate(client: client)
     }
 
     private func commitSymbol(_ symbol: String, client: InputControllerClient?) -> Bool {
@@ -1324,6 +1492,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         commitPolicy: InputCompositionLifecycleCommitPolicy
     ) -> Bool {
+        clearSymbolCandidateSession()
+        if reason != .commit && reason != .nativeEnded {
+            punctuatorRuntime.resetPairingState()
+        }
         traceCompositionLifecycleFinish(reason: reason)
         let finishingSnapshot = compositionState
         let finishPlan = compositionLifecycleRuntime.finishPlan(
@@ -1554,10 +1726,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
         lastInputModePreferenceReload = now
-        inputModeRuntime.reloadIfChanged(
+        if inputModeRuntime.reloadIfChanged(
             preferences: inputModePreferenceStore.loadPreferences(),
             appBundleID: appBundleID
-        )
+        ) {
+            punctuatorRuntime.resetPairingState()
+            clearSymbolCandidateSession()
+        }
     }
 
     @discardableResult
@@ -1606,6 +1781,87 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: locale
         )
         applyCandidatePanelPublicationResult(result)
+    }
+
+    private func publishPanelOverlay(
+        modeStatusText: String?,
+        symbolCandidates: [InputSymbolCandidate],
+        preferredSelection: CandidatePanelSelection?,
+        client: InputControllerClient?
+    ) {
+        let result = candidatePanelPublicationRuntime.publishOverlay(
+            request: InputCandidatePanelOverlayRequest(
+                rawInput: rawBuffer,
+                compositionID: compositionID,
+                rawRevision: rawRevision,
+                anchorResult: candidateAnchorResult(client: client),
+                placementPreference: candidatePanelPlacementPreference(client: client),
+                preeditDisplayText: candidatePanelPreeditDisplayText(client: client),
+                modeStatusText: modeStatusText,
+                symbolCandidates: symbolCandidates,
+                pageSize: runtimePreferences.effectiveCandidatePageSize,
+                layoutMode: runtimePreferences.candidateLayoutMode,
+                preferredSelection: preferredSelection
+            ),
+            locale: locale
+        )
+        applyCandidatePanelPublicationResult(result)
+    }
+
+    private func showModeStatus(client: InputControllerClient?) {
+        modeStatusText = modeStatusDescription(for: inputModeRuntime.state)
+        if hasActiveTextComposition() {
+            updateCandidatePanelImmediately(
+                suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
+                client: client
+            )
+        } else {
+            publishPanelOverlay(
+                modeStatusText: modeStatusText,
+                symbolCandidates: [],
+                preferredSelection: nil,
+                client: client
+            )
+        }
+        scheduleModeStatusClear(client: client)
+    }
+
+    private func scheduleModeStatusClear(client: InputControllerClient?) {
+        let visibleStatus = modeStatusText
+        let task = Task { @MainActor [weak self, weak client] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self,
+                  !Task.isCancelled,
+                  self.modeStatusText == visibleStatus else {
+                return
+            }
+            self.modeStatusText = nil
+            if self.hasActiveTextComposition() {
+                self.updateCandidatePanelImmediately(
+                    suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
+                    client: client
+                )
+            } else if let symbolCandidateSession = self.symbolCandidateSession {
+                let selection = self.candidatePanelPublicationRuntime.state.windowState.selection
+                    ?? CandidatePanelSelection.symbolCandidate(0)
+                self.publishPanelOverlay(
+                    modeStatusText: nil,
+                    symbolCandidates: symbolCandidateSession.candidates,
+                    preferredSelection: selection,
+                    client: client
+                )
+            } else {
+                self.hideCandidatePanel(reason: .compositionEnded)
+            }
+        }
+        taskSupervisor.replace(.modeStatusClear, with: task)
+    }
+
+    private func modeStatusDescription(for state: InputModeState) -> String {
+        let textMode = state.textMode == .chinese ? "中" : "英"
+        let punctuationMode = state.punctuationMode == .chinese ? "中文标点" : "英文标点"
+        let width = state.symbolWidth == .halfWidth ? "半角" : "全角"
+        return "\(textMode) · \(punctuationMode) · \(width)"
     }
 
     private func updateCandidatePanel(suggestion: SuggestionResponse?, client: InputControllerClient?) {
@@ -1658,6 +1914,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             placementPreference: candidatePanelPlacementPreference(client: client),
             preeditDisplayText: candidatePanelPreeditDisplayText(client: client),
             aiRecommendation: aiRecommendationState,
+            modeStatusText: modeStatusText,
+            symbolCandidates: symbolCandidateSession?.candidates ?? [],
             savedPageSize: runtimePreferences.candidatePageSize,
             effectivePageSize: runtimePreferences.effectiveCandidatePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode,

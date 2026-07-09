@@ -85,6 +85,8 @@ public struct CandidatePanelState: Sendable, Equatable {
         placementPreference: CandidatePanelPlacementPreference = .automatic,
         preeditDisplayText: String? = nil,
         aiRecommendation: AIRecommendationState = .idle,
+        modeStatusText: String? = nil,
+        symbolCandidates: [InputSymbolCandidate] = [],
         preferredSelection: CandidatePanelSelection? = nil
     ) {
         let prefixCandidates = suggestion?.prefixCandidates ?? []
@@ -95,9 +97,11 @@ public struct CandidatePanelState: Sendable, Equatable {
         let viewModel = CandidatePanelViewModel(
             rawInput: rawInput,
             preeditDisplayText: normalizedPreeditDisplayText,
+            modeStatusText: modeStatusText,
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates,
-            aiRecommendation: aiRecommendation
+            aiRecommendation: aiRecommendation,
+            symbolCandidates: symbolCandidates
         )
         let hasRows = !CandidatePanelRowBuilder().buildRows(in: viewModel).isEmpty
         let isVisible = isDisplayable && hasRows
@@ -190,6 +194,24 @@ public struct CandidatePanelState: Sendable, Equatable {
 
     @discardableResult
     public mutating func selectVisiblePrefixCandidate(shortcutNumber number: Int) -> CandidatePanelSelection? {
+        guard let selection = visibleNumberShortcutSelection(number),
+              isPrefixCandidateSelection(selection) else {
+            return nil
+        }
+        applyVisibleNumberShortcutSelection(selection)
+        return selection
+    }
+
+    @discardableResult
+    public mutating func selectVisibleNumberShortcut(_ number: Int) -> CandidatePanelSelection? {
+        guard let selection = visibleNumberShortcutSelection(number) else {
+            return nil
+        }
+        applyVisibleNumberShortcutSelection(selection)
+        return selection
+    }
+
+    private func visibleNumberShortcutSelection(_ number: Int) -> CandidatePanelSelection? {
         guard windowState.isVisible,
               number > 0 else {
             return nil
@@ -200,12 +222,23 @@ public struct CandidatePanelState: Sendable, Equatable {
         guard visibleRows.indices.contains(shortcutIndex) else {
             return nil
         }
-        let selection = visibleRows[shortcutIndex]
+        return visibleRows[shortcutIndex]
+    }
+
+    private mutating func applyVisibleNumberShortcutSelection(_ selection: CandidatePanelSelection) {
         windowState.selection = selection
         if let rowIndex = renderRows().firstIndex(of: .some(selection)) {
             windowState.paging = pagingState(forRowIndex: rowIndex, pageSize: windowState.paging.pageSize)
         }
-        return selection
+    }
+
+    private func isPrefixCandidateSelection(_ selection: CandidatePanelSelection) -> Bool {
+        switch selection {
+        case .prefixCandidate, .fullCandidate, .segmentCandidate:
+            return true
+        case .aiRecommendation, .continuationCandidate, .rawInput, .symbolCandidate:
+            return false
+        }
     }
 
     private func selectionAfterUpdate(
@@ -251,6 +284,12 @@ public struct CandidatePanelState: Sendable, Equatable {
         case .aiRecommendation:
             return windowState.viewModel.aiRecommendation == viewModel.aiRecommendation
                 && viewModel.aiRecommendation.isSelectableRecommendation
+        case .symbolCandidate(let index):
+            guard windowState.viewModel.symbolCandidates.indices.contains(index),
+                  viewModel.symbolCandidates.indices.contains(index) else {
+                return false
+            }
+            return windowState.viewModel.symbolCandidates[index] == viewModel.symbolCandidates[index]
         }
     }
 

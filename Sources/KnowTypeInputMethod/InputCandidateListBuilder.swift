@@ -9,6 +9,7 @@ public enum InputCandidateSelectionKind: Sendable, Equatable {
     case segmentCandidate(index: Int)
     case aiRecommendation
     case continuationCandidate(index: Int)
+    case symbolCandidate(index: Int)
 }
 
 extension InputCandidateSelectionKind {
@@ -26,6 +27,8 @@ extension InputCandidateSelectionKind {
             return "ai"
         case .continuationCandidate:
             return "continuation"
+        case .symbolCandidate:
+            return "symbol"
         }
     }
 }

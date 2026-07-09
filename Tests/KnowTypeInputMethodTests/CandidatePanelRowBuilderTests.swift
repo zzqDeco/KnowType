@@ -113,6 +113,47 @@ final class CandidatePanelRowBuilderTests: XCTestCase {
         XCTAssertNil(CandidatePanelRowBuilder().defaultSelection(in: viewModel))
     }
 
+    func testModeStatusIsFixedDisabledRowWithoutSelectionTarget() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "",
+            modeStatusText: "中 · 中文标点 · 半角",
+            prefixCandidates: [],
+            continuationCandidates: []
+        )
+
+        let rows = CandidatePanelRowBuilder().buildRows(in: viewModel)
+
+        XCTAssertEqual(rows.fixedRows.map(\.kind), [.modeStatus])
+        XCTAssertEqual(rows.fixedRows[0].text, "中 · 中文标点 · 半角")
+        XCTAssertEqual(rows.fixedRows[0].visualRole, .status)
+        XCTAssertEqual(rows.fixedRows[0].accessibilityLabel, "输入模式，中 · 中文标点 · 半角")
+        XCTAssertFalse(rows.fixedRows[0].isEnabled)
+        XCTAssertNil(rows.fixedRows[0].selection)
+        XCTAssertTrue(rows.pageableRows.isEmpty)
+        XCTAssertNil(CandidatePanelRowBuilder().defaultSelection(in: viewModel))
+    }
+
+    func testSymbolCandidateRowsAreSelectableAndShortcutEligible() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "",
+            prefixCandidates: [],
+            continuationCandidates: [],
+            symbolCandidates: [
+                InputSymbolCandidate(text: "、"),
+                InputSymbolCandidate(text: "/")
+            ]
+        )
+
+        let rows = CandidatePanelRowBuilder().buildRows(in: viewModel)
+
+        XCTAssertEqual(rows.pageableRows.map(\.kind), [.symbolCandidate, .symbolCandidate])
+        XCTAssertEqual(rows.pageableRows.map(\.selection), [.symbolCandidate(0), .symbolCandidate(1)])
+        XCTAssertEqual(rows.pageableRows.map(\.text), ["、", "/"])
+        XCTAssertEqual(rows.pageableRows.map(\.visualRole), [.symbolCandidate, .symbolCandidate])
+        XCTAssertEqual(rows.pageableRows.map(\.isNumberShortcutEligible), [true, true])
+        XCTAssertEqual(CandidatePanelRowBuilder().defaultSelection(in: viewModel), .symbolCandidate(0))
+    }
+
     func testPrefixSelectionUsesRawRangeShape() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "nihao",

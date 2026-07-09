@@ -375,7 +375,7 @@ Current write contract:
   selected range, reported marked range, chosen replacement range, and reason
   without logging user text
 - Arrow navigation updates Rime's current-page highlight. Right/down at the current page end moves to the next page and highlights row 1; left/up at the current page start moves to the previous page and highlights its last row.
-- Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, the key falls back to the normal punctuation commit path so page shortcuts do not swallow punctuation at page boundaries.
+- Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) first attempts `.pageUp`/`.pageDown`; when the native snapshot does not change, comma and period fall back to the local punctuator commit path so page shortcuts do not swallow `，`/`。` at page boundaries.
 - Other composing ASCII symbols are offered to Rime before KnowType punctuation fallback so schema keys such as apostrophe, semicolon, and slash can be handled by the engine.
 - Explicit `PageUp`/`PageDown` are forwarded to the native engine whenever composition is active, even if the custom panel is hidden because anchoring failed.
 - Rime initialization failure produces `engineName: rime-unavailable` and no candidates. The coordinator keeps raw input and raw commit usable instead of falling back to the retired local converter.
@@ -459,9 +459,10 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - `0` commits raw composition when correction candidates are visible.
 - visible numeric shortcuts commit rows on the current Rime candidate page only; after the AI slot, native alternatives keep their visible row numbers.
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
-- plain punctuation is offered to Rime first while composing; if Rime declines, KnowType commits the current composition display plus punctuation, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, Chinese brackets, book-title marks, and `/` for dunhao, but keeps code/path/operator symbols half-width unless full-width symbols are explicitly enabled.
-- `Option + .` toggles Chinese/English punctuation for the active controller session.
-- `Option + /` toggles Chinese/ASCII text mode for the active controller session; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
+- plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, paired Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao, but keeps code/path/operator symbols half-width unless full-width symbols are explicitly enabled.
+- symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
+- `Option + .` toggles Chinese/English punctuation for the active controller session and publishes a transient mode-status row.
+- `Option + /` toggles Chinese/ASCII text mode for the active controller session, also publishing a transient mode-status row; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.

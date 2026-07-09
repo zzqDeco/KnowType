@@ -52,7 +52,7 @@
 "settings.input.symbol.english" = "英文标点";
 "settings.input.width.half" = "半角";
 "settings.input.width.full" = "全角";
-"settings.input.symbolPolicy.note" = "中文标点只影响逗号、句号、问号等常用标点；全角字符需显式开启，默认关闭。";
+"settings.input.symbolPolicy.note" = "中文标点影响逗号、句号、问号、引号、省略号等；多义符号会显示候选。全角字符需显式开启，默认关闭。";
 "settings.input.punctuationShortcut" = "标点切换快捷键";
 "settings.input.textModeShortcut" = "中英模式切换快捷键";
 "settings.input.section.prefixLock" = "前缀锁定";

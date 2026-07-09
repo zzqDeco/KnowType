@@ -343,18 +343,21 @@ placement.
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
-| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
-| `Option + .` | Toggle Chinese/English punctuation for the active input session. |
+| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, show symbol candidates, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
+| `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. |
+| `Option + .` | Toggle Chinese/English punctuation for the active input session and show a short mode-status row. |
 | `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in terminal-style compatibility hosts, it switches between Chinese placeholder composition and idle ASCII passthrough. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
 Chinese punctuation and full-width symbols are separate controls. Chinese
-punctuation maps sentence punctuation, Chinese brackets and book-title marks,
-and `/` as the dunhao entry, while code/path/operator symbols stay half-width
-unless full-width symbols are explicitly enabled. Code-style apps default to
-Chinese composition with English punctuation and half-width symbols.
+punctuation maps sentence punctuation, paired Chinese quotes, ellipsis,
+em dash, brackets, and symbol-candidate entries such as `/` for dunhao, while
+code/path/operator symbols stay half-width unless full-width symbols are
+explicitly enabled. Code-style apps default to Chinese composition with English
+punctuation and half-width symbols. Mode changes briefly show a status row such
+as `中 · 中文标点 · 半角`.
 
 Host compatibility is conservative. Standard AppKit-style text fields, browsers,
 editors, IDEs, Electron shells, and unknown clients use inline composition with

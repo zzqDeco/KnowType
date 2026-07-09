@@ -297,17 +297,19 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
-| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点，或在没有 composition 时直接插入标点/在兼容宿主中直通给宿主。 |
-| `Option + .` | 切换当前输入会话的中文/英文标点。 |
+| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点、显示符号候选、直接插入标点，或在兼容宿主中直通给宿主。 |
+| `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。 |
+| `Option + .` | 切换当前输入会话的中文/英文标点，并显示短暂模式状态行。 |
 | `Option + /` | 切换当前输入会话的中文/ASCII 文本模式；在终端类兼容宿主中用于在中文 placeholder composition 和空闲 ASCII 直通之间切换。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
-中文标点和全角字符是两个独立控制。中文标点会转换句读、中文括号和书名号，
-并保留 `/` 作为顿号入口；代码、路径和运算类符号在半角宽度下保持 ASCII，
-只有显式开启全角字符时才会变为全角。代码类 app 默认使用中文组合输入、
-英文标点和半角符号。
+中文标点和全角字符是两个独立控制。中文标点会转换句读、成对中文引号、
+省略号、破折号、中文括号，并通过 `/` 等多义符号显示符号候选；代码、路径
+和运算类符号在半角宽度下保持 ASCII，只有显式开启全角字符时才会变为全角。
+代码类 app 默认使用中文组合输入、英文标点和半角符号。模式切换后会短暂显示
+类似 `中 · 中文标点 · 半角` 的状态行。
 
 宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
 IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
@@ -319,8 +321,8 @@ composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候�
 上方，确认时再通过 `insertText` 上屏。仍可用 UserDefaults override 将任意
 bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline marked text 的宿主。
 
-候选窗显示 Rime 前缀候选、固定 AI 推荐状态行、终端/override commit-only
-placeholder 宿主中的真实 preedit，以及没有建议时的 raw input。preedit 行没有
+候选窗显示 Rime 前缀候选、符号候选、固定 AI 推荐状态行、模式状态行、
+终端/override commit-only placeholder 宿主中的真实 preedit，以及没有建议时的 raw input。preedit 行没有
 快捷键、不可选、不能提交；inline 宿主不会额外显示这一行，避免和宿主输入框里的
 preedit 重复。它是紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标
 hover/click 选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，

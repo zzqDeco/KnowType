@@ -4,10 +4,12 @@ import KnowTypeCore
 
 public enum CandidatePanelRowKind: Sendable, Equatable {
     case preedit
+    case modeStatus
     case rawInput
     case prefixCandidate
     case aiRecommendation
     case continuationCandidate
+    case symbolCandidate
 }
 
 public enum CandidatePanelVisualRole: Sendable, Equatable, Hashable {
@@ -15,6 +17,8 @@ public enum CandidatePanelVisualRole: Sendable, Equatable, Hashable {
     case aiRecommendation
     case continuation
     case rawInput
+    case symbolCandidate
+    case status
 }
 
 public enum CandidatePanelRowAccessory: Sendable, Equatable {
@@ -28,6 +32,7 @@ public enum CandidatePanelSelection: Sendable, Equatable {
     case segmentCandidate(Int)
     case aiRecommendation
     case continuationCandidate(Int)
+    case symbolCandidate(Int)
 }
 
 public struct CandidatePanelRenderRow: Sendable, Equatable {
@@ -80,8 +85,12 @@ public struct CandidatePanelRenderRow: Sendable, Equatable {
             rolePrefix = isEnabled ? "AI 推荐" : "AI 状态"
         case .continuation:
             rolePrefix = "续写"
+        case .symbolCandidate:
+            rolePrefix = "符号"
         case .rawInput:
             rolePrefix = "原文"
+        case .status:
+            rolePrefix = "输入模式"
         case .lockedPrefix:
             rolePrefix = nil
         }
@@ -129,7 +138,7 @@ public struct CandidatePanelRenderer: Sendable {
                 shortcutLabel = nil
             case .some(.rawInput):
                 shortcutLabel = nil
-            case .some(.prefixCandidate), .some(.fullCandidate), .some(.segmentCandidate):
+            case .some(.prefixCandidate), .some(.fullCandidate), .some(.segmentCandidate), .some(.symbolCandidate):
                 if item.isNumberShortcutEligible {
                     shortcutLabel = "\(nextNumberShortcut)"
                     nextNumberShortcut += 1
