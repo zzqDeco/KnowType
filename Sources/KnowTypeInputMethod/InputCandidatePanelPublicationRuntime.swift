@@ -287,6 +287,11 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
     }
 
     @discardableResult
+    func clearModeStatusText() -> Bool {
+        panelState.clearModeStatusText()
+    }
+
+    @discardableResult
     func selectVisiblePrefixCandidate(shortcutNumber number: Int) -> InputCandidatePanelPublicationResult? {
         guard panelState.selectVisiblePrefixCandidate(shortcutNumber: number) != nil else {
             return nil

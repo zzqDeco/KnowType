@@ -128,6 +128,15 @@ public struct CandidatePanelState: Sendable, Equatable {
     }
 
     @discardableResult
+    public mutating func clearModeStatusText() -> Bool {
+        guard windowState.viewModel.modeStatusText != nil else {
+            return false
+        }
+        windowState.viewModel.modeStatusText = nil
+        return true
+    }
+
+    @discardableResult
     public mutating func moveSelection(_ navigation: InputCandidateNavigation) -> Bool {
         guard windowState.isVisible else {
             return false

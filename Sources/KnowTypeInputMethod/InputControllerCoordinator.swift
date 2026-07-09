@@ -945,7 +945,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reason: reason
         )
         if shouldPassThrough {
-            hideCandidatePanel(reason: .compositionEnded)
+            hideCandidatePanelIfVisible(reason: .compositionEnded)
         }
         return shouldPassThrough
     }
@@ -1880,10 +1880,25 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         taskSupervisor.cancel(.modeStatusClear)
         modeStatusText = nil
+        let hadVisiblePanel = candidatePanelPublicationRuntime.state.windowState.isVisible
+        let shouldReplayCurrentPanelFrame = intent.replaysCurrentPanelFrameAfterClearingModeStatus
+            && (hasActiveTextComposition() || symbolCandidateSession != nil)
+        if candidatePanelPublicationRuntime.clearModeStatusText(),
+           hadVisiblePanel,
+           shouldReplayCurrentPanelFrame {
+            candidatePanelPublicationRuntime.applyCurrentFrame(
+                reason: .compositionActive,
+                compositionID: compositionID,
+                rawRevision: rawRevision,
+                rawLength: rawBuffer.count,
+                locale: locale
+            )
+        }
         if intent.hidesModeStatusWhenNoReplacementFrame,
+           hadVisiblePanel,
            !hasActiveTextComposition(),
            symbolCandidateSession == nil {
-            hideCandidatePanelIfVisible(reason: .compositionEnded)
+            hideCandidatePanel(reason: .compositionEnded)
         }
     }
 
@@ -2217,6 +2232,15 @@ private extension InputKeyIntent {
         case .deleteBackward, .cancelComposition, .moveCandidateSelection:
             return true
         case .action(.space), .action(.tab), .action(.optionNumber), .action(.optionR), .action(.commitRaw):
+            return true
+        default:
+            return false
+        }
+    }
+
+    var replaysCurrentPanelFrameAfterClearingModeStatus: Bool {
+        switch self {
+        case .moveCandidateSelection:
             return true
         default:
             return false
