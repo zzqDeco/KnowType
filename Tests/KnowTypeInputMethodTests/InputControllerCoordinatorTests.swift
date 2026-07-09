@@ -4203,6 +4203,31 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
     }
 
+    func testNoOpOptionNumberClearsTransientModeStatusFromActivePanel() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 英文标点 · 半角")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "9", keyCode: 25, modifiers: [.option]),
+                client: client
+            )
+        )
+
+        XCTAssertNil(host.panelStates.last?.windowState.viewModel.modeStatusText)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.rawInput, "n")
+        XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
+    }
+
     func testIdlePassthroughWithoutVisibleOverlayDoesNotHideCandidatePanel() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"

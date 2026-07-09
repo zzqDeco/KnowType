@@ -2242,6 +2242,8 @@ private extension InputKeyIntent {
         switch self {
         case .moveCandidateSelection:
             return true
+        case .action(.tab), .action(.optionNumber), .action(.optionR):
+            return true
         default:
             return false
         }
