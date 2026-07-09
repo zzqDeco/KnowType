@@ -1,6 +1,7 @@
 import Foundation
 
 public enum InputModifier: Sendable, Equatable, Hashable {
+    case shift
     case option
     case command
     case control
@@ -83,6 +84,11 @@ public struct InputKeyCommandMapper: Sendable {
                 return .action(.optionR)
             }
             return .ignored
+        }
+
+        if stroke.modifiers == [.shift],
+           stroke.keyCode == Self.spaceKeyCode || stroke.text == " " {
+            return .action(.toggleSymbolWidth)
         }
 
         if stroke.keyCode == Self.escapeKeyCode || stroke.text == Self.escapeText {

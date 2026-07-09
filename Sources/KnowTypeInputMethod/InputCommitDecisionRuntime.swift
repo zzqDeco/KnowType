@@ -149,7 +149,7 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
                 )
             case .optionR:
                 return .result(.polishRequested(context.compositionBuffer.commitText))
-            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .commitRaw:
+            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth, .commitRaw:
                 break
             }
         }

@@ -81,10 +81,12 @@ IMK composition and candidate anchor alive. The host text field sees only that
 placeholder; the candidate panel receives the real raw/preedit display text as a
 non-selectable preedit row above candidates, then commits with `insertText`.
 `Option + /` toggles the session text mode; ASCII mode passes idle printable
-input back to the focused app. Missing clients use `disabled`; printable idle
-input is returned as unhandled so the host can keep normal typing behavior. All
-write modes keep replacement ranges as `{NSNotFound, NSNotFound}` unless a
-future reconversion feature introduces an explicit owned range.
+input back to the focused app. `Option + .` toggles punctuation language and
+`Shift + Space` toggles half-width/full-width symbols without changing text
+mode. Missing clients use `disabled`; printable idle input is returned as
+unhandled so the host can keep normal typing behavior. All write modes keep
+replacement ranges as `{NSNotFound, NSNotFound}` unless a future reconversion
+feature introduces an explicit owned range.
 `InputClientCompositionWriter` is the internal boundary that applies this mode
 to inline marked text, placeholder marked text, idle passthrough, and owned
 marked-text cleanup. `InputClientWriteCoordinator` remains the lower-level
@@ -463,6 +465,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
 - `Option + .` toggles Chinese/English punctuation for the active controller session and publishes a transient mode-status row.
 - `Option + /` toggles Chinese/ASCII text mode for the active controller session, also publishing a transient mode-status row; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
+- `Shift + Space` toggles half-width/full-width symbols for the active controller session and publishes the same transient mode-status row; plain `Space` still commits candidates or inserts/passes through a normal space.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.

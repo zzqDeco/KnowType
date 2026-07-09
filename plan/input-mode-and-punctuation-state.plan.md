@@ -22,7 +22,7 @@ KnowType now models:
 
 - Keep `KnowTypeInputController` as the IMK bridge and move mode decisions into typed policy objects.
 - Preserve PR #26 behavior: plain punctuation commits composition plus punctuation, and `Option + .` toggles punctuation mode.
-- Add full-width symbol mapping as a typed state capability without exposing a user shortcut yet.
+- Add full-width symbol mapping as a typed state capability; the current runtime shortcut is `Shift + Space`.
 - Keep Terminal, iTerm, Xcode, VS Code, and Codex desktop on the separate code-app preference path; the current built-in code-app default uses English punctuation and half-width symbols unless the user overrides it.
 
 ## Non-Goals

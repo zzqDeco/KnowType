@@ -104,4 +104,16 @@ final class InputCompositionControllerTests: XCTestCase {
 
         XCTAssertEqual(result, .noAction)
     }
+
+    func testToggleSymbolWidthDoesNotCommitComposition() {
+        let controller = InputCompositionController()
+        let result = controller.handle(
+            action: .toggleSymbolWidth,
+            prefixCandidates: prefix,
+            continuationCandidates: continuations,
+            originalText: "wo jue de zhege fagnan"
+        )
+
+        XCTAssertEqual(result, .noAction)
+    }
 }

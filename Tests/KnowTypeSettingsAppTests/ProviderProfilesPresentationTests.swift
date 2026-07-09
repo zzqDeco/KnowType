@@ -66,8 +66,16 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             "英文标点"
         )
         XCTAssertEqual(
+            SettingsLocalization.string("settings.input.widthShortcut", preferredLanguages: ["zh-Hans-CN"]),
+            "全半角切换快捷键"
+        )
+        XCTAssertEqual(
             SettingsLocalization.string("settings.input.symbol.chinese", localeIdentifier: "en"),
             "Chinese Punctuation"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.input.widthShortcut", localeIdentifier: "en"),
+            "Width Shortcut"
         )
     }
 

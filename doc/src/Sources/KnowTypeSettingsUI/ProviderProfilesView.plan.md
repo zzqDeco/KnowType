@@ -70,6 +70,9 @@ diagnostics.
 - User-facing settings copy defaults to Simplified Chinese. Technical terms such
   as API Key, URL, Rime, macOS, and InputMethodKit remain untranslated where that
   is the clearest mixed Chinese copy.
+- Input behavior copy lists the three independent session toggles:
+  `Option + /` for text mode, `Option + .` for punctuation language, and
+  `Shift + Space` for symbol width.
 
 ## Tests
 

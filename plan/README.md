@@ -43,6 +43,7 @@ when converting a shipped plan into a short record.
 | [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Visible candidate, punctuation, Space commit, and anchoring alignment | Active |
 | [input-symbol-punctuation-policy.plan.md](input-symbol-punctuation-policy.plan.md) | Keep Chinese punctuation, full-width symbols, and code-app ASCII operator defaults separated | Active |
 | [input-mode-feedback-punctuator-candidates.plan.md](input-mode-feedback-punctuator-candidates.plan.md) | Add transient mode feedback, mature punctuator decisions, and panel-backed symbol candidates | Active |
+| [input-mode-shortcuts-width-feedback.plan.md](input-mode-shortcuts-width-feedback.plan.md) | Add Shift+Space symbol-width toggling and keep text, punctuation, and width feedback explicit | Active |
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
 | [input-method-first-key-performance.plan.md](input-method-first-key-performance.plan.md) | Reduce post-install/process-cold first-key stall and repeated hot-path overhead | Active |
 | [input-method-first-key-review-followup.plan.md](input-method-first-key-review-followup.plan.md) | Resolve PR #150 first-key performance review regressions | Active |
