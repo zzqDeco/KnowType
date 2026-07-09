@@ -39,8 +39,10 @@ candidate ordering, host compatibility policy, or install scripts.
   input cancels before normal handling.
 - Symbol candidates do not trigger AI requests, Rime buffer mutation, prefix
   selection learning, or provider context changes.
-- Mode-status rows are disabled, fixed panel rows with privacy-safe text such as
-  `中 · 中文标点 · 半角`; no user input text or candidate text is logged.
+- Mode-status rows are disabled, transient panel rows with privacy-safe text
+  such as `中 · 中文标点 · 半角`; the next real input key clears the status row
+  before publishing composition or symbol candidates, and no user input text or
+  candidate text is logged.
 
 ## Test Plan
 

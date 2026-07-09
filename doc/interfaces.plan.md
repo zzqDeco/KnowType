@@ -465,7 +465,7 @@ The resolver accepts zero-width caret rects with valid height and rejects zero-h
 - symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
 - `Option + .` toggles Chinese/English punctuation for the active controller session and publishes a transient mode-status row.
 - `Option + /` toggles Chinese/ASCII text mode for the active controller session, also publishing a transient mode-status row; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
-- `Shift + Space` toggles half-width/full-width symbols for the active controller session and publishes the same transient mode-status row; plain `Space` still commits candidates or inserts/passes through a normal space.
+- `Shift + Space` toggles half-width/full-width symbols for the active controller session and publishes the same transient mode-status row; plain `Space` still commits candidates or inserts/passes through a normal space. The transient row is cleared before the next real input key publishes composition, symbol candidates, commit, or passthrough output, so it does not remain mixed into active candidate content.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
