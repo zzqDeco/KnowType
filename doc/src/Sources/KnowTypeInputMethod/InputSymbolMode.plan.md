@@ -29,5 +29,6 @@ model.
   preferences.
 - The IMK controller loads persisted preferences at startup and refreshes them
   at the next composition or direct symbol input. `Option + .` toggles the
-  session punctuation state and `Option + /` toggles text mode without rewriting
-  saved preferences; both publish a transient mode-status row.
+  session punctuation state, `Option + /` toggles text mode, and
+  `Shift + Space` toggles symbol width without rewriting saved preferences; all
+  publish a transient mode-status row.

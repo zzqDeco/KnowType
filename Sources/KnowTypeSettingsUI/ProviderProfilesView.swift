@@ -172,6 +172,7 @@ private struct InputSettingsView: View {
                     .foregroundStyle(.secondary)
                 LabeledContent(settingsString("settings.input.punctuationShortcut"), value: "Option + .")
                 LabeledContent(settingsString("settings.input.textModeShortcut"), value: "Option + /")
+                LabeledContent(settingsString("settings.input.widthShortcut"), value: "Shift + Space")
                 Button {
                     inputModeViewModel.resetToDefaults()
                     runtimePreferencesViewModel.resetToDefaults()

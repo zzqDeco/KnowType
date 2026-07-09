@@ -24,7 +24,7 @@ Current package-level implementation covers:
 - candidate panel mouse hover, click commit, scroll paging, row accessibility, and PNG snapshot regression tests
 - shortcut-to-commit behavior
 - key intent modeling for key down, key up, modifier flag changes, cancel, delete, navigation keys, punctuation, and numeric candidate selection
-- persisted `InputModeState` for text mode, punctuation language, and symbol width, refreshed from saved preferences at new composition/direct symbol boundaries and focused-bundle changes, with `Option + .` toggling punctuation language and `Option + /` toggling Chinese/ASCII text mode for the active session
+- persisted `InputModeState` for text mode, punctuation language, and symbol width, refreshed from saved preferences at new composition/direct symbol boundaries and focused-bundle changes, with `Option + .` toggling punctuation language, `Option + /` toggling Chinese/ASCII text mode, and `Shift + Space` toggling symbol width for the active session
 - host compatibility write modes for inline composition, commit-only
   composition, ASCII passthrough, and missing-client disabled handling
 - host composition write state through `InputClientCompositionWriter`, which

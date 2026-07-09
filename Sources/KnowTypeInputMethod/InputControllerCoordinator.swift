@@ -416,6 +416,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 showModeStatus(client: client)
                 return true
             }
+            if action == .toggleSymbolWidth {
+                inputModeRuntime.toggleSymbolWidth()
+                punctuatorRuntime.resetPairingState()
+                showModeStatus(client: client)
+                return true
+            }
             if action == .space,
                !hasActiveTextComposition() {
                 reloadInputModeDefaultsIfNeeded(client: client)

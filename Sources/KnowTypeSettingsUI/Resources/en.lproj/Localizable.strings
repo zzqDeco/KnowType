@@ -52,9 +52,10 @@
 "settings.input.symbol.english" = "English Punctuation";
 "settings.input.width.half" = "Half-width";
 "settings.input.width.full" = "Full-width";
-"settings.input.symbolPolicy.note" = "Chinese punctuation affects commas, periods, question marks, quotes, ellipses, and similar marks; ambiguous symbols show candidates. Full-width characters are explicit and off by default.";
+"settings.input.symbolPolicy.note" = "Chinese text mode, Chinese punctuation, and full-width characters are separate states. Chinese punctuation affects commas, periods, question marks, quotes, ellipses, and similar marks; ambiguous symbols show candidates. Full-width characters are explicit and off by default.";
 "settings.input.punctuationShortcut" = "Punctuation Shortcut";
 "settings.input.textModeShortcut" = "Text Mode Shortcut";
+"settings.input.widthShortcut" = "Width Shortcut";
 "settings.input.section.prefixLock" = "Prefix Lock";
 "settings.input.prefixLock.note" = "Continuation candidates only append after the locked prefix. Prefix rewriting is available only through explicit polish actions.";
 "settings.input.section.behavior" = "How It Works";

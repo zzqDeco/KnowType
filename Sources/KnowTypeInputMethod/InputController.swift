@@ -306,6 +306,9 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     private func modifierSet(from flags: Int) -> Set<InputModifier> {
         let eventFlags = NSEvent.ModifierFlags(rawValue: UInt(flags))
         var modifiers: Set<InputModifier> = []
+        if eventFlags.contains(.shift) {
+            modifiers.insert(.shift)
+        }
         if eventFlags.contains(.option) {
             modifiers.insert(.option)
         }

@@ -1660,6 +1660,101 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, ".")
     }
 
+    func testShiftSpaceTogglesCurrentSessionSymbolWidth() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+
+        XCTAssertTrue(coordinator.handleText("@", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, "＠")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 半角")
+
+        XCTAssertTrue(coordinator.handleText("@", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, "@")
+    }
+
+    func testModeTogglesPreserveOtherModeDimensions() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 英文标点 · 全角")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "英 · 英文标点 · 全角")
+    }
+
+    func testShiftSpaceDuringCompositionDoesNotCommitText() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "n")
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+    }
+
+    func testShiftSpaceDuringSymbolCandidatesTogglesWidthWithoutCommittingSymbol() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.symbolCandidates, [])
+    }
+
     @MainActor
     func testAsyncPendingPunctuationCommitsFirstNativeCandidateWithoutBlocking() {
         let client = FakeInputControllerClient()

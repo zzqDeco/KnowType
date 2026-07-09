@@ -161,7 +161,7 @@ public enum InputSessionCommitPolicy {
             )
         case .optionR:
             return .polishRequested(rawInput)
-        case .optionNumber, .toggleSymbolMode, .toggleTextMode, .commitRaw:
+        case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth, .commitRaw:
             return .noAction
         }
     }
@@ -179,7 +179,7 @@ public enum InputSessionCommitPolicy {
                 return .commit(rawInput)
             case .optionR:
                 return .polishRequested(rawInput)
-            case .optionNumber, .toggleSymbolMode, .toggleTextMode:
+            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
                 return .noAction
             }
         case .prefixCandidate(let index):
@@ -192,7 +192,7 @@ public enum InputSessionCommitPolicy {
                     return .commit(suggestion.prefixCandidates[index].text)
                 case .optionR:
                     return .polishRequested(rawInput)
-                case .toggleSymbolMode, .toggleTextMode:
+                case .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
                     return .noAction
                 case .commitRaw:
                     return .commit(rawInput)
@@ -221,7 +221,7 @@ public enum InputSessionCommitPolicy {
                 )
             case .optionR:
                 return .polishRequested(rawInput)
-            case .toggleSymbolMode, .toggleTextMode:
+            case .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
                 return .noAction
             case .commitRaw:
                 return .commit(rawInput)
@@ -364,7 +364,7 @@ public actor InputSessionController {
 
         let result: InputCommitResult
         switch action {
-        case .space, .tab, .optionR, .toggleSymbolMode, .toggleTextMode:
+        case .space, .tab, .optionR, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
             result = compositionController.handle(
                 action: action,
                 prefixCandidates: [prefix],
