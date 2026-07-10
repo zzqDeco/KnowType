@@ -12,6 +12,12 @@ private let inputControllerLogger = Logger(
     category: "input-controller"
 )
 
+enum InputControllerRecognizedEventPolicy {
+    static var recognizedEvents: Int {
+        Int(NSEvent.EventTypeMask.keyDown.rawValue)
+    }
+}
+
 enum InputMethodLexicalProfileRuntime {
     static let store = LexicalProfileStore()
     static let refreshGate = LexicalProfileRefreshGate()
@@ -161,11 +167,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     }
 
     public override func recognizedEvents(_ sender: Any!) -> Int {
-        Int(
-            NSEvent.EventTypeMask.keyDown.rawValue
-                | NSEvent.EventTypeMask.keyUp.rawValue
-                | NSEvent.EventTypeMask.flagsChanged.rawValue
-        )
+        InputControllerRecognizedEventPolicy.recognizedEvents
     }
 
     public override func menu() -> NSMenu! {

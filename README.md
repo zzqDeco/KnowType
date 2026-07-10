@@ -369,6 +369,9 @@ Host compatibility is conservative. Standard AppKit-style text fields, browsers,
 editors, IDEs, Electron shells, and unknown clients use inline composition with
 attributed marked text by default, so raw preedit appears in the focused text
 field. Host identity no longer changes the global text or punctuation mode.
+KnowType registers only key-down events with InputMethodKit, preserving IMK's
+default behavior of committing active composition when the user clicks outside
+its marked range. Shortcut modifiers continue to come from key-down flags.
 Terminal, iTerm, MacVim, and Emacs-style hosts therefore also begin in Chinese
 mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;

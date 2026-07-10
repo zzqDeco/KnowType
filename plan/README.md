@@ -110,6 +110,7 @@ when converting a shipped plan into a short record.
 | [provider-live-smoke-model-alignment.plan.md](provider-live-smoke-model-alignment.plan.md) | Align env-gated continuation live smoke with the explicit product model under test | Active |
 | [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |
 | [imk-owned-marked-range-commit.plan.md](imk-owned-marked-range-commit.plan.md) | Prevent cursor misplacement by ignoring stale host marked ranges on ordinary IMK writes | Active |
+| [imk-default-mouse-commit.plan.md](imk-default-mouse-commit.plan.md) | Restore InputMethodKit's default click-outside composition commit | Active |
 | [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
 | [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persisted punctuation and symbol-width preferences | Active |
 | [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Active |

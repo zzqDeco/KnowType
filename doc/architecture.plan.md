@@ -189,6 +189,10 @@ LevelDB state.
 `KnowTypeInputMethod` is the macOS front end:
 
 - `KnowTypeInputController` is the thin IMK bridge for lifecycle, key events, marked text, commit, and palette visibility.
+- `KnowTypeInputController.recognizedEvents` registers only `keyDown`, preserving
+  InputMethodKit's default click-outside `commitComposition(_:)` behavior.
+  Shortcut modifiers are derived from each key-down event's flags, so separate
+  `keyUp` and `flagsChanged` registration is not required.
 - `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses Rime prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
 - `CompositionBuffer` remains available for legacy/session tests, but native Rime preedit is the production marked-text source during active Chinese composition.
 - `InputMethodLexiconRuntime` remains available for legacy demos/tests and settings visibility, but local lexicon rebuilds are not part of the IMK key path.
