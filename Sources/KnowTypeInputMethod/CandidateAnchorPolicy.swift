@@ -1,7 +1,8 @@
 import Foundation
 
 public enum CandidateAnchorPolicy {
-    public static let maximumLineHeightBacktrack = 80
+    public static let maximumFirstRectProbes = 4
+    public static let maximumLineHeightProbes = 4
 
     public static func characterRange(for selectedRange: NSRange) -> NSRange? {
         guard isKnown(selectedRange) else {
@@ -41,7 +42,7 @@ public enum CandidateAnchorPolicy {
         if ranges.isEmpty {
             ranges.append(NSRange(location: 0, length: 0))
         }
-        return ranges.map { range in
+        return ranges.prefix(maximumFirstRectProbes).map { range in
             CandidateAnchorCharacterRange(
                 range: range,
                 source: source(for: range, selectedRange: selectedRange, markedRange: markedRange)
@@ -51,41 +52,24 @@ public enum CandidateAnchorPolicy {
 
     public static func lineHeightCharacterIndexes(
         selectedRange: NSRange,
-        markedRange: NSRange?,
-        maximumBacktrack: Int = maximumLineHeightBacktrack
+        markedRange: NSRange?
     ) -> [Int] {
         var indexes: [Int] = []
-        let startIndexes = lineHeightStartIndexes(
-            selectedRange: selectedRange,
-            markedRange: markedRange
-        )
-
-        for startIndex in startIndexes {
-            let lowerBound = max(0, startIndex - max(0, maximumBacktrack))
-            var index = startIndex
-            while index >= lowerBound {
-                appendUnique(index, to: &indexes)
-                if index == 0 {
-                    break
-                }
-                index -= 1
-            }
+        guard let markedRange, isKnown(markedRange) else {
+            return [0]
         }
-        appendUnique(0, to: &indexes)
-        return indexes
-    }
 
-    public static func insertionPointFallbackRange(
-        selectedRange: NSRange,
-        markedRange: NSRange?
-    ) -> NSRange? {
+        appendUnique(lastInlineCharacterIndex(for: markedRange), to: &indexes)
         if isKnown(selectedRange) {
-            return NSRange(location: selectedRange.location + selectedRange.length, length: 0)
+            appendInlineIndex(
+                selectedRange.location + selectedRange.length,
+                markedRange: markedRange,
+                to: &indexes
+            )
         }
-        if let markedRange, isKnown(markedRange) {
-            return NSRange(location: markedRange.location + markedRange.length, length: 0)
-        }
-        return nil
+        // Marked-start and document-start both map to inline index zero.
+        appendUnique(0, to: &indexes)
+        return Array(indexes.prefix(maximumLineHeightProbes))
     }
 
     private static func source(
@@ -126,33 +110,6 @@ public enum CandidateAnchorPolicy {
         if !indexes.contains(index) {
             indexes.append(index)
         }
-    }
-
-    private static func lineHeightStartIndexes(
-        selectedRange: NSRange,
-        markedRange: NSRange?
-    ) -> [Int] {
-        guard let markedRange, isKnown(markedRange) else {
-            return [0]
-        }
-
-        var indexes: [Int] = []
-        appendUnique(lastInlineCharacterIndex(for: markedRange), to: &indexes)
-
-        guard isKnown(selectedRange) else {
-            return indexes
-        }
-        appendInlineIndex(
-            selectedRange.location + selectedRange.length,
-            markedRange: markedRange,
-            to: &indexes
-        )
-        appendInlineIndex(
-            selectedRange.location,
-            markedRange: markedRange,
-            to: &indexes
-        )
-        return indexes
     }
 
     private static func appendInlineIndex(

@@ -65,7 +65,31 @@ final class CandidateAnchorResolverTests: XCTestCase {
         XCTAssertTrue(result.isFresh)
     }
 
-    func testResolverFallsBackThroughLineHeightIndexesFromCursor() {
+    func testResolverBoundsMaliciousHostGeometryProbes() {
+        let accessibility = FakeAccessibilityAnchorProvider(rect: .infinite)
+        let client = FakeInputClientGeometry(
+            selectedRange: NSRange(location: 1_000, length: 1),
+            markedRange: NSRange(location: 10, length: 200),
+            defaultFirstRect: .infinite,
+            defaultLineRect: CGRect(x: CGFloat.nan, y: 0, width: 0, height: 18)
+        )
+        let resolver = CandidateAnchorResolver(
+            screenProvider: screenProvider(),
+            accessibilityProvider: accessibility
+        )
+
+        let result = resolver.resolve(client: client, context: context())
+
+        XCTAssertEqual(result.source, .safeScreenFallback)
+        XCTAssertEqual(client.requestedFirstRects.count, CandidateAnchorPolicy.maximumFirstRectProbes)
+        XCTAssertLessThanOrEqual(
+            client.requestedLineRects.count,
+            CandidateAnchorPolicy.maximumLineHeightProbes
+        )
+        XCTAssertEqual(accessibility.callCount, 1)
+    }
+
+    func testResolverUsesOnlyStrategicLineHeightIndexes() {
         let client = FakeInputClientGeometry(
             selectedRange: NSRange(location: 105, length: 0),
             markedRange: NSRange(location: 100, length: 5),
@@ -74,7 +98,7 @@ final class CandidateAnchorResolverTests: XCTestCase {
                 NSRange(location: 100, length: 0): .zero
             ],
             lineRects: [
-                3: CGRect(x: 33, y: 44, width: 0, height: 18)
+                0: CGRect(x: 33, y: 44, width: 0, height: 18)
             ]
         )
         let resolver = CandidateAnchorResolver(screenProvider: screenProvider())
@@ -83,8 +107,7 @@ final class CandidateAnchorResolverTests: XCTestCase {
 
         XCTAssertEqual(result.source, .lineHeightRect)
         XCTAssertEqual(result.rect, CGRect(x: 33, y: 44, width: 0, height: 18))
-        XCTAssertFalse(client.requestedLineRects.contains(5))
-        XCTAssertEqual(client.requestedLineRects.prefix(2), [4, 3])
+        XCTAssertEqual(client.requestedLineRects, [4, 0])
     }
 
     func testResolverUsesZeroLineHeightIndexWhenNoMarkedRangeExists() {
@@ -161,6 +184,77 @@ final class CandidateAnchorResolverTests: XCTestCase {
 
         XCTAssertEqual(result.source, .accessibilityFocusedRange)
         XCTAssertEqual(result.rect, CGRect(x: 80, y: 90, width: 0, height: 20))
+    }
+
+    func testResolverUsesScopedCacheBeforeLineHeightAndAccessibility() {
+        let accessibility = FakeAccessibilityAnchorProvider(
+            rect: CGRect(x: 300, y: 300, width: 0, height: 20)
+        )
+        let resolver = CandidateAnchorResolver(
+            screenProvider: screenProvider(),
+            accessibilityProvider: accessibility
+        )
+        let anchor = CGRect(x: 60, y: 60, width: 0, height: 18)
+        _ = resolver.resolve(
+            client: FakeInputClientGeometry(
+                selectedRange: NSRange(location: 0, length: 0),
+                markedRange: nil,
+                firstRects: [NSRange(location: 0, length: 0): anchor]
+            ),
+            context: context(now: 1_000)
+        )
+        let failedClient = FakeInputClientGeometry(
+            selectedRange: NSRange(location: 0, length: 0),
+            markedRange: nil,
+            firstRects: [NSRange(location: 0, length: 0): .zero],
+            lineRects: [0: CGRect(x: 200, y: 200, width: 0, height: 18)]
+        )
+
+        let result = resolver.resolve(
+            client: failedClient,
+            context: context(now: 1_000.05)
+        )
+
+        XCTAssertEqual(result.source, .lastUsableScoped)
+        XCTAssertEqual(result.rect, anchor)
+        XCTAssertEqual(failedClient.requestedLineRects, [])
+        XCTAssertEqual(accessibility.callCount, 0)
+    }
+
+    func testAccessibilityProbeIsThrottledByCompositionAndAppFor100Milliseconds() {
+        let accessibility = FakeAccessibilityAnchorProvider(rect: nil)
+        let resolver = CandidateAnchorResolver(
+            screenProvider: screenProvider(),
+            accessibilityProvider: accessibility
+        )
+        let client = FakeInputClientGeometry(
+            selectedRange: NSRange(location: 0, length: 0),
+            markedRange: nil
+        )
+
+        XCTAssertEqual(
+            resolver.resolve(client: client, context: context(now: 1_000)).source,
+            .safeScreenFallback
+        )
+        XCTAssertEqual(accessibility.callCount, 1)
+
+        _ = resolver.resolve(client: client, context: context(now: 1_000.05))
+        XCTAssertEqual(accessibility.callCount, 1)
+
+        _ = resolver.resolve(
+            client: client,
+            context: context(appBundleID: "com.example.other", now: 1_000.05)
+        )
+        XCTAssertEqual(accessibility.callCount, 2)
+
+        _ = resolver.resolve(
+            client: client,
+            context: context(compositionID: 2, now: 1_000.05)
+        )
+        XCTAssertEqual(accessibility.callCount, 3)
+
+        _ = resolver.resolve(client: client, context: context(now: 1_000.1))
+        XCTAssertEqual(accessibility.callCount, 4)
     }
 
     func testAccessibilityCoordinateConversionUsesScreenTopOrigin() {
@@ -242,6 +336,76 @@ final class CandidateAnchorResolverTests: XCTestCase {
         )
     }
 
+    func testLastUsableExpiresBeforeLineHeightAndAccessibilityFallbacks() {
+        let accessibility = FakeAccessibilityAnchorProvider(rect: nil)
+        let resolver = CandidateAnchorResolver(
+            screenProvider: screenProvider(),
+            accessibilityProvider: accessibility,
+            maxLastUsableAge: 2
+        )
+        _ = resolver.resolve(
+            client: FakeInputClientGeometry(
+                selectedRange: NSRange(location: 0, length: 0),
+                markedRange: nil,
+                firstRects: [
+                    NSRange(location: 0, length: 0): CGRect(x: 60, y: 60, width: 0, height: 18)
+                ]
+            ),
+            context: context(now: 1_000)
+        )
+
+        let result = resolver.resolve(
+            client: FakeInputClientGeometry(
+                selectedRange: NSRange(location: 0, length: 0),
+                markedRange: nil
+            ),
+            context: context(now: 1_002.01)
+        )
+
+        XCTAssertEqual(result.source, .safeScreenFallback)
+        XCTAssertEqual(accessibility.callCount, 1)
+    }
+
+    func testLastUsableRejectsChangedScreenIdentityInMultiScreenTopology() {
+        let screens = FakeScreenGeometryProvider(
+            screens: [
+                CandidateAnchorScreen(
+                    identifier: "main",
+                    frame: CGRect(x: 0, y: 0, width: 800, height: 800),
+                    visibleFrame: CGRect(x: 0, y: 0, width: 800, height: 760)
+                ),
+                CandidateAnchorScreen(
+                    identifier: "secondary",
+                    frame: CGRect(x: 800, y: 0, width: 800, height: 800),
+                    visibleFrame: CGRect(x: 800, y: 0, width: 800, height: 760)
+                )
+            ]
+        )
+        let resolver = CandidateAnchorResolver(screenProvider: screens)
+        _ = resolver.resolve(
+            client: FakeInputClientGeometry(
+                selectedRange: NSRange(location: 0, length: 0),
+                markedRange: nil,
+                firstRects: [
+                    NSRange(location: 0, length: 0): CGRect(x: 900, y: 60, width: 0, height: 18)
+                ]
+            ),
+            context: context(now: 1_000)
+        )
+        screens.screens[1].identifier = "replacement"
+
+        let result = resolver.resolve(
+            client: FakeInputClientGeometry(
+                selectedRange: NSRange(location: 0, length: 0),
+                markedRange: nil
+            ),
+            context: context(now: 1_000.05)
+        )
+
+        XCTAssertEqual(result.source, .safeScreenFallback)
+        XCTAssertLessThan(result.rect.minX, 800)
+    }
+
     func testResolverUsesSafeScreenFallbackAfterAllAnchorSourcesFail() {
         let client = FakeInputClientGeometry(
             selectedRange: NSRange(location: 0, length: 0),
@@ -320,12 +484,13 @@ final class CandidateAnchorResolverTests: XCTestCase {
 
     private func context(
         compositionID: Int = 1,
-        appBundleID: String? = "com.example.app"
+        appBundleID: String? = "com.example.app",
+        now: TimeInterval = 1_000
     ) -> CandidateAnchorContext {
         CandidateAnchorContext(
             compositionID: compositionID,
             appBundleID: appBundleID,
-            now: Date(timeIntervalSince1970: 1_000)
+            now: Date(timeIntervalSince1970: now)
         )
     }
 
@@ -342,15 +507,25 @@ final class CandidateAnchorResolverTests: XCTestCase {
     }
 }
 
-private struct FakeScreenGeometryProvider: ScreenGeometryProviding {
+private final class FakeScreenGeometryProvider: ScreenGeometryProviding {
     var screens: [CandidateAnchorScreen]
+
+    init(screens: [CandidateAnchorScreen]) {
+        self.screens = screens
+    }
 }
 
-private struct FakeAccessibilityAnchorProvider: AccessibilityAnchorProviding {
+private final class FakeAccessibilityAnchorProvider: AccessibilityAnchorProviding {
     var rect: CGRect?
+    private(set) var callCount = 0
+
+    init(rect: CGRect?) {
+        self.rect = rect
+    }
 
     func focusedCaretRect(screenProvider: ScreenGeometryProviding) -> CGRect? {
-        rect
+        callCount += 1
+        return rect
     }
 }
 
@@ -359,6 +534,8 @@ private final class FakeInputClientGeometry: InputClientGeometryProviding {
     var markedRange: NSRange?
     var firstRects: [NSRange: CGRect]
     var lineRects: [Int: CGRect]
+    var defaultFirstRect: CGRect
+    var defaultLineRect: CGRect
     var requestedFirstRects: [NSRange] = []
     var requestedLineRects: [Int] = []
 
@@ -366,21 +543,25 @@ private final class FakeInputClientGeometry: InputClientGeometryProviding {
         selectedRange: NSRange,
         markedRange: NSRange?,
         firstRects: [NSRange: CGRect] = [:],
-        lineRects: [Int: CGRect] = [:]
+        lineRects: [Int: CGRect] = [:],
+        defaultFirstRect: CGRect = .zero,
+        defaultLineRect: CGRect = .zero
     ) {
         self.selectedRange = selectedRange
         self.markedRange = markedRange
         self.firstRects = firstRects
         self.lineRects = lineRects
+        self.defaultFirstRect = defaultFirstRect
+        self.defaultLineRect = defaultLineRect
     }
 
     func firstRect(forCharacterRange range: NSRange) -> CGRect {
         requestedFirstRects.append(range)
-        return firstRects[range] ?? .zero
+        return firstRects[range] ?? defaultFirstRect
     }
 
     func lineHeightRect(forCharacterIndex index: Int) -> CGRect {
         requestedLineRects.append(index)
-        return lineRects[index] ?? .zero
+        return lineRects[index] ?? defaultLineRect
     }
 }

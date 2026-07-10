@@ -497,14 +497,17 @@ Candidate panel movement consumes `CandidateAnchorResult`. UI code should not us
 
 Resolver source priority:
 
-1. marked and selected `firstRect` ranges
-2. insertion-point `firstRect`
-3. line-height rectangles
-4. Accessibility focused-range bounds when available
-5. same-composition scoped last usable anchor
-6. safe screen fallback inside the visible frame
+1. at most four deduplicated marked and selected `firstRect` ranges
+2. unexpired last usable anchor scoped by composition, app, and screen
+3. at most four deduplicated strategic IMK-inline line-height positions
+4. one Accessibility focused-range resolve when available, throttled for 100
+   ms by composition and app
+5. safe screen fallback inside the visible frame
 
-The resolver accepts zero-width caret rects with valid height and rejects zero-height, non-finite, offscreen, or stale cross-composition anchors.
+The resolver accepts zero-width caret rects with valid height and rejects
+zero-height, non-finite, offscreen, or stale cross-composition anchors. Anchor
+diagnostics contain only probe count, source, scope metadata, and rejection
+reason; they do not include user text or raw geometry.
 
 ## Shortcut Contract
 

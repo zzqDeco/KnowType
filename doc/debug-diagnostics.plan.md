@@ -15,7 +15,7 @@ committed text, prompts, provider output, or API keys.
 | `KNOWTYPE_PANEL_DEBUG=1` | Candidate panel frame publication, window apply, layout, hide, and stale frame drops. |
 | `KNOWTYPE_TURN_DEBUG=1` | Input turn effect sequence and per-effect timing. |
 | `KNOWTYPE_CLIENT_WRITE_DEBUG=1` | Host write kind, bundle id, write mode, handled state, and reason. |
-| `KNOWTYPE_ANCHOR_DEBUG=1` | Candidate anchor source acceptance or rejection reason. |
+| `KNOWTYPE_ANCHOR_DEBUG=1` | Candidate anchor probe count, source acceptance, and rejection reason. |
 
 All debug lines use stable key/value output:
 
@@ -26,7 +26,7 @@ KnowType debug: category=<category> stage=<stage> elapsedMs=<ms> ...
 Allowed fields are limited to ids and metadata: `stage`, `elapsedMs`,
 `budgetMs`, `turnID`, `compositionID`, `rawLength`, `rawRevision`,
 `panelGeneration`, `requestID`, `provider`, `bundleID`, `writeMode`,
-`anchorSource`, `handled`, and `reason`.
+`anchorSource`, `probeCount`, `handled`, and `reason`.
 
 ## Common Recipes
 
