@@ -345,33 +345,36 @@ placement.
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
 | Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, show symbol candidates, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
 | `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. |
-| `Option + .` | Toggle Chinese/English punctuation for the active input session and show a short mode-status row. |
-| `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in terminal-style compatibility hosts, it switches between Chinese placeholder composition and idle ASCII passthrough. |
-| `Shift + Space` | Toggle half-width/full-width characters for the active input session and show a short mode-status row. |
+| `Option + .` | In Chinese text mode, manually toggle Chinese/English punctuation until the next text-mode switch. In ASCII mode it leaves punctuation English and only repeats the mode status. |
+| `Option + /` | Toggle the process-wide Chinese/ASCII text mode. The switch also restores linked Chinese/English punctuation and is shared across apps. |
+| `Shift + Space` | Toggle the process-wide half-width/full-width setting without changing text or punctuation mode. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
 
-Chinese text mode, Chinese punctuation, and full-width symbols are separate
-controls. Chinese punctuation maps sentence punctuation, paired Chinese quotes,
-ellipsis, em dash, brackets, and symbol-candidate entries such as `/` for
-dunhao, while code/path/operator symbols stay half-width unless full-width
-symbols are explicitly enabled. Code-style apps default to Chinese composition
-with English punctuation and half-width symbols. Mode changes briefly show a
-status row such as `中 · 中文标点 · 半角`; the row clears as soon as the next
-real input key starts a composition, symbol candidate session, commit, or
-passthrough.
+Text mode, punctuation language, and symbol width remain separate state
+dimensions, but text and punctuation now follow a predictable global linkage:
+Chinese input starts with Chinese punctuation, ASCII input always uses English
+punctuation, and `Option + /` restores that link. A manual `Option + .`
+override is available only while Chinese input is active and lasts until the
+next text-mode switch. Symbol width remains independent. All apps share the
+current state for the lifetime of the input-method host; a host restart begins
+again in linked Chinese mode with the saved global width. A period immediately
+after an ASCII digit stays `.` for decimals and numbered lists, even in Chinese
+punctuation or full-width mode; comma and unknown/selected caret contexts keep
+the normal punctuation policy. Mode changes briefly show a status row such as
+`中 · 中文标点 · 半角`.
 
 Host compatibility is conservative. Standard AppKit-style text fields, browsers,
 editors, IDEs, Electron shells, and unknown clients use inline composition with
 attributed marked text by default, so raw preedit appears in the focused text
-field. Terminal, iTerm, MacVim, and Emacs-style hosts default to idle ASCII
-passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
-the shell or editor until the session is switched with `Option + /`. In those
-terminal-style hosts, Chinese composition uses a full-width-space attributed
+field. Host identity no longer changes the global text or punctuation mode.
+Terminal, iTerm, MacVim, and Emacs-style hosts therefore also begin in Chinese
+mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;
 the real raw/preedit string is shown in KnowType's candidate panel above the
-candidates, then committed with `insertText`. A UserDefaults override can force
+candidates, then committed with `insertText`. When the global mode is switched
+to ASCII, idle printable input is passed back to the focused host. A UserDefaults override can force
 any bundle back to `commitOnlyComposition` when a host proves incompatible with
 inline marked text.
 

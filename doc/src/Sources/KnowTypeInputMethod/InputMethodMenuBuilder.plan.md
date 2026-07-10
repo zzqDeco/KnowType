@@ -18,7 +18,7 @@ InputMethodKit menu.
   status, data/diagnostic folder entries, then the localized KnowType settings
   item and About.
 - The mode-status item is read-only and reports text mode, punctuation style,
-  and character width at menu-open time.
+  and character width from the shared process runtime at menu-open time.
 - Menu titles resolve through `SettingsLocalization`, so the default visible
   menu copy is Simplified Chinese while explicit English resources remain
   available.

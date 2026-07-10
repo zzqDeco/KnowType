@@ -44,15 +44,12 @@
 "settings.input.continuationCommit" = "Continuation Commit";
 "settings.input.continuationCommit.value" = "Tab commits the prefix and continuation";
 "settings.input.section.symbols" = "Punctuation & Width";
-"settings.input.defaultPunctuation" = "Punctuation Style";
-"settings.input.defaultWidth" = "Character Width";
-"settings.input.codeAppPunctuation" = "Code App Punctuation Style";
-"settings.input.codeAppWidth" = "Code App Character Width";
+"settings.input.defaultWidth" = "Default Character Width";
 "settings.input.symbol.chinese" = "Chinese Punctuation";
 "settings.input.symbol.english" = "English Punctuation";
 "settings.input.width.half" = "Half-width";
 "settings.input.width.full" = "Full-width";
-"settings.input.symbolPolicy.note" = "Chinese text mode, Chinese punctuation, and full-width characters are separate states. Chinese punctuation affects commas, periods, question marks, quotes, ellipses, and similar marks; ambiguous symbols show candidates. Full-width characters are explicit and off by default.";
+"settings.input.symbolPolicy.note" = "Chinese mode follows Chinese punctuation and ASCII mode follows English punctuation in every app. A manual punctuation override lasts until the next text-mode switch. A period immediately after a digit stays half-width for decimals and numbered lists.";
 "settings.input.punctuationShortcut" = "Punctuation Shortcut";
 "settings.input.textModeShortcut" = "Text Mode Shortcut";
 "settings.input.widthShortcut" = "Width Shortcut";

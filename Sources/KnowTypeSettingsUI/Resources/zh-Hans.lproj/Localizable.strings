@@ -44,15 +44,12 @@
 "settings.input.continuationCommit" = "续写提交";
 "settings.input.continuationCommit.value" = "Tab 提交前缀与续写";
 "settings.input.section.symbols" = "标点与宽度";
-"settings.input.defaultPunctuation" = "标点样式";
-"settings.input.defaultWidth" = "字符宽度";
-"settings.input.codeAppPunctuation" = "代码 app 标点样式";
-"settings.input.codeAppWidth" = "代码 app 字符宽度";
+"settings.input.defaultWidth" = "默认字符宽度";
 "settings.input.symbol.chinese" = "中文标点";
 "settings.input.symbol.english" = "英文标点";
 "settings.input.width.half" = "半角";
 "settings.input.width.full" = "全角";
-"settings.input.symbolPolicy.note" = "中文输入、中文标点、全角字符是三个独立状态。中文标点影响逗号、句号、问号、引号、省略号等；多义符号会显示候选。全角字符需显式开启，默认关闭。";
+"settings.input.symbolPolicy.note" = "所有 App 中，中文模式跟随中文标点，ASCII 模式跟随英文标点。手动标点覆盖持续到下一次中英切换；数字后的句点保持半角，用于小数和编号。";
 "settings.input.punctuationShortcut" = "标点切换快捷键";
 "settings.input.textModeShortcut" = "中英模式切换快捷键";
 "settings.input.widthShortcut" = "全半角切换快捷键";

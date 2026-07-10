@@ -6,15 +6,13 @@ final class InputModePreferencesViewModelTests: XCTestCase {
     @MainActor
     func testViewModelLoadsStoredPreferences() throws {
         let store = makeStore()
-        let preferences = InputModePreferences(
-            defaultState: InputModeState(punctuationMode: .english, symbolWidth: .fullWidth),
-            codeAppState: InputModeState(punctuationMode: .chinese, symbolWidth: .fullWidth)
-        )
+        var preferences = InputModePreferences.standard
+        preferences.globalSymbolWidth = .fullWidth
         try store.savePreferences(preferences)
 
         let viewModel = InputModePreferencesViewModel(store: store)
 
-        XCTAssertEqual(viewModel.preferences, preferences)
+        XCTAssertEqual(viewModel.preferences.globalSymbolWidth, .fullWidth)
     }
 
     @MainActor
@@ -22,31 +20,25 @@ final class InputModePreferencesViewModelTests: XCTestCase {
         let store = makeStore()
         let viewModel = InputModePreferencesViewModel(store: store)
 
-        viewModel.setDefaultPunctuationMode(.english)
-        viewModel.setDefaultSymbolWidth(.fullWidth)
-        viewModel.setCodeAppPunctuationMode(.chinese)
-        viewModel.setCodeAppSymbolWidth(.fullWidth)
+        viewModel.setGlobalSymbolWidth(.fullWidth)
 
         XCTAssertNil(viewModel.lastErrorMessage)
-        XCTAssertEqual(store.loadPreferences(), viewModel.preferences)
-        XCTAssertEqual(store.loadPreferences().defaultState.punctuationMode, .english)
-        XCTAssertEqual(store.loadPreferences().defaultState.symbolWidth, .fullWidth)
-        XCTAssertEqual(store.loadPreferences().codeAppState.punctuationMode, .chinese)
-        XCTAssertEqual(store.loadPreferences().codeAppState.symbolWidth, .fullWidth)
+        XCTAssertEqual(store.loadPreferences().globalSymbolWidth, .fullWidth)
+        XCTAssertEqual(viewModel.preferences.globalSymbolWidth, .fullWidth)
     }
 
     @MainActor
     func testViewModelResetsToDefaults() {
         let store = makeStore()
         let viewModel = InputModePreferencesViewModel(store: store)
-        viewModel.setDefaultPunctuationMode(.english)
-        viewModel.setDefaultSymbolWidth(.fullWidth)
+        viewModel.setGlobalSymbolWidth(.fullWidth)
 
         viewModel.resetToDefaults()
 
         XCTAssertEqual(viewModel.preferences, .standard)
         XCTAssertEqual(viewModel.preferences.defaultState.punctuationMode, .chinese)
         XCTAssertEqual(viewModel.preferences.defaultState.symbolWidth, .halfWidth)
+        XCTAssertEqual(viewModel.preferences.codeAppState.textMode, .ascii)
         XCTAssertEqual(viewModel.preferences.codeAppState.punctuationMode, .english)
         XCTAssertEqual(viewModel.preferences.codeAppState.symbolWidth, .halfWidth)
         XCTAssertEqual(store.loadPreferences(), .standard)

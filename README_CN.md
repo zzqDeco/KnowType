@@ -299,28 +299,30 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点、显示符号候选、直接插入标点，或在兼容宿主中直通给宿主。 |
 | `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。 |
-| `Option + .` | 切换当前输入会话的中文/英文标点，并显示短暂模式状态行。 |
-| `Option + /` | 切换当前输入会话的中文/ASCII 文本模式；在终端类兼容宿主中用于在中文 placeholder composition 和空闲 ASCII 直通之间切换。 |
-| `Shift + Space` | 切换当前输入会话的半角/全角字符，并显示短暂模式状态行。 |
+| `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
+| `Option + /` | 切换进程级中文/ASCII 输入模式，同时恢复中文/英文标点联动；所有 App 共享。 |
+| `Shift + Space` | 切换进程级半角/全角，不改变中英输入或标点模式。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
-中文输入、中文标点和全角字符是三个独立控制。中文标点会转换句读、成对中文
-引号、省略号、破折号、中文括号，并通过 `/` 等多义符号显示符号候选；代码、
-路径和运算类符号在半角宽度下保持 ASCII，只有显式开启全角字符时才会变为
-全角。代码类 app 默认使用中文组合输入、英文标点和半角符号。模式切换后会
-短暂显示类似 `中 · 中文标点 · 半角` 的状态行；下一次真实输入开始
-composition、符号候选、提交或直通时会立即清掉该状态行。
+中英输入、标点语言和字符宽度仍是三层状态，但中英输入与标点采用可预测的全局
+联动：中文输入默认中文标点，ASCII 输入始终英文标点，`Option + /` 每次切换都会
+恢复联动。中文阶段可用 `Option + .` 临时改成英文标点，该手动覆盖到下一次中英
+切换时失效；全半角始终独立。当前输入法 host 运行期间所有 App 共享状态，host
+重启后重新从“中文 + 中文标点 + 已保存全局宽度”开始。紧邻 ASCII 数字后的 `.`
+固定输出半角点，适配小数和编号，即使当前为中文标点或全角；逗号、选区和未知
+光标上下文仍走普通标点规则。模式切换后会短暂显示类似
+`中 · 中文标点 · 半角` 的状态行。
 
 宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
 IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
-因此 raw preedit 会显示在当前宿主输入框内。Terminal、iTerm、MacVim 和 Emacs
-风格宿主默认空闲 ASCII 直通，普通字母、数字、空格和标点先交还给 shell 或编辑器，
-按 `Option + /` 后再进入中文输入。这些终端类宿主的中文 composition 使用带
-marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
+因此 raw preedit 会显示在当前宿主输入框内。宿主身份不再改变全局中英或标点
+状态，因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
-上方，确认时再通过 `insertText` 上屏。仍可用 UserDefaults override 将任意
+上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲 printable 输入会直通
+当前宿主。仍可用 UserDefaults override 将任意
 bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline marked text 的宿主。
 
 候选窗显示 Rime 前缀候选、符号候选、固定 AI 推荐状态行、模式状态行、

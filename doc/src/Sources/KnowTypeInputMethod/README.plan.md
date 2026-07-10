@@ -24,7 +24,10 @@ Current package-level implementation covers:
 - candidate panel mouse hover, click commit, scroll paging, row accessibility, and PNG snapshot regression tests
 - shortcut-to-commit behavior
 - key intent modeling for key down, key up, modifier flag changes, cancel, delete, navigation keys, punctuation, and numeric candidate selection
-- persisted `InputModeState` for text mode, punctuation language, and symbol width, refreshed from saved preferences at new composition/direct symbol boundaries and focused-bundle changes, with `Option + .` toggling punctuation language, `Option + /` toggling Chinese/ASCII text mode, and `Shift + Space` toggling symbol width for the active session
+- process-wide `InputModeStateMachine` state for text mode, punctuation
+  language, punctuation source, symbol width, and generation; `Option + /`
+  relinks punctuation while changing Chinese/ASCII mode, `Option + .` is a
+  Chinese-only manual override, and `Shift + Space` changes width independently
 - host compatibility write modes for inline composition, commit-only
   composition, ASCII passthrough, and missing-client disabled handling
 - host composition write state through `InputClientCompositionWriter`, which
@@ -106,7 +109,22 @@ not execute effects or inspect committed text.
 
 The IMK controller marks composing text with `IMKTextInput.setMarkedText`. Inline-compatible hosts, including browsers, text editors, IDEs, Electron shells, and JetBrains-style clients by default, receive Rime preedit as attributed marked text. Terminal-style or explicit override commit-only hosts receive a full-width-space attributed placeholder so IMK composition ownership and candidate anchoring stay stable without exposing raw pinyin in the host field. `InputClientCompositionWriter` owns that carrier choice, idle ASCII passthrough decisions, and KnowType-owned marked-text cleanup, while `InputClientWriteCoordinator` owns the low-level `setMarkedText`/`insertText` calls and privacy-safe diagnostics. Their real preedit is shown in the candidate panel instead. Candidate anchor lookup is delegated to `CandidateAnchorResolver`, which prefers fresh IMK text rects, then line-height rects, then Accessibility focused-range bounds if permission is already granted, then a same-composition scoped last usable anchor, and finally a stable safe point inside the screen visible frame. The panel no longer follows the mouse pointer when host text geometry is temporarily unavailable.
 
-Product commit decisions are shared through the session commit policy and coordinator: `Space` commits the highlighted/current Rime candidate, selects a non-highlighted native row by stable current-page Rime index before falling through to generic native Rime space handling, or commits raw input when Rime is degraded; `Return` commits the raw composition, `Tab` commits AI only when that slot is ready, numeric candidate shortcuts call Rime current-page selection without recomputing candidates, punctuation commits the current Rime candidate/composition plus mapped punctuation, `Option+/` toggles Chinese/ASCII text mode for the active session, and `Option+R` requests explicit polish only. `InputNativeCandidateNavigationRuntime` owns the Rime navigation decisions behind hover, arrows, numeric current-page selection, paging, and panel-selection mapping; the coordinator still applies commit results, learning, marked text, insertion, and panel publication. Idle printable ASCII can be returned unhandled when the session is in ASCII mode; Terminal-style hosts default to that mode, while editor/Electron/IDE-style hosts default to Chinese inline composition so candidates can appear immediately without a separate preedit row. Duplicate native surface forms keep their Rime stable index, and runtime lexicon reload no longer replaces the production conversion session. The IMK controller remains responsible for host integration details such as client lookup, marked text, insertion, palette visibility, input mode state ownership, and window anchoring, but those details now route through `InputControllerCoordinator` and small host/client seams so controller-adjacent behavior can be unit-tested without installing the input method.
+Product commit decisions are shared through the session commit policy and
+coordinator: `Space` commits the highlighted/current Rime candidate, selects a
+non-highlighted native row by stable current-page Rime index before falling
+through to generic native Rime space handling, or commits raw input when Rime is
+degraded; `Return` commits raw composition, `Tab` commits ready AI, and numeric
+shortcuts call Rime current-page selection. Punctuation commits the current
+Rime candidate/composition plus mapped punctuation; an idle period after an
+ASCII digit stays `.`. `Option+/` changes the process-wide linked text mode and
+`Option+R` requests explicit polish only. `InputNativeCandidateNavigationRuntime`
+owns Rime navigation decisions; the coordinator still applies commit results,
+learning, marked text, insertion, and panel publication. Idle printable input
+is returned unhandled whenever the shared mode is ASCII. All hosts start in
+linked Chinese mode; terminal-style hosts differ only by using placeholder
+carrier during composition. Duplicate native surface forms keep their Rime
+stable index, and runtime lexicon reload no longer replaces the production
+conversion session.
 
 Candidate paging keeps 6 visible rows per page in adaptive horizontal mode so short candidates do not force a vertical panel. Vertical-list mode can show up to 9 visible rows per page. Arrow keys move one selectable row, PageDown/PageUp preserve the selected row's visible offset on the target page, and short final pages clamp to their last available row. Scroll-wheel paging maps to PageDown/PageUp with a small delta threshold to avoid trackpad jitter. Screenshot baselines under `Tests/KnowTypeInputMethodTests/__Snapshots__/` cover light horizontal, dark vertical, and AI status panel states.
 

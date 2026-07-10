@@ -27,6 +27,28 @@ public enum InputPunctuatorDecision: Sendable, Equatable {
     case passThrough(String)
 }
 
+public enum InputPreviousCharacterKind: String, Sendable, Equatable {
+    case asciiDigit
+    case other
+    case unknown
+}
+
+public struct InputPunctuatorContext: Sendable, Equatable {
+    public var state: InputModeState
+    public var previousCharacterKind: InputPreviousCharacterKind
+    public var hasActiveComposition: Bool
+
+    public init(
+        state: InputModeState,
+        previousCharacterKind: InputPreviousCharacterKind = .unknown,
+        hasActiveComposition: Bool = false
+    ) {
+        self.state = state
+        self.previousCharacterKind = previousCharacterKind
+        self.hasActiveComposition = hasActiveComposition
+    }
+}
+
 public struct InputPunctuatorRuntime: Sendable {
     private var nextDoubleQuoteIsOpening = true
     private var nextSingleQuoteIsOpening = true
@@ -43,9 +65,27 @@ public struct InputPunctuatorRuntime: Sendable {
         state: InputModeState,
         prefersCandidateList: Bool = true
     ) -> InputPunctuatorDecision? {
+        decision(
+            for: input,
+            context: InputPunctuatorContext(state: state),
+            prefersCandidateList: prefersCandidateList
+        )
+    }
+
+    public mutating func decision(
+        for input: String,
+        context: InputPunctuatorContext,
+        prefersCandidateList: Bool = true
+    ) -> InputPunctuatorDecision? {
         guard InputSymbolTransformer.isSymbolInput(input) else {
             return nil
         }
+        if input == ".",
+           !context.hasActiveComposition,
+           context.previousCharacterKind == .asciiDigit {
+            return .commit(".")
+        }
+        let state = context.state
         guard state.punctuationMode == .chinese else {
             return .commit(InputSymbolTransformer.symbolWithWidth(for: input, width: state.symbolWidth))
         }

@@ -42,6 +42,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputClientWriteCoordinator.swift"),
             encoding: .utf8
         )
+        let inputControllerClientSeams = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputControllerHostClientSeams.swift"),
+            encoding: .utf8
+        )
         let inputRuntimeBoundaries = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputRuntimeBoundaries.swift"),
             encoding: .utf8
@@ -121,6 +125,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("InputDebugDiagnostics.trace(\n                category: .turn"))
         XCTAssertTrue(coordinator.contains("guard isTurnTraceEnabled || latencyTracer.isEnabled else"))
         XCTAssertTrue(coordinator.contains("guard InputDebugDiagnostics.isEnabled(.turn) || !violations.isEmpty else"))
+        XCTAssertTrue(coordinator.contains("guard input == \".\" else"))
+        XCTAssertTrue(coordinator.contains(#"previous=\(previous.kind.rawValue);source=\(previous.source.rawValue)"#))
+        XCTAssertFalse(coordinator.contains("punctuation_context_text"))
+        XCTAssertTrue(inputControllerClientSeams.contains("NSRange(location: range.location - 1, length: 1)"))
         XCTAssertFalse(inputClientWriteCoordinator.contains("fputs("))
         XCTAssertTrue(inputClientWriteCoordinator.contains("guard InputDebugDiagnostics.isEnabled(.clientWrite) else"))
         XCTAssertFalse(inputRuntimeBoundaries.contains("fputs("))

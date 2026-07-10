@@ -1363,19 +1363,19 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testTerminalAppDefaultsToAsciiPassthroughWithoutComposition() {
+    func testTerminalUsesGlobalChineseModeInsteadOfAppSpecificAsciiDefault() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
-        let (coordinator, _, _) = makeCoordinator(client: client)
+        let (coordinator, host, _) = makeCoordinator(client: client)
 
-        XCTAssertFalse(coordinator.handleText("a", client: client))
-        XCTAssertFalse(coordinator.handleText("1", client: client))
-        XCTAssertFalse(coordinator.handleText(" ", client: client))
-        XCTAssertFalse(coordinator.handleText(".", client: client))
+        XCTAssertTrue(coordinator.handleText("n", client: client))
 
-        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.currentInputModeState().textMode, .chinese)
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .chinese)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         XCTAssertTrue(client.insertTextWrites.isEmpty)
-        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.preeditDisplayText, "n")
+        XCTAssertEqual(coordinator.composedString() as? String, "n")
     }
 
     func testCodexDefaultsToChineseInlineComposition() {
@@ -1426,7 +1426,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testTerminalOptionSlashEntersChineseCommitOnlyComposition() {
+    func testTerminalTextModeToggleReturnsToChineseCommitOnlyComposition() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -1437,6 +1437,17 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 client: client
             )
         )
+        XCTAssertEqual(coordinator.currentInputModeState().textMode, .ascii)
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .english)
+        XCTAssertFalse(coordinator.handleText("a", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertEqual(coordinator.currentInputModeState().textMode, .chinese)
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .chinese)
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertTrue(coordinator.handleText("i", client: client))
         let windowState = host.panelStates.last?.windowState
@@ -1466,23 +1477,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testInputModeReloadsImmediatelyWhenFocusedBundleChanges() {
+    func testFocusedBundleChangeDoesNotResetGlobalInputMode() {
         let codeClient = FakeInputControllerClient()
         codeClient.bundleIdentifier = "com.apple.Terminal"
         let textClient = FakeInputControllerClient()
         textClient.bundleIdentifier = "com.apple.TextEdit"
         let (coordinator, _, _) = makeCoordinator(client: codeClient)
 
-        XCTAssertFalse(coordinator.handleText("a", client: codeClient))
-        XCTAssertTrue(coordinator.handleText("n", client: textClient))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: codeClient
+            )
+        )
+        XCTAssertFalse(coordinator.handleText("a", client: textClient))
+        XCTAssertEqual(coordinator.currentInputModeState().textMode, .ascii)
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .english)
 
-        XCTAssertEqual(coordinator.composedString() as? String, "n")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
         XCTAssertTrue(codeClient.insertTextWrites.isEmpty)
         XCTAssertTrue(textClient.insertTextWrites.isEmpty)
-        XCTAssertEqual(textClient.markedTextWrites.last?.text, "n")
     }
 
-    func testModeToggleReloadsDefaultsWhenFocusedBundleChanges() {
+    func testWidthToggleUsesSameGlobalStateAcrossFocusedBundles() {
         let codeClient = FakeInputControllerClient()
         codeClient.bundleIdentifier = "com.apple.Terminal"
         let textClient = FakeInputControllerClient()
@@ -1497,6 +1514,10 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "中 · 中文标点 · 全角")
+        XCTAssertEqual(coordinator.currentInputModeState().symbolWidth, .fullWidth)
+
+        XCTAssertTrue(coordinator.handleText("n", client: codeClient))
+        XCTAssertEqual(coordinator.currentInputModeState().symbolWidth, .fullWidth)
     }
 
     func testTextEditInlineCompositionUsesAttributedMarkedTextCarrier() {
@@ -1518,29 +1539,26 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertNil(host.panelStates.last?.windowState.viewModel.preeditDisplayText)
     }
 
-    func testCodeAppDefaultKeepsIdleOperatorsAsciiWhileAllowingChineseComposition() {
+    func testCodeAppUsesGlobalChinesePunctuationWhileAllowingChineseComposition() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"
         let (coordinator, _, _) = makeCoordinator(client: client)
 
-        XCTAssertTrue(coordinator.handleText("/", client: client))
-        XCTAssertTrue(coordinator.handleText("-", client: client))
-        XCTAssertTrue(coordinator.handleText("_", client: client))
-        XCTAssertTrue(coordinator.handleText("{", client: client))
-        XCTAssertTrue(coordinator.handleText("}", client: client))
-
-        XCTAssertEqual(client.insertTextWrites.map(\.text), ["/", "-", "_", "{", "}"])
+        client.characterBeforeCaretValue = "x"
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
 
         XCTAssertEqual(client.markedTextWrites.last?.text, "n")
     }
 
-    func testCodeAppSavedChinesePunctuationPreferenceIsNotOverridden() {
+    func testLegacyCodeAppPunctuationPreferenceDoesNotOverrideGlobalInitialMode() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.openai.codex"
         let preferences = InputModePreferences(
-            codeAppState: InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
+            defaultState: InputModeState(punctuationMode: .english),
+            codeAppState: InputModeState(punctuationMode: .english)
         )
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -1549,7 +1567,219 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .chinese)
         XCTAssertEqual(client.insertTextWrites.last?.text, "。")
+    }
+
+    func testCoordinatorsShareManualPunctuationAndLinkedTextModeTransitions() {
+        let runtime = ProcessInputModeStateRuntime()
+        let firstClient = FakeInputControllerClient()
+        firstClient.bundleIdentifier = "com.apple.TextEdit"
+        let secondClient = FakeInputControllerClient()
+        secondClient.bundleIdentifier = "com.openai.codex"
+        secondClient.characterBeforeCaretValue = "x"
+        let (firstCoordinator, _, _) = makeCoordinator(
+            client: firstClient,
+            inputModeStateRuntime: runtime
+        )
+        let (secondCoordinator, _, _) = makeCoordinator(
+            client: secondClient,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertTrue(
+            firstCoordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: firstClient
+            )
+        )
+        XCTAssertEqual(runtime.currentSnapshot().punctuationSource, .manual)
+        XCTAssertTrue(secondCoordinator.handleText(".", client: secondClient))
+        XCTAssertEqual(secondClient.insertTextWrites.last?.text, ".")
+
+        XCTAssertTrue(
+            firstCoordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: firstClient
+            )
+        )
+        XCTAssertEqual(secondCoordinator.currentInputModeState().textMode, .ascii)
+        XCTAssertEqual(secondCoordinator.currentInputModeState().punctuationMode, .english)
+        XCTAssertEqual(runtime.currentSnapshot().punctuationSource, .linked)
+
+        XCTAssertTrue(
+            firstCoordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: firstClient
+            )
+        )
+        XCTAssertTrue(secondCoordinator.handleText(".", client: secondClient))
+        XCTAssertEqual(secondClient.insertTextWrites.last?.text, "。")
+        XCTAssertEqual(runtime.currentSnapshot().generation, 3)
+    }
+
+    func testExternalModeGenerationResetsQuotePairingState() {
+        let runtime = ProcessInputModeStateRuntime()
+        let modeClient = FakeInputControllerClient()
+        let typingClient = FakeInputControllerClient()
+        let (modeCoordinator, _, _) = makeCoordinator(
+            client: modeClient,
+            inputModeStateRuntime: runtime
+        )
+        let (typingCoordinator, _, _) = makeCoordinator(
+            client: typingClient,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertTrue(typingCoordinator.handleText("\"", client: typingClient))
+        XCTAssertEqual(typingClient.insertTextWrites.last?.text, "“")
+        for _ in 0..<2 {
+            XCTAssertTrue(
+                modeCoordinator.handle(
+                    stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                    client: modeClient
+                )
+            )
+        }
+
+        XCTAssertTrue(typingCoordinator.handleText("\"", client: typingClient))
+        XCTAssertEqual(typingClient.insertTextWrites.map(\.text), ["“", "“"])
+    }
+
+    func testExternalModeGenerationInvalidatesIdleSymbolCandidateSession() {
+        let runtime = ProcessInputModeStateRuntime()
+        let modeClient = FakeInputControllerClient()
+        let symbolClient = FakeInputControllerClient()
+        let (modeCoordinator, _, _) = makeCoordinator(
+            client: modeClient,
+            inputModeStateRuntime: runtime
+        )
+        let (symbolCoordinator, symbolHost, _) = makeCoordinator(
+            client: symbolClient,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertTrue(symbolCoordinator.handleText("/", client: symbolClient))
+        XCTAssertFalse(symbolHost.panelStates.last?.windowState.viewModel.symbolCandidates.isEmpty ?? true)
+        XCTAssertTrue(
+            modeCoordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: modeClient
+            )
+        )
+
+        XCTAssertFalse(
+            symbolCoordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: symbolClient
+            )
+        )
+        XCTAssertEqual(symbolHost.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testASCIIPunctuationToggleIsNoOpButShowsCurrentStatus() {
+        let runtime = ProcessInputModeStateRuntime()
+        _ = runtime.transition(.toggleTextMode)
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            inputModeStateRuntime: runtime
+        )
+        let generationBeforeToggle = runtime.currentSnapshot().generation
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(runtime.currentSnapshot().generation, generationBeforeToggle)
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .english)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "英 · 英文标点 · 半角")
+    }
+
+    func testIdlePeriodAfterClientDigitUsesAsciiPeriod() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 4, length: 0)
+        client.characterBeforeCaretValue = "1"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
+    }
+
+    func testIdlePeriodAfterNonDigitUsesChinesePeriod() {
+        let client = FakeInputControllerClient()
+        client.characterBeforeCaretValue = "文"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
+    }
+
+    func testSelectionAndActiveCompositionDoNotUseDigitPeriodException() {
+        let selectedClient = FakeInputControllerClient()
+        selectedClient.selectedRangeValue = NSRange(location: 4, length: 1)
+        selectedClient.characterBeforeCaretValue = "1"
+        let (selectedCoordinator, _, _) = makeCoordinator(client: selectedClient)
+
+        XCTAssertTrue(selectedCoordinator.handleText(".", client: selectedClient))
+        XCTAssertEqual(selectedClient.insertTextWrites.last?.text, "。")
+        XCTAssertEqual(selectedClient.characterBeforeCaretReadCount, 0)
+
+        let composingClient = FakeInputControllerClient()
+        composingClient.characterBeforeCaretValue = "1"
+        let (composingCoordinator, _, _) = makeCoordinator(client: composingClient)
+        XCTAssertTrue(composingCoordinator.handleText("n", client: composingClient))
+        XCTAssertTrue(composingCoordinator.handleText(".", client: composingClient))
+        XCTAssertTrue(composingClient.insertTextWrites.last?.text.hasSuffix("。") == true)
+        XCTAssertEqual(composingClient.characterBeforeCaretReadCount, 0)
+    }
+
+    func testRecordedDigitFallbackSupportsOneAsciiPeriodThenChinesePeriod() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 10, length: 0)
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("1", client: client))
+        client.selectedRangeValue = NSRange(location: 11, length: 0)
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+        client.selectedRangeValue = NSRange(location: 12, length: 0)
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["1", ".", "。"])
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 2)
+    }
+
+    func testFullWidthModeStillUsesAsciiPeriodAfterDigit() {
+        let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
+        let client = FakeInputControllerClient()
+        client.characterBeforeCaretValue = "3"
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+    }
+
+    func testDocumentContextIsReadOnlyForIdlePeriod() {
+        let client = FakeInputControllerClient()
+        client.characterBeforeCaretValue = "1"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText(",", client: client))
+        XCTAssertTrue(coordinator.handleText("1", client: client))
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
     }
 
     func testMissingClientPrintableInputPassesThroughWithoutComposition() {
@@ -1582,12 +1812,6 @@ final class InputControllerCoordinatorTests: XCTestCase {
         client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
-        XCTAssertTrue(
-            coordinator.handle(
-                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
-                client: client
-            )
-        )
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         XCTAssertEqual(client.markedTextWrites.last?.isAttributed, true)
@@ -1610,12 +1834,6 @@ final class InputControllerCoordinatorTests: XCTestCase {
         client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
-        XCTAssertTrue(
-            coordinator.handle(
-                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
-                client: client
-            )
-        )
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         host.currentClientValue = nil
@@ -1640,12 +1858,6 @@ final class InputControllerCoordinatorTests: XCTestCase {
         staleClient.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
 
-        XCTAssertTrue(
-            coordinator.handle(
-                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
-                client: client
-            )
-        )
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
         host.currentClientValue = staleClient
@@ -1663,7 +1875,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testOptionPeriodTogglesCurrentSessionPunctuationMode() {
+    func testOptionPeriodCreatesManualPunctuationOverrideInChineseMode() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(client: client)
 
@@ -1678,7 +1890,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.insertTextWrites.last?.text, ".")
     }
 
-    func testShiftSpaceTogglesCurrentSessionSymbolWidth() {
+    func testShiftSpaceTogglesProcessSymbolWidth() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
 
@@ -2281,10 +2493,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             client: client,
             provider: provider,
             aiRecommendationProvider: aiProvider,
-            enablesAsyncSuggestionRefresh: true,
-            inputModePreferences: InputModePreferences(
-                codeAppState: InputModeState(textMode: .chinese)
-            )
+            enablesAsyncSuggestionRefresh: true
         )
 
         for character in "secretphrase" {
@@ -3021,6 +3230,20 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertNil(adapter.markedRange)
     }
 
+    func testIMKClientAdapterReadsOnlyCharacterBeforeCollapsedCaret() {
+        let imkClient = FakeIMKTextInput()
+        imkClient.documentText = "a7"
+        imkClient.selectedRangeValue = NSRange(location: 2, length: 0)
+        let adapter = IMKInputControllerClientAdapter(client: imkClient)
+
+        XCTAssertEqual(adapter.characterBeforeCaret(), "7")
+        XCTAssertEqual(imkClient.attributedSubstringRanges, [NSRange(location: 1, length: 1)])
+
+        imkClient.selectedRangeValue = NSRange(location: 2, length: 1)
+        XCTAssertNil(adapter.characterBeforeCaret())
+        XCTAssertEqual(imkClient.attributedSubstringRanges.count, 1)
+    }
+
     func testInputControllerWrapperAdaptsOnlyIMKTextInputClients() {
         let imkClient = FakeIMKTextInput()
         imkClient.bundleIdentifierValue = "com.example.wrapper"
@@ -3490,9 +3713,6 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiRecommendationProvider: aiProvider,
             aiAcceptedLearning: acceptedLearning,
             enablesAsyncSuggestionRefresh: true,
-            inputModePreferences: InputModePreferences(
-                codeAppState: InputModeState(textMode: .chinese)
-            ),
             conversionEngine: RecordingNativeConversionEngine(
                 candidates: ["这个API"],
                 recorder: NativeSelectionRecorder()
@@ -3532,9 +3752,6 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiRecommendationProvider: aiProvider,
             aiAcceptedFeedback: acceptedFeedback,
             enablesAsyncSuggestionRefresh: true,
-            inputModePreferences: InputModePreferences(
-                codeAppState: InputModeState(textMode: .chinese)
-            ),
             conversionEngine: RecordingNativeConversionEngine(
                 candidates: ["这个API"],
                 recorder: NativeSelectionRecorder()
@@ -4056,17 +4273,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
     func testActiveSymbolCandidateOverlayPreservesCommitOnlyPreedit() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
-        let preferences = InputModePreferences(
-            codeAppState: InputModeState(
-                textMode: .chinese,
-                punctuationMode: .chinese,
-                symbolWidth: .halfWidth
-            )
-        )
-        let (coordinator, host, _) = makeCoordinator(
-            client: client,
-            inputModePreferences: preferences
-        )
+        let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("n", client: client))
         XCTAssertTrue(coordinator.handleText("i", client: client))
@@ -4231,7 +4438,12 @@ final class InputControllerCoordinatorTests: XCTestCase {
     func testIdlePassthroughWithoutVisibleOverlayDoesNotHideCandidatePanel() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
-        let (coordinator, host, _) = makeCoordinator(client: client)
+        let inputModeStateRuntime = ProcessInputModeStateRuntime()
+        _ = inputModeStateRuntime.transition(.toggleTextMode)
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            inputModeStateRuntime: inputModeStateRuntime
+        )
 
         XCTAssertFalse(coordinator.handleText("a", client: client))
 
@@ -4315,6 +4527,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         enablesAsyncSuggestionRefresh: Bool = false,
         lexiconRuntime: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferences: InputModePreferences = .standard,
+        inputModeStateRuntime: (any InputModeStateRuntime)? = nil,
         runtimePreferences: InputMethodRuntimePreferences = .standard,
         runtimePreferenceStore: (any InputMethodRuntimePreferenceStore)? = nil,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
@@ -4336,6 +4549,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             lexiconRuntimeSnapshot: lexiconRuntime.snapshot(),
             lexiconRuntime: lexiconRuntime,
             inputModePreferenceStore: FixedInputModePreferenceStore(preferences: inputModePreferences),
+            inputModeStateRuntime: inputModeStateRuntime,
             runtimePreferenceStore: runtimePreferenceStore ?? FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: client.bundleIdentifier,
@@ -5594,7 +5808,12 @@ final class InputControllerCoordinatorRefactorRegressionTests: XCTestCase {
     func testTerminalHostKeepsIdlePassthroughAndActivePlaceholderCommitPath() throws {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
-        let (coordinator, host, _) = makeCoordinator(client: client)
+        let inputModeStateRuntime = ProcessInputModeStateRuntime()
+        _ = inputModeStateRuntime.transition(.toggleTextMode)
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            inputModeStateRuntime: inputModeStateRuntime
+        )
 
         XCTAssertFalse(coordinator.handleText("a", client: client))
         XCTAssertFalse(coordinator.handleText("1", client: client))
@@ -5724,6 +5943,7 @@ final class InputControllerCoordinatorRefactorRegressionTests: XCTestCase {
         provider: (any LLMProvider)? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         inputModePreferences: InputModePreferences = .standard,
+        inputModeStateRuntime: (any InputModeStateRuntime)? = nil,
         runtimePreferences: InputMethodRuntimePreferences = .standard,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         enablesAsyncSuggestionRefresh: Bool = false
@@ -5739,6 +5959,7 @@ final class InputControllerCoordinatorRefactorRegressionTests: XCTestCase {
             provider: provider,
             traditionalInputEngine: nil,
             inputModePreferenceStore: FixedInputModePreferenceStore(preferences: inputModePreferences),
+            inputModeStateRuntime: inputModeStateRuntime,
             runtimePreferenceStore: FixedInputMethodRuntimePreferenceStore(preferences: runtimePreferences),
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: client.bundleIdentifier,
@@ -5917,8 +6138,10 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
     var bundleIdentifier: String? = "com.example.host"
     var selectedRangeValue = NSRange(location: 10, length: 0)
     var markedRangeValue: NSRange?
+    var characterBeforeCaretValue: Character?
     var firstRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
     var lineHeightRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
+    private(set) var characterBeforeCaretReadCount = 0
     private(set) var markedTextWrites: [MarkedTextWrite] = []
     private(set) var insertTextWrites: [InsertTextWrite] = []
     private(set) var writeEventKinds: [String] = []
@@ -5929,6 +6152,11 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
 
     var markedRange: NSRange? {
         markedRangeValue
+    }
+
+    func characterBeforeCaret() -> Character? {
+        characterBeforeCaretReadCount += 1
+        return characterBeforeCaretValue
     }
 
     func firstRect(forCharacterRange range: NSRange) -> CGRect {
@@ -6023,12 +6251,14 @@ private actor CountingRimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotProv
 #if canImport(InputMethodKit)
 private final class FakeIMKTextInput: NSObject, IMKTextInput {
     var bundleIdentifierValue = "com.example.host"
+    var documentText = ""
     var selectedRangeValue = NSRange(location: 0, length: 0)
     var markedRangeValue = NSRange(location: NSNotFound, length: NSNotFound)
     var firstRectValue = CGRect(x: 0, y: 0, width: 0, height: 18)
     var lineHeightRectValue = CGRect(x: 0, y: 0, width: 0, height: 18)
     private(set) var markedTextWrites: [FakeInputControllerClient.MarkedTextWrite] = []
     private(set) var insertTextWrites: [FakeInputControllerClient.InsertTextWrite] = []
+    private(set) var attributedSubstringRanges: [NSRange] = []
 
     func insertText(_ string: Any!, replacementRange: NSRange) {
         insertTextWrites.append(
@@ -6081,11 +6311,18 @@ private final class FakeIMKTextInput: NSObject, IMKTextInput {
     }
 
     func attributedSubstring(from range: NSRange) -> NSAttributedString! {
-        nil
+        attributedSubstringRanges.append(range)
+        let text = documentText as NSString
+        guard range.location != NSNotFound,
+              range.length != NSNotFound,
+              NSMaxRange(range) <= text.length else {
+            return nil
+        }
+        return NSAttributedString(string: text.substring(with: range))
     }
 
     func length() -> Int {
-        0
+        (documentText as NSString).length
     }
 
     func characterIndex(

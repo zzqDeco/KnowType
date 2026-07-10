@@ -151,19 +151,7 @@ private struct InputSettingsView: View {
     var body: some View {
         SettingsForm(title: SettingsSection.input.title) {
             Section(settingsString("settings.input.section.symbols")) {
-                Picker(settingsString("settings.input.defaultPunctuation"), selection: defaultPunctuationBinding) {
-                    Text(settingsString("settings.input.symbol.chinese")).tag(InputSymbolMode.chinese)
-                    Text(settingsString("settings.input.symbol.english")).tag(InputSymbolMode.english)
-                }
-                Picker(settingsString("settings.input.defaultWidth"), selection: defaultWidthBinding) {
-                    Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
-                    Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
-                }
-                Picker(settingsString("settings.input.codeAppPunctuation"), selection: codeAppPunctuationBinding) {
-                    Text(settingsString("settings.input.symbol.chinese")).tag(InputSymbolMode.chinese)
-                    Text(settingsString("settings.input.symbol.english")).tag(InputSymbolMode.english)
-                }
-                Picker(settingsString("settings.input.codeAppWidth"), selection: codeAppWidthBinding) {
+                Picker(settingsString("settings.input.defaultWidth"), selection: globalWidthBinding) {
                     Text(settingsString("settings.input.width.half")).tag(InputSymbolWidth.halfWidth)
                     Text(settingsString("settings.input.width.full")).tag(InputSymbolWidth.fullWidth)
                 }
@@ -198,31 +186,10 @@ private struct InputSettingsView: View {
         }
     }
 
-    private var defaultPunctuationBinding: Binding<InputSymbolMode> {
+    private var globalWidthBinding: Binding<InputSymbolWidth> {
         Binding(
-            get: { inputModeViewModel.preferences.defaultState.punctuationMode },
-            set: { inputModeViewModel.setDefaultPunctuationMode($0) }
-        )
-    }
-
-    private var defaultWidthBinding: Binding<InputSymbolWidth> {
-        Binding(
-            get: { inputModeViewModel.preferences.defaultState.symbolWidth },
-            set: { inputModeViewModel.setDefaultSymbolWidth($0) }
-        )
-    }
-
-    private var codeAppPunctuationBinding: Binding<InputSymbolMode> {
-        Binding(
-            get: { inputModeViewModel.preferences.codeAppState.punctuationMode },
-            set: { inputModeViewModel.setCodeAppPunctuationMode($0) }
-        )
-    }
-
-    private var codeAppWidthBinding: Binding<InputSymbolWidth> {
-        Binding(
-            get: { inputModeViewModel.preferences.codeAppState.symbolWidth },
-            set: { inputModeViewModel.setCodeAppSymbolWidth($0) }
+            get: { inputModeViewModel.preferences.globalSymbolWidth },
+            set: { inputModeViewModel.setGlobalSymbolWidth($0) }
         )
     }
 
