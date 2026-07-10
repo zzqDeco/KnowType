@@ -395,8 +395,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             if rawBuffer.isEmpty {
                 reloadInputModePreferencesIfNeeded()
-                if inputModeSnapshot.state.symbolWidth != .fullWidth,
-                   shouldPassThroughIdleText(text, client: client, reason: "idle_symbol") {
+                if shouldPassThroughIdleText(text, client: client, reason: "idle_symbol") {
                     return false
                 }
             }
@@ -925,10 +924,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 hasActiveComposition: hasActiveComposition
             )
         }
+        let readsChineseQuoteContext = (input == "\"" || input == "'")
+            && inputModeSnapshot.state.punctuationMode == .chinese
+            && inputModeSnapshot.state.symbolWidth == .halfWidth
         let resolution = punctuationContextResolver.resolve(
             client: client,
             hasActiveComposition: hasActiveComposition,
-            readsCharacterBeforeCaret: input == "\"" || input == "'"
+            readsCharacterBeforeCaret: readsChineseQuoteContext
         )
         if resolution.didSelectionOrFocusChange {
             punctuatorRuntime.resetPairingState()
@@ -1002,7 +1004,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         reason: String
     ) -> Bool {
-        guard inputModeSnapshot.state.symbolWidth != .fullWidth else {
+        if inputModeSnapshot.state.symbolWidth == .fullWidth,
+           inputClientCompositionWriter.writeMode(
+               client: client,
+               state: writeState(hasActiveComposition: false)
+           ) != .disabled {
             return false
         }
         let shouldPassThrough = inputClientCompositionWriter.shouldPassThroughIdleText(

@@ -20,7 +20,8 @@ exception.
   document start is opening context.
 - A client query has priority. If unavailable, the resolver may use the last
   KnowType insertion only when client identity and expected caret both match.
-- Client document text is queried only for quote keys. Period decisions use the
+- Client document text is queried only for contextual Chinese half-width quote
+  keys. English and full-width quotes skip the query. Period decisions use the
   recorded insertion path so the decimal exception does not add a document read.
 - Whitespace and Unicode opening/initial punctuation open quotes. Text, digits,
   and closing/final punctuation close quotes. Unknown context remains available

@@ -95,8 +95,10 @@ to inline marked text, placeholder marked text, idle passthrough, and owned
 marked-text cleanup. `InputClientWriteCoordinator` remains the lower-level
 writer for `setMarkedText`, `insertText`, replacement ranges, and debug logs.
 
-The local punctuator receives `InputPunctuatorContext`. Only quote keys ask the
-IMK adapter for the single UTF-16 unit immediately before a collapsed caret.
+The local punctuator receives `InputPunctuatorContext`. Only Chinese
+half-width quote keys ask the IMK adapter for the single UTF-16 unit immediately
+before a collapsed caret; English and full-width quote output does not read
+document context.
 Whitespace and opening punctuation open a quote; text, digits, and closing
 punctuation close it; unknown context falls back to session alternation. An
 idle `.` uses only a client-bound, expected-caret record of the last KnowType

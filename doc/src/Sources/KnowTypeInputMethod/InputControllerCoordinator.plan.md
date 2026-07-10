@@ -79,7 +79,8 @@ Current behavior:
 - if native highlight is unavailable, arrow navigation falls back to local panel selection and Space explicitly selects that Rime current-page index before generic native Space
 - handles Rime's default paging punctuation (`-`/`=`, `,`/`.`) before symbol commit fallback, but falls back to punctuation when the native snapshot does not change so page-boundary punctuation is not swallowed
 - offers composing ASCII symbols to Rime before punctuation fallback so schema keys such as apostrophe, semicolon, and slash stay available to the engine
-- requests the character before a collapsed caret only for Chinese quote keys;
+- requests the character before a collapsed caret only for Chinese half-width
+  quote keys; English and full-width quote output skips document context;
   the recorded prior insertion keeps ASCII-origin digits followed by `.`
   half-width without a period-key document read, while quote context maps
   whitespace/open punctuation to opening and text/digits/closing punctuation to

@@ -1856,12 +1856,62 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
     }
 
+    func testQuoteContextReadOnlyOccursForChineseHalfWidthQuotes() {
+        let englishRuntime = ProcessInputModeStateRuntime()
+        _ = englishRuntime.transition(.togglePunctuationMode)
+        let englishClient = FakeInputControllerClient()
+        englishClient.characterBeforeCaretValue = "文"
+        let (englishCoordinator, _, _) = makeCoordinator(
+            client: englishClient,
+            inputModeStateRuntime: englishRuntime
+        )
+
+        XCTAssertTrue(englishCoordinator.handleText("\"", client: englishClient))
+        XCTAssertEqual(englishClient.insertTextWrites.last?.text, "\"")
+        XCTAssertEqual(englishClient.characterBeforeCaretReadCount, 0)
+
+        let fullWidthRuntime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
+        var fullWidthPreferences = InputModePreferences.standard
+        fullWidthPreferences.globalSymbolWidth = .fullWidth
+        let fullWidthClient = FakeInputControllerClient()
+        fullWidthClient.characterBeforeCaretValue = "文"
+        let (fullWidthCoordinator, _, _) = makeCoordinator(
+            client: fullWidthClient,
+            inputModePreferences: fullWidthPreferences,
+            inputModeStateRuntime: fullWidthRuntime
+        )
+
+        XCTAssertTrue(fullWidthCoordinator.handleText("\"", client: fullWidthClient))
+        XCTAssertEqual(fullWidthClient.insertTextWrites.last?.text, "＂")
+        XCTAssertEqual(fullWidthClient.characterBeforeCaretReadCount, 0)
+    }
+
     func testMissingClientPrintableInputPassesThroughWithoutComposition() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
         host.currentClientValue = nil
 
         XCTAssertFalse(coordinator.handleText("a", client: nil))
+
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testFullWidthSymbolsPassThroughWhenClientIsMissing() {
+        let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
+        var preferences = InputModePreferences.standard
+        preferences.globalSymbolWidth = .fullWidth
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            inputModePreferences: preferences,
+            inputModeStateRuntime: runtime
+        )
+        host.currentClientValue = nil
+
+        XCTAssertFalse(coordinator.handleText("@", client: nil))
+        XCTAssertFalse(coordinator.handleText(",", client: nil))
 
         XCTAssertTrue(client.markedTextWrites.isEmpty)
         XCTAssertTrue(client.insertTextWrites.isEmpty)
@@ -2013,8 +2063,9 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
         XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertTrue(coordinator.handleText("@", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.map(\.text), ["Ａ", "１", "　"])
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["Ａ", "１", "　", "＠"])
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
