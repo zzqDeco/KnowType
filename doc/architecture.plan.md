@@ -319,11 +319,14 @@ Candidate positioning is centralized in `CandidateAnchorResolver`. The resolver
 uses fixed synchronous probe budgets and falls back in this order:
 
 1. up to four deduplicated marked and selected `firstRect` ranges
-2. unexpired last usable anchor scoped by composition, bundle, and screen
+2. unexpired last usable anchor scoped by composition, bundle, and an
+   unambiguous current screen
 3. up to four deduplicated strategic IMK-inline line-height positions
 4. one Accessibility focused-range resolve when permission is already granted,
-   throttled for 100 ms by composition and app
-5. stable safe point inside the screen visible frame
+   throttled for 100 ms by composition and app from the actual monotonic attempt
+   time
+5. an otherwise valid scoped cache deferred by ambiguous multi-screen topology
+6. stable safe point inside the screen visible frame
 
 Pointer location is not used as a moving candidate anchor.
 

@@ -12,14 +12,18 @@ Implementation:
 - move anchor lookup out of `InputController` into `CandidateAnchorResolver`
 - validate rects before use, allowing zero-width caret rects, normalizing negative-size rects, and rejecting zero-height/offscreen geometry
 - try at most four deduplicated marked/selected `firstRect` ranges
-- after invalid `firstRect` results, reuse an unexpired last usable anchor only
-  when composition id, app bundle id, and screen identity still match
+- after invalid `firstRect` results, prioritize an unexpired last usable anchor
+  only when composition id and app bundle id match and the connected-screen
+  topology proves its screen is current; defer an otherwise valid multi-screen
+  cache until bounded line-height and Accessibility probes have a chance to find
+  a moved caret
 - replace per-character line-height backtracking with at most four deduplicated
   IMK-inline strategic positions: marked end, in-range selection end, marked
   start, and zero
 - resolve Accessibility at most once per resolver call and throttle repeated
-  attempts for the same composition/app scope for 100 ms, then use a stable
-  safe point inside the visible screen frame
+  attempts for the same composition/app scope for 100 ms from a monotonic
+  timestamp recorded at the actual Accessibility gate, then use a stable safe
+  point inside the visible screen frame
 - convert Accessibility bounds from the menu-bar screen top before screen containment checks, so vertically arranged displays above the primary screen stay addressable
 - scope last usable anchors by composition id, bundle id, screen id, and age so old input fields do not move the panel
 - re-anchor once on the next main run loop after `setMarkedText` when the same composition is still active

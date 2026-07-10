@@ -214,19 +214,22 @@ public final class CandidateAnchorResolver {
     private let accessibilityProvider: AccessibilityAnchorProviding
     private let maxLastUsableAge: TimeInterval
     private let traceEnabled: Bool
+    private let monotonicNow: () -> TimeInterval
     private var lastUsable: ScopedAnchor?
-    private var accessibilityProbeTimes: [AccessibilityProbeScope: Date] = [:]
+    private var accessibilityProbeTimes: [AccessibilityProbeScope: TimeInterval] = [:]
 
     public init(
         screenProvider: ScreenGeometryProviding,
         accessibilityProvider: AccessibilityAnchorProviding = NoopAccessibilityAnchorProvider(),
         maxLastUsableAge: TimeInterval = 2,
-        traceEnabled: Bool = ProcessInfo.processInfo.environment["KNOWTYPE_ANCHOR_DEBUG"] == "1"
+        traceEnabled: Bool = ProcessInfo.processInfo.environment["KNOWTYPE_ANCHOR_DEBUG"] == "1",
+        monotonicNow: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.screenProvider = screenProvider
         self.accessibilityProvider = accessibilityProvider
         self.maxLastUsableAge = maxLastUsableAge
         self.traceEnabled = traceEnabled
+        self.monotonicNow = monotonicNow
     }
 
     public func reset() {
@@ -259,8 +262,17 @@ public final class CandidateAnchorResolver {
             }
         }
 
-        if let result = scopedLastUsableResult(context: context, probeCount: probeCount) {
-            return result
+        let scopedLastUsable = validatedScopedLastUsable(
+            context: context,
+            probeCount: probeCount
+        )
+        if let scopedLastUsable,
+           canPrioritizeScopedAnchor(scopedLastUsable) {
+            return scopedLastUsableResult(
+                scopedLastUsable,
+                context: context,
+                probeCount: probeCount
+            )
         }
 
         if let client, let selectedRange {
@@ -307,6 +319,14 @@ public final class CandidateAnchorResolver {
                 rect: .zero,
                 accepted: false,
                 reason: "throttled",
+                context: context,
+                probeCount: probeCount
+            )
+        }
+
+        if let scopedLastUsable {
+            return scopedLastUsableResult(
+                scopedLastUsable,
                 context: context,
                 probeCount: probeCount
             )
@@ -367,10 +387,10 @@ public final class CandidateAnchorResolver {
         return CandidateAnchorResult(rect: normalizedRect, source: source, isFresh: true)
     }
 
-    private func scopedLastUsableResult(
+    private func validatedScopedLastUsable(
         context: CandidateAnchorContext,
         probeCount: Int
-    ) -> CandidateAnchorResult? {
+    ) -> ScopedAnchor? {
         guard let lastUsable else {
             return nil
         }
@@ -396,20 +416,35 @@ public final class CandidateAnchorResolver {
             traceScopedAnchorRejection("invalid-cache", context: context, probeCount: probeCount)
             return nil
         }
+        return lastUsable
+    }
+
+    private func canPrioritizeScopedAnchor(_ anchor: ScopedAnchor) -> Bool {
+        let screens = screenProvider.screens
+        return screens.count == 1 && screens[0].identifier == anchor.screenID
+    }
+
+    private func scopedLastUsableResult(
+        _ anchor: ScopedAnchor,
+        context: CandidateAnchorContext,
+        probeCount: Int
+    ) -> CandidateAnchorResult {
         trace(
             source: .lastUsableScoped,
-            rect: lastUsable.rect,
+            rect: anchor.rect,
             accepted: true,
             reason: nil,
             context: context,
             probeCount: probeCount
         )
-        return CandidateAnchorResult(rect: lastUsable.rect, source: .lastUsableScoped, isFresh: false)
+        return CandidateAnchorResult(rect: anchor.rect, source: .lastUsableScoped, isFresh: false)
     }
 
     private func shouldProbeAccessibility(context: CandidateAnchorContext) -> Bool {
+        let attemptTime = monotonicNow()
         accessibilityProbeTimes = accessibilityProbeTimes.filter { _, timestamp in
-            context.now.timeIntervalSince(timestamp) < Self.accessibilityThrottleInterval
+            let elapsed = attemptTime - timestamp
+            return elapsed >= 0 && elapsed < Self.accessibilityThrottleInterval
         }
         let scope = AccessibilityProbeScope(
             compositionID: context.compositionID,
@@ -418,7 +453,7 @@ public final class CandidateAnchorResolver {
         guard accessibilityProbeTimes[scope] == nil else {
             return false
         }
-        accessibilityProbeTimes[scope] = context.now
+        accessibilityProbeTimes[scope] = attemptTime
         return true
     }
 
