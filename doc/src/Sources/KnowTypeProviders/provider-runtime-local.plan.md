@@ -4,7 +4,9 @@ KnowType supports OpenAI-compatible local endpoints without hardcoding a model i
 
 Runtime behavior:
 
-- If `providers.json` is empty or missing, `ProviderRuntimeLoader` seeds the same default local OpenAI-compatible profile shown by settings.
+- If canonical `providers.v2.json` is empty or genuinely absent,
+  `ProviderRuntimeLoader` seeds the same default local OpenAI-compatible profile
+  shown by settings. Legacy or incomplete migration state fails closed.
 - `OpenAIChatProvider` and `OpenAIResponsesProvider` resolve blank or placeholder model values through `GET /v1/models`.
 - Discovery uses only the generic OpenAI-compatible response shape: a top-level `data` array with model `id` strings.
 - Discovery ignores model IDs that are clearly not completion-capable, such as image, embed/embedding, moderation, TTS, or Whisper models, before selecting the first usable local model.

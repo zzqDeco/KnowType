@@ -19,7 +19,15 @@ The script does not mutate macOS input-source state. It reports:
 - current Text Input Source ID plus KnowType parent/mode registration, enabled status, select-capable status, localized display names, exact de-duplicated active-mode count, and legacy `.Mode` count;
 - persisted HIToolbox and third-party enabled preference rows for the parent anchor and `.Hans`, plus strict failures when selected/history still point at the non-selectable parent or legacy `.Mode`;
 - KnowType's `AppleInputSourceHistory` position, because `Ctrl+Space` normally toggles the current and previous input sources and can skip KnowType if it is buried behind ABC or Apple Pinyin in history;
-- Gatekeeper assessment status, stale LaunchServices records outside `~/Library/Input Methods/KnowType.app`, optional compatibility `KnowType.prefPane` metadata, `KnowTypeInputMethodApp` process status, provider profile, local lexicon directories, AI lexical profile files, and ENV/CORRECTION/LEXICAL_PROFILE document presence.
+- Gatekeeper assessment status, stale LaunchServices records outside `~/Library/Input Methods/KnowType.app`, optional compatibility `KnowType.prefPane` metadata, `KnowTypeInputMethodApp` process status, privacy-safe provider profile and storage-generation state, local lexicon directories, AI lexical profile files, and ENV/CORRECTION/LEXICAL_PROFILE document presence.
+
+Provider diagnostics distinguish canonical, unmigrated legacy, legacy-writer
+divergence, tombstone-only, and missing-canonical states. Divergence warnings
+state that both canonical and legacy payloads were preserved; migration may
+also retain a permission-restricted `providers.legacy-conflict.<UUID>.json`
+when three legacy writes overlap the atomic cutover. Provider summaries
+always prefer `providers.v2.json` and never expose credentials or removed URL
+query values.
 
 Strict stale LaunchServices failures are install blockers, not cosmetic
 warnings. Records that still point at `dist/KnowType.app`, release extraction

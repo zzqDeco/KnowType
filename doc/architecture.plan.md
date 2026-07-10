@@ -149,12 +149,15 @@ local-candidate path.
 - `ProviderProfilesViewModel` edits provider profile metadata, rejects stale
   revision baselines, preserves drafts on conflict, and coordinates secret-first
   immutable API-key updates through `SecretStore`.
+- Canonical provider metadata lives in generation-separated
+  `providers.v2.json`. Install-time migration snapshots and tombstones the
+  legacy path so a pre-v2 Settings writer cannot overwrite runtime state.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
 - `InputModePreferencesViewModel` edits punctuation language and symbol-width defaults stored in the shared `com.knowtype.preferences` defaults domain.
 - `RuntimePreferencesViewModel` edits candidate paging/layout and AI continuation behavior through the same shared defaults domain. The legacy input-scheme value remains persisted for compatibility but is not exposed in the Rime-only settings UI.
 - `LexiconSettingsViewModel` reports the local JSON/TSV lexicon directory status by reusing `KnowTypeCore` directory resolution and lexicon file loading.
 - Lexicon settings can create missing directories, create a non-overwriting sample TSV file, install the recommended managed lexicon pack, and display installed pack metadata.
-- Diagnostics settings read install-state, bundle metadata, Rime runtime presence, AI provider summary, user-data file timestamps, and backup availability. They display rollback commands but do not execute rollback from inside the running input-method/settings process.
+- Diagnostics settings read install-state, bundle metadata, Rime runtime presence, AI provider summary and storage-generation state, user-data file timestamps, and backup availability. They display rollback commands but do not execute rollback from inside the running input-method/settings process.
 
 Settings status does not import the IMK frontend and does not own dictionary licensing. The macOS Keyboard/Input Sources page still only enables/selects the input method; KnowType-specific controls live in the IMK preferences window, with the prefPane retained only as an optional compatibility host.
 

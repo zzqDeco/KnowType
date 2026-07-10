@@ -2,7 +2,8 @@
 
 ## Goal
 
-Keep the settings app and input-method runtime aligned when `providers.json` has not been created yet.
+Keep the settings app and input-method runtime aligned when canonical
+`providers.v2.json` has not been created in a genuinely new store.
 
 ## Behavior
 

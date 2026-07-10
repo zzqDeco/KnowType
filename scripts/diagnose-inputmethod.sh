@@ -181,9 +181,46 @@ def bundle_info(bundle_path):
     return payload
 
 def default_provider(app_support):
-    provider_path = Path(app_support) / "providers.json"
+    support = Path(app_support)
+    canonical_path = support / "providers.v2.json"
+    legacy_path = support / "providers.json"
+    snapshot_path = support / "providers.legacy.json"
+    legacy_file = load_json(legacy_path)
+    legacy_is_tombstone = (
+        isinstance(legacy_file, dict)
+        and legacy_file.get("schemaVersion") == "migrated-to-providers.v2.json"
+        and legacy_file.get("canonicalFile") == "providers.v2.json"
+    )
+    legacy_expects_canonical = (
+        bool(legacy_file.get("canonicalExpected"))
+        if isinstance(legacy_file, dict) and "canonicalExpected" in legacy_file
+        else snapshot_path.is_file()
+    )
+    legacy_is_configuration = legacy_path.is_file() and not legacy_is_tombstone
+    if canonical_path.is_file():
+        provider_path = canonical_path
+        storage_state = "legacy-diverged" if legacy_is_configuration else "canonical"
+    elif legacy_is_configuration:
+        provider_path = legacy_path
+        storage_state = "legacy-unmigrated"
+    elif legacy_is_tombstone and legacy_expects_canonical:
+        provider_path = canonical_path
+        storage_state = "canonical-missing"
+    elif legacy_is_tombstone:
+        provider_path = canonical_path
+        storage_state = "tombstone"
+    else:
+        provider_path = canonical_path
+        storage_state = "missing"
     provider_file = load_json(provider_path)
-    result = {"path": str(provider_path), "exists": provider_path.is_file(), "defaultProfile": None}
+    result = {
+        "path": str(provider_path),
+        "canonicalPath": str(canonical_path),
+        "legacyPath": str(legacy_path),
+        "exists": provider_path.is_file(),
+        "storageState": storage_state,
+        "defaultProfile": None,
+    }
     profiles = []
     if isinstance(provider_file, dict):
         profiles = provider_file.get("profiles") or []
@@ -1169,7 +1206,10 @@ echo
 echo "KnowType user data paths"
 
 APP_SUPPORT="$HOME/Library/Application Support/KnowType"
-PROVIDER_JSON="$APP_SUPPORT/providers.json"
+PROVIDER_JSON_CANONICAL="$APP_SUPPORT/providers.v2.json"
+PROVIDER_JSON_LEGACY="$APP_SUPPORT/providers.json"
+PROVIDER_JSON_SNAPSHOT="$APP_SUPPORT/providers.legacy.json"
+PROVIDER_JSON="$PROVIDER_JSON_CANONICAL"
 HISTORY_JSON="$APP_SUPPORT/user-selection-history.json"
 LEXICON_DIR="$APP_SUPPORT/Lexicons"
 AI_PROFILE_JSON="$APP_SUPPORT/AI/lexical-profile.json"
@@ -1183,11 +1223,73 @@ ENV_MD="$HOME/.knowtype/ENV.md"
 CORRECTION_MD="$HOME/.knowtype/CORRECTION.md"
 LEXICAL_PROFILE_MD="$HOME/.knowtype/LEXICAL_PROFILE.md"
 
-if [[ -f "$PROVIDER_JSON" ]]; then
-  ok "provider profile file exists: $PROVIDER_JSON"
-else
-  warn "provider profile file is missing; runtime will use seeded local defaults"
-fi
+provider_storage_state="$({
+  KNOWTYPE_PROVIDER_CANONICAL="$PROVIDER_JSON_CANONICAL" \
+  KNOWTYPE_PROVIDER_LEGACY="$PROVIDER_JSON_LEGACY" \
+  KNOWTYPE_PROVIDER_SNAPSHOT="$PROVIDER_JSON_SNAPSHOT" \
+  "$KNOWTYPE_PYTHON3" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+canonical = Path(os.environ["KNOWTYPE_PROVIDER_CANONICAL"])
+legacy = Path(os.environ["KNOWTYPE_PROVIDER_LEGACY"])
+snapshot = Path(os.environ["KNOWTYPE_PROVIDER_SNAPSHOT"])
+payload = None
+try:
+    with legacy.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+except Exception:
+    pass
+tombstone = (
+    isinstance(payload, dict)
+    and payload.get("schemaVersion") == "migrated-to-providers.v2.json"
+    and payload.get("canonicalFile") == "providers.v2.json"
+)
+expects_canonical = (
+    bool(payload.get("canonicalExpected"))
+    if isinstance(payload, dict) and "canonicalExpected" in payload
+    else snapshot.is_file()
+)
+legacy_configuration = legacy.is_file() and not tombstone
+if canonical.is_file():
+    print("legacy-diverged" if legacy_configuration else "canonical")
+elif legacy_configuration:
+    print("legacy-unmigrated")
+elif tombstone and expects_canonical:
+    print("canonical-missing")
+elif tombstone:
+    print("tombstone")
+else:
+    print("missing")
+PY
+} 2>/dev/null)"
+
+case "$provider_storage_state" in
+  canonical)
+    ok "canonical provider profile file exists: $PROVIDER_JSON_CANONICAL"
+    ;;
+  legacy-diverged)
+    warn "canonical provider profiles are active, but providers.json was rewritten by a legacy Settings process; both payloads were preserved, so close legacy Settings and resolve the conflict before reinstalling"
+    ;;
+  legacy-unmigrated)
+    PROVIDER_JSON="$PROVIDER_JSON_LEGACY"
+    warn "legacy provider profiles require migration before Settings can save changes; rerun the installer"
+    ;;
+  canonical-missing)
+    if (( STRICT == 1 )); then
+      fail "canonical providers.v2.json is missing after migration; restore from backup or rerun a verified installer"
+    else
+      warn "canonical providers.v2.json is missing after migration"
+    fi
+    ;;
+  tombstone)
+    info "provider profile storage is initialized; no canonical profile file has been created yet"
+    ;;
+  *)
+    warn "provider profile file is missing; runtime will use seeded local defaults"
+    ;;
+esac
 
 if [[ -f "$HISTORY_JSON" ]]; then
   ok "local candidate history file exists"

@@ -18,6 +18,10 @@ successfully. Before every save, default change, and connection test, the
 ViewModel reloads and compares its baseline. A mismatch keeps the draft,
 refreshes saved profiles, rejects the operation, and surfaces localized conflict
 copy. Store compare-and-swap performs the same check again at commit time.
+An unmigrated legacy profile file, a missing post-migration canonical file, or
+an old Settings writer recreating `providers.json` is therefore never treated
+as an empty profile list. The installer owns migration and conflict detection; the ViewModel
+stays fail-closed and preserves the user's draft.
 
 Changed secrets use immutable credential references. The ViewModel writes a new
 secret before committing metadata, deletes that new secret if metadata commit

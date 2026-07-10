@@ -138,6 +138,8 @@ public enum ProviderProfileStoreError: Error, Equatable, LocalizedError {
     case legacyChangedDuringMigration(path: String)
     case invalidMigrationCredentialReference
     case filePermissionUpdateFailed(path: String, code: Int32)
+    case migrationRollbackFailed
+    case metadataRollbackFailed
 
     public var errorDescription: String? {
         switch self {
@@ -161,6 +163,10 @@ public enum ProviderProfileStoreError: Error, Equatable, LocalizedError {
             return "Provider profile migration generated an invalid credential reference"
         case .filePermissionUpdateFailed(let path, let code):
             return "Could not restrict provider profile file permissions at \(path) (errno \(code))"
+        case .migrationRollbackFailed:
+            return "Provider profile migration failed and metadata rollback could not be completed"
+        case .metadataRollbackFailed:
+            return "Provider profile metadata update failed and the previous canonical file could not be restored"
         }
     }
 }
@@ -177,7 +183,6 @@ public enum ProviderProfileStorageMigrationStatus: String, Sendable, Equatable {
     case noLegacyConfiguration = "no_legacy_configuration"
     case migrated
     case alreadyCurrent = "already_current"
-    case legacyWriterQuarantined = "legacy_writer_quarantined"
 }
 
 public struct ProviderProfileStorageMigrationResult: Sendable, Equatable {
@@ -202,6 +207,38 @@ public struct ProviderProfileStorageMigrationResult: Sendable, Equatable {
     }
 }
 
+public struct ProviderProfileStorageRollbackResult: Sendable, Equatable {
+    public var credentialsRemoved: Int
+    public var credentialCleanupFailures: Int
+
+    public init(credentialsRemoved: Int, credentialCleanupFailures: Int) {
+        self.credentialsRemoved = credentialsRemoved
+        self.credentialCleanupFailures = credentialCleanupFailures
+    }
+}
+
+public enum ProviderProfileStorageDowngradeStatus: String, Sendable, Equatable {
+    case alreadyLegacy = "already_legacy"
+    case downgraded
+    case unmanaged
+}
+
+public struct ProviderProfileStorageDowngradeResult: Sendable, Equatable {
+    public var status: ProviderProfileStorageDowngradeStatus
+    public var revision: UInt64
+    public var profileCount: Int
+
+    public init(
+        status: ProviderProfileStorageDowngradeStatus,
+        revision: UInt64,
+        profileCount: Int
+    ) {
+        self.status = status
+        self.revision = revision
+        self.profileCount = profileCount
+    }
+}
+
 private struct LegacyProviderProfilesEnvelope: Decodable {
     var schemaVersion: Int
     var revision: UInt64
@@ -219,6 +256,18 @@ private struct LegacyProviderProfilesEnvelope: Decodable {
         revision = try container.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
         profiles = try container.decode([ProviderProfile].self, forKey: .profiles)
     }
+}
+
+private struct LegacyProviderProfilesPayload: Encodable {
+    let schemaVersion = 1
+    var profiles: [ProviderProfile]
+}
+
+private enum LegacyFilePreparation {
+    case unmanaged
+    case unchanged
+    case created(publishedData: Data)
+    case replaced(claimURL: URL, publishedData: Data)
 }
 
 public protocol ProviderProfileRevisionSignaling: Sendable {
@@ -248,6 +297,7 @@ public struct FileProviderProfileStore: ProviderProfileStore {
     public static let canonicalFilename = "providers.v2.json"
     public static let legacyFilename = "providers.json"
     public static let legacySnapshotFilename = "providers.legacy.json"
+    public static let legacyConflictFilenamePrefix = "providers.legacy-conflict."
     public static let legacyTombstoneSchemaVersion = "migrated-to-providers.v2.json"
 
     public let fileURL: URL
@@ -255,6 +305,7 @@ public struct FileProviderProfileStore: ProviderProfileStore {
     public let legacyFileURL: URL?
     public let legacySnapshotURL: URL?
     private let revisionSignal: any ProviderProfileRevisionSignaling
+    private let migrationCutoverHook: (@Sendable () throws -> Void)?
 
     public init(
         fileURL: URL,
@@ -267,6 +318,22 @@ public struct FileProviderProfileStore: ProviderProfileStore {
         self.legacyFileURL = legacyFileURL
         self.legacySnapshotURL = legacySnapshotURL
         self.revisionSignal = revisionSignal
+        self.migrationCutoverHook = nil
+    }
+
+    init(
+        fileURL: URL,
+        legacyFileURL: URL?,
+        legacySnapshotURL: URL?,
+        revisionSignal: any ProviderProfileRevisionSignaling = DistributedProviderProfileRevisionSignal(),
+        migrationCutoverHook: @escaping @Sendable () throws -> Void
+    ) {
+        self.fileURL = fileURL
+        self.lockFileURL = fileURL.appendingPathExtension("lock")
+        self.legacyFileURL = legacyFileURL
+        self.legacySnapshotURL = legacySnapshotURL
+        self.revisionSignal = revisionSignal
+        self.migrationCutoverHook = migrationCutoverHook
     }
 
     public static func defaultStore(createDirectory: Bool = true) throws -> FileProviderProfileStore {
@@ -331,19 +398,12 @@ public struct FileProviderProfileStore: ProviderProfileStore {
                     profileCount: 0
                 )
             }
-
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 let current = try loadProfilesWithoutLock()
-                if legacyStorageStateWithoutLock() == .configuration {
-                    try preserveLegacySnapshotIfNeeded(Data(contentsOf: legacyFileURL))
-                    try writeLegacyTombstoneWithoutLock()
-                    return ProviderProfileStorageMigrationResult(
-                        status: .legacyWriterQuarantined,
-                        revision: current.revision,
-                        profileCount: current.profiles.count
-                    )
-                }
-                try writeLegacyTombstoneWithoutLock()
+                let preparation = try prepareLegacyTombstoneForCanonicalWithoutLock(
+                    conflictError: .legacyWriterDetected(path: legacyFileURL.path)
+                )
+                try finishLegacyFilePreparation(preparation)
                 return ProviderProfileStorageMigrationResult(
                     status: .alreadyCurrent,
                     revision: current.revision,
@@ -359,15 +419,13 @@ public struct FileProviderProfileStore: ProviderProfileStore {
                     profileCount: 0
                 )
             case .absent:
-                try writeLegacyTombstoneWithoutLock()
                 return ProviderProfileStorageMigrationResult(
                     status: .noLegacyConfiguration,
                     revision: 0,
                     profileCount: 0
                 )
             case .tombstone:
-                if let legacySnapshotURL,
-                   FileManager.default.fileExists(atPath: legacySnapshotURL.path) {
+                if legacyTombstoneExpectsCanonicalWithoutLock() {
                     throw ProviderProfileStoreError.canonicalFileMissing(path: fileURL.path)
                 }
                 return ProviderProfileStorageMigrationResult(
@@ -387,12 +445,14 @@ public struct FileProviderProfileStore: ProviderProfileStore {
             guard legacy.revision < UInt64.max else {
                 throw ProviderProfileStoreError.revisionOverflow
             }
-            try preserveLegacySnapshotIfNeeded(legacyData)
+            try writeLegacySnapshot(legacyData)
 
             var migratedProfiles = legacy.profiles
             var createdCredentialReferences: [String] = []
             var createdCredentialReferenceSet = Set<String>()
+            let legacyCredentialReferenceSet = Set(legacy.profiles.compactMap(\.secretName))
             var missingCredentials = 0
+            var canCompensateCredentials = true
 
             do {
                 for index in migratedProfiles.indices {
@@ -407,8 +467,11 @@ public struct FileProviderProfileStore: ProviderProfileStore {
 
                     let newReference = credentialReferenceGenerator(migratedProfiles[index].id)
                     guard !newReference.isEmpty,
-                          newReference != legacyReference,
+                          !legacyCredentialReferenceSet.contains(newReference),
                           createdCredentialReferenceSet.insert(newReference).inserted else {
+                        throw ProviderProfileStoreError.invalidMigrationCredentialReference
+                    }
+                    guard try secretStore.secret(named: newReference) == nil else {
                         throw ProviderProfileStoreError.invalidMigrationCredentialReference
                     }
                     try secretStore.setSecret(secret, named: newReference)
@@ -416,23 +479,38 @@ public struct FileProviderProfileStore: ProviderProfileStore {
                     migratedProfiles[index].secretName = newReference
                 }
 
-                let currentLegacyData = try Data(contentsOf: legacyFileURL)
-                guard currentLegacyData == legacyData else {
-                    throw ProviderProfileStoreError.legacyChangedDuringMigration(path: legacyFileURL.path)
-                }
-
                 let migrated = ProviderProfilesFile(
                     schemaVersion: ProviderProfilesFile.currentSchemaVersion,
                     revision: legacy.revision + 1,
                     profiles: migratedProfiles
                 )
+                var tombstonePreparation: LegacyFilePreparation?
                 do {
+                    tombstonePreparation = try replaceLegacyPayloadWithTombstoneWithoutLock(
+                        expectedData: legacyData,
+                        canonicalExpected: true,
+                        conflictError: .legacyChangedDuringMigration(path: legacyFileURL.path)
+                    )
+                    try migrationCutoverHook?()
                     try writeProfilesWithoutLock(migrated)
-                    try writeLegacyTombstoneWithoutLock()
+                    guard legacyStorageStateWithoutLock() == .tombstone else {
+                        throw ProviderProfileStoreError.legacyChangedDuringMigration(path: legacyFileURL.path)
+                    }
+                    if let tombstonePreparation {
+                        try finishLegacyFilePreparation(tombstonePreparation)
+                    }
                 } catch {
-                    try? FileManager.default.removeItem(at: fileURL)
-                    try? legacyData.write(to: legacyFileURL, options: [.atomic])
-                    try? Self.restrictFilePermissions(legacyFileURL)
+                    do {
+                        if FileManager.default.fileExists(atPath: fileURL.path) {
+                            try FileManager.default.removeItem(at: fileURL)
+                        }
+                        if let tombstonePreparation {
+                            try rollbackLegacyFilePreparationWithoutLock(tombstonePreparation)
+                        }
+                    } catch {
+                        canCompensateCredentials = false
+                        throw ProviderProfileStoreError.migrationRollbackFailed
+                    }
                     throw error
                 }
 
@@ -445,8 +523,10 @@ public struct FileProviderProfileStore: ProviderProfileStore {
                     missingCredentials: missingCredentials
                 )
             } catch {
-                for reference in createdCredentialReferences {
-                    try? secretStore.deleteSecret(named: reference)
+                if canCompensateCredentials {
+                    for reference in createdCredentialReferences {
+                        try? secretStore.deleteSecret(named: reference)
+                    }
                 }
                 throw error
             }
@@ -455,6 +535,187 @@ public struct FileProviderProfileStore: ProviderProfileStore {
             revisionSignal.postProviderProfilesChanged(revision: committedRevision)
         }
         return result
+    }
+
+    public func downgradeCanonicalProfilesForLegacyRuntime() throws -> ProviderProfileStorageDowngradeResult {
+        try withFileLock(operation: LOCK_EX, createDirectory: true) {
+            guard let legacyFileURL else {
+                return ProviderProfileStorageDowngradeResult(
+                    status: .unmanaged,
+                    revision: 0,
+                    profileCount: 0
+                )
+            }
+
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                switch legacyStorageStateWithoutLock() {
+                case .configuration:
+                    let data = try Data(contentsOf: legacyFileURL)
+                    let legacy = try JSONDecoder().decode(LegacyProviderProfilesEnvelope.self, from: data)
+                    return ProviderProfileStorageDowngradeResult(
+                        status: .alreadyLegacy,
+                        revision: legacy.revision,
+                        profileCount: legacy.profiles.count
+                    )
+                case .absent, .unmanaged:
+                    return ProviderProfileStorageDowngradeResult(
+                        status: .alreadyLegacy,
+                        revision: 0,
+                        profileCount: 0
+                    )
+                case .tombstone:
+                    if legacyTombstoneExpectsCanonicalWithoutLock() {
+                        throw ProviderProfileStoreError.canonicalFileMissing(path: fileURL.path)
+                    }
+                    try writeLegacyPayloadWithoutLock(profiles: [])
+                    return ProviderProfileStorageDowngradeResult(
+                        status: .alreadyLegacy,
+                        revision: 0,
+                        profileCount: 0
+                    )
+                }
+            }
+
+            let legacyState = legacyStorageStateWithoutLock()
+            guard legacyState != .configuration else {
+                throw ProviderProfileStoreError.legacyWriterDetected(path: legacyFileURL.path)
+            }
+            let canonicalData = try Data(contentsOf: fileURL)
+            let canonical = try JSONDecoder().decode(ProviderProfilesFile.self, from: canonicalData)
+            var legacyPreparation: LegacyFilePreparation?
+
+            do {
+                let legacyData = try encodedLegacyPayload(profiles: canonical.profiles)
+                switch legacyState {
+                case .tombstone:
+                    legacyPreparation = try replaceLegacyPayloadWithoutLock(
+                        expectedData: Data(contentsOf: legacyFileURL),
+                        replacementData: legacyData,
+                        conflictError: .legacyChangedDuringMigration(path: legacyFileURL.path)
+                    )
+                case .absent:
+                    do {
+                        try createLegacyFileExclusivelyWithoutLock(data: legacyData)
+                        legacyPreparation = .created(publishedData: legacyData)
+                    } catch let error as NSError
+                        where error.domain == NSPOSIXErrorDomain && error.code == Int(EEXIST) {
+                        throw ProviderProfileStoreError.legacyChangedDuringMigration(
+                            path: legacyFileURL.path
+                        )
+                    }
+                case .unmanaged:
+                    legacyPreparation = .unmanaged
+                case .configuration:
+                    throw ProviderProfileStoreError.legacyWriterDetected(path: legacyFileURL.path)
+                }
+                try migrationCutoverHook?()
+                guard try Data(contentsOf: legacyFileURL) == legacyData else {
+                    throw ProviderProfileStoreError.legacyChangedDuringMigration(path: legacyFileURL.path)
+                }
+                try FileManager.default.removeItem(at: fileURL)
+                if let legacyPreparation {
+                    try finishLegacyFilePreparation(legacyPreparation)
+                }
+                if let legacySnapshotURL {
+                    try? FileManager.default.removeItem(at: legacySnapshotURL)
+                }
+            } catch {
+                do {
+                    if !FileManager.default.fileExists(atPath: fileURL.path) {
+                        try canonicalData.write(to: fileURL, options: [.atomic])
+                        try Self.restrictFilePermissions(fileURL)
+                    }
+                    if let legacyPreparation {
+                        try rollbackLegacyFilePreparationWithoutLock(legacyPreparation)
+                    }
+                } catch {
+                    throw ProviderProfileStoreError.metadataRollbackFailed
+                }
+                throw error
+            }
+
+            return ProviderProfileStorageDowngradeResult(
+                status: .downgraded,
+                revision: canonical.revision,
+                profileCount: canonical.profiles.count
+            )
+        }
+    }
+
+    public func rollbackLegacyMigration(
+        expectedCanonicalRevision: UInt64,
+        secretStore: any SecretStore
+    ) throws -> ProviderProfileStorageRollbackResult {
+        var credentialReferencesToRemove: [String] = []
+        try withFileLock(operation: LOCK_EX, createDirectory: false) {
+            guard let legacyFileURL, let legacySnapshotURL else {
+                return
+            }
+            guard legacyStorageStateWithoutLock() == .tombstone,
+                  FileManager.default.fileExists(atPath: fileURL.path),
+                  FileManager.default.fileExists(atPath: legacySnapshotURL.path) else {
+                throw ProviderProfileStoreError.migrationRollbackFailed
+            }
+
+            let canonical = try loadProfilesWithoutLock()
+            guard canonical.revision == expectedCanonicalRevision else {
+                throw ProviderProfileStoreError.revisionConflict(
+                    expected: expectedCanonicalRevision,
+                    actual: canonical.revision
+                )
+            }
+            let legacyData = try Data(contentsOf: legacySnapshotURL)
+            let legacy = try JSONDecoder().decode(LegacyProviderProfilesEnvelope.self, from: legacyData)
+            let legacyReferences = Set(legacy.profiles.compactMap(\.secretName))
+            let canonicalData = try Data(contentsOf: fileURL)
+            let tombstoneData = try Data(contentsOf: legacyFileURL)
+            credentialReferencesToRemove = canonical.profiles
+                .compactMap(\.secretName)
+                .filter { !legacyReferences.contains($0) }
+
+            var legacyPreparation: LegacyFilePreparation?
+            do {
+                legacyPreparation = try replaceLegacyPayloadWithoutLock(
+                    expectedData: tombstoneData,
+                    replacementData: legacyData,
+                    conflictError: .legacyChangedDuringMigration(path: legacyFileURL.path)
+                )
+                try FileManager.default.removeItem(at: fileURL)
+                if let legacyPreparation {
+                    try finishLegacyFilePreparation(legacyPreparation)
+                }
+                try? FileManager.default.removeItem(at: legacySnapshotURL)
+            } catch {
+                credentialReferencesToRemove = []
+                do {
+                    if !FileManager.default.fileExists(atPath: fileURL.path) {
+                        try canonicalData.write(to: fileURL, options: [.atomic])
+                        try Self.restrictFilePermissions(fileURL)
+                    }
+                    if let legacyPreparation {
+                        try rollbackLegacyFilePreparationWithoutLock(legacyPreparation)
+                    }
+                } catch {
+                    throw ProviderProfileStoreError.metadataRollbackFailed
+                }
+                throw ProviderProfileStoreError.migrationRollbackFailed
+            }
+        }
+
+        var removed = 0
+        var failures = 0
+        for reference in Set(credentialReferencesToRemove) {
+            do {
+                try secretStore.deleteSecret(named: reference)
+                removed += 1
+            } catch {
+                failures += 1
+            }
+        }
+        return ProviderProfileStorageRollbackResult(
+            credentialsRemoved: removed,
+            credentialCleanupFailures: failures
+        )
     }
 
     public func transactProfiles(
@@ -504,15 +765,34 @@ public struct FileProviderProfileStore: ProviderProfileStore {
 
     private func writeProfilesAndTombstoneWithoutLock(_ profiles: ProviderProfilesFile) throws {
         let previousData = try? Data(contentsOf: fileURL)
+        var tombstonePreparation: LegacyFilePreparation?
         do {
             try writeProfilesWithoutLock(profiles)
-            try writeLegacyTombstoneWithoutLock()
+            try migrationCutoverHook?()
+            tombstonePreparation = try prepareLegacyTombstoneForCanonicalWithoutLock(
+                conflictError: .legacyWriterDetected(path: legacyFileURL?.path ?? "<unmanaged>")
+            )
+            guard legacyStorageStateWithoutLock() != .configuration else {
+                throw ProviderProfileStoreError.legacyWriterDetected(
+                    path: legacyFileURL?.path ?? "<unmanaged>"
+                )
+            }
+            if let tombstonePreparation {
+                try finishLegacyFilePreparation(tombstonePreparation)
+            }
         } catch {
-            if let previousData {
-                try? previousData.write(to: fileURL, options: [.atomic])
-                try? Self.restrictFilePermissions(fileURL)
-            } else {
-                try? FileManager.default.removeItem(at: fileURL)
+            do {
+                if let previousData {
+                    try previousData.write(to: fileURL, options: [.atomic])
+                    try Self.restrictFilePermissions(fileURL)
+                } else if FileManager.default.fileExists(atPath: fileURL.path) {
+                    try FileManager.default.removeItem(at: fileURL)
+                }
+                if let tombstonePreparation {
+                    try rollbackLegacyFilePreparationWithoutLock(tombstonePreparation)
+                }
+            } catch {
+                throw ProviderProfileStoreError.metadataRollbackFailed
             }
             throw error
         }
@@ -531,9 +811,7 @@ public struct FileProviderProfileStore: ProviderProfileStore {
                 ? ProviderProfileStoreError.legacyWriterDetected(path: legacyFileURL.path)
                 : ProviderProfileStoreError.migrationRequired(path: legacyFileURL.path)
         case .tombstone:
-            if !canonicalExists,
-               let legacySnapshotURL,
-               FileManager.default.fileExists(atPath: legacySnapshotURL.path) {
+            if !canonicalExists, legacyTombstoneExpectsCanonicalWithoutLock() {
                 throw ProviderProfileStoreError.canonicalFileMissing(path: fileURL.path)
             }
         }
@@ -549,8 +827,7 @@ public struct FileProviderProfileStore: ProviderProfileStore {
         case .configuration:
             throw ProviderProfileStoreError.migrationRequired(path: legacyFileURL.path)
         case .tombstone:
-            if let legacySnapshotURL,
-               FileManager.default.fileExists(atPath: legacySnapshotURL.path) {
+            if legacyTombstoneExpectsCanonicalWithoutLock() {
                 throw ProviderProfileStoreError.canonicalFileMissing(path: fileURL.path)
             }
         }
@@ -571,28 +848,196 @@ public struct FileProviderProfileStore: ProviderProfileStore {
         return .tombstone
     }
 
-    private func preserveLegacySnapshotIfNeeded(_ data: Data) throws {
-        guard let legacySnapshotURL,
-              !FileManager.default.fileExists(atPath: legacySnapshotURL.path) else {
+    private func writeLegacySnapshot(_ data: Data) throws {
+        guard let legacySnapshotURL else {
             return
         }
         try data.write(to: legacySnapshotURL, options: [.atomic])
         try Self.restrictFilePermissions(legacySnapshotURL)
     }
 
-    private func writeLegacyTombstoneWithoutLock() throws {
+    private func writeLegacyPayloadWithoutLock(profiles: [ProviderProfile]) throws {
         guard let legacyFileURL else {
             return
         }
-        try Self.legacyTombstoneData.write(to: legacyFileURL, options: [.atomic])
+        try encodedLegacyPayload(profiles: profiles).write(to: legacyFileURL, options: [.atomic])
         try Self.restrictFilePermissions(legacyFileURL)
     }
 
-    private static var legacyTombstoneData: Data {
+    private func encodedLegacyPayload(profiles: [ProviderProfile]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(LegacyProviderProfilesPayload(profiles: profiles))
+    }
+
+    private func legacyTombstoneExpectsCanonicalWithoutLock() -> Bool {
+        guard let legacyFileURL,
+              let data = try? Data(contentsOf: legacyFileURL),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        if let expected = object["canonicalExpected"] as? Bool {
+            return expected
+        }
+        return legacySnapshotURL.map {
+            FileManager.default.fileExists(atPath: $0.path)
+        } ?? false
+    }
+
+    private func prepareLegacyTombstoneForCanonicalWithoutLock(
+        conflictError: ProviderProfileStoreError
+    ) throws -> LegacyFilePreparation {
+        guard let legacyFileURL else {
+            return .unmanaged
+        }
+        switch legacyStorageStateWithoutLock() {
+        case .unmanaged:
+            return .unmanaged
+        case .configuration:
+            throw conflictError
+        case .tombstone:
+            if legacyTombstoneExpectsCanonicalWithoutLock() {
+                return .unchanged
+            }
+            return try replaceLegacyPayloadWithTombstoneWithoutLock(
+                expectedData: Data(contentsOf: legacyFileURL),
+                canonicalExpected: true,
+                conflictError: conflictError
+            )
+        case .absent:
+            let tombstoneData = Self.legacyTombstoneData(canonicalExpected: true)
+            do {
+                try createLegacyFileExclusivelyWithoutLock(data: tombstoneData)
+                return .created(publishedData: tombstoneData)
+            } catch let error as NSError
+                where error.domain == NSPOSIXErrorDomain && error.code == Int(EEXIST) {
+                throw conflictError
+            }
+        }
+    }
+
+    private func replaceLegacyPayloadWithTombstoneWithoutLock(
+        expectedData: Data,
+        canonicalExpected: Bool,
+        conflictError: ProviderProfileStoreError
+    ) throws -> LegacyFilePreparation {
+        try replaceLegacyPayloadWithoutLock(
+            expectedData: expectedData,
+            replacementData: Self.legacyTombstoneData(canonicalExpected: canonicalExpected),
+            conflictError: conflictError
+        )
+    }
+
+    private func replaceLegacyPayloadWithoutLock(
+        expectedData: Data,
+        replacementData: Data,
+        conflictError: ProviderProfileStoreError
+    ) throws -> LegacyFilePreparation {
+        guard let legacyFileURL else {
+            return .unmanaged
+        }
+        let claimURL = legacyFileURL.deletingLastPathComponent().appendingPathComponent(
+            "\(Self.legacyConflictFilenamePrefix)\(UUID().uuidString).json"
+        )
+        guard rename(legacyFileURL.path, claimURL.path) == 0 else {
+            throw conflictError
+        }
+        do {
+            guard try Data(contentsOf: claimURL) == expectedData else {
+                try restoreClaimedLegacyPayloadWithoutLock(claimURL)
+                throw conflictError
+            }
+            do {
+                try createLegacyFileExclusivelyWithoutLock(data: replacementData)
+            } catch {
+                try restoreClaimedLegacyPayloadWithoutLock(claimURL)
+                throw conflictError
+            }
+            return .replaced(claimURL: claimURL, publishedData: replacementData)
+        } catch {
+            if FileManager.default.fileExists(atPath: claimURL.path) {
+                try? Self.restrictFilePermissions(claimURL)
+            }
+            throw error
+        }
+    }
+
+    private func createLegacyFileExclusivelyWithoutLock(data: Data) throws {
+        guard let legacyFileURL else {
+            return
+        }
+        let descriptor = open(
+            legacyFileURL.path,
+            O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        var completed = false
+        defer {
+            _ = close(descriptor)
+            if !completed {
+                _ = unlink(legacyFileURL.path)
+            }
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+        try handle.write(contentsOf: data)
+        try handle.synchronize()
+        completed = true
+    }
+
+    private func restoreClaimedLegacyPayloadWithoutLock(_ claimURL: URL) throws {
+        guard let legacyFileURL else {
+            return
+        }
+        if !FileManager.default.fileExists(atPath: legacyFileURL.path) {
+            guard rename(claimURL.path, legacyFileURL.path) == 0 else {
+                throw ProviderProfileStoreError.metadataRollbackFailed
+            }
+            return
+        }
+        // A newer pre-v2 payload already owns the legacy path. Keep the
+        // permission-restricted claim as conflict evidence rather than
+        // overwriting either writer or silently dropping an intermediate save.
+        try Self.restrictFilePermissions(claimURL)
+    }
+
+    private func rollbackLegacyFilePreparationWithoutLock(
+        _ preparation: LegacyFilePreparation
+    ) throws {
+        switch preparation {
+        case .unmanaged, .unchanged:
+            return
+        case .created(let publishedData):
+            if let legacyFileURL,
+               (try? Data(contentsOf: legacyFileURL)) == publishedData {
+                try FileManager.default.removeItem(at: legacyFileURL)
+            }
+        case .replaced(let claimURL, let publishedData):
+            if let legacyFileURL,
+               (try? Data(contentsOf: legacyFileURL)) == publishedData {
+                try FileManager.default.removeItem(at: legacyFileURL)
+            }
+            try restoreClaimedLegacyPayloadWithoutLock(claimURL)
+        }
+    }
+
+    private func finishLegacyFilePreparation(
+        _ preparation: LegacyFilePreparation
+    ) throws {
+        guard case .replaced(let claimURL, _) = preparation else {
+            return
+        }
+        try FileManager.default.removeItem(at: claimURL)
+    }
+
+    private static func legacyTombstoneData(canonicalExpected: Bool) -> Data {
         Data(
             """
             {
               "canonicalFile" : "\(canonicalFilename)",
+              "canonicalExpected" : \(canonicalExpected),
               "profiles" : [],
               "schemaVersion" : "\(legacyTombstoneSchemaVersion)"
             }
@@ -612,14 +1057,28 @@ public struct FileProviderProfileStore: ProviderProfileStore {
         createDirectory: Bool,
         _ body: () throws -> T
     ) throws -> T {
-        let directory = lockFileURL.deletingLastPathComponent()
+        try withLock(
+            at: lockFileURL,
+            operation: operation,
+            createDirectory: createDirectory,
+            body
+        )
+    }
+
+    private func withLock<T>(
+        at lockURL: URL,
+        operation: Int32,
+        createDirectory: Bool,
+        _ body: () throws -> T
+    ) throws -> T {
+        let directory = lockURL.deletingLastPathComponent()
         if createDirectory {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
 
-        let descriptor = open(lockFileURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else {
-            throw ProviderProfileStoreError.lockFailed(path: lockFileURL.path, code: errno)
+            throw ProviderProfileStoreError.lockFailed(path: lockURL.path, code: errno)
         }
         defer {
             _ = flock(descriptor, LOCK_UN)
@@ -628,7 +1087,7 @@ public struct FileProviderProfileStore: ProviderProfileStore {
 
         while flock(descriptor, operation) != 0 {
             guard errno == EINTR else {
-                throw ProviderProfileStoreError.lockFailed(path: lockFileURL.path, code: errno)
+                throw ProviderProfileStoreError.lockFailed(path: lockURL.path, code: errno)
             }
         }
         return try body()

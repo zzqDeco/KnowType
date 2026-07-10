@@ -164,6 +164,16 @@ assert_not_contains "$install_script_contents" 'open -g "$TARGET_PATH"' "install
 assert_contains "$install_script_contents" '--version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION"' "install script"
 assert_contains "$install_script_contents" 'knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0' "install script"
 assert_contains "$install_script_contents" 'knowtype_replace_local_preferencepane_bundle_atomically' "install script"
+assert_contains "$install_script_contents" 'stop_provider_profile_writer_hosts' "install script"
+assert_contains "$install_script_contents" '"$executable" --knowtype-migrate-provider-profiles' "install script"
+assert_contains "$install_script_contents" '"$executable" --knowtype-rollback-provider-profile-migration' "install script"
+assert_contains "$install_script_contents" '"$executable" --knowtype-downgrade-provider-profiles' "install script"
+assert_contains "$install_script_contents" 'provider_storage_generation_for_bundle' "install script"
+assert_not_contains "$install_script_contents" 'restore_provider_storage_snapshot' "install script"
+assert_contains "$install_script_contents" 'rollback_provider_storage_after_failed_install' "install script"
+assert_contains "$install_script_contents" 'migrate_provider_profiles
+
+launchservices_cleanup_output="$(knowtype_unregister_launchservices_records_except' "install script"
 
 assert_contains "$rollback_script_contents" "purge_args=(" "rollback script"
 assert_contains "$rollback_script_contents" "bootstrap_args=(" "rollback script"
@@ -181,6 +191,9 @@ assert_not_contains "$rollback_script_contents" 'open -g "$target_path"' "rollba
 assert_contains "$rollback_script_contents" "--allow-unverified-backup" "rollback script"
 assert_contains "$rollback_script_contents" 'knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP"' "rollback script"
 assert_contains "$rollback_script_contents" 'knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0' "rollback script"
+assert_contains "$rollback_script_contents" '--knowtype-downgrade-provider-profiles' "rollback script"
+assert_contains "$rollback_script_contents" 'prepare_provider_storage_for_restored_app' "rollback script"
+assert_contains "$rollback_script_contents" 'provider_storage_generation_for_bundle' "rollback script"
 assert_not_contains "$rollback_script_contents" 'rm -rf -- "$prefpane_path"' "rollback script"
 
 assert_contains "$uninstall_script_contents" 'knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"' "uninstall script"
@@ -330,6 +343,9 @@ assert_equals "$smoke_short_version" \
 assert_equals "$smoke_build_version" \
   "$(plist_read ":CFBundleVersion" "$bundle_path/Contents/Info.plist")" \
   "input-method build version override"
+assert_equals "2" \
+  "$(plist_read ":KnowTypeProviderProfileStorageGeneration" "$bundle_path/Contents/Info.plist")" \
+  "provider profile storage generation"
 
 prefpane_path=""
 if (( WITH_PREFPANE == 1 )); then
@@ -360,6 +376,47 @@ if (( WITH_PREFPANE == 1 )); then
   cp -R "$prefpane_path" "$fake_prefpane_dir/KnowType.prefPane"
 fi
 
+migration_support_dir="$install_state_tmp/provider-migration"
+mkdir -p "$migration_support_dir"
+legacy_provider_fixture='{"schemaVersion":1,"profiles":[]}'
+printf '%s\n' "$legacy_provider_fixture" >"$migration_support_dir/providers.json"
+migration_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-migrate-provider-profiles
+})"
+assert_contains "$migration_output" "provider.migration.status=migrated" "provider migration CLI output"
+migration_revision="$(printf '%s\n' "$migration_output" | awk -F= '/^provider\.migration\.revision=/{print $2; exit}')"
+[[ "$migration_revision" =~ ^[0-9]+$ ]] || die "provider migration CLI did not report a revision"
+assert_file "$migration_support_dir/providers.v2.json"
+assert_file "$migration_support_dir/providers.legacy.json"
+rollback_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rollback-provider-profile-migration "$migration_revision"
+})"
+assert_contains "$rollback_output" "provider.migration.rollback=ok" "provider migration rollback CLI output"
+[[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider migration rollback left canonical metadata"
+assert_equals "$legacy_provider_fixture" "$(cat "$migration_support_dir/providers.json")" "provider migration rollback legacy metadata"
+second_migration_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-migrate-provider-profiles
+})"
+assert_contains "$second_migration_output" "provider.migration.status=migrated" "second provider migration CLI output"
+downgrade_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-downgrade-provider-profiles
+})"
+assert_contains "$downgrade_output" "provider.storage.downgrade.status=downgraded" "provider downgrade CLI output"
+[[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider downgrade left canonical metadata"
+"$KNOWTYPE_PYTHON3" - "$migration_support_dir/providers.json" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if payload.get("schemaVersion") != 1 or "revision" in payload:
+    raise SystemExit("provider downgrade did not produce a pre-v2-compatible payload")
+PY
+
 install_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
@@ -370,6 +427,7 @@ assert_contains "$install_dry_run_output" "Source mode: bundle" "install dry run
 assert_contains "$install_dry_run_output" "Install state: $fake_support_dir/install-state.json" "install dry run output"
 assert_contains "$install_dry_run_output" "Backup root: $fake_support_dir/Backups" "install dry run output"
 assert_contains "$install_dry_run_output" "Would create install backup" "install dry run output"
+assert_contains "$install_dry_run_output" "migrate provider profiles to providers.v2.json" "install dry run output"
 
 release_zip_path="$install_state_tmp/KnowType-test-release.zip"
 release_zip_checksum_path="$install_state_tmp/KnowType-test-release.zip.sha256"
@@ -560,6 +618,7 @@ rollback_dry_run_output="$(
 assert_contains "$rollback_dry_run_output" "KnowType rollback dry run" "rollback dry run output"
 assert_contains "$rollback_dry_run_output" "$backup_id" "rollback dry run output"
 assert_contains "$rollback_dry_run_output" "Backup integrity: verified-schema-2" "rollback dry run output"
+assert_contains "$rollback_dry_run_output" "supports provider storage generation 2" "rollback dry run output"
 rollback_latest_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \

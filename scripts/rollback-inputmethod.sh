@@ -17,8 +17,10 @@ usage() {
 Usage: scripts/rollback-inputmethod.sh [--list] [--latest | --to BACKUP_ID] [--dry-run] [--allow-unverified-backup]
 
 Restores a previously backed up KnowType.app and optional KnowType.prefPane.
-Rollback only swaps install artifacts; it does not modify Rime userdb, provider
-profiles, Keychain secrets, ENV.md, CORRECTION.md, or LEXICAL_PROFILE.md.
+Rollback preserves user data. Before publishing a pre-v2 app, it converts the
+current provider profile metadata to the legacy numeric schema without changing
+profiles or Keychain secrets. It does not modify Rime userdb, ENV.md,
+CORRECTION.md, LEXICAL_PROFILE.md, or lexicons.
 
 Options:
   --list          List available backups.
@@ -76,10 +78,13 @@ prefpane_path="$(knowtype_preferencepane_target_path)"
 target_dir="$(knowtype_inputmethod_target_dir)"
 prefpane_dir="$(knowtype_preferencepane_target_dir)"
 restore_app_staging_dir=""
+current_app_staging_dir=""
 restore_prefpane_staging_dir=""
+provider_storage_downgraded=0
 
 cleanup_restore_staging() {
   [[ -n "$restore_app_staging_dir" && -d "$restore_app_staging_dir" ]] && rm -rf "$restore_app_staging_dir"
+  [[ -n "$current_app_staging_dir" && -d "$current_app_staging_dir" ]] && rm -rf "$current_app_staging_dir"
   [[ -n "$restore_prefpane_staging_dir" && -d "$restore_prefpane_staging_dir" ]] && rm -rf "$restore_prefpane_staging_dir"
   return 0
 }
@@ -104,6 +109,122 @@ knowtype_input_method_host_is_running() {
         ;;
     esac
   done < <(ps -axo command= 2>/dev/null)
+  return 1
+}
+
+provider_storage_generation_for_bundle() {
+  local bundle_path="$1"
+  knowtype_plist_value \
+    "KnowTypeProviderProfileStorageGeneration" \
+    "$bundle_path/Contents/Info.plist"
+}
+
+knowtype_settings_host_pids() {
+  local pid command
+  while read -r pid command; do
+    [[ -n "${pid:-}" && -n "${command:-}" ]] || continue
+    case "$command" in
+      KnowTypeSettingsApp|KnowTypeSettingsApp\ *|*/KnowTypeSettingsApp|*/KnowTypeSettingsApp\ *|KnowTypeSettings|KnowTypeSettings\ *|*/KnowTypeSettings|*/KnowTypeSettings\ *)
+        printf '%s\n' "$pid"
+        ;;
+    esac
+  done < <(ps -axo pid=,command= 2>/dev/null)
+}
+
+stop_provider_profile_writer_hosts() {
+  local pids=""
+  pids="$(knowtype_settings_host_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  if [[ -n "$pids" ]]; then
+    echo "Requesting KnowType Settings shutdown before provider storage rollback: $pids"
+    # shellcheck disable=SC2086
+    kill -TERM $pids 2>/dev/null || true
+  fi
+  knowtype_quit_system_settings_if_running 0
+
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if [[ -z "$(knowtype_settings_host_pids)" ]] && ! knowtype_system_settings_is_running; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  echo "error: close KnowType Settings and System Settings before restoring an older input method" >&2
+  return 1
+}
+
+legacy_provider_storage_is_compatible() {
+  local legacy_path
+  legacy_path="$(knowtype_app_support_dir)/providers.json"
+  if [[ ! -e "$legacy_path" ]]; then
+    return 0
+  fi
+  "$KNOWTYPE_PYTHON3" - "$legacy_path" <<'PY'
+import json
+import pathlib
+import sys
+
+try:
+    payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(0 if isinstance(payload.get("schemaVersion"), int) else 1)
+PY
+}
+
+prepare_provider_storage_for_restored_app() {
+  local restored_generation current_generation current_executable output status
+  restored_generation="$(provider_storage_generation_for_bundle "$backup_dir/KnowType.app" || true)"
+  if [[ "$restored_generation" =~ ^[0-9]+$ ]] && (( restored_generation >= 2 )); then
+    return 0
+  fi
+
+  stop_provider_profile_writer_hosts
+  current_generation="$(provider_storage_generation_for_bundle "$target_path" || true)"
+  if [[ "$current_generation" =~ ^[0-9]+$ ]] && (( current_generation >= 2 )); then
+    current_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
+    if [[ ! -x "$current_executable" ]]; then
+      echo "error: current generation-2 executable is unavailable for provider storage downgrade" >&2
+      return 1
+    fi
+    output=""
+    if ! output="$("$current_executable" --knowtype-downgrade-provider-profiles 2>&1)"; then
+      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+      echo "error: provider storage downgrade failed; refusing to publish an incompatible pre-v2 app" >&2
+      return 1
+    fi
+    [[ -n "$output" ]] && printf '%s\n' "$output"
+    status="$(printf '%s\n' "$output" | awk -F= '/^provider\.storage\.downgrade\.status=/{print $2; exit}')"
+    case "$status" in
+      downgraded)
+        provider_storage_downgraded=1
+        ;;
+      already_legacy|unmanaged)
+        ;;
+      *)
+        echo "error: provider storage downgrade returned an unknown status" >&2
+        return 1
+        ;;
+    esac
+    return 0
+  fi
+
+  if ! legacy_provider_storage_is_compatible; then
+    echo "error: current app cannot downgrade the provider tombstone for this pre-v2 backup" >&2
+    echo "Reinstall the current KnowType build, then retry rollback." >&2
+    return 1
+  fi
+}
+
+reapply_provider_migration_after_abandoned_rollback() {
+  local executable="$1"
+  if (( provider_storage_downgraded != 1 )); then
+    return 0
+  fi
+  if [[ -x "$executable" ]] && "$executable" --knowtype-migrate-provider-profiles >/dev/null 2>&1; then
+    provider_storage_downgraded=0
+    return 0
+  fi
+  echo "warning: could not reapply provider migration after app rollback was abandoned; rerun the installer" >&2
   return 1
 }
 
@@ -212,6 +333,12 @@ if (( DRY_RUN == 1 )); then
   fi
   echo "Restored active input mode: $restored_active_mode_id"
   echo "Target app: $target_path"
+  restored_provider_generation="$(provider_storage_generation_for_bundle "$backup_dir/KnowType.app" || true)"
+  if [[ ! "$restored_provider_generation" =~ ^[0-9]+$ ]] || (( restored_provider_generation < 2 )); then
+    echo "[dry-run] Would quiesce Settings writers and convert current provider metadata to the legacy numeric schema before publishing this pre-v2 app."
+  else
+    echo "[dry-run] Restored app supports provider storage generation $restored_provider_generation; canonical metadata would remain in place."
+  fi
   if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
     echo "Target PreferencePane: $prefpane_path"
   else
@@ -271,12 +398,36 @@ if [[ -n "$restore_prefpane_staging_dir" ]]; then
   fi
 fi
 
+prepare_provider_storage_for_restored_app
+
 if [[ -e "$target_path" || -L "$target_path" ]]; then
-  knowtype_remove_local_inputmethod_bundle_if_safe "$target_path" 0
+  if ! knowtype_is_safe_local_inputmethod_bundle_path "$target_path"; then
+    reapply_provider_migration_after_abandoned_rollback \
+      "$target_path/Contents/MacOS/KnowTypeInputMethodApp" || true
+    echo "error: refusing to replace a foreign or unsafe current input-method bundle" >&2
+    exit 1
+  fi
+  current_app_staging_dir="$(mktemp -d "$target_dir/.KnowType.rollback.current.XXXXXX")"
+  if ! mv "$target_path" "$current_app_staging_dir/KnowType.app"; then
+    reapply_provider_migration_after_abandoned_rollback \
+      "$target_path/Contents/MacOS/KnowTypeInputMethodApp" || true
+    echo "error: could not stage the current KnowType app for rollback" >&2
+    exit 1
+  fi
 fi
-mv "$restore_app_staging_dir/KnowType.app" "$target_path"
+if ! mv "$restore_app_staging_dir/KnowType.app" "$target_path"; then
+  if [[ -d "$current_app_staging_dir/KnowType.app" && ! -e "$target_path" ]]; then
+    mv "$current_app_staging_dir/KnowType.app" "$target_path" 2>/dev/null || true
+  fi
+  reapply_provider_migration_after_abandoned_rollback \
+    "$target_path/Contents/MacOS/KnowTypeInputMethodApp" || true
+  echo "error: could not publish the staged KnowType backup" >&2
+  exit 1
+fi
 rm -rf "$restore_app_staging_dir"
 restore_app_staging_dir=""
+rm -rf "$current_app_staging_dir"
+current_app_staging_dir=""
 
 if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
   knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0

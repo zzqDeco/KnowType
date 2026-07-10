@@ -142,7 +142,7 @@
 "settings.provider.lastError" = "Last Error";
 "settings.provider.error.missingAPIKey" = "API key is required for this provider.";
 "settings.provider.error.invalidCredentialReference" = "Could not allocate a new immutable credential reference.";
-"settings.provider.error.rollbackFailed" = "Failed to update provider secret: %@. Also failed to restore providers.json: %@. Provider metadata may be staged on disk.";
+"settings.provider.error.rollbackFailed" = "Failed to update provider secret: %@. Also failed to restore provider metadata: %@. Provider metadata may be staged on disk.";
 "settings.provider.error.secretCompensationFailed" = "Saving provider metadata failed: %@. Removing the unreferenced new credential also failed: %@.";
 "settings.provider.error.credentialCleanupFailed" = "The provider configuration was saved, but an old unreferenced credential could not be removed: %@.";
 "settings.provider.error.staleBaseline" = "Provider settings changed in another KnowType settings window. Your draft was kept and saved profiles were refreshed. Review the latest settings and try again.";
@@ -214,6 +214,13 @@
 "settings.diagnostics.ai.cloud" = "Cloud Continuation";
 "settings.diagnostics.ai.localFallback" = "Local fallback";
 "settings.diagnostics.ai.provider" = "Default provider";
+"settings.diagnostics.ai.storage" = "Configuration Storage";
+"settings.diagnostics.ai.storage.canonical" = "Current";
+"settings.diagnostics.ai.storage.legacyDiverged" = "Legacy writer detected";
+"settings.diagnostics.ai.storage.legacyUnmigrated" = "Migration required";
+"settings.diagnostics.ai.storage.canonicalMissing" = "Missing after migration";
+"settings.diagnostics.ai.storage.initialized" = "Initialized";
+"settings.diagnostics.ai.storage.missing" = "Not created";
 "settings.diagnostics.userData.lexicalJSON" = "lexical-profile.json";
 "settings.diagnostics.userData.env" = "ENV.md";
 "settings.diagnostics.userData.correction" = "CORRECTION.md";

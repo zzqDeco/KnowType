@@ -143,14 +143,17 @@ ProviderProfilesFile {
 }
 ```
 
-Default file-backed profile storage writes `providers.json` under the user's
-Application Support `KnowType` directory only on explicit save. Schema-v1 files
-decode at revision `0` and upgrade on first save; unknown future schemas fail
-closed. Production mutations hold a sidecar `flock`, compare the ViewModel's
+Default file-backed profile storage writes canonical `providers.v2.json` under
+the user's Application Support `KnowType` directory only on explicit save.
+During upgrade, numeric legacy `providers.json` is copied exactly to
+`providers.legacy.json`, available credentials are rekeyed, and the legacy path
+becomes an incompatible tombstone. Schema-v1 files decode at revision `0`;
+unknown future schemas fail closed. Production mutations hold a sidecar `flock`, compare the ViewModel's
 expected revision, increment once, and atomically replace the file. Successful
 commits emit a privacy-safe cross-process revision signal. Runtime cold-start
-paths use the no-create loader, so a missing provider profile does not create
-`Application Support/KnowType` merely because the IMK host was launched.
+paths use the no-create loader, so a genuinely absent provider profile does not
+create `Application Support/KnowType` merely because the IMK host was launched.
+Unmigrated legacy or missing post-migration canonical state fails closed.
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore`
 stores API keys under the `KnowType` service. New key writes use immutable
@@ -160,7 +163,10 @@ successful commits clean old unreferenced secrets afterward. Existing legacy
 references remain readable until the next secret change. Tests and non-UI code
 can use in-memory or read-only dictionary stores.
 
-When `providers.json` is missing or empty, settings and runtime loading share seeded defaults. The default profile is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model` blank for discovery, and does not embed an API key.
+When canonical `providers.v2.json` is missing in a genuinely new store or is
+empty, settings and runtime loading share seeded defaults. The default profile
+is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model`
+blank for discovery, and does not embed an API key.
 
 Settings validation rules:
 

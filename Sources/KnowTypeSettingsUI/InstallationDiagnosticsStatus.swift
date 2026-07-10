@@ -32,7 +32,11 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
             .appendingPathComponent("Library/PreferencePanes/KnowType.prefPane", isDirectory: true)
         let installState = Self.loadInstallState(from: supportURL.appendingPathComponent("install-state.json"))
         let bundleInfo = Self.bundleInfo(at: bundleURL)
-        let providerSummary = Self.defaultProviderSummary(from: supportURL.appendingPathComponent("providers.json"))
+        let providerStorage = Self.providerStorageSummary(
+            supportURL: supportURL,
+            fileManager: fileManager,
+            preferredLanguages: preferredLanguages
+        )
         let backupSummary = Self.backupSummary(
             in: supportURL.appendingPathComponent("Backups", isDirectory: true),
             fileManager: fileManager
@@ -59,7 +63,8 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
         aiRows = [
             Self.row("settings.diagnostics.ai.cloud", runtimePreferences.cloudContinuationEnabled ? Self.enabled(preferredLanguages) : Self.disabled(preferredLanguages), preferredLanguages),
             Self.row("settings.diagnostics.ai.localFallback", runtimePreferences.localContinuationEnabledWhenNoProvider ? Self.enabled(preferredLanguages) : Self.disabled(preferredLanguages), preferredLanguages),
-            Self.row("settings.diagnostics.ai.provider", providerSummary ?? Self.missing(preferredLanguages), preferredLanguages)
+            Self.row("settings.diagnostics.ai.provider", providerStorage.defaultProvider ?? Self.missing(preferredLanguages), preferredLanguages),
+            Self.row("settings.diagnostics.ai.storage", providerStorage.state, preferredLanguages)
         ]
 
         userDataRows = [
@@ -379,6 +384,54 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
         return "\(profile.displayName) · \(profile.kind.rawValue) · \(profile.model) · \(ProviderEndpointURLPolicy.privacySafeSummary(profile.baseURL))"
     }
 
+    private static func providerStorageSummary(
+        supportURL: URL,
+        fileManager: FileManager,
+        preferredLanguages: [String]
+    ) -> ProviderStorageSummary {
+        let canonicalURL = supportURL.appendingPathComponent(FileProviderProfileStore.canonicalFilename)
+        let legacyURL = supportURL.appendingPathComponent(FileProviderProfileStore.legacyFilename)
+        let snapshotURL = supportURL.appendingPathComponent(FileProviderProfileStore.legacySnapshotFilename)
+        let legacyData = try? Data(contentsOf: legacyURL)
+        let legacyObject = legacyData.flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        }
+        let legacyIsTombstone = legacyObject?["schemaVersion"] as? String
+            == FileProviderProfileStore.legacyTombstoneSchemaVersion
+            && legacyObject?["canonicalFile"] as? String
+            == FileProviderProfileStore.canonicalFilename
+        let legacyExpectsCanonical = (legacyObject?["canonicalExpected"] as? Bool)
+            ?? fileManager.fileExists(atPath: snapshotURL.path)
+        let legacyExists = fileManager.fileExists(atPath: legacyURL.path)
+        let legacyIsConfiguration = legacyExists && !legacyIsTombstone
+
+        let providerURL: URL
+        let stateKey: String
+        if fileManager.fileExists(atPath: canonicalURL.path) {
+            providerURL = canonicalURL
+            stateKey = legacyIsConfiguration
+                ? "settings.diagnostics.ai.storage.legacyDiverged"
+                : "settings.diagnostics.ai.storage.canonical"
+        } else if legacyIsConfiguration {
+            providerURL = legacyURL
+            stateKey = "settings.diagnostics.ai.storage.legacyUnmigrated"
+        } else if legacyIsTombstone, legacyExpectsCanonical {
+            providerURL = canonicalURL
+            stateKey = "settings.diagnostics.ai.storage.canonicalMissing"
+        } else if legacyIsTombstone {
+            providerURL = canonicalURL
+            stateKey = "settings.diagnostics.ai.storage.initialized"
+        } else {
+            providerURL = canonicalURL
+            stateKey = "settings.diagnostics.ai.storage.missing"
+        }
+
+        return ProviderStorageSummary(
+            defaultProvider: Self.defaultProviderSummary(from: providerURL),
+            state: SettingsLocalization.string(stateKey, preferredLanguages: preferredLanguages)
+        )
+    }
+
     private static func backupSummary(in rootURL: URL, fileManager: FileManager) -> BackupSummary {
         guard let contents = try? fileManager.contentsOfDirectory(
             at: rootURL,
@@ -428,6 +481,11 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
         }
         return manifest.backupID == url.lastPathComponent
     }
+}
+
+private struct ProviderStorageSummary {
+    var defaultProvider: String?
+    var state: String
 }
 
 private struct InstallState: Decodable, Equatable, Sendable {
