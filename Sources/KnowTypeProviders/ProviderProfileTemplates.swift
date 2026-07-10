@@ -4,6 +4,7 @@ public enum ProviderProfileTemplates {
     private struct RetiredModelMigration {
         var kind: ProviderKind
         var officialHost: String
+        var officialPaths: Set<String>
         var retiredModel: String
         var replacementModel: String
     }
@@ -12,12 +13,14 @@ public enum ProviderProfileTemplates {
         RetiredModelMigration(
             kind: .anthropicMessages,
             officialHost: "api.anthropic.com",
+            officialPaths: ["", "/", "/v1", "/v1/"],
             retiredModel: "claude-3-5-haiku-latest",
             replacementModel: "claude-haiku-4-5-20251001"
         ),
         RetiredModelMigration(
             kind: .geminiNative,
             officialHost: "generativelanguage.googleapis.com",
+            officialPaths: ["", "/"],
             retiredModel: "gemini-1.5-flash",
             replacementModel: "gemini-3.5-flash"
         )
@@ -120,7 +123,11 @@ public enum ProviderProfileTemplates {
             guard let migration = retiredModelMigrations.first(where: { migration in
                 profile.kind == migration.kind
                     && profile.model == migration.retiredModel
-                    && isOfficialEndpoint(profile.baseURL, host: migration.officialHost)
+                    && isOfficialEndpoint(
+                        profile.baseURL,
+                        host: migration.officialHost,
+                        paths: migration.officialPaths
+                    )
             }) else {
                 return profile
             }
@@ -131,7 +138,11 @@ public enum ProviderProfileTemplates {
         }
     }
 
-    private static func isOfficialEndpoint(_ url: URL, host: String) -> Bool {
+    private static func isOfficialEndpoint(
+        _ url: URL,
+        host: String,
+        paths: Set<String>
+    ) -> Bool {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               components.scheme?.lowercased() == "https",
               components.host?.lowercased() == host,
@@ -140,7 +151,7 @@ public enum ProviderProfileTemplates {
               components.password == nil,
               components.percentEncodedQuery == nil,
               components.fragment == nil,
-              components.path.isEmpty || components.path == "/" else {
+              paths.contains(components.percentEncodedPath) else {
             return false
         }
         return true

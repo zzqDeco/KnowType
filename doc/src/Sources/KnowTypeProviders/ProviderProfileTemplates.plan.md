@@ -20,8 +20,10 @@ the input-method runtime.
 - New Anthropic and Gemini templates use `claude-haiku-4-5-20251001` and
   `gemini-3.5-flash`.
 - Exact retired template IDs migrate through an expected-revision transaction
-  only for the matching provider kind and canonical official HTTPS root
-  endpoint. Proxy hosts, paths, queries, and non-exact IDs are never rewritten.
+  only for the matching provider kind and official HTTPS endpoint. Anthropic
+  accepts root and `/v1` base paths; Gemini remains root-only. Proxy hosts,
+  custom paths, queries, userinfo, fragments, nonstandard ports, and non-exact
+  IDs are never rewritten.
 - A revision conflict reloads current profiles once before retrying so unrelated
   concurrent edits are preserved.
 

@@ -180,9 +180,10 @@ blank for discovery, and does not embed an API key.
 New Anthropic and Gemini templates use `claude-haiku-4-5-20251001` and
 `gemini-3.5-flash`. On profile load, the exact retired IDs
 `claude-3-5-haiku-latest` and `gemini-1.5-flash` migrate once through the
-observed provider-file revision only when the provider kind and canonical
-official HTTPS root endpoint also match. Custom proxy paths, hosts, queries,
-and non-exact model IDs are preserved.
+observed provider-file revision only when the provider kind and official HTTPS
+endpoint also match. Anthropic accepts its root and `/v1` base paths; Gemini
+remains root-only. Custom proxy paths, hosts, queries, userinfo, fragments,
+nonstandard ports, and non-exact model IDs are preserved.
 
 Settings validation rules:
 

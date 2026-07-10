@@ -29,8 +29,10 @@ Status: Active
 
 - `ProviderProfileTemplates` owns both current template IDs and the narrow
   revision-aware migration. It requires the matching provider kind, exact
-  retired model string, HTTPS official host, root path, and no query before
-  replacing a saved model. Runtime and Settings loading invoke the same helper.
+  retired model string, HTTPS official host, provider-specific official path,
+  and no query before replacing a saved model. Anthropic accepts root and
+  `/v1`; Gemini remains root-only. Runtime and Settings loading invoke the same
+  helper.
 - `OpenAIResponsesProvider` checks response completion state first, skips
   non-message output such as reasoning, walks all message content, rejects any
   refusal, concatenates all `output_text` items, then performs one strict decode.

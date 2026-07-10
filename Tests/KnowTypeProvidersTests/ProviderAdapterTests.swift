@@ -854,12 +854,12 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(requests.first?.url?.path, "/v1/models")
     }
 
-    func testAnthropicMessagesUsesNativeHeaders() async throws {
+    func testAnthropicMessagesUsesNativeHeadersAndDeduplicatesV1BasePath() async throws {
         let client = MockHTTPClient(json: #"{"content":[{"type":"text","text":"{\"candidates\":[{\"text\":\"could be simplified further\"}]}"}]}"#)
         let provider = AnthropicMessagesProvider(
             configuration: ProviderConfiguration(
                 kind: .anthropicMessages,
-                baseURL: URL(string: "https://api.anthropic.example")!,
+                baseURL: URL(string: "https://api.anthropic.com/v1")!,
                 apiKey: "anthropic-key",
                 model: "claude"
             ),
@@ -869,7 +869,7 @@ final class ProviderAdapterTests: XCTestCase {
         let response = try await provider.complete(llmRequest)
         let request = await client.capturedRequest()
 
-        XCTAssertEqual(request?.url?.absoluteString, "https://api.anthropic.example/v1/messages")
+        XCTAssertEqual(request?.url?.absoluteString, "https://api.anthropic.com/v1/messages")
         XCTAssertEqual(request?.value(forHTTPHeaderField: "x-api-key"), "anthropic-key")
         XCTAssertEqual(response.candidates.first?.text, "could be simplified further")
     }

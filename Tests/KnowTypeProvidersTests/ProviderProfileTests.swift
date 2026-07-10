@@ -221,6 +221,57 @@ final class ProviderProfileTests: XCTestCase {
         ])
     }
 
+    func testAnthropicRetiredModelMigrationAcceptsOnlyOfficialRootAndV1Paths() {
+        let retiredModel = "claude-3-5-haiku-latest"
+        let replacementModel = "claude-haiku-4-5-20251001"
+        let officialURLs = [
+            "https://api.anthropic.com",
+            "https://api.anthropic.com/",
+            "https://api.anthropic.com/v1",
+            "https://api.anthropic.com/v1/"
+        ]
+        let excludedURLs = [
+            "https://proxy.example.com/v1",
+            "https://api.anthropic.com/proxy",
+            "https://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com/v1beta",
+            "https://api.anthropic.com/v1?tenant=custom",
+            "https://user@api.anthropic.com/v1",
+            "https://api.anthropic.com/v1#custom",
+            "https://api.anthropic.com:8443/v1"
+        ]
+
+        for urlString in officialURLs {
+            let profile = ProviderProfile(
+                displayName: "Anthropic",
+                kind: .anthropicMessages,
+                baseURL: URL(string: urlString)!,
+                model: retiredModel
+            )
+
+            XCTAssertEqual(
+                ProviderProfileTemplates.migratingRetiredModels(in: [profile]).first?.model,
+                replacementModel,
+                urlString
+            )
+        }
+
+        for urlString in excludedURLs {
+            let profile = ProviderProfile(
+                displayName: "Anthropic",
+                kind: .anthropicMessages,
+                baseURL: URL(string: urlString)!,
+                model: retiredModel
+            )
+
+            XCTAssertEqual(
+                ProviderProfileTemplates.migratingRetiredModels(in: [profile]).first?.model,
+                retiredModel,
+                urlString
+            )
+        }
+    }
+
     func testRetiredModelMigrationRetriesAgainstLatestRevision() throws {
         let store = RevisionConflictOnceProfileStore(file: ProviderProfilesFile(
             revision: 7,
