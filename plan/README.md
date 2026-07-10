@@ -98,6 +98,7 @@ when converting a shipped plan into a short record.
 | [ai-timeout-diagnostics.plan.md](ai-timeout-diagnostics.plan.md) | AI recommendation 10-second runtime timeout and privacy-preserving substate diagnostics | Active |
 | [ai-structured-output-contract.plan.md](ai-structured-output-contract.plan.md) | Provider-level structured output contract and diagnosable AI no-recommendation reasons | Active |
 | [ai-continuation-prompt-reliability.plan.md](ai-continuation-prompt-reliability.plan.md) | Task-specific suffix-generation prompt and ENV marker repair for reliable AI continuation | Active |
+| [prefix-repair-punctuation.plan.md](prefix-repair-punctuation.plan.md) | Preserve suffix punctuation while repairing repeated locked prefixes | Active |
 | [ai-candidate-hints-lock-prefix.plan.md](ai-candidate-hints-lock-prefix.plan.md) | Keep unselected Rime candidates as AI hints instead of locked prefixes | Active |
 | [ai-remove-candidate-hints-bias.plan.md](ai-remove-candidate-hints-bias.plan.md) | Remove current-page Rime candidate hints from real-time AI continuation context | Active |
 | [ai-trigger-stability-no-hints.plan.md](ai-trigger-stability-no-hints.plan.md) | Stabilize three-character raw-input AI triggers without reintroducing candidate hints | Active |

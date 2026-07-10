@@ -358,8 +358,125 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             return XCTFail("expected ready AI recommendation")
         }
         XCTAssertEqual(candidate.prefixText, "  我觉得这个方案 ")
-        XCTAssertEqual(candidate.continuationText, "还可以再细化一下")
-        XCTAssertEqual(candidate.displayText, "  我觉得这个方案 还可以再细化一下")
+        XCTAssertEqual(candidate.continuationText, "还可以再细化一下。")
+        XCTAssertEqual(candidate.displayText, "  我觉得这个方案 还可以再细化一下。")
+    }
+
+    func testRecommendationRepairPreservesPunctuationAndFinalDisplayText() async {
+        let cases: [(
+            name: String,
+            prefix: String,
+            providerText: String,
+            continuation: String,
+            displayText: String
+        )] = [
+            ("English comma", "I think", "I think, therefore I am", ", therefore I am", "I think, therefore I am"),
+            ("Chinese comma", "我觉得这个方案", "我觉得这个方案，还有空间", "，还有空间", "我觉得这个方案，还有空间"),
+            ("period", "This works", "This works. Next step.", ". Next step.", "This works. Next step."),
+            ("semicolon", "The result", "The result; however", "; however", "The result; however"),
+            ("colon", "结论", "结论：可以推进", "：可以推进", "结论：可以推进"),
+            ("exact duplicate", "I think,", "I think,, therefore I am", " therefore I am", "I think, therefore I am"),
+            ("suffix only", "I think", ", therefore I am", ", therefore I am", "I think, therefore I am")
+        ]
+
+        for testCase in cases {
+            let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+                LLMCandidate(text: testCase.providerText, confidence: 0.88)
+            ]))
+            let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+            let request = AIRecommendationRequest(
+                rawInput: "continuation",
+                lockedPrefix: testCase.prefix,
+                appBundleID: "com.apple.TextEdit",
+                compositionID: 1
+            )
+
+            let state = await runtime.recommendation(for: request)
+
+            guard case .ready(let candidate) = state else {
+                XCTFail("expected ready AI recommendation: \(testCase.name)")
+                continue
+            }
+            XCTAssertEqual(candidate.prefixText, testCase.prefix, testCase.name)
+            XCTAssertEqual(candidate.continuationText, testCase.continuation, testCase.name)
+            XCTAssertEqual(candidate.displayText, testCase.displayText, testCase.name)
+        }
+    }
+
+    func testRecommendationRepairCanReturnPunctuationOnlySuffix() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "我觉得这个方案，", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "continuation",
+            lockedPrefix: "我觉得这个方案",
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected punctuation-only ready recommendation")
+        }
+        XCTAssertEqual(candidate.continuationText, "，")
+        XCTAssertEqual(candidate.displayText, "我觉得这个方案，")
+    }
+
+    func testRecommendationRejectsRepeatedPrefixWithOnlyVisualSeparators() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "我觉得这个方案 | ｜", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "continuation",
+            lockedPrefix: "我觉得这个方案",
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .sanitizeEmpty && $0.reason == "no_usable_suffix"
+        })
+    }
+
+    func testRecommendationRejectsPunctuationPrefixedRepeatWithOrWithoutProtocolSeparator() async {
+        for providerText in [
+            "| ，我觉得这个方案还有问题",
+            "，我觉得这个方案还有问题"
+        ] {
+            let diagnosticSink = RecordingDiagnosticSink()
+            let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+                LLMCandidate(text: providerText, confidence: 0.88)
+            ]))
+            let runtime = AIRecommendationRuntime(
+                provider: provider,
+                debounceMilliseconds: 0,
+                diagnosticSink: diagnosticSink
+            )
+            let request = AIRecommendationRequest(
+                rawInput: "continuation",
+                lockedPrefix: "我觉得这个方案",
+                appBundleID: "com.apple.TextEdit",
+                compositionID: 1
+            )
+
+            let state = await runtime.recommendation(for: request)
+
+            XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"), providerText)
+            XCTAssertTrue(diagnosticSink.events.contains {
+                $0.stage == .sanitizeEmpty && $0.reason == "still_repeats_prefix"
+            }, providerText)
+        }
     }
 
     func testRecommendationDiagnosticsRecordSuccessAndCacheHit() async {

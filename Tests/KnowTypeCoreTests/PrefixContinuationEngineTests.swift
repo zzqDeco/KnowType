@@ -50,6 +50,116 @@ final class PrefixContinuationEngineTests: XCTestCase {
         XCTAssertEqual(continuations.first?.text, "还有进一步优化空间")
     }
 
+    func testRepeatedPrefixRepairPreservesBoundaryPunctuation() {
+        let cases: [(name: String, prefix: String, response: String, suffix: String)] = [
+            ("English comma", "I think", "I think, therefore I am", ", therefore I am"),
+            ("Chinese comma", "我觉得这个方案", "我觉得这个方案，还有空间", "，还有空间"),
+            ("English period", "This works", "This works. Next step", ". Next step"),
+            ("Chinese period", "结论", "结论。下一步", "。下一步"),
+            ("English semicolon", "The result", "The result; however", "; however"),
+            ("Chinese semicolon", "结论", "结论；仍需验证", "；仍需验证"),
+            ("English colon", "Result", "Result: ready", ": ready"),
+            ("Chinese colon", "结论", "结论：可以推进", "：可以推进")
+        ]
+
+        for testCase in cases {
+            XCTAssertEqual(
+                PrefixContinuationEngine.sanitizeContinuationDetailed(
+                    testCase.response,
+                    lockedPrefix: testCase.prefix
+                ),
+                ContinuationSanitizationResult(
+                    text: testCase.suffix,
+                    reason: .repeatedPrefixRepaired
+                ),
+                testCase.name
+            )
+        }
+    }
+
+    func testRepeatedPrefixRepairRemovesOnlyOneExactDuplicatePunctuation() {
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "I think,, therefore I am",
+                lockedPrefix: "I think,"
+            ),
+            ContinuationSanitizationResult(
+                text: " therefore I am",
+                reason: .repeatedPrefixRepaired
+            )
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "I think,. However",
+                lockedPrefix: "I think,"
+            ),
+            ContinuationSanitizationResult(
+                text: ". However",
+                reason: .repeatedPrefixRepaired
+            )
+        )
+    }
+
+    func testRepeatedPrefixRepairKeepsPunctuationOnlySuffixWhenItIsNotDuplicated() {
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案，",
+                lockedPrefix: "我觉得这个方案"
+            ),
+            ContinuationSanitizationResult(
+                text: "，",
+                reason: .repeatedPrefixRepaired
+            )
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案，，",
+                lockedPrefix: "我觉得这个方案，"
+            ),
+            ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
+        )
+    }
+
+    func testRepeatedPrefixRepairRejectsPureVisualSeparators() {
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案 | ｜ \n",
+                lockedPrefix: "我觉得这个方案"
+            ),
+            ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
+        )
+    }
+
+    func testPunctuationPrefixedRepeatIsRejectedWithOrWithoutProtocolSeparator() {
+        for response in [
+            "| ，我觉得这个方案还有问题",
+            "，我觉得这个方案还有问题"
+        ] {
+            XCTAssertEqual(
+                PrefixContinuationEngine.sanitizeContinuationDetailed(
+                    response,
+                    lockedPrefix: "我觉得这个方案"
+                ),
+                ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix),
+                response
+            )
+        }
+    }
+
+    func testSanitizerKeepsSuffixOnlyOutputUnchanged() {
+        let suffixes = ["还有进一步优化空间。", ", therefore I am"]
+
+        for suffix in suffixes {
+            XCTAssertEqual(
+                PrefixContinuationEngine.sanitizeContinuationDetailed(
+                    suffix,
+                    lockedPrefix: "我觉得这个方案"
+                ),
+                ContinuationSanitizationResult(text: suffix, reason: .accepted)
+            )
+        }
+    }
+
     func testDetailedSanitizerReportsRejectionAndRepairReasons() {
         XCTAssertEqual(
             PrefixContinuationEngine.sanitizeContinuationDetailed(
@@ -77,7 +187,10 @@ final class PrefixContinuationEngineTests: XCTestCase {
             ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix)
         )
         XCTAssertEqual(
-            PrefixContinuationEngine.sanitizeContinuationDetailed("我觉得这个方案，", lockedPrefix: "我觉得这个方案"),
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案 | ｜",
+                lockedPrefix: "我觉得这个方案"
+            ),
             ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
         )
     }
