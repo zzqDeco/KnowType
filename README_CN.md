@@ -128,6 +128,13 @@ raw 输入可用并报告 degraded conversion state，而不是回退到已经�
 Keychain secret、AI 上下文文档、`~/.knowtype` 或本地词库。用户手动选择 KnowType 并开始真实输入后，
 Rime 初始化属于正常使用行为，不属于安装阶段副作用。
 
+新版回滚 manifest 会记录两个安装产物各自的 checksum、bundle ID、版本/build 和签名
+requirement/identity。回滚会在替换前核对全部字段，并执行
+`codesign --verify --deep --strict`。旧 schema-v1 备份默认拒绝恢复；只有在独立确认备份可信后，
+才能显式使用高风险参数 `--allow-unverified-backup`，而且该参数不能绕过新版 manifest
+校验失败。安装、卸载和回滚也只允许删除 canonical、非 symlink 且 bundle ID 为
+`com.knowtype.preferencepane` 的 `KnowType.prefPane`，同名外部 bundle 会被保留并阻断操作。
+
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
 macOS 输入法菜单中选中 KnowType，然后点击 `KnowType 设置...`（显式英文资源路径下为
 `KnowType Settings...`）。它会打开 macOS 原生 sidebar 和 grouped settings 页面；
@@ -167,6 +174,12 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 ```bash
 ./scripts/rollback-inputmethod.sh --list
 ./scripts/rollback-inputmethod.sh --latest
+```
+
+只对已独立确认可信的旧备份，先执行 dry-run 并显式开启兼容覆盖：
+
+```bash
+./scripts/rollback-inputmethod.sh --to BACKUP_ID --dry-run --allow-unverified-backup
 ```
 
 本地 IME 行为仍需要在真实 host app 中打字验证。macOS policy、输入源选择和

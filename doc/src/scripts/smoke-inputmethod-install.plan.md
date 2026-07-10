@@ -21,6 +21,14 @@ Runs CI-safe smoke checks for local input-method scripts and bundle packaging.
   install-state backup manifest creation, rollback list/dry-run, uninstall
   backup preservation, and diagnostics JSON without touching real Text Input
   Source state.
+- Integrity smoke covers schema `2` metadata, checksum tampering, invalid code
+  signatures even when the manifest checksum is refreshed, legacy rejection
+  and explicit override visibility, foreign same-name PreferencePane refusal,
+  staged rollback preflight, failed staged PreferencePane replacement, and
+  shared app/pane short-version and build values.
+- A self-contained packaged-DMG fixture runs the copied installer without the
+  repository `Resources/InputMethod/Info.plist`, preventing source-only version
+  lookup from regressing the mounted-image install command.
 - The default run validates the primary `KnowType.app` install path. Passing
   `--with-prefpane` additionally builds and load-checks the compatibility
   `KnowType.prefPane`; CI and release workflows run that explicit compatibility

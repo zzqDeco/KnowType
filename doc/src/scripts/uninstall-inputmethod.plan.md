@@ -20,6 +20,10 @@ machine.
 - Existing backups are preserved after uninstall. Use `--purge-backups`
   explicitly to delete them; purge mode skips creating a new backup because the
   backup root will be removed. User data is still left in place.
+- Before backup creation, input-source mutation, or removal, the script verifies
+  that a same-name local PreferencePane is the canonical non-symlink
+  `com.knowtype.preferencepane` bundle. Foreign bundles block uninstall and are
+  left unchanged.
 - It removes stale System Settings PreferencePane caches that still reference
   `com.knowtype.preferencepane` or `KnowType.prefPane` and asks System Settings
   to quit if needed, so an already removed compatibility pane does not remain as

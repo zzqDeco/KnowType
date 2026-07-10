@@ -137,14 +137,25 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         )
         try writeJSON(
             [
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "backupID": backup.lastPathComponent,
                 "createdAt": "2026-05-24T00:00:00Z",
                 "sourceVersion": "0.1.0",
                 "sourceBuild": "1",
                 "bundleIdentifier": "com.knowtype.inputmethod.KnowType",
+                "appBundleIdentifier": "com.knowtype.inputmethod.KnowType",
+                "appShortVersion": "0.1.0",
+                "appBuildVersion": "1",
                 "appChecksum": "checksum",
+                "appSigningRequirement": "identifier \"com.knowtype.inputmethod.KnowType\"",
+                "appSigningIdentity": "identifier=com.knowtype.inputmethod.KnowType",
                 "includedPrefPane": true,
+                "prefPaneChecksum": "prefpane-checksum",
+                "prefPaneBundleIdentifier": "com.knowtype.preferencepane",
+                "prefPaneShortVersion": "0.1.0",
+                "prefPaneBuildVersion": "1",
+                "prefPaneSigningRequirement": "identifier \"com.knowtype.preferencepane\"",
+                "prefPaneSigningIdentity": "identifier=com.knowtype.preferencepane",
                 "restoreCommand": "./scripts/rollback-inputmethod.sh --to \(backup.lastPathComponent)"
             ],
             to: backup.appendingPathComponent("manifest.json")

@@ -718,6 +718,69 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(uninstallScript.contains("Removed $bundle_count local KnowType input method bundle(s)."))
     }
 
+    func testInstallerFailsClosedOnUnverifiedBackupsAndForeignPreferencePanes() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let helperSource = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/lib/inputmethod-installation.sh"),
+            encoding: .utf8
+        )
+        let installScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/install-inputmethod.sh"),
+            encoding: .utf8
+        )
+        let uninstallScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/uninstall-inputmethod.sh"),
+            encoding: .utf8
+        )
+        let rollbackScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/rollback-inputmethod.sh"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(helperSource.contains("KNOWTYPE_BACKUP_MANIFEST_SCHEMA_VERSION=2"))
+        XCTAssertTrue(helperSource.contains(#""appChecksum""#))
+        XCTAssertTrue(helperSource.contains(#""appSigningRequirement""#))
+        XCTAssertTrue(helperSource.contains(#""appSigningIdentity""#))
+        XCTAssertTrue(helperSource.contains(#""prefPaneChecksum""#))
+        XCTAssertTrue(helperSource.contains(#""prefPaneSigningRequirement""#))
+        XCTAssertTrue(helperSource.contains(#""prefPaneSigningIdentity""#))
+        XCTAssertTrue(helperSource.contains("codesign --verify --deep --strict"))
+        XCTAssertTrue(helperSource.contains("knowtype_validate_install_backup_for_restore"))
+        XCTAssertTrue(helperSource.contains("legacy backup manifest lacks required integrity metadata"))
+        XCTAssertTrue(helperSource.contains("schemaVersion 1 legacy backups"))
+        XCTAssertTrue(helperSource.contains("KNOWTYPE_PREFPANE_BUNDLE_ID=\"com.knowtype.preferencepane\""))
+        XCTAssertTrue(helperSource.contains("knowtype_is_canonical_local_preferencepane_path"))
+        XCTAssertTrue(helperSource.contains("knowtype_is_safe_local_preferencepane_bundle_path"))
+        XCTAssertTrue(helperSource.contains("knowtype_remove_local_preferencepane_bundle_if_safe"))
+        XCTAssertTrue(helperSource.contains("knowtype_replace_local_preferencepane_bundle_atomically"))
+        XCTAssertTrue(helperSource.contains("staged KnowType.prefPane failed validation"))
+        XCTAssertTrue(helperSource.contains("foreign or unsafe same-name PreferencePane"))
+
+        XCTAssertTrue(rollbackScript.contains("--allow-unverified-backup"))
+        XCTAssertTrue(rollbackScript.contains(#"knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP""#))
+        XCTAssertTrue(rollbackScript.contains(#"knowtype_require_safe_local_preferencepane_if_present "$prefpane_path""#))
+        XCTAssertTrue(rollbackScript.contains(#"knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0"#))
+        XCTAssertFalse(rollbackScript.contains(#"rm -rf -- "$prefpane_path""#))
+
+        XCTAssertTrue(installScript.contains(#"--version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION""#))
+        XCTAssertTrue(installScript.contains(#"if [[ "$SOURCE_MODE" == "build" ]]; then"#))
+        XCTAssertTrue(installScript.contains("build-inputmethod-bundle.sh"))
+        XCTAssertTrue(installScript.contains("build-preference-pane.sh"))
+        XCTAssertTrue(installScript.contains("knowtype_replace_local_preferencepane_bundle_atomically"))
+        XCTAssertTrue(installScript.contains(#"knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0"#))
+        XCTAssertTrue(installScript.contains(#"knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH""#))
+        XCTAssertTrue(installScript.contains(#"knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0"#))
+        XCTAssertFalse(installScript.contains(#"rm -rf -- "$PREFPANE_TARGET_PATH""#))
+
+        XCTAssertTrue(uninstallScript.contains(#"knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH""#))
+        XCTAssertTrue(uninstallScript.contains(#"knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" "$DRY_RUN""#))
+        XCTAssertFalse(uninstallScript.contains(#"rm -rf -- "$PREFPANE_TARGET_PATH""#))
+    }
+
     func testInputMethodInfoDeclaresVisibleHansInputMode() throws {
         let plistURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

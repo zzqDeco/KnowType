@@ -152,6 +152,15 @@ secrets, AI context documents, `~/.knowtype`, or local lexicons. First real
 typing after manually selecting KnowType may initialize Rime as normal product
 use; that is intentionally outside the install step.
 
+New rollback manifests record checksums, bundle IDs, versions/builds, and code
+signing requirements/identities for both artifacts. Rollback verifies all
+metadata plus `codesign --verify --deep --strict` before replacement. Legacy
+schema-v1 backups are rejected unless the explicitly dangerous
+`--allow-unverified-backup` flag is supplied; that flag never bypasses a current
+manifest failure. Installer paths also refuse to remove or replace a same-name
+PreferencePane unless it is the canonical non-symlink
+`com.knowtype.preferencepane` bundle.
+
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
 `KnowType 设置...` (`KnowType Settings...` in the explicit English resource
@@ -199,6 +208,13 @@ List or restore local rollback points:
 ```bash
 ./scripts/rollback-inputmethod.sh --list
 ./scripts/rollback-inputmethod.sh --latest
+```
+
+For a trusted legacy backup only, inspect it first and make the override
+explicit:
+
+```bash
+./scripts/rollback-inputmethod.sh --to BACKUP_ID --dry-run --allow-unverified-backup
 ```
 
 Local IME behavior must still be verified by typing in real host apps. See
