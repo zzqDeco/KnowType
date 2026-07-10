@@ -312,6 +312,30 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             let transportStartedAt = Date()
             let state = await provider.recommendation(for: request)
             let transportElapsedMilliseconds = Self.elapsedMilliseconds(since: transportStartedAt)
+            if case .stale = state {
+                await MainActor.run { [weak self] in
+                    guard let self, self.activeRequestID == requestID else {
+                        return
+                    }
+                    self.activeRequestID = nil
+                    self.activeTask = nil
+                    self.activeRequestPhase = nil
+                }
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .staleResultDropped,
+                        requestID: requestID,
+                        compositionID: context.compositionID,
+                        rawLength: context.rawInput.count,
+                        rawRevision: context.rawRevision,
+                        prefixLength: context.lockedPrefix?.count,
+                        appBundleID: context.appBundleID,
+                        elapsedMilliseconds: transportElapsedMilliseconds,
+                        reason: "provider_generation_changed"
+                    )
+                )
+                return
+            }
             let patch = AIRecommendationPatch(
                 requestID: requestID,
                 generation: currentGeneration,
@@ -524,6 +548,8 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         switch state {
         case .idle:
             return "idle"
+        case .stale:
+            return "provider_generation_changed"
         case .pending:
             return "pending"
         case .ready:

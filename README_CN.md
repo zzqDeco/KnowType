@@ -216,6 +216,9 @@ Profile 文件使用带 revision 的事务格式，多个设置窗口不会静�
 修改。变更后的 Keychain 凭据使用不可变引用。Base URL 可以保留运行时兼容
 所需的 query，但不能包含 userinfo 或 fragment；诊断输出会移除 userinfo、
 query 和 fragment。
+运行中的输入法 host 会观察已提交的 profile revision。下一次满足条件的推荐或
+context digest 会直接使用新 provider，无需重启 host；旧的 in-flight provider
+请求会被取消，普通按键热路径不会轮询 provider 文件。
 
 ```text
 ~/Library/Application Support/KnowType/providers.v2.json

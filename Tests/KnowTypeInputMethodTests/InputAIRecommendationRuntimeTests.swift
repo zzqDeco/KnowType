@@ -571,6 +571,37 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         })
     }
 
+    @MainActor
+    func testProviderGenerationStaleResultNeverPublishesUIState() async {
+        let provider = RecordingRuntimeAIRecommendationProvider(response: .stale)
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let initial = runtime.schedule(
+            context: context(rawInput: "abc"),
+            currentSnapshot: { snapshot(rawInput: "abc") },
+            onStateChange: { publishedStates.append($0) }
+        )
+
+        XCTAssertNotNil(pendingRequestID(initial))
+        let staleDropped = await waitUntil {
+            diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped
+                    && $0.reason == "provider_generation_changed"
+            }
+        }
+        XCTAssertTrue(staleDropped)
+        XCTAssertTrue(publishedStates.isEmpty)
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .stateApplied })
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil

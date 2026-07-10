@@ -14,7 +14,7 @@ private func withTypingEventFileLock<T>(_ body: () throws -> T) rethrows -> T {
     return try body()
 }
 
-public actor TypingEventStore {
+public final class TypingEventStore: @unchecked Sendable {
     private let eventsFileURL: URL
     private let processedDirectoryURL: URL
     private let fileManager: FileManager
@@ -34,7 +34,7 @@ public actor TypingEventStore {
         self.decoder.dateDecodingStrategy = .iso8601
     }
 
-    public func append(_ event: AITypingEvent) throws {
+    public func append(_ event: AITypingEvent) async throws {
         try withTypingEventFileLock {
             try fileManager.createDirectory(
                 at: eventsFileURL.deletingLastPathComponent(),
@@ -54,15 +54,19 @@ public actor TypingEventStore {
         }
     }
 
-    public func pendingEvents() throws -> [AITypingEvent] {
-        try pendingSnapshot().events
+    public func pendingEvents() async throws -> [AITypingEvent] {
+        try pendingSnapshotSynchronously().events
     }
 
-    public func pendingRawContent() throws -> String {
-        try pendingSnapshot().rawContent
+    public func pendingRawContent() async throws -> String {
+        try pendingSnapshotSynchronously().rawContent
     }
 
-    public func pendingSnapshot() throws -> (rawContent: String, events: [AITypingEvent]) {
+    public func pendingSnapshot() async throws -> (rawContent: String, events: [AITypingEvent]) {
+        try pendingSnapshotSynchronously()
+    }
+
+    private func pendingSnapshotSynchronously() throws -> (rawContent: String, events: [AITypingEvent]) {
         try withTypingEventFileLock {
             guard fileManager.fileExists(atPath: eventsFileURL.path) else {
                 return ("", [])
@@ -80,11 +84,29 @@ public actor TypingEventStore {
         }
     }
 
-    public func archivePendingEvents() throws {
-        try archivePendingEvents(matchingRawContent: pendingRawContent())
+    public func archivePendingEvents() async throws {
+        let rawContent = try pendingSnapshotSynchronously().rawContent
+        try archivePendingEventsSynchronously(matchingRawContent: rawContent)
     }
 
-    public func archivePendingEvents(matchingRawContent rawContent: String) throws {
+    public func archivePendingEvents(matchingRawContent rawContent: String) async throws {
+        try archivePendingEventsSynchronously(matchingRawContent: rawContent)
+    }
+
+    public func commitPendingEvents(
+        matchingRawContent rawContent: String,
+        beforeArchive: @Sendable () throws -> Void
+    ) throws {
+        try archivePendingEventsSynchronously(
+            matchingRawContent: rawContent,
+            beforeArchive: beforeArchive
+        )
+    }
+
+    private func archivePendingEventsSynchronously(
+        matchingRawContent rawContent: String,
+        beforeArchive: @Sendable () throws -> Void = {}
+    ) throws {
         try withTypingEventFileLock {
             guard !rawContent.isEmpty,
                   fileManager.fileExists(atPath: eventsFileURL.path) else {
@@ -94,6 +116,7 @@ public actor TypingEventStore {
             guard currentContent.hasPrefix(rawContent) else {
                 throw TypingEventStoreError.pendingContentChanged
             }
+            try beforeArchive()
             try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
             let formatter = ISO8601DateFormatter()
             let filename = "typing-events-\(formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
@@ -143,6 +166,7 @@ public actor LazyDefaultAIContextMemoryRuntime: AIContextEventRecording {
 
 public actor AIContextMemoryRuntime: AIContextEventRecording {
     private let provider: (any LLMProvider)?
+    private let providerRegistry: ProviderRuntimeRegistry?
     private let eventStore: TypingEventStore
     private let environmentStore: EnvironmentDocumentStore
     private let batchSize: Int
@@ -150,6 +174,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var lastDigestAt: Date?
     private var lastDigestFailureAt: Date?
     private var digestInFlight = false
+    private var providerGeneration: UInt64?
 
     public init(
         provider: (any LLMProvider)?,
@@ -159,6 +184,22 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         minimumInterval: TimeInterval = 600
     ) {
         self.provider = provider
+        self.providerRegistry = nil
+        self.eventStore = eventStore
+        self.environmentStore = environmentStore
+        self.batchSize = max(1, batchSize)
+        self.minimumInterval = max(1, minimumInterval)
+    }
+
+    public init(
+        providerRegistry: ProviderRuntimeRegistry,
+        eventStore: TypingEventStore = TypingEventStore(),
+        environmentStore: EnvironmentDocumentStore = EnvironmentDocumentStore(),
+        batchSize: Int = 50,
+        minimumInterval: TimeInterval = 600
+    ) {
+        self.provider = nil
+        self.providerRegistry = providerRegistry
         self.eventStore = eventStore
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
@@ -176,7 +217,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
     public func processIfNeeded(now: Date = Date()) async {
         guard !digestInFlight,
-              let provider else {
+              provider != nil || providerRegistry != nil else {
             return
         }
         digestInFlight = true
@@ -209,6 +250,13 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             }
             return
         }
+        if let providerRegistry,
+           let providerGeneration {
+            let registryGeneration = await providerRegistry.currentGeneration()
+            if registryGeneration > 0, registryGeneration != providerGeneration {
+                resetProviderRuntimeState()
+            }
+        }
         if let lastDigestFailureAt,
            now.timeIntervalSince(lastDigestFailureAt) < minimumInterval {
             return
@@ -221,6 +269,23 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 return
             }
             let currentEnvironment = try environmentStore.loadSnapshot()
+            let lease: ProviderRuntimeLease?
+            let activeProvider: (any LLMProvider)?
+            if let providerRegistry {
+                let loadedLease = await providerRegistry.leaseForEligibleDispatch()
+                if providerGeneration != loadedLease.generation {
+                    resetProviderRuntimeState()
+                    providerGeneration = loadedLease.generation
+                }
+                lease = loadedLease
+                activeProvider = loadedLease.provider
+            } else {
+                lease = nil
+                activeProvider = provider
+            }
+            guard let activeProvider else {
+                return
+            }
             let request = LLMRequest(
                 task: .contextDigest,
                 rawInput: rawEvents,
@@ -231,19 +296,45 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                     "ENV.md": currentEnvironment.content
                 ]
             )
-            let response = try await provider.complete(request)
+            let response: LLMResponse
+            if let providerRegistry, let lease {
+                response = try await providerRegistry.perform(using: lease) { provider in
+                    try await provider.complete(request)
+                }
+            } else {
+                response = try await activeProvider.complete(request)
+            }
             guard let generated = Self.generatedDigestText(from: response) else {
                 lastDigestFailureAt = now
                 return
             }
-            _ = try environmentStore.replaceGeneratedSection(with: generated)
-            try await eventStore.archivePendingEvents(matchingRawContent: rawEvents)
+            let eventStore = self.eventStore
+            let environmentStore = self.environmentStore
+            let persist: @Sendable () throws -> Void = {
+                try eventStore.commitPendingEvents(matchingRawContent: rawEvents) {
+                    _ = try environmentStore.replaceGeneratedSection(with: generated)
+                }
+            }
+            if let providerRegistry, let lease {
+                try await providerRegistry.commitIfCurrent(using: lease, operation: persist)
+            } else {
+                try persist()
+            }
             lastDigestAt = now
             lastDigestFailureAt = nil
+        } catch ProviderRuntimeRegistryError.staleGeneration {
+            resetProviderRuntimeState()
+            return
         } catch {
             lastDigestFailureAt = now
             return
         }
+    }
+
+    private func resetProviderRuntimeState() {
+        lastDigestAt = nil
+        lastDigestFailureAt = nil
+        providerGeneration = nil
     }
 
     private static func isProtectedOnlyEvent(_ event: AITypingEvent) -> Bool {

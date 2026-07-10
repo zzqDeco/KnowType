@@ -41,6 +41,9 @@ Current behavior:
   `InputAIRecommendationRuntime`, which debounces before transport dispatch and
   stale-drops older provider results instead of aborting started HTTP requests
 - injects a process-wide lexical profile store, refresh gate, and Rime userdb snapshot provider so multiple IMK controller sessions cannot independently overwrite the global `LEXICAL_PROFILE.md`
+- injects one process-wide `AIContextMemoryRuntime` actor into every controller,
+  so multiple IMK sessions cannot digest or archive the same pending context
+  snapshot independently
 - overrides `showPreferences(_:)` and retains `KnowTypePreferencesWindowController`, so the input-method menu opens the SwiftUI settings window without relying on InputMethodKit's default nib-backed preferences loader
 - builds its input-method menu through `KnowTypeInputMethodMenuBuilder`:
   localized AI continuation, current shared input-mode status,

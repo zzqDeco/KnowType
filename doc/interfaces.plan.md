@@ -161,6 +161,11 @@ expected revision, increment once, and atomically replace the file. Successful
 commits emit a privacy-safe cross-process revision signal. Runtime cold-start
 paths use the no-create loader, so a genuinely absent provider profile does not
 create `Application Support/KnowType` merely because the IMK host was launched.
+The process-level runtime registry observes the signal and returns leases with
+`revision`, `generation`, opaque `fingerprint`, and optional `provider`. It uses
+the file revision only as an eligible-dispatch fallback. A generation change
+cancels old lease operations and rejects late results before UI, ENV, or archive
+writes.
 Unmigrated legacy or missing post-migration canonical state fails closed. The
 install migration first publishes a recoverable provisional tombstone and only
 marks canonical metadata expected after the canonical file is durable.
@@ -590,6 +595,8 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
 - caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
+- rebuilds cache and health state for each provider generation; the internal
+  stale-generation state is dropped before the coordinator UI callback
 - skips cloud requests for too-short context: with a confirmed locked prefix, fewer than two Han characters or fewer than six visible mixed/Latin characters; without a locked prefix, fewer than three visible raw-input characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
@@ -611,6 +618,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - updates only the generated section in `ENV.md`
 - normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically on a best-effort basis; read-only or transient write failures still return the repaired in-memory snapshot
 - sanitizes Level 0 protected content before writing logs
+- is shared across all controllers in the process, so one pending snapshot
+  starts at most one digest request
+- updates ENV and archives a pending prefix only while both its provider lease
+  and snapshot claim remain current; later appended events stay pending
 
 `LexicalProfileStore`:
 

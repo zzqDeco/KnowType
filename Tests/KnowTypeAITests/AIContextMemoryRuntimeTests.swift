@@ -384,7 +384,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertTrue(environment.contains("- TextEdit: writes short notes."))
     }
 
-    func testConcurrentDigestAttemptsOnlyIssueOneProviderRequest() async throws {
+    func testTwoControllerReferencesIssueOneDigestForOnePendingSnapshot() async throws {
         let directory = makeTemporaryDirectory()
         let eventStore = TypingEventStore(
             eventsDirectoryURL: directory.appendingPathComponent("events", isDirectory: true)
@@ -400,10 +400,12 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             batchSize: 1,
             minimumInterval: 600
         )
+        let firstControllerRuntime = runtime
+        let secondControllerRuntime = runtime
 
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
-                await runtime.record(
+                await firstControllerRuntime.record(
                     AITypingEvent(
                         rawInput: "nihao",
                         committedText: "你好",
@@ -413,7 +415,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 )
             }
             group.addTask {
-                await runtime.record(
+                await secondControllerRuntime.record(
                     AITypingEvent(
                         rawInput: "zaijian",
                         committedText: "再见",
@@ -428,6 +430,175 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
 
         XCTAssertEqual(requests.count, 1)
     }
+
+    func testContextDigestReloadsAtoBWithoutRestart() async throws {
+        let directory = makeTemporaryDirectory()
+        let providerA = NamedLLMProvider(
+            name: "provider-a",
+            responseText: "## Global Style\n- Provider A digest."
+        )
+        let providerB = NamedLLMProvider(
+            name: "provider-b",
+            responseText: "## Global Style\n- Provider B digest."
+        )
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: providerA
+        )
+        let signal = TestProviderRevisionSignal()
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source, signal: signal),
+            eventStore: TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events")),
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "nihao", committedText: "你好"))
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        signal.send(2)
+        await runtime.record(makeContextEvent(rawInput: "zaijian", committedText: "再见"))
+
+        let environment = try String(
+            contentsOf: directory.appendingPathComponent("ENV.md"),
+            encoding: .utf8
+        )
+        let providerACount = await providerA.requestCount
+        let providerBCount = await providerB.requestCount
+        XCTAssertEqual(providerACount, 1)
+        XCTAssertEqual(providerBCount, 1)
+        XCTAssertTrue(environment.contains("Provider B digest"))
+        XCTAssertFalse(environment.contains("Provider A digest"))
+    }
+
+    func testContextGenerationChangeCancelsOldDigestAndPreservesPendingEvents() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsURL = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsURL)
+        let providerA = SuspendedGenerationLLMProvider(name: "provider-a")
+        let providerB = NamedLLMProvider(
+            name: "provider-b",
+            responseText: "## Global Style\n- Provider B digest."
+        )
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: providerA
+        )
+        let signal = TestProviderRevisionSignal()
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source, signal: signal),
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        let oldDigest = Task {
+            await runtime.record(makeContextEvent(rawInput: "nihao", committedText: "你好"))
+        }
+        try await waitUntil { await providerA.requestCount == 1 }
+        await runtime.record(makeContextEvent(rawInput: "zaijian", committedText: "再见"))
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        signal.send(2)
+        try await waitUntil { await providerA.cancellationCount == 1 }
+        await providerA.finish(responseText: "## Global Style\n- Provider A stale digest.")
+        await oldDigest.value
+
+        let pendingBeforeRetry = try await eventStore.pendingEvents()
+        let staleEnvironment = try String(contentsOf: environmentURL, encoding: .utf8)
+        XCTAssertEqual(pendingBeforeRetry.map(\.rawInput), ["nihao", "zaijian"])
+        XCTAssertFalse(staleEnvironment.contains("Provider A stale digest"))
+
+        await runtime.processIfNeeded()
+
+        let pendingAfterRetry = try await eventStore.pendingEvents()
+        let currentEnvironment = try String(contentsOf: environmentURL, encoding: .utf8)
+        let providerBRequests = await providerB.recordedRequests
+        XCTAssertTrue(pendingAfterRetry.isEmpty)
+        XCTAssertTrue(currentEnvironment.contains("Provider B digest"))
+        XCTAssertEqual(providerBRequests.count, 1)
+        XCTAssertTrue(providerBRequests[0].rawInput?.contains("nihao") == true)
+        XCTAssertTrue(providerBRequests[0].rawInput?.contains("zaijian") == true)
+    }
+
+    func testProtectedOnlyRegistryBatchDoesNotReadProviderFiles() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: NamedLLMProvider(name: "provider-a", responseText: "unused")
+        )
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source),
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(
+            AITypingEvent(
+                rawInput: "https://example.com/private",
+                committedText: "https://example.com/private",
+                commitKind: .raw,
+                candidateSource: "raw"
+            )
+        )
+        let pendingEvents = try await eventStore.pendingEvents()
+
+        XCTAssertTrue(pendingEvents.isEmpty)
+        XCTAssertEqual(source.revisionReadCount, 0)
+        XCTAssertEqual(source.runtimeLoadCount, 0)
+    }
+
+    func testRegistryDigestFailureKeepsMinimumIntervalWithoutExtraFileRead() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let provider = FailingDigestLLMProvider()
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: provider
+        )
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source),
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "nihao", committedText: "你好"))
+        await runtime.record(makeContextEvent(rawInput: "zaijian", committedText: "再见"))
+
+        let requestCount = await provider.requestCount
+        let pendingEvents = try await eventStore.pendingEvents()
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(source.revisionReadCount, 1)
+        XCTAssertEqual(source.runtimeLoadCount, 1)
+        XCTAssertEqual(pendingEvents.count, 2)
+    }
+}
+
+private func makeContextEvent(rawInput: String, committedText: String) -> AITypingEvent {
+    AITypingEvent(
+        rawInput: rawInput,
+        committedText: committedText,
+        commitKind: .traditional,
+        candidateSource: "traditional"
+    )
 }
 
 private actor DigestLLMProvider: LLMProvider {

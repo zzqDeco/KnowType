@@ -256,6 +256,10 @@ The profile file uses a revisioned transactional format so concurrent settings
 windows cannot silently overwrite each other. Changed keys use immutable
 Keychain references. Base URLs may contain runtime query parameters, but not
 userinfo or fragments; diagnostics omit userinfo, query, and fragment.
+The running input-method host observes committed profile revisions. The next
+eligible recommendation or context digest uses the new provider without a host
+restart, cancels older in-flight provider work, and never polls provider files
+from the ordinary key path.
 
 ```text
 ~/Library/Application Support/KnowType/providers.v2.json
