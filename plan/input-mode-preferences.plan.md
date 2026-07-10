@@ -1,30 +1,23 @@
 # Input Mode Preferences
 
+Status: Absorbed by
+[input-mode-punctuation-linkage.plan.md](input-mode-punctuation-linkage.plan.md).
+
 ## Goal
 
-Persist KnowType punctuation preferences so Chinese punctuation, English punctuation, and full-width symbol behavior are no longer only session-local controller state.
+Persist the one restart-level input preference that remains product state: the
+global character width.
 
 ## Behavior
 
-- Pure input-mode models live in `KnowTypeCore`:
-  - `InputTextMode`
-  - `InputSymbolMode`
-  - `InputSymbolWidth`
-  - `InputModeState`
-  - `InputModePreferences`
-  - `InputModePreferenceRuntime`
-  - `InputModeAppPolicy`
-- `UserDefaultsInputModePreferenceStore` stores punctuation preferences in the shared `com.knowtype.preferences` defaults domain.
-- The input-method controller reads preferences at controller startup and refreshes them when a new composition or direct symbol input begins:
-  - normal apps use `defaultState`
-  - code/terminal-style apps use `codeAppState`
-- The built-in `codeAppState` punctuation mode is Chinese; saved user preferences can still override it to English.
-- The SwiftUI Input settings tab can edit:
-  - default punctuation language
-  - default symbol width
-  - code-app punctuation language
-  - code-app symbol width
-- `Option + .` remains a session-local toggle for the active controller session and is not written back to saved preferences.
+- `UserDefaultsInputModePreferenceStore` stores `input.global.symbolWidth` in the
+  shared `com.knowtype.preferences` defaults domain.
+- The input-method host starts in linked Chinese text/Chinese punctuation and
+  the saved global width. App and window changes do not reload mode.
+- `Option + /`, `Option + .`, and `Shift + Space` mutate the process runtime for
+  the host lifetime; only width is persisted for the next host process.
+- Legacy default/code-app fields remain readable migration data but do not
+  influence runtime mode or acceptance.
 
 ## Verification
 

@@ -107,6 +107,7 @@ public protocol KnowTypeConversionEngine: Sendable {
     var snapshot: ConversionEngineSnapshot { get }
     var activeSchemaID: String { get }
 
+    mutating func synchronizeInputMode(_ snapshot: InputModeSnapshot)
     mutating func reset()
     mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult
 }
@@ -115,6 +116,8 @@ public extension KnowTypeConversionEngine {
     var activeSchemaID: String {
         "pinyin_simp"
     }
+
+    mutating func synchronizeInputMode(_: InputModeSnapshot) {}
 
     func userDBTextSnapshot(schemaID _: String) async throws -> RimeUserDBTextSnapshot {
         throw RimeUserDBTextSnapshotProviderError.unavailable
@@ -129,6 +132,8 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
     private var nativeBypassUntilReset = false
     private var nativeRawInputMirror = ""
     private let configuredSchemaID: String
+    private var desiredInputModeSnapshot: InputModeSnapshot
+    private var appliedNativeInputModeSnapshot: InputModeSnapshot?
 
     public var isNativeActive: Bool {
         nativeSession != nil && !nativeBypassUntilReset
@@ -144,12 +149,15 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
 
     public init(
         traditionalInputEngine _: TraditionalInputEngine? = nil,
-        configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration()
+        configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration(),
+        inputModeSnapshot: InputModeSnapshot = InputModeStateMachine().snapshot
     ) {
         self.nativeConfiguration = configuration
         self.configuredSchemaID = configuration?.schemaID ?? "pinyin_simp"
         self.nativeSession = nil
         self.currentSnapshot = Self.unavailableSnapshot(rawInput: "")
+        self.desiredInputModeSnapshot = inputModeSnapshot
+        self.appliedNativeInputModeSnapshot = nil
     }
 
     @discardableResult
@@ -177,6 +185,11 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         nativeRawInputMirror = ""
         nativeSession?.reset()
         currentSnapshot = nativeSession?.snapshot() ?? Self.unavailableSnapshot(rawInput: "")
+    }
+
+    public mutating func synchronizeInputMode(_ snapshot: InputModeSnapshot) {
+        desiredInputModeSnapshot = snapshot
+        synchronizeNativeInputModeIfNeeded()
     }
 
     public mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
@@ -244,6 +257,8 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         case .created(let session):
             nativeSessionCreationAttempted = true
             nativeSession = session
+            appliedNativeInputModeSnapshot = nil
+            synchronizeNativeInputModeIfNeeded()
             replayNativeRawInputMirrorIfNeeded(into: session)
             currentSnapshot = nativeSession?.snapshot() ?? currentSnapshot
             success = true
@@ -265,6 +280,19 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             return nil
         }
         return nativeSession
+    }
+
+    private mutating func synchronizeNativeInputModeIfNeeded() {
+        guard appliedNativeInputModeSnapshot != desiredInputModeSnapshot,
+              let nativeSession,
+              nativeSession.synchronizeInputMode(desiredInputModeSnapshot.state) else {
+            return
+        }
+        appliedNativeInputModeSnapshot = desiredInputModeSnapshot
+    }
+
+    func nativeOptionValue(_ name: String) -> Bool? {
+        nativeSession?.optionValue(name)
     }
 
     private static func shouldPreemptSpeculativePrewarm(
@@ -819,6 +847,27 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
         ktb_rime_clear_composition(session)
     }
 
+    func synchronizeInputMode(_ state: InputModeState) -> Bool {
+        let options = RimeSessionModeOptions(state: state)
+        var didApplyAllOptions = true
+        for option in options.namedValues {
+            if !setOption(option.name, value: option.value) {
+                didApplyAllOptions = false
+            }
+        }
+        return didApplyAllOptions
+    }
+
+    func setOption(_ name: String, value: Bool) -> Bool {
+        name.withCString { ktb_rime_set_option(session, $0, value) }
+    }
+
+    func optionValue(_ name: String) -> Bool? {
+        var value = false
+        let didRead = name.withCString { ktb_rime_get_option(session, $0, &value) }
+        return didRead ? value : nil
+    }
+
     func snapshot() -> ConversionEngineSnapshot {
         guard let context = ktb_rime_copy_context(session) else {
             return ConversionEngineSnapshot(engineName: "rime-native")
@@ -960,6 +1009,26 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
         }
         let value = String(cString: name).trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+}
+
+struct RimeSessionModeOptions: Sendable, Equatable {
+    var asciiMode: Bool
+    var asciiPunct: Bool
+    var fullShape: Bool
+
+    init(state: InputModeState) {
+        self.asciiMode = state.textMode == .ascii
+        self.asciiPunct = state.punctuationMode == .english
+        self.fullShape = state.symbolWidth == .fullWidth
+    }
+
+    var namedValues: [(name: String, value: Bool)] {
+        [
+            ("ascii_mode", asciiMode),
+            ("ascii_punct", asciiPunct),
+            ("full_shape", fullShape)
+        ]
     }
 }
 

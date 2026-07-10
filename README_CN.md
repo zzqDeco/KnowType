@@ -317,8 +317,8 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 
 | 快捷键 | 行为 |
 |---|---|
-| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时插入普通空格，或在兼容宿主中直通给宿主。 |
-| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时输入普通数字，或在兼容宿主中直通给宿主。 |
+| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时输入普通空格，全角模式下输入 U+3000。 |
+| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时按字符宽度输入半角或全角数字。 |
 | 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。第一页首项按左/上会到上一页最后一项。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
@@ -327,7 +327,7 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。 |
 | `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
 | `Option + /` | 切换进程级中文/ASCII 输入模式，同时恢复中文/英文标点联动；所有 App 共享。 |
-| `Shift + Space` | 切换进程级半角/全角，不改变中英输入或标点模式。 |
+| `Shift + Space` | 切换进程级半角/全角字符，不改变中英输入或标点模式。全角会转换 ASCII `!` 到 `~` 及普通空格，不转换控制字符、Tab 或换行。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
 | `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
@@ -336,10 +336,13 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 联动：中文输入默认中文标点，ASCII 输入始终英文标点，`Option + /` 每次切换都会
 恢复联动。中文阶段可用 `Option + .` 临时改成英文标点，该手动覆盖到下一次中英
 切换时失效；全半角始终独立。当前输入法 host 运行期间所有 App 共享状态，host
-重启后重新从“中文 + 中文标点 + 已保存全局宽度”开始。紧邻 ASCII 数字后的 `.`
+重启后重新从“中文 + 中文标点 + 已保存全局宽度”开始。原生 Rime session 创建及
+进程模式 generation 变化时会同步 `ascii_mode`、`ascii_punct` 和 `full_shape`。紧邻 ASCII 数字后的 `.`
 固定输出半角点，适配小数和编号，即使当前为中文标点或全角；逗号、选区和未知
-光标上下文仍走普通标点规则。模式切换后会短暂显示类似
-`中 · 中文标点 · 半角` 的状态行。
+光标上下文仍走普通标点规则。中文引号会读取光标前字符：空白或开标点输出开引号，
+文本、数字或闭标点输出闭引号；上下文未知时才使用 session 内交替。外部删除、
+焦点或选区变化、模式 generation 变化都会重置该 fallback。模式切换后会短暂显示
+类似 `中 · 中文标点 · 半角` 的状态行。
 
 宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
 IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
@@ -349,8 +352,8 @@ IDE、Electron shell 和未知客户端默认都使用 inline attributed marked 
 flags 读取。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
 它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
-上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲 printable 输入会直通
-当前宿主。仍可用 UserDefaults override 将任意
+上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲半角 printable 输入会直通
+当前宿主；全角 printable 输入由 KnowType 转换后插入。仍可用 UserDefaults override 将任意
 bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline marked text 的宿主。
 
 候选窗显示 Rime 前缀候选、符号候选、固定 AI 推荐状态行、模式状态行、

@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-`InputSymbolMode.swift` owns local punctuator decisions and full-width symbol
+`InputSymbolMode.swift` owns local punctuator decisions and full-width character
 conversion for one key event.
 
 ## Boundaries
@@ -21,13 +21,16 @@ conversion for one key event.
   ellipsis, em dash, bracket pairs, and panel-backed ambiguous symbols.
 - ASCII mode uses English punctuation. Chinese mode may temporarily use English
   punctuation after a manual override.
-- Symbol width remains independent and full-width mapping is applied only when
-  explicitly enabled.
+- Character width remains independent. Full width maps U+0021 through U+007E
+  with the Unicode full-width offset and maps U+0020 to U+3000; controls, Tab,
+  newline, and non-ASCII text are unchanged.
 - An idle period with `previousCharacterKind == asciiDigit` commits `.` before
   punctuation and width mapping. This exception does not apply to active Rime
   composition or comma.
-- Quote pairing state is coordinator-local and resets whenever a newer global
-  mode generation is observed.
+- Chinese half-width quote decisions prefer opening/closing caret context and
+  use coordinator-local alternation only when context is unknown. Fallback
+  state resets after external delete, focus/selection changes, and newer global
+  mode generations.
 
 ## Tests
 

@@ -1646,6 +1646,49 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(typingClient.insertTextWrites.map(\.text), ["“", "“"])
     }
 
+    func testQuoteContextUsesWhitespaceForOpeningAndTextForClosing() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 4, length: 0)
+        client.characterBeforeCaretValue = " "
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+        client.selectedRangeValue = NSRange(location: 5, length: 0)
+        client.characterBeforeCaretValue = "文"
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["“", "”"])
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 2)
+    }
+
+    func testQuoteAlternationResetsAfterSelectionChange() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 10, length: 0)
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+        client.selectedRangeValue = NSRange(location: 3, length: 0)
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["“", "“"])
+    }
+
+    func testExternalDeleteResetsQuoteAlternation() {
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{7F}", keyCode: 51),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["“", "“"])
+    }
+
     func testExternalModeGenerationInvalidatesIdleSymbolCandidateSession() {
         let runtime = ProcessInputModeStateRuntime()
         let modeClient = FakeInputControllerClient()
@@ -1699,16 +1742,22 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.modeStatusText, "英 · 英文标点 · 半角")
     }
 
-    func testIdlePeriodAfterClientDigitUsesAsciiPeriod() {
+    func testIdlePeriodAfterRecordedDigitUsesAsciiPeriodWithoutDocumentRead() {
         let client = FakeInputControllerClient()
         client.selectedRangeValue = NSRange(location: 4, length: 0)
-        client.characterBeforeCaretValue = "1"
         let (coordinator, _, _) = makeCoordinator(client: client)
 
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: 18),
+                client: client
+            )
+        )
+        client.selectedRangeValue = NSRange(location: 5, length: 0)
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, ".")
-        XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
     }
 
     func testIdlePeriodAfterNonDigitUsesChinesePeriod() {
@@ -1719,7 +1768,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, "。")
-        XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
     }
 
     func testSelectionAndActiveCompositionDoNotUseDigitPeriodException() {
@@ -1753,21 +1802,32 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["1", ".", "。"])
-        XCTAssertEqual(client.characterBeforeCaretReadCount, 2)
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
     }
 
     func testFullWidthModeStillUsesAsciiPeriodAfterDigit() {
         let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
+        var preferences = InputModePreferences.standard
+        preferences.globalSymbolWidth = .fullWidth
         let client = FakeInputControllerClient()
-        client.characterBeforeCaretValue = "3"
+        client.selectedRangeValue = NSRange(location: 4, length: 0)
         let (coordinator, _, _) = makeCoordinator(
             client: client,
+            inputModePreferences: preferences,
             inputModeStateRuntime: runtime
         )
 
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "3", keyCode: 20),
+                client: client
+            )
+        )
+        client.selectedRangeValue = NSRange(location: 5, length: 0)
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, ".")
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["３", "."])
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
     }
 
     func testDocumentContextIsReadOnlyForIdlePeriod() {
@@ -1780,6 +1840,20 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("n", client: client))
 
         XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
+    }
+
+    func testDocumentContextReadIsLimitedToPeriodAndQuotePunctuation() {
+        let client = FakeInputControllerClient()
+        client.characterBeforeCaretValue = "文"
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText(",", client: client))
+        XCTAssertTrue(coordinator.handleText("@", client: client))
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
+
+        XCTAssertTrue(coordinator.handleText(".", client: client))
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
     }
 
     func testMissingClientPrintableInputPassesThroughWithoutComposition() {
@@ -1917,6 +1991,64 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handleText("@", client: client))
         XCTAssertEqual(client.insertTextWrites.last?.text, "@")
+    }
+
+    func testFullWidthASCIIIdleInputTransformsLettersDigitsAndSpace() {
+        let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
+        _ = runtime.transition(.toggleTextMode)
+        var preferences = InputModePreferences.standard
+        preferences.globalSymbolWidth = .fullWidth
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            inputModePreferences: preferences,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertTrue(coordinator.handleText("A", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: 18),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["Ａ", "１", "　"])
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testCoordinatorSynchronizesNativeModeAtCreationAndGenerationChanges() {
+        let runtime = ProcessInputModeStateRuntime()
+        let recorder = ModeSyncConversionRecorder()
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            inputModeStateRuntime: runtime,
+            conversionEngine: ModeSyncRecordingConversionEngine(recorder: recorder)
+        )
+
+        XCTAssertEqual(recorder.snapshots.map(\.generation), [0])
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.shift]),
+                client: client
+            )
+        )
+        XCTAssertEqual(recorder.snapshots.map(\.generation), [0, 1])
+        XCTAssertEqual(recorder.snapshots.last?.state.symbolWidth, .fullWidth)
+
+        _ = runtime.transition(.toggleTextMode)
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: -1, eventKind: .flagsChanged),
+                client: client
+            )
+        )
+        XCTAssertEqual(recorder.snapshots.map(\.generation), [0, 1, 2])
+        XCTAssertEqual(recorder.snapshots.last?.state.textMode, .ascii)
+        XCTAssertEqual(recorder.snapshots.last?.state.punctuationMode, .english)
     }
 
     func testModeTogglesPreserveOtherModeDimensions() {
@@ -4712,6 +4844,26 @@ final class InputControllerCoordinatorTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return (await provider.requests).count
+    }
+}
+
+private final class ModeSyncConversionRecorder: @unchecked Sendable {
+    var snapshots: [InputModeSnapshot] = []
+}
+
+private struct ModeSyncRecordingConversionEngine: KnowTypeConversionEngine {
+    var isNativeActive = false
+    var snapshot = ConversionEngineSnapshot(engineName: "mode-sync-recording")
+    let recorder: ModeSyncConversionRecorder
+
+    mutating func synchronizeInputMode(_ snapshot: InputModeSnapshot) {
+        recorder.snapshots.append(snapshot)
+    }
+
+    mutating func reset() {}
+
+    mutating func process(_: ConversionEngineKey) -> ConversionEngineResult {
+        ConversionEngineResult(handled: false, snapshot: snapshot)
     }
 }
 

@@ -9,7 +9,8 @@ between `InputControllerCoordinator` and the low-level
 ## Boundaries
 
 - It selects the effective write mode through `InputClientCompatibilityPolicy`.
-- It decides idle printable passthrough for ASCII/disabled modes.
+- It decides idle half-width printable passthrough for ASCII/disabled modes;
+  the coordinator handles full-width transformation before this boundary.
 - It writes inline attributed preedit or commit-only attributed placeholder
   marked text.
 - It tracks the KnowType-owned marked-text client id and clears only owned

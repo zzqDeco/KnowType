@@ -6,7 +6,7 @@ Extract host composition write decisions from `InputControllerCoordinator` into
 `InputClientCompositionWriter`.
 
 This PR keeps IMK behavior unchanged while reducing coordinator ownership of
-host write-mode selection, idle ASCII passthrough, placeholder marked text, and
+host write-mode selection, idle half-width ASCII passthrough, placeholder marked text, and
 KnowType-owned marked-text cleanup.
 
 ## Scope

@@ -52,6 +52,10 @@ input.
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct
   lexical-profile refresh and merge gates.
+- The engine caches the desired process `InputModeSnapshot` without creating a
+  native session. After schema selection, every new native session receives
+  `ascii_mode`, `ascii_punct`, and `full_shape`; later process-generation
+  changes update those options on the live session.
 - Raw-bypass state is checked before native session creation. If a composition
   entered non-ASCII bypass before a native session existed, later ASCII or
   navigation keys continue through the raw-bypass path until reset and still do
@@ -80,6 +84,9 @@ input.
   selection, highlight changes, composition commit, raw input, current schema,
   and page changes, must check `data_size` before reading the mirrored function
   pointer.
+- Session option get/set bridge calls guard both `data_size` and null function
+  pointers. Older librime APIs return unavailable without dereferencing missing
+  `set_option` or `get_option` members.
 - Sync/user-data directory bridge calls also guard versioned API members before
   dereferencing function pointers and return fallback errors when unavailable.
 - The C bridge treats `commit_composition`, `highlight_candidate_on_current_page`,

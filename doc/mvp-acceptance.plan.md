@@ -70,6 +70,18 @@ successful script run as proof of target-app typing behavior.
 - Feishu:
   - Repeat the WeChat chat-field flow.
   - Candidate window remains visible and usable.
+- Cross-app process mode:
+  - Toggle Chinese/ASCII, punctuation, and width in one app, then switch among
+    TextEdit, Chrome, Xcode, and Terminal. The mode remains unchanged for the
+    input-method host lifetime; no default/code-app mode is reloaded.
+  - With full width enabled, verify ASCII letters, digits, punctuation, and
+    normal space become full-width, while Tab, Return, and controls remain host
+    actions.
+  - During active Rime composition, toggle punctuation or width and verify the
+    resulting native commit matches the displayed mode.
+  - After external delete, caret/selection movement, or app focus change, type a
+    Chinese quote and verify whitespace/open punctuation opens while
+    text/digits/closing punctuation closes.
 
 ## Provider and Privacy Scenarios
 

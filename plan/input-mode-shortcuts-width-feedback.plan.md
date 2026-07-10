@@ -1,25 +1,28 @@
 # KnowType Input Mode Shortcuts Width Feedback
 
-Status: Active
+Status: Absorbed by
+[input-mode-punctuation-linkage.plan.md](input-mode-punctuation-linkage.plan.md)
+and [rime-mode-option-sync.plan.md](rime-mode-option-sync.plan.md).
 
 ## Summary
 
 Add the missing runtime shortcut for the third input-mode dimension:
-half-width/full-width symbols. KnowType keeps text mode, punctuation language,
-and symbol width independent, but each dimension now has an explicit shortcut
+half-width/full-width characters. KnowType keeps text mode, punctuation language,
+and character width independent, but each dimension now has an explicit shortcut
 and the transient mode-status row shows the full current state.
 
 ## Key Changes
 
 - `Option + /` toggles Chinese/ASCII text mode only.
 - `Option + .` toggles Chinese/English punctuation only.
-- `Shift + Space` toggles half-width/full-width symbols only.
+- `Shift + Space` toggles half-width/full-width characters only.
 - Every mode toggle resets punctuator pairing state and publishes the existing
   transient mode-status row, for example `中 · 中文标点 · 全角`; the row clears
   when the next real input key starts composition, symbol candidates, commit, or
   passthrough.
-- Plain `Space` remains candidate commit or normal space; Command/Control
-  modified Space stays unhandled so system shortcuts are not consumed.
+- Plain `Space` remains candidate commit, U+0020, or U+3000 according to active
+  composition and width; Command/Control modified Space stays unhandled so
+  system shortcuts are not consumed.
 
 ## Test Plan
 
@@ -34,6 +37,5 @@ and the transient mode-status row shows the full current state.
 
 - `Shift + Space` is the default full-width/half-width runtime shortcut because
   it matches common mature Chinese IME behavior.
-- Code-style apps keep their default Chinese composition + English punctuation
-  + half-width symbols policy; users can still switch the active session or
-  change saved settings.
+- All apps share the host-lifetime process mode. Host carrier compatibility does
+  not select different text, punctuation, or width defaults.

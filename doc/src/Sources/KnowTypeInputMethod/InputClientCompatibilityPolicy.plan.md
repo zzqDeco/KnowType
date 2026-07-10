@@ -24,15 +24,17 @@ carrier table.
   default to inline carrier. Host identity does not choose text or punctuation
   mode.
 - Any host uses `asciiPassthrough` while idle when the shared input mode is
-  ASCII. Terminal, iTerm, MacVim, and Emacs-style hosts begin in the same linked
-  Chinese mode as all other apps.
+  ASCII and width is half. Full-width printable ASCII is transformed and
+  inserted before this policy runs. Terminal, iTerm, MacVim, and Emacs-style
+  hosts begin in the same linked Chinese mode as all other apps.
 - During active Chinese composition, terminal-style or override commit-only
   hosts use `commitOnlyComposition`: KnowType writes a full-width-space
   attributed marked-text placeholder to keep the host composition and candidate
   anchor alive without exposing raw pinyin in the host text field. The real
   preedit display is owned by candidate-panel state, not by this policy.
 - `Option + /` switches the process-wide mode between Chinese composition and
-  idle ASCII passthrough for every host.
+  ASCII input for every host; half-width ASCII passes through and full-width
+  ASCII is inserted by KnowType.
 - Missing clients use `disabled`, allowing printable idle input to return
   unhandled rather than being swallowed.
 - Override keys use `input.client.<bundle id>.writeMode` in the shared

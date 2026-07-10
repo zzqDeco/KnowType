@@ -368,8 +368,8 @@ placement.
 
 | Shortcut | Behavior |
 |---|---|
-| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, produce a normal space or pass it through in compatibility hosts. |
-| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, produce ordinary digits or pass them through in compatibility hosts. |
+| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, produce a normal space, U+3000 in full-width mode, or pass it through in compatibility hosts. |
+| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, produce ordinary or full-width digits according to character width. |
 | Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the current Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. Left/up from the first row lands on the previous page's last row. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
@@ -378,7 +378,7 @@ placement.
 | `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. |
 | `Option + .` | In Chinese text mode, manually toggle Chinese/English punctuation until the next text-mode switch. In ASCII mode it leaves punctuation English and only repeats the mode status. |
 | `Option + /` | Toggle the process-wide Chinese/ASCII text mode. The switch also restores linked Chinese/English punctuation and is shared across apps. |
-| `Shift + Space` | Toggle the process-wide half-width/full-width setting without changing text or punctuation mode. |
+| `Shift + Space` | Toggle process-wide half-width/full-width characters without changing text or punctuation mode. Full width maps ASCII `!` through `~` and normal space; controls, Tab, and newline are unchanged. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
 | `Option + R` | Request explicit polish, the default rewrite path. |
@@ -390,11 +390,16 @@ punctuation, and `Option + /` restores that link. A manual `Option + .`
 override is available only while Chinese input is active and lasts until the
 next text-mode switch. Symbol width remains independent. All apps share the
 current state for the lifetime of the input-method host; a host restart begins
-again in linked Chinese mode with the saved global width. A period immediately
+again in linked Chinese mode with the saved global width. The active native Rime
+session receives the same `ascii_mode`, `ascii_punct`, and `full_shape` values
+after creation and on each process-mode generation change. A period immediately
 after an ASCII digit stays `.` for decimals and numbered lists, even in Chinese
 punctuation or full-width mode; comma and unknown/selected caret contexts keep
-the normal punctuation policy. Mode changes briefly show a status row such as
-`中 · 中文标点 · 半角`.
+the normal punctuation policy. Chinese quotes use caret context: whitespace or
+opening punctuation opens, while text, digits, or closing punctuation closes;
+unknown context falls back to session alternation. External delete, focus or
+selection movement, and mode changes reset that fallback. Mode changes briefly
+show a status row such as `中 · 中文标点 · 半角`.
 
 Host compatibility is conservative. Standard AppKit-style text fields, browsers,
 editors, IDEs, Electron shells, and unknown clients use inline composition with
@@ -408,7 +413,8 @@ mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;
 the real raw/preedit string is shown in KnowType's candidate panel above the
 candidates, then committed with `insertText`. When the global mode is switched
-to ASCII, idle printable input is passed back to the focused host. A UserDefaults override can force
+to ASCII, idle half-width printable input is passed back to the focused host;
+full-width printable input is transformed and inserted by KnowType. A UserDefaults override can force
 any bundle back to `commitOnlyComposition` when a host proves incompatible with
 inline marked text.
 

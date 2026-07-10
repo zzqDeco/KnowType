@@ -120,7 +120,8 @@ ASCII digit stays `.`. `Option+/` changes the process-wide linked text mode and
 `Option+R` requests explicit polish only. `InputNativeCandidateNavigationRuntime`
 owns Rime navigation decisions; the coordinator still applies commit results,
 learning, marked text, insertion, and panel publication. Idle printable input
-is returned unhandled whenever the shared mode is ASCII. All hosts start in
+is returned unhandled whenever the shared mode is ASCII and width is half;
+full-width printable ASCII is transformed and inserted by KnowType. All hosts start in
 linked Chinese mode; terminal-style hosts differ only by using placeholder
 carrier during composition. Duplicate native surface forms keep their Rime
 stable index, and runtime lexicon reload no longer replaces the production
