@@ -58,7 +58,8 @@ Installs the locally built KnowType input method bundle into
 - A pre-v2 source bundle never receives the unknown migration command. Before
   replacement, the currently installed generation-2 executable transactionally
   downgrades provider metadata; without such an executable, the installer
-  requires already-compatible numeric legacy metadata and no canonical file.
+  requires already-compatible numeric legacy metadata and no canonical,
+  snapshot, or compare-and-claim file.
   Otherwise installation fails before publishing the older app.
 - If a later step fails, the installer checks the backup app's declared storage
   generation before publishing it. For a pre-v2 backup, the still-canonical new

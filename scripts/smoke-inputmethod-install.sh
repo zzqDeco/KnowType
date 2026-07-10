@@ -248,6 +248,10 @@ declare -F knowtype_clean_preferencepane_caches >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
 declare -F knowtype_legacy_provider_storage_is_compatible >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load legacy provider validation helpers"
+declare -F knowtype_provider_storage_is_pre_v2_compatible >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load provider storage compatibility helpers"
+declare -F knowtype_migrate_provider_storage_for_bundle >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load provider storage migration helpers"
 
 legacy_validation_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-legacy-provider-validation.XXXXXX")"
 printf '%s\n' '{"schemaVersion":1,"profiles":[]}' >"$legacy_validation_root/valid.json"
@@ -264,6 +268,28 @@ for invalid_legacy_path in \
     die "legacy provider validation accepted incompatible metadata: $invalid_legacy_path"
   fi
 done
+
+pre_v2_storage_root="$legacy_validation_root/storage"
+mkdir -p "$pre_v2_storage_root"
+knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root" ||
+  die "pre-v2 provider compatibility rejected empty storage"
+cp "$legacy_validation_root/valid.json" "$pre_v2_storage_root/providers.json"
+knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root" ||
+  die "pre-v2 provider compatibility rejected a valid legacy envelope"
+printf '{}\n' >"$pre_v2_storage_root/providers.v2.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted canonical metadata"
+fi
+rm -f "$pre_v2_storage_root/providers.v2.json"
+printf '{}\n' >"$pre_v2_storage_root/providers.legacy.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted an interrupted migration snapshot"
+fi
+rm -f "$pre_v2_storage_root/providers.legacy.json"
+printf '{}\n' >"$pre_v2_storage_root/providers.legacy-conflict.interrupted.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted an interrupted migration claim"
+fi
 rm -rf "$legacy_validation_root"
 
 manifest_smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-manifest-smoke.XXXXXX")"
@@ -404,7 +430,7 @@ legacy_provider_fixture='{"schemaVersion":1,"profiles":[]}'
 printf '%s\n' "$legacy_provider_fixture" >"$migration_support_dir/providers.json"
 migration_output="$({
   KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
-    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-migrate-provider-profiles
+    knowtype_migrate_provider_storage_for_bundle "$bundle_path"
 })"
 assert_contains "$migration_output" "provider.migration.status=migrated" "provider migration CLI output"
 migration_revision="$(printf '%s\n' "$migration_output" | awk -F= '/^provider\.migration\.revision=/{print $2; exit}')"

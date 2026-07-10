@@ -39,8 +39,12 @@ uninstall scripts.
   switches away from KnowType and quiesces Settings writers. Each app declares
   `KnowTypeProviderProfileStorageGeneration` in `Info.plist`. Before a pre-v2
   backup becomes canonical, the current app runs the explicit privacy-safe
-  provider downgrade command; unknown or incompatible storage fails closed.
-  Only then does rollback restore the backup app and refresh
+  provider downgrade command; without a usable generation-2 executable,
+  canonical metadata or interrupted migration evidence fails closed. After a
+  generation-2 backup is published, its explicit migration command converts any
+  legacy metadata before the previous app is discarded or registration begins;
+  failure restores the previous app only after metadata compatibility is proven.
+  Only then does rollback refresh
   LaunchServices, clears stale prefPane caches, repairs scoped input-source
   preferences, runs helper bootstrap without `--select`, and writes
   `install-state.json`. The running-host check matches the full process command

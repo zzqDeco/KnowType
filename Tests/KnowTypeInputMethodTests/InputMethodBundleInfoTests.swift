@@ -596,6 +596,9 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains(#""$executable" --knowtype-downgrade-provider-profiles"#))
         XCTAssertTrue(installScript.contains("provider_storage_generation_for_bundle"))
         XCTAssertTrue(installHelper.contains("knowtype_legacy_provider_storage_is_compatible"))
+        XCTAssertTrue(installHelper.contains("knowtype_provider_storage_is_pre_v2_compatible"))
+        XCTAssertTrue(installHelper.contains("knowtype_migrate_provider_storage_for_bundle"))
+        XCTAssertTrue(installScript.contains("knowtype_provider_storage_is_pre_v2_compatible"))
         XCTAssertTrue(installHelper.contains(#"payload["schemaVersion"] != 1"#))
         XCTAssertTrue(installHelper.contains(#"not isinstance(payload.get("profiles"), list)"#))
         let sourceGenerationGuard = try XCTUnwrap(
@@ -730,7 +733,11 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(rollbackScript.contains(#"--knowtype-register-input-source --knowtype-enable-input-source"#))
         XCTAssertTrue(rollbackScript.contains("require_input_method_host_stopped"))
         XCTAssertTrue(rollbackScript.contains("prepare_provider_storage_for_restored_app"))
+        XCTAssertTrue(rollbackScript.contains("migrate_provider_storage_for_restored_app"))
+        XCTAssertTrue(rollbackScript.contains("restore_current_app_after_failed_provider_migration"))
         XCTAssertTrue(rollbackScript.contains("--knowtype-downgrade-provider-profiles"))
+        XCTAssertTrue(rollbackScript.contains("knowtype_provider_storage_is_pre_v2_compatible"))
+        XCTAssertTrue(rollbackScript.contains("knowtype_migrate_provider_storage_for_bundle"))
         XCTAssertTrue(rollbackScript.contains("KnowTypeProviderProfileStorageGeneration"))
         let explicitProviderDowngrade = try XCTUnwrap(
             rollbackScript.range(of: "\nprepare_provider_storage_for_restored_app\n")
@@ -742,6 +749,18 @@ final class InputMethodBundleInfoTests: XCTestCase {
             explicitProviderDowngrade.lowerBound,
             explicitOldAppPublish.lowerBound,
             "explicit rollback must prepare compatible provider metadata before publishing the backup app"
+        )
+        let restoredV2Migration = try XCTUnwrap(
+            rollbackScript.range(of: "\nif ! migrate_provider_storage_for_restored_app; then")
+        )
+        let previousAppCleanup = try XCTUnwrap(
+            rollbackScript.range(of: #"rm -rf "$current_app_staging_dir""#, range: restoredV2Migration.upperBound..<rollbackScript.endIndex)
+        )
+        XCTAssertLessThan(explicitOldAppPublish.lowerBound, restoredV2Migration.lowerBound)
+        XCTAssertLessThan(
+            restoredV2Migration.lowerBound,
+            previousAppCleanup.lowerBound,
+            "generation-2 rollback must migrate legacy provider metadata before discarding the previous app"
         )
         XCTAssertTrue(rollbackScript.contains("process shutdown can flush Rime user data"))
         XCTAssertTrue(rollbackScript.contains("knowtype_input_method_host_is_running"))

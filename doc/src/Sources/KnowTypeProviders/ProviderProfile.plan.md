@@ -49,7 +49,10 @@
 - Explicit app rollback uses `downgradeCanonicalProfilesForLegacyRuntime()`
   before publishing a pre-v2 binary. It writes the current canonical profile set
   as schema v1, preserves current Keychain references, and removes canonical
-  metadata only after the legacy payload is verified.
+  metadata only after the legacy payload is verified. If migration stopped at
+  the provisional tombstone or compare-and-claim step, downgrade restores the
+  exact snapshot only when the matching claim proves ownership; it never
+  replaces recoverable profiles with an empty legacy payload.
 - A successful production commit posts only the new revision through
   `ProviderProfileRevisionSignaling`; the default signal crosses process
   boundaries and exposes no profile or credential contents.

@@ -576,7 +576,21 @@ public struct FileProviderProfileStore: ProviderProfileStore {
                         revision: legacy.revision,
                         profileCount: legacy.profiles.count
                     )
-                case .absent, .unmanaged:
+                case .absent:
+                    if interruptedLegacyMigrationEvidenceExistsWithoutLock() {
+                        let legacy = try recoverInterruptedLegacyProfilesForDowngradeWithoutLock()
+                        return ProviderProfileStorageDowngradeResult(
+                            status: .alreadyLegacy,
+                            revision: legacy.revision,
+                            profileCount: legacy.profiles.count
+                        )
+                    }
+                    return ProviderProfileStorageDowngradeResult(
+                        status: .alreadyLegacy,
+                        revision: 0,
+                        profileCount: 0
+                    )
+                case .unmanaged:
                     return ProviderProfileStorageDowngradeResult(
                         status: .alreadyLegacy,
                         revision: 0,
@@ -586,11 +600,11 @@ public struct FileProviderProfileStore: ProviderProfileStore {
                     if legacyTombstoneExpectsCanonicalWithoutLock() {
                         throw ProviderProfileStoreError.canonicalFileMissing(path: fileURL.path)
                     }
-                    try writeLegacyPayloadWithoutLock(profiles: [])
+                    let legacy = try recoverInterruptedLegacyProfilesForDowngradeWithoutLock()
                     return ProviderProfileStorageDowngradeResult(
                         status: .alreadyLegacy,
-                        revision: 0,
-                        profileCount: 0
+                        revision: legacy.revision,
+                        profileCount: legacy.profiles.count
                     )
                 }
             }
@@ -918,6 +932,18 @@ public struct FileProviderProfileStore: ProviderProfileStore {
         }
         try? FileManager.default.removeItem(at: matchingClaimURL)
         return snapshotData
+    }
+
+    private func recoverInterruptedLegacyProfilesForDowngradeWithoutLock() throws
+        -> LegacyProviderProfilesEnvelope {
+        guard let recoveredData = try recoverInterruptedLegacyMigrationWithoutLock() else {
+            throw ProviderProfileStoreError.migrationRollbackFailed
+        }
+        let legacy = try JSONDecoder().decode(LegacyProviderProfilesEnvelope.self, from: recoveredData)
+        if let legacySnapshotURL {
+            try? FileManager.default.removeItem(at: legacySnapshotURL)
+        }
+        return legacy
     }
 
     private func legacyStorageStateWithoutLock() -> LegacyProviderProfileStorageState {

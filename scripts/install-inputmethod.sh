@@ -258,9 +258,7 @@ prepare_provider_storage_for_source_bundle() {
     esac
   fi
 
-  local canonical_path
-  canonical_path="$(knowtype_app_support_dir)/providers.v2.json"
-  if [[ -e "$canonical_path" ]] || ! knowtype_legacy_provider_storage_is_compatible; then
+  if ! knowtype_provider_storage_is_pre_v2_compatible; then
     echo "error: provider storage is not compatible with the pre-v2 source bundle and no generation-2 installed app can downgrade it" >&2
     return 1
   fi

@@ -67,7 +67,11 @@ wire formats or adding a runtime reload observer.
 - Explicit user-requested rollback reads the target app's declared provider
   storage generation. A pre-v2 target is not published until the current app
   has converted the latest canonical profile set to a verified numeric legacy
-  payload; values and Keychain secrets are preserved.
+  payload; values and Keychain secrets are preserved. A generation-2 target
+  migrates legacy metadata after bundle publication but before registration and
+  before the previous app is discarded. Interrupted migration evidence is
+  recovered only through its matching claim and is never replaced by an empty
+  profile set.
 - ViewModels compare their complete loaded baseline before each operation and
   use the store CAS again at commit time. In-flight connection results also
   recheck the baseline before publication.

@@ -155,11 +155,11 @@ stop_provider_profile_writer_hosts() {
 prepare_provider_storage_for_restored_app() {
   local restored_generation current_generation current_executable output status
   restored_generation="$(provider_storage_generation_for_bundle "$backup_dir/KnowType.app" || true)"
+  stop_provider_profile_writer_hosts
   if [[ "$restored_generation" =~ ^[0-9]+$ ]] && (( restored_generation >= 2 )); then
     return 0
   fi
 
-  stop_provider_profile_writer_hosts
   current_generation="$(provider_storage_generation_for_bundle "$target_path" || true)"
   if [[ "$current_generation" =~ ^[0-9]+$ ]] && (( current_generation >= 2 )); then
     current_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
@@ -189,11 +189,58 @@ prepare_provider_storage_for_restored_app() {
     return 0
   fi
 
-  if ! knowtype_legacy_provider_storage_is_compatible; then
+  if ! knowtype_provider_storage_is_pre_v2_compatible; then
     echo "error: current app cannot downgrade the provider tombstone for this pre-v2 backup" >&2
     echo "Reinstall the current KnowType build, then retry rollback." >&2
     return 1
   fi
+}
+
+migrate_provider_storage_for_restored_app() {
+  local restored_generation
+  restored_generation="$(provider_storage_generation_for_bundle "$target_path" || true)"
+  if [[ ! "$restored_generation" =~ ^[0-9]+$ ]] || (( restored_generation < 2 )); then
+    return 0
+  fi
+  if ! knowtype_migrate_provider_storage_for_bundle "$target_path"; then
+    echo "error: provider profile migration failed; refusing to finalize the generation-2 rollback" >&2
+    return 1
+  fi
+}
+
+restore_current_app_after_failed_provider_migration() {
+  local previous_app="$current_app_staging_dir/KnowType.app"
+  local previous_generation=""
+  local restored_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
+  local output=""
+  local status=""
+
+  [[ -d "$previous_app" ]] || return 1
+  previous_generation="$(provider_storage_generation_for_bundle "$previous_app" || true)"
+  if [[ ! "$previous_generation" =~ ^[0-9]+$ ]] || (( previous_generation < 2 )); then
+    if [[ ! -x "$restored_executable" ]] ||
+       ! output="$("$restored_executable" --knowtype-downgrade-provider-profiles 2>&1)"; then
+      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+      echo "error: provider metadata could not be returned to a pre-v2-compatible state; keeping the generation-2 app" >&2
+      return 1
+    fi
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    status="$(printf '%s\n' "$output" | awk -F= '/^provider\.storage\.downgrade\.status=/{print $2; exit}')"
+    case "$status" in
+      downgraded|already_legacy|unmanaged)
+        ;;
+      *)
+        echo "error: provider storage downgrade returned an unknown status; keeping the generation-2 app" >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  knowtype_remove_local_inputmethod_bundle_if_safe "$target_path" 0
+  mv "$previous_app" "$target_path"
+  rm -rf "$current_app_staging_dir"
+  current_app_staging_dir=""
+  return 0
 }
 
 reapply_provider_migration_after_abandoned_rollback() {
@@ -318,7 +365,7 @@ if (( DRY_RUN == 1 )); then
   if [[ ! "$restored_provider_generation" =~ ^[0-9]+$ ]] || (( restored_provider_generation < 2 )); then
     echo "[dry-run] Would quiesce Settings writers and convert current provider metadata to the legacy numeric schema before publishing this pre-v2 app."
   else
-    echo "[dry-run] Restored app supports provider storage generation $restored_provider_generation; canonical metadata would remain in place."
+    echo "[dry-run] Restored app supports provider storage generation $restored_provider_generation; after publishing it, rollback would migrate any legacy metadata before registration."
   fi
   if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
     echo "Target PreferencePane: $prefpane_path"
@@ -407,6 +454,14 @@ if ! mv "$restore_app_staging_dir/KnowType.app" "$target_path"; then
 fi
 rm -rf "$restore_app_staging_dir"
 restore_app_staging_dir=""
+if ! migrate_provider_storage_for_restored_app; then
+  if restore_current_app_after_failed_provider_migration; then
+    echo "Restored the previous app after provider profile migration failed." >&2
+  else
+    echo "The generation-2 backup remains installed so canonical provider metadata stays fail-closed." >&2
+  fi
+  exit 1
+fi
 rm -rf "$current_app_staging_dir"
 current_app_staging_dir=""
 

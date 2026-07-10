@@ -451,6 +451,92 @@ final class ProviderProfileTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: claimURL.path))
     }
 
+    func testDowngradeRecoversInterruptedProvisionalTombstone() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-provisional-downgrade-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let snapshotURL = try XCTUnwrap(store.legacySnapshotURL)
+        let profile = ProviderProfile(
+            id: "recovered",
+            displayName: "Recovered",
+            kind: .openAIChat,
+            baseURL: URL(string: "https://example.com/v1")!,
+            model: "model",
+            isDefault: true
+        )
+        let legacyData = try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [profile])
+        )
+        try legacyData.write(to: snapshotURL, options: [.atomic])
+        let claimURL = legacyURL.deletingLastPathComponent().appendingPathComponent(
+            "\(FileProviderProfileStore.legacyConflictFilenamePrefix)interrupted.json"
+        )
+        try legacyData.write(to: claimURL, options: [.atomic])
+        try Data(
+            """
+            {
+              "canonicalFile" : "providers.v2.json",
+              "canonicalExpected" : false,
+              "profiles" : [],
+              "schemaVersion" : "migrated-to-providers.v2.json"
+            }
+            """.utf8
+        ).write(to: legacyURL, options: [.atomic])
+
+        let result = try store.downgradeCanonicalProfilesForLegacyRuntime()
+
+        XCTAssertEqual(
+            result,
+            ProviderProfileStorageDowngradeResult(
+                status: .alreadyLegacy,
+                revision: 0,
+                profileCount: 1
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: legacyURL), legacyData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: claimURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshotURL.path))
+    }
+
+    func testDowngradeRecoversInterruptedClaimBeforeProvisionalTombstone() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-claim-downgrade-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let snapshotURL = try XCTUnwrap(store.legacySnapshotURL)
+        let profile = ProviderProfile(
+            id: "recovered",
+            displayName: "Recovered",
+            kind: .openAIChat,
+            baseURL: URL(string: "https://example.com/v1")!,
+            model: "model",
+            isDefault: true
+        )
+        let legacyData = try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [profile])
+        )
+        try legacyData.write(to: snapshotURL, options: [.atomic])
+        let claimURL = legacyURL.deletingLastPathComponent().appendingPathComponent(
+            "\(FileProviderProfileStore.legacyConflictFilenamePrefix)interrupted.json"
+        )
+        try legacyData.write(to: claimURL, options: [.atomic])
+
+        let result = try store.downgradeCanonicalProfilesForLegacyRuntime()
+
+        XCTAssertEqual(result.profileCount, 1)
+        XCTAssertEqual(try Data(contentsOf: legacyURL), legacyData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: claimURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshotURL.path))
+    }
+
     func testMigrationRejectsSnapshotWithoutMatchingInterruptedClaim() throws {
         let applicationSupport = FileManager.default.temporaryDirectory
             .appendingPathComponent("provider-profile-unproven-recovery-\(UUID().uuidString)", isDirectory: true)
