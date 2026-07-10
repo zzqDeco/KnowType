@@ -235,8 +235,30 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertFalse(baseKey.contains("tenant-a"))
     }
 
-    func testOpenAIResponsesParsesOutputText() async throws {
-        let client = MockHTTPClient(json: #"{"output_text":"{\"candidates\":[{\"text\":\"still needs more validation\"}]}"}"#)
+    func testOpenAIResponsesTraversesReasoningMessagesAndOutputTextItems() async throws {
+        let client = MockHTTPClient(json: #"""
+        {
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "summary": []},
+            {
+              "type": "message",
+              "status": "completed",
+              "content": [
+                {"type": "output_text", "text": "{\"candidates\":["},
+                {"type": "output_text", "text": "{\"text\":\"still needs more validation\"},"}
+              ]
+            },
+            {
+              "type": "message",
+              "status": "completed",
+              "content": [
+                {"type": "output_text", "text": "{\"text\":\"then verify the rollout\"}]}"}
+              ]
+            }
+          ]
+        }
+        """#)
         let provider = OpenAIResponsesProvider(
             configuration: ProviderConfiguration(
                 kind: .openAIResponses,
@@ -255,7 +277,81 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(format["type"] as? String, "json_schema")
         XCTAssertEqual(format["strict"] as? Bool, true)
         XCTAssertEqual(bodyObject["instructions"] as? String, PromptBuilder.systemPrompt(for: .continuation))
-        XCTAssertEqual(response.candidates.first?.text, "still needs more validation")
+        XCTAssertEqual(
+            response.candidates.map(\.text),
+            ["still needs more validation", "then verify the rollout"]
+        )
+    }
+
+    func testOpenAIResponsesRejectsRefusalEvenAfterOutputText() async throws {
+        let client = MockHTTPClient(json: #"""
+        {
+          "status": "completed",
+          "output": [{
+            "type": "message",
+            "status": "completed",
+            "content": [
+              {"type": "output_text", "text": "{\"candidates\":[{\"text\":\"partial\"}]}"},
+              {"type": "refusal", "refusal": "not available"}
+            ]
+          }]
+        }
+        """#)
+        let provider = OpenAIResponsesProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIResponses,
+                baseURL: URL(string: "https://api.example.com")!,
+                apiKey: "key",
+                model: "model"
+            ),
+            httpClient: client
+        )
+
+        do {
+            _ = try await provider.complete(llmRequest)
+            XCTFail("Expected refusal to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderError,
+                .invalidResponse("response contained a refusal")
+            )
+        }
+    }
+
+    func testOpenAIResponsesRejectsIncompleteBeforeParsingPartialStructuredOutput() async throws {
+        let client = MockHTTPClient(json: #"""
+        {
+          "status": "incomplete",
+          "incomplete_details": {"reason": "max_output_tokens"},
+          "output": [{
+            "type": "message",
+            "status": "incomplete",
+            "content": [{
+              "type": "output_text",
+              "text": "{\"candidates\":[{\"text\":\"parseable but incomplete\"}]}"
+            }]
+          }]
+        }
+        """#)
+        let provider = OpenAIResponsesProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIResponses,
+                baseURL: URL(string: "https://api.example.com")!,
+                apiKey: "key",
+                model: "model"
+            ),
+            httpClient: client
+        )
+
+        do {
+            _ = try await provider.complete(llmRequest)
+            XCTFail("Expected incomplete response to be rejected")
+        } catch {
+            XCTAssertEqual(
+                error as? ProviderError,
+                .invalidResponse("response incomplete: max_output_tokens")
+            )
+        }
     }
 
     func testOpenAIResponsesFallsBackToJSONModeWhenSchemaFormatIsUnsupported() async throws {
@@ -409,7 +505,34 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(format["type"] as? String, "json_schema")
         XCTAssertEqual(format["strict"] as? Bool, true)
         XCTAssertEqual(bodyObject["system"] as? String, PromptBuilder.systemPrompt(for: .continuation))
+        XCTAssertNil(bodyObject["temperature"])
+        XCTAssertNil(bodyObject["top_p"])
+        XCTAssertNil(bodyObject["top_k"])
         XCTAssertEqual(response.candidates.first?.text, "继续推进")
+    }
+
+    func testAnthropicDiagnosticUsesSamplingFreeCompletionRequestBuilder() async throws {
+        await StructuredOutputCapabilityCache.shared.reset()
+        let content = #"{"candidates":[{"text":" continues safely","confidence":0.9,"reason":"ok"}]}"#
+        let escaped = content.replacingOccurrences(of: "\"", with: "\\\"")
+        let client = MockHTTPClient(json: #"{"content":[{"type":"text","text":"\#(escaped)"}]}"#)
+        let configuration = ProviderConfiguration(
+            kind: .anthropicMessages,
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "key",
+            model: "claude-haiku-4-5-20251001"
+        )
+        let diagnostic = ProviderConnectionDiagnostic(providerBuilder: { configuration in
+            AnthropicMessagesProvider(configuration: configuration, httpClient: client)
+        })
+
+        _ = try await diagnostic.test(configuration: configuration)
+        let bodyObject = try requestBodyObject(await client.capturedRequest())
+
+        XCTAssertNil(bodyObject["temperature"])
+        XCTAssertNil(bodyObject["top_p"])
+        XCTAssertNil(bodyObject["top_k"])
+        XCTAssertNotNil(bodyObject["output_config"])
     }
 
     func testOpenAICompatibleBaseURLMayIncludeV1() async throws {
@@ -812,5 +935,81 @@ final class ProviderAdapterTests: XCTestCase {
 
         XCTAssertEqual(body, #"{"task":"continuation","prefix":"我觉得这个方案","n":3}"#)
         XCTAssertEqual(response.candidates.first?.text, "核心假设还需要进一步验证")
+    }
+
+    func testCustomHTTPTemplateDoesNotRescanReplacementTextAndIsDeterministic() async throws {
+        let responseJSON = #"{"candidates":[{"text":"继续"}]}"#
+        let client = SequencedMockHTTPClient(responses: [
+            (json: responseJSON, statusCode: 200),
+            (json: responseJSON, statusCode: 200)
+        ])
+        let provider = CustomHTTPProvider(
+            configuration: ProviderConfiguration(
+                kind: .customHTTP,
+                baseURL: URL(string: "https://custom.example/infer")!,
+                model: "custom",
+                customBodyTemplate: #"{"raw":"{{raw_input}}","prefix":"{{locked_prefix}}","request":{{request_json}}}"#,
+                customResponsePath: "candidates"
+            ),
+            httpClient: client
+        )
+        var firstDocuments: [String: String] = [:]
+        firstDocuments["B.md"] = "second"
+        firstDocuments["A.md"] = "first"
+        var secondDocuments: [String: String] = [:]
+        secondDocuments["A.md"] = "first"
+        secondDocuments["B.md"] = "second"
+        let rawInput = "literal {{task}} {{locale}} {{request_json}}"
+        let lockedPrefix = "prefix {{raw_input}}"
+
+        for documents in [firstDocuments, secondDocuments] {
+            _ = try await provider.complete(
+                LLMRequest(
+                    task: .continuation,
+                    lockedPrefix: lockedPrefix,
+                    rawInput: rawInput,
+                    locale: .mixed,
+                    contextDocuments: documents
+                )
+            )
+        }
+
+        let requests = await client.capturedRequests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[0].httpBody, requests[1].httpBody)
+        let bodyObject = try requestBodyObject(requests[0])
+        let embeddedRequest = try XCTUnwrap(bodyObject["request"] as? [String: Any])
+        XCTAssertEqual(bodyObject["raw"] as? String, rawInput)
+        XCTAssertEqual(bodyObject["prefix"] as? String, lockedPrefix)
+        XCTAssertEqual(embeddedRequest["rawInput"] as? String, rawInput)
+        XCTAssertEqual(embeddedRequest["lockedPrefix"] as? String, lockedPrefix)
+    }
+
+    func testCustomHTTPTemplateRejectsUnknownAndUnclosedPlaceholders() async throws {
+        for (template, expectedError) in [
+            (#"{"value":"{{unknown}}"}"#, ProviderError.invalidTemplate("unknown placeholder: unknown")),
+            (#"{"value":"{{raw_input"}"#, ProviderError.invalidTemplate("unclosed placeholder"))
+        ] {
+            let client = MockHTTPClient(json: #"{"candidates":[]}"#)
+            let provider = CustomHTTPProvider(
+                configuration: ProviderConfiguration(
+                    kind: .customHTTP,
+                    baseURL: URL(string: "https://custom.example/infer")!,
+                    model: "custom",
+                    customBodyTemplate: template,
+                    customResponsePath: "candidates"
+                ),
+                httpClient: client
+            )
+
+            do {
+                _ = try await provider.complete(llmRequest)
+                XCTFail("Expected invalid template to be rejected")
+            } catch {
+                XCTAssertEqual(error as? ProviderError, expectedError)
+            }
+            let capturedRequest = await client.capturedRequest()
+            XCTAssertNil(capturedRequest)
+        }
     }
 }

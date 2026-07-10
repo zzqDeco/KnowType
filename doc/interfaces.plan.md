@@ -49,6 +49,14 @@ endpoints that reject schema fields fall back once to JSON mode and report `stru
 rejects those fields. Ollama and custom HTTP do not claim provider-enforced schema, but their outputs still pass
 through strict local decoding instead of line-based candidate extraction.
 
+Raw OpenAI Responses payloads are accepted only after the adapter confirms a
+completed response, traverses every `message` output and `output_text` content
+item, and rejects any refusal or incomplete message. All collected text is
+decoded as one structured value, so a valid-looking partial item cannot be
+accepted independently. Anthropic Messages requests omit `temperature`,
+`top_p`, and `top_k` by default; ordinary completion and Settings connection
+diagnostics use the same adapter request builder.
+
 Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; unselected Rime candidates are not sent to the provider and must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
 Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from unconfirmed raw input:
@@ -169,6 +177,12 @@ When canonical `providers.v2.json` is missing in a genuinely new store or is
 empty, settings and runtime loading share seeded defaults. The default profile
 is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model`
 blank for discovery, and does not embed an API key.
+New Anthropic and Gemini templates use `claude-haiku-4-5-20251001` and
+`gemini-3.5-flash`. On profile load, the exact retired IDs
+`claude-3-5-haiku-latest` and `gemini-1.5-flash` migrate once through the
+observed provider-file revision only when the provider kind and canonical
+official HTTPS root endpoint also match. Custom proxy paths, hosts, queries,
+and non-exact model IDs are preserved.
 
 Settings validation rules:
 
@@ -182,6 +196,9 @@ Settings validation rules:
 - local OpenAI-compatible profiles may leave model blank for `/v1/models` discovery
 - cloud profiles require a new key or an existing non-empty secret
 - custom HTTP profiles require body template and response path, but may omit the API key
+- custom HTTP placeholders are rendered in one pass over the original template;
+  replacement text is never rescanned, and unknown or unclosed placeholders fail
+  before a request is sent
 - stale ViewModel revisions reject saves and default changes, refresh disk state,
   and preserve the draft
 - profile saves publish new settings only after a required new secret and the

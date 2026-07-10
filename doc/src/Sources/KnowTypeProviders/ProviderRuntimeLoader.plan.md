@@ -15,6 +15,8 @@ provider used by the input method.
 ## Behavior Notes
 
 - Missing or empty profile storage falls back to `ProviderProfileTemplates`.
+- Existing profiles pass through the revision-aware retired-template migration
+  before the default provider is resolved.
 - `secretName` values resolve through `SecretStore`.
 - IMK cold-start paths use `loadDefaultProvider(createProfileDirectory: false)`
   through lazy AI runtimes. This reads an existing profile when present but does

@@ -17,6 +17,13 @@ the input-method runtime.
 - The model may remain blank for local `/v1/models` discovery.
 - Settings and runtime loading should use the same seeded defaults so a fresh
   install behaves consistently.
+- New Anthropic and Gemini templates use `claude-haiku-4-5-20251001` and
+  `gemini-3.5-flash`.
+- Exact retired template IDs migrate through an expected-revision transaction
+  only for the matching provider kind and canonical official HTTPS root
+  endpoint. Proxy hosts, paths, queries, and non-exact IDs are never rewritten.
+- A revision conflict reloads current profiles once before retrying so unrelated
+  concurrent edits are preserved.
 
 ## Tests
 

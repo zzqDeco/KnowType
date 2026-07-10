@@ -298,6 +298,14 @@ key. Remote OpenAI-compatible profiles require an explicit model ID; local
 OpenAI-compatible profiles may leave the model blank for `/v1/models`
 discovery.
 
+New Anthropic and Gemini profiles use `claude-haiku-4-5-20251001` and
+`gemini-3.5-flash`. Saved profiles using the exact retired template IDs are
+updated once only on the matching official API endpoint; custom proxy endpoints
+keep their configured model. Custom HTTP body placeholders are expanded in one
+pass, so placeholder-like text inside user input is preserved. Unknown or
+unclosed `{{...}}` placeholders fail the connection request as an invalid
+template.
+
 AI context files live under `~/.knowtype/`. `ENV.md` stores local context
 memory for the AI recommendation slot, `CORRECTION.md` stores user-editable AI
 correction instructions, and `LEXICAL_PROFILE.md` mirrors the local top-K
