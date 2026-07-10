@@ -22,7 +22,8 @@ def privacy_safe_endpoint_summary(value):
         netloc = rendered_host
         if parsed.port is not None:
             netloc = f"{netloc}:{parsed.port}"
-        return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
+        summary = urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
+        return f"{summary} [query redacted]" if parsed.query else summary
     except (TypeError, ValueError):
         return INVALID_ENDPOINT
 

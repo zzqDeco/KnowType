@@ -24,10 +24,14 @@ public enum ProviderEndpointURLPolicy {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return "<invalid endpoint>"
         }
+        let redactedQuery = components.percentEncodedQuery?.isEmpty == false
         components.user = nil
         components.password = nil
         components.query = nil
         components.fragment = nil
-        return components.string ?? "<invalid endpoint>"
+        guard let summary = components.string else {
+            return "<invalid endpoint>"
+        }
+        return redactedQuery ? "\(summary) [query redacted]" : summary
     }
 }

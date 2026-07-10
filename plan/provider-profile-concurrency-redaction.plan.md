@@ -64,6 +64,6 @@ wire formats or adding a runtime reload observer.
 - Runtime consumers continue loading provider state on their existing lifecycle;
   this slice emits the cross-process signal but intentionally adds no observer.
 - Query parameters remain accepted for compatibility but are always omitted from
-  diagnostics.
+  diagnostics; summaries append `[query redacted]` when a query was removed.
 - Failure to remove an old unreferenced credential is reported after a successful
   metadata commit; the active metadata/credential pair is not rolled back.

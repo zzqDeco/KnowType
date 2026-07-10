@@ -9,6 +9,8 @@ by `scripts/diagnose-inputmethod.sh` in text and JSON modes.
 
 - Keep only scheme, host, port, and path.
 - Remove username, password, query, and fragment for every output mode.
+- Append `[query redacted]` when a non-empty query was removed, without exposing
+  query keys or values.
 - Return `<invalid endpoint>` rather than echoing an input that cannot be parsed
   safely.
 - Do not inspect provider secrets or Keychain state.

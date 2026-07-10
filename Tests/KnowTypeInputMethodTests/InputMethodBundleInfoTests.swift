@@ -956,13 +956,18 @@ final class InputMethodBundleInfoTests: XCTestCase {
         let snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: jsonOutput) as? [String: Any])
         let ai = try XCTUnwrap(snapshot["ai"] as? [String: Any])
         let defaultProfile = try XCTUnwrap(ai["defaultProfile"] as? [String: Any])
-        XCTAssertEqual(defaultProfile["baseURL"] as? String, "https://example.com/v1")
+        XCTAssertEqual(
+            defaultProfile["baseURL"] as? String,
+            "https://example.com/v1 [query redacted]"
+        )
         let jsonText = try XCTUnwrap(String(data: jsonOutput, encoding: .utf8))
         XCTAssertFalse(jsonText.contains("TOPSECRET"))
         XCTAssertFalse(jsonText.contains("user:pass"))
 
         let textOutput = try runDiagnoseText(scriptURL: scriptURL, homeURL: home, bundleURL: bundle)
-        XCTAssertTrue(textOutput.contains("default AI provider: Work · openAIResponses · gpt-test · https://example.com/v1"))
+        XCTAssertTrue(textOutput.contains(
+            "default AI provider: Work · openAIResponses · gpt-test · https://example.com/v1 [query redacted]"
+        ))
         XCTAssertFalse(textOutput.contains("TOPSECRET"))
         XCTAssertFalse(textOutput.contains("user:pass"))
         XCTAssertFalse(textOutput.contains("api_key"))
