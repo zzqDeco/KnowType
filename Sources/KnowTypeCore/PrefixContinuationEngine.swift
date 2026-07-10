@@ -100,19 +100,16 @@ public final class PrefixContinuationEngine: Sendable {
             return ContinuationSanitizationResult(text: nil, reason: .sameAsPrefix)
         }
 
-        var removedProtocolSeparator = false
         if candidate.hasPrefix("|") || candidate.hasPrefix("｜") {
             candidate.removeFirst()
             candidate = trimProtocolJoiners(candidate)
-            removedProtocolSeparator = true
         }
 
         guard !candidate.isEmpty else {
             return ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
         }
         if candidate.hasPrefix(prefix)
-            || ((repaired || removedProtocolSeparator)
-                && repeatsLockedPrefixAfterBoundary(candidate, lockedPrefix: prefix)) {
+            || repeatsLockedPrefixAfterBoundary(candidate, lockedPrefix: prefix) {
             return ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix)
         }
 

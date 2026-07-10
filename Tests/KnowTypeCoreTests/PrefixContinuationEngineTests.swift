@@ -130,24 +130,20 @@ final class PrefixContinuationEngineTests: XCTestCase {
         )
     }
 
-    func testSeparatorPrefixedRepeatAfterPunctuationIsRejected() {
-        XCTAssertEqual(
-            PrefixContinuationEngine.sanitizeContinuationDetailed(
-                "| ，我觉得这个方案还有问题",
-                lockedPrefix: "我觉得这个方案"
-            ),
-            ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix)
-        )
-        XCTAssertEqual(
-            PrefixContinuationEngine.sanitizeContinuationDetailed(
-                "，我觉得这个方案还有问题",
-                lockedPrefix: "我觉得这个方案"
-            ),
-            ContinuationSanitizationResult(
-                text: "，我觉得这个方案还有问题",
-                reason: .accepted
+    func testPunctuationPrefixedRepeatIsRejectedWithOrWithoutProtocolSeparator() {
+        for response in [
+            "| ，我觉得这个方案还有问题",
+            "，我觉得这个方案还有问题"
+        ] {
+            XCTAssertEqual(
+                PrefixContinuationEngine.sanitizeContinuationDetailed(
+                    response,
+                    lockedPrefix: "我觉得这个方案"
+                ),
+                ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix),
+                response
             )
-        )
+        }
     }
 
     func testSanitizerKeepsSuffixOnlyOutputUnchanged() {
