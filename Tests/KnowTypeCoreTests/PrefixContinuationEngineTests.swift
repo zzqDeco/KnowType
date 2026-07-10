@@ -110,6 +110,26 @@ final class PrefixContinuationEngineTests: XCTestCase {
         )
     }
 
+    func testSeparatorPrefixedRepeatAfterPunctuationIsRejected() {
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "| ，我觉得这个方案还有问题",
+                lockedPrefix: "我觉得这个方案"
+            ),
+            ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix)
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "，我觉得这个方案还有问题",
+                lockedPrefix: "我觉得这个方案"
+            ),
+            ContinuationSanitizationResult(
+                text: "，我觉得这个方案还有问题",
+                reason: .accepted
+            )
+        )
+    }
+
     func testSanitizerKeepsSuffixOnlyOutputUnchanged() {
         let suffixes = ["还有进一步优化空间。", ", therefore I am"]
 

@@ -428,6 +428,31 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         })
     }
 
+    func testRecommendationRejectsSeparatorPrefixedRepeatAfterPunctuation() async {
+        let diagnosticSink = RecordingDiagnosticSink()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "| ，我觉得这个方案还有问题", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "continuation",
+            lockedPrefix: "我觉得这个方案",
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 无推荐"))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .sanitizeEmpty && $0.reason == "still_repeats_prefix"
+        })
+    }
+
     func testRecommendationDiagnosticsRecordSuccessAndCacheHit() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
