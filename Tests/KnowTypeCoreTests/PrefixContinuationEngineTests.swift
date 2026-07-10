@@ -100,6 +100,26 @@ final class PrefixContinuationEngineTests: XCTestCase {
         )
     }
 
+    func testRepeatedPrefixRepairKeepsPunctuationOnlySuffixWhenItIsNotDuplicated() {
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案，",
+                lockedPrefix: "我觉得这个方案"
+            ),
+            ContinuationSanitizationResult(
+                text: "，",
+                reason: .repeatedPrefixRepaired
+            )
+        )
+        XCTAssertEqual(
+            PrefixContinuationEngine.sanitizeContinuationDetailed(
+                "我觉得这个方案，，",
+                lockedPrefix: "我觉得这个方案，"
+            ),
+            ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
+        )
+    }
+
     func testRepeatedPrefixRepairRejectsPureVisualSeparators() {
         XCTAssertEqual(
             PrefixContinuationEngine.sanitizeContinuationDetailed(

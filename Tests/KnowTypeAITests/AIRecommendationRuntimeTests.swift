@@ -403,6 +403,27 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
     }
 
+    func testRecommendationRepairCanReturnPunctuationOnlySuffix() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "我觉得这个方案，", confidence: 0.88)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: "continuation",
+            lockedPrefix: "我觉得这个方案",
+            appBundleID: "com.apple.TextEdit",
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        guard case .ready(let candidate) = state else {
+            return XCTFail("expected punctuation-only ready recommendation")
+        }
+        XCTAssertEqual(candidate.continuationText, "，")
+        XCTAssertEqual(candidate.displayText, "我觉得这个方案，")
+    }
+
     func testRecommendationRejectsRepeatedPrefixWithOnlyVisualSeparators() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
