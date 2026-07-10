@@ -376,7 +376,7 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
               let profile = profilesFile.profiles.first(where: \.isDefault) else {
             return nil
         }
-        return "\(profile.displayName) · \(profile.kind.rawValue) · \(profile.model) · \(profile.baseURL.absoluteString)"
+        return "\(profile.displayName) · \(profile.kind.rawValue) · \(profile.model) · \(ProviderEndpointURLPolicy.privacySafeSummary(profile.baseURL))"
     }
 
     private static func backupSummary(in rootURL: URL, fileManager: FileManager) -> BackupSummary {

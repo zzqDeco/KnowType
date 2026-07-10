@@ -1,6 +1,12 @@
 import Foundation
 import KnowTypeCore
 
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
 public struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var displayName: String
@@ -42,25 +48,140 @@ public struct ProviderProfile: Codable, Sendable, Equatable, Identifiable {
 }
 
 public struct ProviderProfilesFile: Codable, Sendable, Equatable {
+    public static let currentSchemaVersion = 2
+
     public var schemaVersion: Int
+    public var revision: UInt64
     public var profiles: [ProviderProfile]
 
-    public init(schemaVersion: Int = 1, profiles: [ProviderProfile] = []) {
+    public init(
+        schemaVersion: Int = ProviderProfilesFile.currentSchemaVersion,
+        revision: UInt64 = 0,
+        profiles: [ProviderProfile] = []
+    ) {
         self.schemaVersion = schemaVersion
+        self.revision = revision
         self.profiles = profiles
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case revision
+        case profiles
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard (1...Self.currentSchemaVersion).contains(schemaVersion) else {
+            throw ProviderProfileStoreError.unsupportedSchemaVersion(schemaVersion)
+        }
+
+        self.schemaVersion = schemaVersion
+        if schemaVersion == 1 {
+            self.revision = try container.decodeIfPresent(UInt64.self, forKey: .revision) ?? 0
+        } else {
+            self.revision = try container.decode(UInt64.self, forKey: .revision)
+        }
+        self.profiles = try container.decode([ProviderProfile].self, forKey: .profiles)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(profiles, forKey: .profiles)
     }
 }
 
 public protocol ProviderProfileStore: Sendable {
     func loadProfiles() throws -> ProviderProfilesFile
     func saveProfiles(_ profiles: ProviderProfilesFile) throws
+    func transactProfiles(
+        expectedRevision: UInt64,
+        _ mutation: (ProviderProfilesFile) throws -> ProviderProfilesFile
+    ) throws -> ProviderProfilesFile
+}
+
+public extension ProviderProfileStore {
+    func transactProfiles(
+        expectedRevision: UInt64,
+        _ mutation: (ProviderProfilesFile) throws -> ProviderProfilesFile
+    ) throws -> ProviderProfilesFile {
+        let current = try loadProfiles()
+        guard current.revision == expectedRevision else {
+            throw ProviderProfileStoreError.revisionConflict(
+                expected: expectedRevision,
+                actual: current.revision
+            )
+        }
+        guard current.revision < UInt64.max else {
+            throw ProviderProfileStoreError.revisionOverflow
+        }
+
+        var updated = try mutation(current)
+        updated.schemaVersion = ProviderProfilesFile.currentSchemaVersion
+        updated.revision = current.revision + 1
+        try saveProfiles(updated)
+        return updated
+    }
+}
+
+public enum ProviderProfileStoreError: Error, Equatable, LocalizedError {
+    case unsupportedSchemaVersion(Int)
+    case revisionConflict(expected: UInt64, actual: UInt64)
+    case revisionOverflow
+    case lockFailed(path: String, code: Int32)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedSchemaVersion(let version):
+            return "Unsupported provider profile schema version: \(version)"
+        case .revisionConflict(let expected, let actual):
+            return "Provider profile revision conflict (expected \(expected), found \(actual))"
+        case .revisionOverflow:
+            return "Provider profile revision cannot be incremented"
+        case .lockFailed(let path, let code):
+            return "Could not lock provider profiles at \(path) (errno \(code))"
+        }
+    }
+}
+
+public protocol ProviderProfileRevisionSignaling: Sendable {
+    func postProviderProfilesChanged(revision: UInt64)
+}
+
+public struct DistributedProviderProfileRevisionSignal: ProviderProfileRevisionSignaling {
+    public static let notificationName = Notification.Name(
+        "com.knowtype.provider-profiles.revision-changed"
+    )
+
+    public init() {}
+
+    public func postProviderProfilesChanged(revision: UInt64) {
+        #if os(macOS)
+        DistributedNotificationCenter.default().postNotificationName(
+            Self.notificationName,
+            object: nil,
+            userInfo: ["revision": NSNumber(value: revision)],
+            deliverImmediately: true
+        )
+        #endif
+    }
 }
 
 public struct FileProviderProfileStore: ProviderProfileStore {
     public let fileURL: URL
+    public let lockFileURL: URL
+    private let revisionSignal: any ProviderProfileRevisionSignaling
 
-    public init(fileURL: URL) {
+    public init(
+        fileURL: URL,
+        revisionSignal: any ProviderProfileRevisionSignaling = DistributedProviderProfileRevisionSignal()
+    ) {
         self.fileURL = fileURL
+        self.lockFileURL = fileURL.appendingPathExtension("lock")
+        self.revisionSignal = revisionSignal
     }
 
     public static func defaultStore(createDirectory: Bool = true) throws -> FileProviderProfileStore {
@@ -88,17 +209,83 @@ public struct FileProviderProfileStore: ProviderProfileStore {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             return ProviderProfilesFile()
         }
+        return try withFileLock(operation: LOCK_SH, createDirectory: false) {
+            try loadProfilesWithoutLock()
+        }
+    }
+
+    public func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+        _ = try transactProfiles(expectedRevision: profiles.revision) { _ in profiles }
+    }
+
+    public func transactProfiles(
+        expectedRevision: UInt64,
+        _ mutation: (ProviderProfilesFile) throws -> ProviderProfilesFile
+    ) throws -> ProviderProfilesFile {
+        let committed = try withFileLock(operation: LOCK_EX, createDirectory: true) {
+            let current = try loadProfilesWithoutLock()
+            guard current.revision == expectedRevision else {
+                throw ProviderProfileStoreError.revisionConflict(
+                    expected: expectedRevision,
+                    actual: current.revision
+                )
+            }
+            guard current.revision < UInt64.max else {
+                throw ProviderProfileStoreError.revisionOverflow
+            }
+
+            var updated = try mutation(current)
+            updated.schemaVersion = ProviderProfilesFile.currentSchemaVersion
+            updated.revision = current.revision + 1
+            try writeProfilesWithoutLock(updated)
+            return updated
+        }
+        revisionSignal.postProviderProfilesChanged(revision: committed.revision)
+        return committed
+    }
+
+    private func loadProfilesWithoutLock() throws -> ProviderProfilesFile {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return ProviderProfilesFile()
+        }
         let data = try Data(contentsOf: fileURL)
         return try JSONDecoder().decode(ProviderProfilesFile.self, from: data)
     }
 
-    public func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+    private func writeProfilesWithoutLock(_ profiles: ProviderProfilesFile) throws {
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(profiles)
         try data.write(to: fileURL, options: [.atomic])
+    }
+
+    private func withFileLock<T>(
+        operation: Int32,
+        createDirectory: Bool,
+        _ body: () throws -> T
+    ) throws -> T {
+        let directory = lockFileURL.deletingLastPathComponent()
+        if createDirectory {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        let descriptor = open(lockFileURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            throw ProviderProfileStoreError.lockFailed(path: lockFileURL.path, code: errno)
+        }
+        defer {
+            _ = flock(descriptor, LOCK_UN)
+            _ = close(descriptor)
+        }
+
+        while flock(descriptor, operation) != 0 {
+            guard errno == EINTR else {
+                throw ProviderProfileStoreError.lockFailed(path: lockFileURL.path, code: errno)
+            }
+        }
+        return try body()
     }
 }
 
@@ -163,6 +350,9 @@ public struct ProviderProfileResolver {
     }
 
     public func configuration(for profile: ProviderProfile) throws -> ProviderConfiguration {
+        guard ProviderEndpointURLPolicy.isAllowedRuntimeURL(profile.baseURL) else {
+            throw ProviderError.invalidResponse("provider base URL contains unsupported credentials or fragment")
+        }
         let apiKey: String?
         if let secretName = profile.secretName {
             guard let resolvedSecret = try secretStore.secret(named: secretName),

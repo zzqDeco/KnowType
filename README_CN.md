@@ -208,6 +208,10 @@ shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
 ## 配置
 
 Provider profile 以 JSON 元数据保存，API key 单独保存。
+Profile 文件使用带 revision 的事务格式，多个设置窗口不会静默覆盖彼此的
+修改。变更后的 Keychain 凭据使用不可变引用。Base URL 可以保留运行时兼容
+所需的 query，但不能包含 userinfo 或 fragment；诊断输出会移除 userinfo、
+query 和 fragment。
 
 ```text
 ~/Library/Application Support/KnowType/providers.json

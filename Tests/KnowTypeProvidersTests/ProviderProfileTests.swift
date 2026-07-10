@@ -94,7 +94,138 @@ final class ProviderProfileTests: XCTestCase {
         try store.saveProfiles(profiles)
         let loaded = try store.loadProfiles()
 
-        XCTAssertEqual(loaded, profiles)
+        XCTAssertEqual(loaded.schemaVersion, ProviderProfilesFile.currentSchemaVersion)
+        XCTAssertEqual(loaded.revision, 1)
+        XCTAssertEqual(loaded.profiles, profiles.profiles)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.lockFileURL.path))
+    }
+
+    func testV1FileDecodesRevisionZeroAndUpgradesOnFirstTransaction() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-v1-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("providers.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(#"{"schemaVersion":1,"profiles":[]}"#.utf8).write(to: fileURL)
+        let store = FileProviderProfileStore(fileURL: fileURL)
+
+        let legacy = try store.loadProfiles()
+        XCTAssertEqual(legacy.schemaVersion, 1)
+        XCTAssertEqual(legacy.revision, 0)
+
+        let upgraded = try store.transactProfiles(expectedRevision: 0) { $0 }
+        XCTAssertEqual(upgraded.schemaVersion, 2)
+        XCTAssertEqual(upgraded.revision, 1)
+        XCTAssertEqual(try store.loadProfiles(), upgraded)
+    }
+
+    func testFutureProviderProfileSchemaIsRejected() throws {
+        let data = Data(#"{"schemaVersion":3,"revision":9,"profiles":[]}"#.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ProviderProfilesFile.self, from: data)) { error in
+            XCTAssertEqual(error as? ProviderProfileStoreError, .unsupportedSchemaVersion(3))
+        }
+    }
+
+    func testV2ProviderProfileSchemaRequiresRevision() throws {
+        let data = Data(#"{"schemaVersion":2,"profiles":[]}"#.utf8)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(ProviderProfilesFile.self, from: data))
+    }
+
+    func testFileStoreCASRejectsStaleRevisionWithoutLosingProfiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-cas-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeA = FileProviderProfileStore(fileURL: directory.appendingPathComponent("providers.json"))
+        let storeB = FileProviderProfileStore(fileURL: storeA.fileURL)
+        let profile = ProviderProfileDefaults.openAICompatible()
+
+        let committed = try storeA.transactProfiles(expectedRevision: 0) { current in
+            var updated = current
+            updated.profiles = [profile]
+            return updated
+        }
+        XCTAssertEqual(committed.revision, 1)
+
+        XCTAssertThrowsError(
+            try storeB.transactProfiles(expectedRevision: 0) { current in
+                var updated = current
+                updated.profiles = []
+                return updated
+            }
+        ) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .revisionConflict(expected: 0, actual: 1)
+            )
+        }
+        XCTAssertEqual(try storeA.loadProfiles().profiles, [profile])
+    }
+
+    func testFileStorePostsRevisionSignalOnlyAfterSuccessfulCommit() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-signal-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let signal = RecordingProviderProfileRevisionSignal()
+        let store = FileProviderProfileStore(
+            fileURL: directory.appendingPathComponent("providers.json"),
+            revisionSignal: signal
+        )
+
+        _ = try store.transactProfiles(expectedRevision: 0) { $0 }
+        XCTAssertEqual(signal.revisions, [1])
+
+        XCTAssertThrowsError(try store.transactProfiles(expectedRevision: 0) { $0 })
+        XCTAssertEqual(signal.revisions, [1])
+    }
+
+    func testPrivacySafeEndpointSummaryMatchesSharedFixtures() throws {
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/provider-endpoint-summary.json")
+        let fixture = try JSONDecoder().decode(
+            ProviderEndpointSummaryFixture.self,
+            from: Data(contentsOf: fixtureURL)
+        )
+
+        for item in fixture.cases {
+            let url = try XCTUnwrap(URL(string: item.input))
+            XCTAssertEqual(
+                ProviderEndpointURLPolicy.privacySafeSummary(url),
+                item.summary,
+                item.input
+            )
+        }
+    }
+
+    func testProfileResolverRejectsUserInfoAndFragmentButAllowsQuery() throws {
+        let resolver = ProviderProfileResolver(secretStore: DictionarySecretStore(values: [:]))
+        let unsafeURLs = [
+            "https://user:pass@example.com/v1",
+            "https://example.com/v1#debug"
+        ]
+        for value in unsafeURLs {
+            let profile = ProviderProfile(
+                displayName: "Unsafe",
+                kind: .ollamaNative,
+                baseURL: try XCTUnwrap(URL(string: value)),
+                model: "model"
+            )
+            XCTAssertThrowsError(try resolver.configuration(for: profile))
+        }
+
+        let queryProfile = ProviderProfile(
+            displayName: "Compatible",
+            kind: .ollamaNative,
+            baseURL: URL(string: "https://example.com/v1?runtime=compatible")!,
+            model: "model"
+        )
+        XCTAssertEqual(
+            try resolver.configuration(for: queryProfile).baseURL.absoluteString,
+            "https://example.com/v1?runtime=compatible"
+        )
     }
 
     func testDefaultProfileStoreCanOpenWithoutCreatingDirectory() throws {
@@ -343,4 +474,30 @@ final class ProviderProfileTests: XCTestCase {
             "Invalid provider response: diagnostic returned no candidates"
         )
     }
+}
+
+private final class RecordingProviderProfileRevisionSignal: ProviderProfileRevisionSignaling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [UInt64] = []
+
+    var revisions: [UInt64] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
+    }
+
+    func postProviderProfilesChanged(revision: UInt64) {
+        lock.lock()
+        values.append(revision)
+        lock.unlock()
+    }
+}
+
+private struct ProviderEndpointSummaryFixture: Decodable {
+    struct Item: Decodable {
+        var input: String
+        var summary: String
+    }
+
+    var cases: [Item]
 }

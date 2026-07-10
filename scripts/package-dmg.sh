@@ -135,6 +135,7 @@ cp "$ROOT_DIR/scripts/diagnose-inputmethod.sh" "$staging_dir/Scripts/"
 cp "$ROOT_DIR/scripts/lib/inputsource-ids.sh" "$staging_dir/Scripts/lib/"
 cp "$ROOT_DIR/scripts/lib/inputsource-tool.sh" "$staging_dir/Scripts/lib/"
 cp "$ROOT_DIR/scripts/lib/inputmethod-installation.sh" "$staging_dir/Scripts/lib/"
+cp "$ROOT_DIR/scripts/lib/provider_endpoint_summary.py" "$staging_dir/Scripts/lib/"
 cp "$inputsource_tool_path" "$staging_dir/Scripts/bin/"
 
 release_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"

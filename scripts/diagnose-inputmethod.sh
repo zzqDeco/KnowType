@@ -128,6 +128,7 @@ print_json_snapshot() {
   KNOWTYPE_DIAG_BACKUP_ROOT="$(knowtype_backup_root_dir)" \
   KNOWTYPE_DIAG_APP_SUPPORT="$(knowtype_app_support_dir)" \
   KNOWTYPE_DIAG_RIME_USER_DATA="${KNOWTYPE_RIME_USER_DATA_DIR:-$(knowtype_app_support_dir)/Rime}" \
+  PYTHONPATH="$SCRIPTS_DIR/lib${PYTHONPATH:+:$PYTHONPATH}" \
   "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import hashlib
@@ -136,6 +137,7 @@ import plistlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from provider_endpoint_summary import privacy_safe_endpoint_summary
 
 def file_mtime(path):
     try:
@@ -191,7 +193,7 @@ def default_provider(app_support):
             "displayName": default.get("displayName"),
             "kind": default.get("kind"),
             "model": default.get("model"),
-            "baseURL": default.get("baseURL"),
+            "baseURL": privacy_safe_endpoint_summary(default.get("baseURL")),
         }
     return result
 
@@ -1202,15 +1204,19 @@ fi
 
 if [[ -f "$PROVIDER_JSON" ]]; then
   default_provider_summary="$(
-    KNOWTYPE_PROVIDER_JSON="$PROVIDER_JSON" "$KNOWTYPE_PYTHON3" - <<'PY'
+    KNOWTYPE_PROVIDER_JSON="$PROVIDER_JSON" \
+    PYTHONPATH="$SCRIPTS_DIR/lib${PYTHONPATH:+:$PYTHONPATH}" \
+    "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
+from provider_endpoint_summary import privacy_safe_endpoint_summary
 try:
     with open(os.environ["KNOWTYPE_PROVIDER_JSON"], encoding="utf-8") as handle:
         profiles = json.load(handle).get("profiles", [])
     profile = next((item for item in profiles if item.get("isDefault")), None)
     if profile:
-        print(f"{profile.get('displayName', '<unnamed>')} · {profile.get('kind', '<kind>')} · {profile.get('model', '<model>')} · {profile.get('baseURL', '<baseURL>')}")
+        endpoint = privacy_safe_endpoint_summary(profile.get("baseURL"))
+        print(f"{profile.get('displayName', '<unnamed>')} · {profile.get('kind', '<kind>')} · {profile.get('model', '<model>')} · {endpoint}")
 except Exception:
     pass
 PY

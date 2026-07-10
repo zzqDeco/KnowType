@@ -132,7 +132,7 @@
 "settings.provider.connection.fixValidationBeforeTesting" = "Fix validation errors before testing.";
 "settings.provider.validation" = "Validation";
 "settings.provider.validation.displayNameRequired" = "Display name is required.";
-"settings.provider.validation.baseURLHTTP" = "Base URL must be an HTTP or HTTPS URL.";
+"settings.provider.validation.baseURLHTTP" = "Base URL must be a valid HTTP or HTTPS URL without a username, password, or fragment.";
 "settings.provider.validation.modelRequired" = "Model is required.";
 "settings.provider.validation.timeoutPositive" = "Timeout must be greater than zero.";
 "settings.provider.validation.customHTTPBodyRequired" = "Custom HTTP body template is required.";
@@ -141,7 +141,12 @@
 "settings.provider.validation.customHTTPPlaceholder" = "Finish the Custom HTTP Base URL in Advanced Service Configuration before making it current.";
 "settings.provider.lastError" = "Last Error";
 "settings.provider.error.missingAPIKey" = "API key is required for this provider.";
+"settings.provider.error.invalidCredentialReference" = "Could not allocate a new immutable credential reference.";
 "settings.provider.error.rollbackFailed" = "Failed to update provider secret: %@. Also failed to restore providers.json: %@. Provider metadata may be staged on disk.";
+"settings.provider.error.secretCompensationFailed" = "Saving provider metadata failed: %@. Removing the unreferenced new credential also failed: %@.";
+"settings.provider.error.credentialCleanupFailed" = "The provider configuration was saved, but an old unreferenced credential could not be removed: %@.";
+"settings.provider.error.staleBaseline" = "Provider settings changed in another KnowType settings window. Your draft was kept and saved profiles were refreshed. Review the latest settings and try again.";
+"settings.provider.error.staleBaselineCompensationFailed" = "Provider settings changed in another KnowType settings window. Your draft was kept and saved profiles were refreshed, but the unreferenced new credential could not be removed: %@.";
 "settings.provider.section.continuation" = "Continuation";
 "settings.provider.cloudContinuation" = "Enable cloud continuation";
 "settings.provider.localContinuation" = "Show local continuation when no provider is available";

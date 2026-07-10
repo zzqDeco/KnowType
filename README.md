@@ -247,6 +247,10 @@ The older local MVP zip can still be installed for developer debugging:
 ## Configuration
 
 Provider profiles are stored as JSON metadata; API keys are stored separately.
+The profile file uses a revisioned transactional format so concurrent settings
+windows cannot silently overwrite each other. Changed keys use immutable
+Keychain references. Base URLs may contain runtime query parameters, but not
+userinfo or fragments; diagnostics omit userinfo, query, and fragment.
 
 ```text
 ~/Library/Application Support/KnowType/providers.json

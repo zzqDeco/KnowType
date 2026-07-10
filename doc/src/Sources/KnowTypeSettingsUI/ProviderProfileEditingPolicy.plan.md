@@ -8,13 +8,13 @@ SwiftUI state:
 - Draft validation for display name, HTTP(S) base URL, model requirements,
   timeout, and custom HTTP template fields.
 - Save-plan construction for updated profiles, default-provider exclusivity,
-  profile-scoped secret names, post-save draft state, and staged metadata.
+  immutable credential references, post-save draft state, and staged metadata.
 - Secret mutation decisions for required cloud keys, optional local/custom HTTP
   keys, blank-key keep or clear behavior, and provider kind or endpoint changes.
 - Transient connection-test `ProviderConfiguration` construction without saving
   draft secrets.
-- Secret mutation application, including shared-secret protection and cleanup of
-  newly written scoped secrets if deleting an old unreferenced secret fails.
+- Secret mutation planning, including shared-secret protection and identifying
+  new versus retired references for transactional sequencing in the ViewModel.
 
 ## Boundaries
 
@@ -34,6 +34,9 @@ SwiftUI state:
   credential scope.
 - Blank draft API keys never cross provider kind or endpoint boundaries during
   save or connection test.
+- A non-blank API key always receives a fresh
+  `knowtype.provider.<profileID>.credential.<UUID>` reference. Legacy references
+  remain reusable for unchanged profiles until their next secret change.
 - Local OpenAI-compatible endpoints may keep an optional saved key only when the
   referenced secret still resolves and the provider kind plus credential scope
   match.

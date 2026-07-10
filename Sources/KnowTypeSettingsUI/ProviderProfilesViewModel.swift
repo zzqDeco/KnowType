@@ -6,6 +6,7 @@ import KnowTypeProviders
 @MainActor
 public final class ProviderProfilesViewModel: ObservableObject {
     public typealias ConnectionTester = @Sendable (ProviderConfiguration) async throws -> ProviderConnectionDiagnosticResult
+    public typealias CredentialReferenceGenerator = @Sendable (String) -> String
 
     @Published public private(set) var profiles: [ProviderProfile]
     @Published public var selectedProfileID: String?
@@ -25,6 +26,8 @@ public final class ProviderProfilesViewModel: ObservableObject {
 
     private let profileStore: any ProviderProfileStore
     private let secretStore: any SecretStore
+    private let loadDefaultsWhenEmpty: Bool
+    private let credentialReferenceGenerator: CredentialReferenceGenerator
     private let connectionTester: ConnectionTester
     private var file: ProviderProfilesFile
     private var persistenceBlockedError: Error?
@@ -35,12 +38,17 @@ public final class ProviderProfilesViewModel: ObservableObject {
         profileStore: any ProviderProfileStore,
         secretStore: any SecretStore,
         loadDefaultsWhenEmpty: Bool = true,
+        credentialReferenceGenerator: @escaping CredentialReferenceGenerator = { profileID in
+            "knowtype.provider.\(profileID).credential.\(UUID().uuidString)"
+        },
         connectionTester: @escaping ConnectionTester = { configuration in
             try await ProviderConnectionDiagnostic().test(configuration: configuration)
         }
     ) {
         self.profileStore = profileStore
         self.secretStore = secretStore
+        self.loadDefaultsWhenEmpty = loadDefaultsWhenEmpty
+        self.credentialReferenceGenerator = credentialReferenceGenerator
         self.connectionTester = connectionTester
         self.validationErrors = []
         self.connectionStatus = .idle
@@ -87,6 +95,9 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 
     public func selectProfile(id: String) {
+        guard prepareDraftOperation() else {
+            return
+        }
         guard let profile = profiles.first(where: { $0.id == id }) else {
             return
         }
@@ -97,6 +108,9 @@ public final class ProviderProfilesViewModel: ObservableObject {
     }
 
     public func createProfile(kind: ProviderKind) {
+        guard prepareDraftOperation() else {
+            return
+        }
         var profile = ProviderProfileTemplates.defaultProfile(kind: kind)
         if profile.secretName != nil {
             profile.secretName = ProviderProfileEditingPolicy.secretName(for: profile.id)
@@ -138,46 +152,65 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return false
         }
 
+        do {
+            try requireCurrentBaseline()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return false
+        }
+
         validationErrors = ProviderProfileEditingPolicy.saveValidationErrors(draft: draft, profiles: profiles)
         guard validationErrors.isEmpty else {
             return false
         }
 
+        let baseline = file
+        var preparedSecretName: String?
         do {
             let plan = try ProviderProfileEditingPolicy.makeSavePlan(
                 draft: draft,
                 profiles: profiles,
                 file: file,
-                secretResolver: { try secretStore.secret(named: $0) }
+                secretResolver: { try secretStore.secret(named: $0) },
+                credentialReferenceGenerator: credentialReferenceGenerator
             )
-            try profileStore.saveProfiles(plan.updatedFile)
-            do {
-                try ProviderProfileEditingPolicy.applySecretMutation(
-                    plan.secretMutation,
-                    updatedProfiles: plan.updatedProfiles,
-                    secretStore: secretStore
-                )
-            } catch {
-                let secretMutationError = error
-                do {
-                    try profileStore.saveProfiles(file)
-                } catch {
-                    throw ProviderProfilesViewModelError.rollbackFailed(
-                        secretMutation: secretMutationError.localizedDescription,
-                        rollback: error.localizedDescription
-                    )
-                }
-                throw secretMutationError
+
+            if let newSecret = plan.secretMutation.newSecret {
+                try secretStore.setSecret(newSecret.value, named: newSecret.name)
+                preparedSecretName = newSecret.name
             }
-            profiles = plan.updatedProfiles
-            file = plan.updatedFile
+
+            let committedFile = try commit(plan.updatedFile, against: baseline)
+            profiles = committedFile.profiles
+            file = committedFile
             selectedProfileID = plan.selectedProfileID
             draft = plan.postSaveDraft
-            lastErrorMessage = nil
+            lastErrorMessage = cleanupMessage(
+                for: plan.secretMutation.retiredSecretName,
+                committedProfiles: committedFile.profiles
+            )
             resetConnectionStatus()
             return true
         } catch {
-            lastErrorMessage = error.localizedDescription
+            let compensationError = compensatePreparedSecret(named: preparedSecretName)
+            if isRevisionConflict(error) {
+                refreshAfterRevisionConflict()
+                if let compensationError {
+                    lastErrorMessage = String(
+                        format: SettingsLocalization.string(
+                            "settings.provider.error.staleBaselineCompensationFailed"
+                        ),
+                        compensationError.localizedDescription
+                    )
+                }
+            } else if let compensationError {
+                lastErrorMessage = ProviderProfilesViewModelError.secretCompensationFailed(
+                    metadata: error.localizedDescription,
+                    compensation: compensationError.localizedDescription
+                ).localizedDescription
+            } else {
+                lastErrorMessage = error.localizedDescription
+            }
             return false
         }
     }
@@ -186,6 +219,13 @@ public final class ProviderProfilesViewModel: ObservableObject {
         if let persistenceBlockedError {
             lastErrorMessage = persistenceBlockedError.localizedDescription
             throw persistenceBlockedError
+        }
+
+        do {
+            try requireCurrentBaseline()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            throw error
         }
 
         guard let profile = profiles.first(where: { $0.id == id }) else {
@@ -205,15 +245,23 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
         var updatedFile = file
         updatedFile.profiles = updatedProfiles
+        let baseline = file
         do {
-            try profileStore.saveProfiles(updatedFile)
+            updatedFile = try commit(updatedFile, against: baseline)
         } catch {
+            if isRevisionConflict(error) {
+                refreshAfterRevisionConflict()
+                throw ProviderProfilesViewModelError.staleBaseline
+            }
             lastErrorMessage = error.localizedDescription
             throw error
         }
-        profiles = updatedProfiles
+        profiles = updatedFile.profiles
         file = updatedFile
-        lastErrorMessage = nil
+        lastErrorMessage = cleanupMessage(
+            for: profile.secretName == activatedProfile.secretName ? nil : profile.secretName,
+            committedProfiles: updatedFile.profiles
+        )
         reconcileDraftDefaultState(activeProfileID: id)
         resetSavedConnectionStatus()
     }
@@ -222,6 +270,15 @@ public final class ProviderProfilesViewModel: ObservableObject {
     public func testDraftConnection() async -> Bool {
         if let persistenceBlockedError {
             let message = persistenceBlockedError.localizedDescription
+            lastErrorMessage = message
+            setDraftConnectionStatus(.failure(message))
+            return false
+        }
+
+        do {
+            try requireCurrentBaseline()
+        } catch {
+            let message = error.localizedDescription
             lastErrorMessage = message
             setDraftConnectionStatus(.failure(message))
             return false
@@ -256,6 +313,14 @@ public final class ProviderProfilesViewModel: ObservableObject {
             guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
                 return false
             }
+            do {
+                try requireCurrentBaseline()
+            } catch {
+                let message = error.localizedDescription
+                lastErrorMessage = message
+                setDraftConnectionStatus(.failure(message))
+                return false
+            }
             setDraftConnectionStatus(
                 .success(
                     String(
@@ -270,6 +335,14 @@ public final class ProviderProfilesViewModel: ObservableObject {
             guard isCurrentConnectionTest(generation: generation, snapshot: snapshot) else {
                 return false
             }
+            do {
+                try requireCurrentBaseline()
+            } catch {
+                let message = error.localizedDescription
+                lastErrorMessage = message
+                setDraftConnectionStatus(.failure(message))
+                return false
+            }
             let message = error.localizedDescription
             setDraftConnectionStatus(.failure(message))
             return false
@@ -280,6 +353,15 @@ public final class ProviderProfilesViewModel: ObservableObject {
     public func testSavedProfileConnection(id profileID: String? = nil) async -> Bool {
         if let persistenceBlockedError {
             let message = persistenceBlockedError.localizedDescription
+            lastErrorMessage = message
+            savedConnectionStatus = .failure(message)
+            return false
+        }
+
+        do {
+            try requireCurrentBaseline()
+        } catch {
+            let message = error.localizedDescription
             lastErrorMessage = message
             savedConnectionStatus = .failure(message)
             return false
@@ -326,6 +408,14 @@ public final class ProviderProfilesViewModel: ObservableObject {
             guard isCurrentSavedConnectionTest(generation: generation, snapshot: snapshot) else {
                 return false
             }
+            do {
+                try requireCurrentBaseline()
+            } catch {
+                let message = error.localizedDescription
+                lastErrorMessage = message
+                savedConnectionStatus = .failure(message)
+                return false
+            }
             savedConnectionStatus = .success(
                 String(
                     format: SettingsLocalization.string("settings.provider.connection.success"),
@@ -336,6 +426,14 @@ public final class ProviderProfilesViewModel: ObservableObject {
             return true
         } catch {
             guard isCurrentSavedConnectionTest(generation: generation, snapshot: snapshot) else {
+                return false
+            }
+            do {
+                try requireCurrentBaseline()
+            } catch {
+                let message = error.localizedDescription
+                lastErrorMessage = message
+                savedConnectionStatus = .failure(message)
                 return false
             }
             let message = error.localizedDescription
@@ -396,15 +494,131 @@ public final class ProviderProfilesViewModel: ObservableObject {
         }
         var updatedFile = file
         updatedFile.profiles = updatedProfiles
+        let baseline = file
         do {
-            try profileStore.saveProfiles(updatedFile)
+            updatedFile = try commit(updatedFile, against: baseline)
+        } catch {
+            if isRevisionConflict(error) {
+                refreshAfterRevisionConflict()
+                throw ProviderProfilesViewModelError.staleBaseline
+            }
+            lastErrorMessage = error.localizedDescription
+            throw error
+        }
+        profiles = updatedFile.profiles
+        file = updatedFile
+        lastErrorMessage = cleanupMessage(
+            for: originalProfile.secretName == normalizedProfile.secretName ? nil : originalProfile.secretName,
+            committedProfiles: updatedFile.profiles
+        )
+    }
+
+    private func commit(
+        _ updatedFile: ProviderProfilesFile,
+        against baseline: ProviderProfilesFile
+    ) throws -> ProviderProfilesFile {
+        try profileStore.transactProfiles(expectedRevision: baseline.revision) { current in
+            guard current == baseline else {
+                throw ProviderProfileStoreError.revisionConflict(
+                    expected: baseline.revision,
+                    actual: current.revision
+                )
+            }
+            return updatedFile
+        }
+    }
+
+    private func requireCurrentBaseline() throws {
+        let current: ProviderProfilesFile
+        do {
+            current = try profileStore.loadProfiles()
         } catch {
             lastErrorMessage = error.localizedDescription
             throw error
         }
-        profiles = updatedProfiles
-        file = updatedFile
-        lastErrorMessage = nil
+        guard current == file else {
+            applyRevisionConflict(currentFile: current)
+            throw ProviderProfilesViewModelError.staleBaseline
+        }
+    }
+
+    private func prepareDraftOperation() -> Bool {
+        if let persistenceBlockedError {
+            lastErrorMessage = persistenceBlockedError.localizedDescription
+            return false
+        }
+        do {
+            try requireCurrentBaseline()
+            return true
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func refreshAfterRevisionConflict() {
+        do {
+            applyRevisionConflict(currentFile: try profileStore.loadProfiles())
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func applyRevisionConflict(currentFile: ProviderProfilesFile) {
+        file = currentFile
+        if currentFile.profiles.isEmpty && loadDefaultsWhenEmpty {
+            profiles = ProviderProfileEditingPolicy.profileScopedSecrets(
+                ProviderProfileTemplates.defaultProfiles()
+            )
+        } else {
+            profiles = currentFile.profiles
+        }
+        lastErrorMessage = ProviderProfilesViewModelError.staleBaseline.localizedDescription
+        resetConnectionStatus()
+    }
+
+    private func isRevisionConflict(_ error: Error) -> Bool {
+        if error as? ProviderProfilesViewModelError == .staleBaseline {
+            return true
+        }
+        guard let storeError = error as? ProviderProfileStoreError else {
+            return false
+        }
+        if case .revisionConflict = storeError {
+            return true
+        }
+        return false
+    }
+
+    private func compensatePreparedSecret(named secretName: String?) -> Error? {
+        guard let secretName else {
+            return nil
+        }
+        do {
+            try secretStore.deleteSecret(named: secretName)
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    private func cleanupMessage(
+        for secretName: String?,
+        committedProfiles: [ProviderProfile]
+    ) -> String? {
+        guard let secretName,
+              !ProviderProfileEditingPolicy.isSecretReferenced(secretName, in: committedProfiles) else {
+            return nil
+        }
+        do {
+            try secretStore.deleteSecret(named: secretName)
+            return nil
+        } catch {
+            return String(
+                format: SettingsLocalization.string("settings.provider.error.credentialCleanupFailed"),
+                error.localizedDescription
+            )
+        }
     }
 
     private func reconcileDraftDefaultState(activeProfileID: String) {
@@ -465,14 +679,19 @@ private struct SavedConnectionTestSnapshot: Equatable {
 
 public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
     case loadFailed(String)
+    case invalidCredentialReference
     case missingAPIKey
     case rollbackFailed(secretMutation: String, rollback: String)
+    case secretCompensationFailed(metadata: String, compensation: String)
+    case staleBaseline
     case validationFailed(String)
 
     public var errorDescription: String? {
         switch self {
         case .loadFailed(let message):
             return message
+        case .invalidCredentialReference:
+            return SettingsLocalization.string("settings.provider.error.invalidCredentialReference")
         case .missingAPIKey:
             return SettingsLocalization.string("settings.provider.error.missingAPIKey")
         case .rollbackFailed(let secretMutation, let rollback):
@@ -481,6 +700,14 @@ public enum ProviderProfilesViewModelError: Error, Equatable, LocalizedError {
                 secretMutation,
                 rollback
             )
+        case .secretCompensationFailed(let metadata, let compensation):
+            return String(
+                format: SettingsLocalization.string("settings.provider.error.secretCompensationFailed"),
+                metadata,
+                compensation
+            )
+        case .staleBaseline:
+            return SettingsLocalization.string("settings.provider.error.staleBaseline")
         case .validationFailed(let message):
             return message
         }
@@ -540,10 +767,7 @@ public struct ProviderProfileDraft: Equatable, Sendable, Identifiable {
     }
 
     public func makeProfile() throws -> ProviderProfile {
-        guard let url = URL(string: baseURL),
-              let scheme = url.scheme,
-              (scheme == "http" || scheme == "https"),
-              url.host?.isEmpty == false else {
+        guard let url = ProviderEndpointURLPolicy.validatedHTTPURL(baseURL) else {
             throw ProviderProfileDraftError.invalidBaseURL
         }
         return ProviderProfile(

@@ -232,6 +232,40 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         XCTAssertEqual(value("Summary 状态", in: status.acceptedLearningRows), "过期")
     }
 
+    func testProviderDiagnosticSummaryRemovesUserInfoQueryAndFragment() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-provider-diagnostic-redaction-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("Support/KnowType", isDirectory: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let profile = ProviderProfile(
+            id: "work",
+            displayName: "Work",
+            kind: .openAIResponses,
+            baseURL: URL(string: "https://user:pass@example.com/v1?api_key=TOPSECRET#trace")!,
+            model: "gpt-test",
+            isDefault: true
+        )
+        try JSONEncoder().encode(ProviderProfilesFile(revision: 1, profiles: [profile]))
+            .write(to: support.appendingPathComponent("providers.json"))
+
+        let status = InstallationDiagnosticsStatus(
+            applicationSupportURL: support,
+            homeDirectoryURL: root,
+            inputMethodBundleURL: root.appendingPathComponent("KnowType.app", isDirectory: true),
+            preferencePaneURL: root.appendingPathComponent("KnowType.prefPane", isDirectory: true),
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+
+        let summary = value("默认 provider", in: status.aiRows)
+        XCTAssertTrue(summary.contains("https://example.com/v1"))
+        XCTAssertFalse(summary.contains("user"))
+        XCTAssertFalse(summary.contains("pass"))
+        XCTAssertFalse(summary.contains("api_key"))
+        XCTAssertFalse(summary.contains("TOPSECRET"))
+        XCTAssertFalse(summary.contains("trace"))
+    }
+
     private func makeBundle(at url: URL, version: String, build: String) throws {
         let contents = url.appendingPathComponent("Contents", isDirectory: true)
         try FileManager.default.createDirectory(

@@ -101,8 +101,16 @@ Provider runtime loading uses:
 - `ProviderFactory`: builds the adapter for `openai_chat`, `openai_responses`, `anthropic_messages`, `gemini_native`, `ollama_native`, or `custom_http`.
 - `ProviderConnectionDiagnostic`: settings-facing provider verification that sends a small prefix-locked continuation request and reports a normalized success or provider error.
 - `KeychainSecretStore`: macOS storage for API keys under the `KnowType` service.
+- `ProviderEndpointURLPolicy`: rejects credential-bearing or fragmented Base
+  URLs and renders diagnostics without userinfo, query, or fragment.
 
-Profile JSON stores metadata and secret names only. It must not store API key values represented by `secretName`. Custom headers are persisted as configured, so the MVP docs warn users not to place bearer tokens directly in headers.
+Profile JSON schema v2 stores metadata, secret names, and a monotonic revision.
+The production store serializes cross-process writers with a sidecar `flock` and
+expected-revision transaction, then posts a revision-only change signal. API key
+values never enter JSON. Changed keys receive immutable credential references so
+a stale endpoint cannot resolve a newer key; old unreferenced items are cleaned
+only after metadata commit. Custom headers are persisted as configured, so the
+MVP docs warn users not to place bearer tokens directly in headers.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -138,7 +146,9 @@ local-candidate path.
 
 `KnowTypeSettingsUI` owns reusable user-facing configuration and status surfaces. `KnowTypeSettingsApp`, `KnowType.prefPane`, and the InputMethodKit preferences window host the same SwiftUI root view. The primary UI is a macOS settings surface with a sidebar, search, and grouped-form detail pages for input, candidates, Rime/user data, AI continuation, privacy, and diagnostics. Localized settings strings default to Simplified Chinese; English resources remain available for explicit English locale queries and missing-key fallback.
 
-- `ProviderProfilesViewModel` edits provider profile metadata and coordinates API-key writes through `SecretStore`.
+- `ProviderProfilesViewModel` edits provider profile metadata, rejects stale
+  revision baselines, preserves drafts on conflict, and coordinates secret-first
+  immutable API-key updates through `SecretStore`.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
 - `InputModePreferencesViewModel` edits punctuation language and symbol-width defaults stored in the shared `com.knowtype.preferences` defaults domain.
 - `RuntimePreferencesViewModel` edits candidate paging/layout and AI continuation behavior through the same shared defaults domain. The legacy input-scheme value remains persisted for compatibility but is not exposed in the Rime-only settings UI.

@@ -14,7 +14,7 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
         let errors = ProviderProfileEditingPolicy.validate(draft)
 
         XCTAssertTrue(errors.contains("显示名称不能为空。"))
-        XCTAssertTrue(errors.contains("Base URL 必须是 HTTP 或 HTTPS URL。"))
+        XCTAssertTrue(errors.contains("Base URL 必须是有效的 HTTP 或 HTTPS URL，且不能包含用户名、密码或 fragment。"))
         XCTAssertTrue(errors.contains("模型不能为空。"))
         XCTAssertTrue(errors.contains("超时时间必须大于 0。"))
     }
@@ -51,11 +51,17 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
             draft: draft,
             profiles: [],
             file: ProviderProfilesFile(),
-            secretResolver: { _ in nil }
+            secretResolver: { _ in nil },
+            credentialReferenceGenerator: { _ in
+                "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000001"
+            }
         )
 
         XCTAssertEqual(plan.profile.id, "work")
-        XCTAssertEqual(plan.profile.secretName, "knowtype.provider.work.apiKey")
+        XCTAssertEqual(
+            plan.profile.secretName,
+            "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000001"
+        )
         XCTAssertEqual(plan.selectedProfileID, "work")
         XCTAssertEqual(plan.postSaveDraft.id, "work")
         XCTAssertEqual(plan.postSaveDraft.apiKey, "")
@@ -63,7 +69,11 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
         XCTAssertEqual(plan.updatedFile.profiles.map(\.id), ["work"])
         XCTAssertEqual(
             plan.secretMutation,
-            .set(value: "sk-work", secretName: "knowtype.provider.work.apiKey", oldSecretName: nil)
+            .set(
+                value: "sk-work",
+                secretName: "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000001",
+                oldSecretName: nil
+            )
         )
     }
 
@@ -192,6 +202,33 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
         }
     }
 
+    func testSavePlanRejectsReusedCredentialReference() {
+        let reference = "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000001"
+        let existing = ProviderProfile(
+            id: "work",
+            displayName: "Work",
+            kind: .openAIResponses,
+            baseURL: URL(string: "https://api.openai.com")!,
+            model: "gpt-test",
+            secretName: reference,
+            isDefault: true
+        )
+        var draft = ProviderProfileDraft(profile: existing)
+        draft.apiKey = "K2"
+
+        XCTAssertThrowsError(
+            try ProviderProfileEditingPolicy.makeSavePlan(
+                draft: draft,
+                profiles: [existing],
+                file: ProviderProfilesFile(profiles: [existing]),
+                secretResolver: { _ in "K1" },
+                credentialReferenceGenerator: { _ in reference }
+            )
+        ) { error in
+            XCTAssertEqual(error as? ProviderProfilesViewModelError, .invalidCredentialReference)
+        }
+    }
+
     func testConnectionConfigurationUsesTransientDraftAPIKey() throws {
         var draft = ProviderProfileDraft(profile: ProviderProfileTemplates.defaultProfile(kind: .openAIResponses))
         draft.apiKey = " \n sk-transient \t "
@@ -242,8 +279,7 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
         }
     }
 
-    func testApplySecretMutationDoesNotDeleteSharedOldSecret() throws {
-        let store = RecordingPolicySecretStore()
+    func testSharedOldSecretRemainsReferencedByAnotherProfile() {
         let updatedProfiles = [
             ProviderProfile(
                 id: "work",
@@ -263,75 +299,20 @@ final class ProviderProfileEditingPolicyTests: XCTestCase {
             )
         ]
 
-        try ProviderProfileEditingPolicy.applySecretMutation(
-            .set(value: "sk-new", secretName: "knowtype.provider.work.apiKey", oldSecretName: "legacy.shared"),
-            updatedProfiles: updatedProfiles,
-            secretStore: store
-        )
-
-        XCTAssertEqual(store.setSecretCalls.map(\.name), ["knowtype.provider.work.apiKey"])
-        XCTAssertTrue(store.deleteSecretCalls.isEmpty)
+        XCTAssertTrue(ProviderProfileEditingPolicy.isSecretReferenced("legacy.shared", in: updatedProfiles))
     }
 
-    func testApplySecretMutationCleansNewSecretWhenOldDeleteFails() {
-        let store = RecordingPolicySecretStore(deleteErrors: ["legacy.old": TestPolicyError(message: "delete failed")])
-        let updatedProfiles = [
-            ProviderProfile(
-                id: "work",
-                displayName: "Work",
-                kind: .openAIResponses,
-                baseURL: URL(string: "https://api.openai.com")!,
-                model: "gpt-4.1-mini",
-                secretName: "knowtype.provider.work.apiKey"
-            )
-        ]
+    func testValidationRejectsUserInfoAndFragmentButAllowsQuery() {
+        var draft = ProviderProfileDraft(profile: ProviderProfileTemplates.defaultProfile(kind: .openAIResponses))
+        draft.model = "gpt-test"
 
-        XCTAssertThrowsError(
-            try ProviderProfileEditingPolicy.applySecretMutation(
-                .set(value: "sk-new", secretName: "knowtype.provider.work.apiKey", oldSecretName: "legacy.old"),
-                updatedProfiles: updatedProfiles,
-                secretStore: store
-            )
-        )
+        draft.baseURL = "https://user:pass@example.com/v1"
+        XCTAssertFalse(ProviderProfileEditingPolicy.validate(draft).isEmpty)
 
-        XCTAssertEqual(store.setSecretCalls.map(\.name), ["knowtype.provider.work.apiKey"])
-        XCTAssertEqual(store.deleteSecretCalls, ["legacy.old", "knowtype.provider.work.apiKey"])
-    }
-}
+        draft.baseURL = "https://example.com/v1#debug"
+        XCTAssertFalse(ProviderProfileEditingPolicy.validate(draft).isEmpty)
 
-private final class RecordingPolicySecretStore: SecretStore, @unchecked Sendable {
-    private var values: [String: String]
-    private let deleteErrors: [String: Error]
-    private(set) var setSecretCalls: [(value: String, name: String)] = []
-    private(set) var deleteSecretCalls: [String] = []
-
-    init(values: [String: String] = [:], deleteErrors: [String: Error] = [:]) {
-        self.values = values
-        self.deleteErrors = deleteErrors
-    }
-
-    func secret(named name: String) throws -> String? {
-        values[name]
-    }
-
-    func setSecret(_ value: String, named name: String) throws {
-        setSecretCalls.append((value: value, name: name))
-        values[name] = value
-    }
-
-    func deleteSecret(named name: String) throws {
-        deleteSecretCalls.append(name)
-        if let error = deleteErrors[name] {
-            throw error
-        }
-        values.removeValue(forKey: name)
-    }
-}
-
-private struct TestPolicyError: LocalizedError {
-    let message: String
-
-    var errorDescription: String? {
-        message
+        draft.baseURL = "https://example.com/v1?runtime=compatible"
+        XCTAssertTrue(ProviderProfileEditingPolicy.validate(draft).isEmpty)
     }
 }

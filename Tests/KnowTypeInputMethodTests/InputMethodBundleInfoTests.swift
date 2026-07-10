@@ -923,6 +923,51 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(warnings.contains("invalid_feedback_history_lines:2"))
     }
 
+    func testProviderEndpointFixturesAndDiagnosticOutputsAreRedacted() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let fixtureURL = rootURL.appendingPathComponent("Tests/Fixtures/provider-endpoint-summary.json")
+        let helperURL = rootURL.appendingPathComponent("scripts/lib/provider_endpoint_summary.py")
+        let fixtureProcess = Process()
+        fixtureProcess.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        fixtureProcess.arguments = [helperURL.path, "--verify-fixtures", fixtureURL.path]
+        try fixtureProcess.run()
+        fixtureProcess.waitUntilExit()
+        XCTAssertEqual(fixtureProcess.terminationStatus, 0)
+
+        let testRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-provider-redaction-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: testRoot) }
+        let home = testRoot.appendingPathComponent("Home", isDirectory: true)
+        let bundle = testRoot.appendingPathComponent("KnowType.app", isDirectory: true)
+        let support = home.appendingPathComponent("Library/Application Support/KnowType", isDirectory: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try makeMinimalBundle(at: bundle)
+        try Data(
+            """
+            {"schemaVersion":2,"revision":1,"profiles":[{"id":"work","displayName":"Work","kind":"openAIResponses","baseURL":"https://user:pass@example.com/v1?api_key=TOPSECRET#trace","model":"gpt-test","timeoutSeconds":20,"headers":{},"isDefault":true}]}
+            """.utf8
+        ).write(to: support.appendingPathComponent("providers.json"))
+        let scriptURL = rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh")
+
+        let jsonOutput = try runDiagnoseJSON(scriptURL: scriptURL, homeURL: home, bundleURL: bundle)
+        let snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: jsonOutput) as? [String: Any])
+        let ai = try XCTUnwrap(snapshot["ai"] as? [String: Any])
+        let defaultProfile = try XCTUnwrap(ai["defaultProfile"] as? [String: Any])
+        XCTAssertEqual(defaultProfile["baseURL"] as? String, "https://example.com/v1")
+        let jsonText = try XCTUnwrap(String(data: jsonOutput, encoding: .utf8))
+        XCTAssertFalse(jsonText.contains("TOPSECRET"))
+        XCTAssertFalse(jsonText.contains("user:pass"))
+
+        let textOutput = try runDiagnoseText(scriptURL: scriptURL, homeURL: home, bundleURL: bundle)
+        XCTAssertTrue(textOutput.contains("default AI provider: Work · openAIResponses · gpt-test · https://example.com/v1"))
+        XCTAssertFalse(textOutput.contains("TOPSECRET"))
+        XCTAssertFalse(textOutput.contains("user:pass"))
+        XCTAssertFalse(textOutput.contains("api_key"))
+    }
+
     private func makeMinimalBundle(at bundle: URL) throws {
         let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
         let executable = contents.appendingPathComponent("MacOS/KnowTypeInputMethodApp", isDirectory: false)
@@ -971,6 +1016,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = homeURL.path
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        environment["KNOWTYPE_INPUTSOURCE_TOOL"] = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("knowtype-inputsource-tool")
+            .path
         process.environment = environment
         let output = try FileHandle(forWritingTo: outputURL)
         let error = try FileHandle(forWritingTo: errorURL)
@@ -986,5 +1035,48 @@ final class InputMethodBundleInfoTests: XCTestCase {
             XCTFail("diagnose-inputmethod.sh --json failed: \(stderr)")
         }
         return data
+    }
+
+    private func runDiagnoseText(
+        scriptURL: URL,
+        homeURL: URL,
+        bundleURL: URL
+    ) throws -> String {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-stdout-\(UUID().uuidString).txt")
+        let errorURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-stderr-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errorURL.path, contents: nil)
+        defer {
+            try? FileManager.default.removeItem(at: outputURL)
+            try? FileManager.default.removeItem(at: errorURL)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptURL.path, "--path", bundleURL.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = homeURL.path
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        environment["KNOWTYPE_INPUTSOURCE_TOOL"] = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("knowtype-inputsource-tool")
+            .path
+        process.environment = environment
+        let output = try FileHandle(forWritingTo: outputURL)
+        let error = try FileHandle(forWritingTo: errorURL)
+        process.standardOutput = output
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        try? output.close()
+        try? error.close()
+        let data = try Data(contentsOf: outputURL)
+        if process.terminationStatus != 0 {
+            let stderr = String(data: try Data(contentsOf: errorURL), encoding: .utf8) ?? ""
+            XCTFail("diagnose-inputmethod.sh text mode failed: \(stderr)")
+        }
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }
