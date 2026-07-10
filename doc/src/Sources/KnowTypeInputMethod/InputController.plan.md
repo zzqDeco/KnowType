@@ -15,6 +15,10 @@ Current behavior:
 - uses current-client fallback for lifecycle-style callbacks such as explicit
   commit, candidate selection, deactivate, and close where finishing or
   clearing an existing composition is safer than dropping state
+- returns exactly the `keyDown` mask from `recognizedEvents(_:)`, allowing
+  InputMethodKit to retain its default click-outside composition commit;
+  modifier-dependent shortcuts read flags from key-down events and do not
+  require separate `keyUp` or `flagsChanged` registration
 - forwards IMK text, key event, candidate, commit, palette, deactivate, and close callbacks into `InputControllerCoordinator`
 - keeps AppKit/InputMethodKit imports guarded by `canImport(InputMethodKit)`
 - owns the production `CandidatePanelWindowController` and exposes it through the host seam

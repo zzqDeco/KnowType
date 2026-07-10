@@ -318,7 +318,9 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
 IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
 因此 raw preedit 会显示在当前宿主输入框内。宿主身份不再改变全局中英或标点
-状态，因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+状态。KnowType 只向 InputMethodKit 注册 key-down 事件，以保留 IMK 的默认行为：
+用户点击 marked range 外部时提交 active composition。快捷键修饰键仍从 key-down
+flags 读取。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
 它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
 上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲 printable 输入会直通
