@@ -19,11 +19,11 @@ carrier layer.
 - TextEdit, Safari, Chrome, editors, IDEs, Electron/ToDesktop shells,
   JetBrains-style clients, unknown AppKit-style clients, and other unmatched
   hosts default to inline composition.
-- Code-app entries can still exist in `InputModeAppPolicy` for punctuation and
-  symbol defaults, but they do not create carrier-table matches.
+- Input mode is process-wide and has no code-app bundle table. Carrier matches
+  do not change Chinese/ASCII, punctuation, or width state.
 - Terminal, iTerm, MacVim, and Emacs-style hosts use placeholder carrier during
-  Chinese composition and start from the ASCII idle policy owned by
-  `InputModeAppPolicy`.
+  Chinese composition and otherwise share the same linked Chinese initial mode
+  as all apps.
 - The compatibility table is deliberately close to mature IME app-option tables:
   matching by exact bundle id or stable prefix, with the effect limited to the
   carrier layer.

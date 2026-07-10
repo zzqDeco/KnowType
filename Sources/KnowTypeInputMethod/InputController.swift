@@ -22,6 +22,14 @@ enum InputMethodLexicalProfileRuntime {
     )
 }
 
+private enum InputMethodInputModeRuntime {
+    static let shared = ProcessInputModeStateRuntime(
+        initialSymbolWidth: UserDefaultsInputModePreferenceStore.defaultStore()
+            .loadPreferences()
+            .globalSymbolWidth
+    )
+}
+
 private final class InputMethodRimePrewarmer: @unchecked Sendable {
     static let shared = InputMethodRimePrewarmer()
 
@@ -76,6 +84,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         self.coordinator = InputControllerCoordinator(
             provider: nil,
             inputModePreferenceStore: inputModePreferenceStore,
+            inputModeStateRuntime: InputMethodInputModeRuntime.shared,
             runtimePreferenceStore: runtimePreferenceStore,
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: initialClient?.bundleIdentifier,

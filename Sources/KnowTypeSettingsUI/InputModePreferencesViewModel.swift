@@ -15,20 +15,8 @@ public final class InputModePreferencesViewModel: ObservableObject {
         self.lastErrorMessage = nil
     }
 
-    public func setDefaultPunctuationMode(_ mode: InputSymbolMode) {
-        update { $0.defaultState.punctuationMode = mode }
-    }
-
-    public func setDefaultSymbolWidth(_ width: InputSymbolWidth) {
-        update { $0.defaultState.symbolWidth = width }
-    }
-
-    public func setCodeAppPunctuationMode(_ mode: InputSymbolMode) {
-        update { $0.codeAppState.punctuationMode = mode }
-    }
-
-    public func setCodeAppSymbolWidth(_ width: InputSymbolWidth) {
-        update { $0.codeAppState.symbolWidth = width }
+    public func setGlobalSymbolWidth(_ width: InputSymbolWidth) {
+        update { $0.globalSymbolWidth = width }
     }
 
     public func resetToDefaults() {

@@ -5,6 +5,9 @@
 Current behavior:
 
 - adapts `IMKTextInput` clients into the internal `InputControllerClient` seam
+- injects one process-wide `ProcessInputModeStateRuntime` into every coordinator
+  so app and window changes cannot reload different text or punctuation modes;
+  a new host process starts linked Chinese mode with the saved global width
 - forwards key-input callbacks with only the callback sender's adapted client;
   the coordinator decides whether active composition may use the current IMK
   client fallback, while idle printable input with a missing sender remains
@@ -35,7 +38,9 @@ Current behavior:
   stale-drops older provider results instead of aborting started HTTP requests
 - injects a process-wide lexical profile store, refresh gate, and Rime userdb snapshot provider so multiple IMK controller sessions cannot independently overwrite the global `LEXICAL_PROFILE.md`
 - overrides `showPreferences(_:)` and retains `KnowTypePreferencesWindowController`, so the input-method menu opens the SwiftUI settings window without relying on InputMethodKit's default nib-backed preferences loader
-- builds its input-method menu through `KnowTypeInputMethodMenuBuilder`: localized AI continuation, log/support/Rime folders, settings, and About items
+- builds its input-method menu through `KnowTypeInputMethodMenuBuilder`:
+  localized AI continuation, current shared input-mode status,
+  log/support/Rime folders, settings, and About items
 - toggles localized AI continuation by writing `InputMethodRuntimePreferences` and forcing the coordinator to reload runtime preferences and refresh the visible candidate UI for the external menu change
 - preserves superclass calls for `hidePalettes`, `deactivateServer`, `inputControllerWillClose`, and fallback composition updates
 

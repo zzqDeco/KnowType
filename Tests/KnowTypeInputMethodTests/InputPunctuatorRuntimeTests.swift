@@ -82,4 +82,77 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
             )
         )
     }
+
+    func testDigitBeforePeriodUsesAsciiPeriodInChineseAndFullWidthModes() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(
+            textMode: .chinese,
+            punctuationMode: .chinese,
+            symbolWidth: .fullWidth
+        )
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit
+                )
+            ),
+            .commit(".")
+        )
+    }
+
+    func testDigitContextDoesNotChangeCommaOrActiveCompositionPeriod() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: ",",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit
+                )
+            ),
+            .commit("，")
+        )
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit,
+                    hasActiveComposition: true
+                )
+            ),
+            .commit("。")
+        )
+    }
+
+    func testSecondPeriodAfterRecordedAsciiPeriodReturnsToChinesePunctuation() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit
+                )
+            ),
+            .commit(".")
+        )
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .other
+                )
+            ),
+            .commit("。")
+        )
+    }
 }

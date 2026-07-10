@@ -98,11 +98,16 @@ protocol InputControllerClient: AnyObject, Sendable, InputClientGeometryProvidin
         replacementRange: NSRange
     )
     func insertText(_ text: String, replacementRange: NSRange)
+    func characterBeforeCaret() -> Character?
 }
 
 extension InputControllerClient {
     var feedbackTrackingID: ObjectIdentifier {
         ObjectIdentifier(self)
+    }
+
+    func characterBeforeCaret() -> Character? {
+        nil
     }
 }
 
@@ -166,6 +171,21 @@ final class IMKInputControllerClientAdapter: InputControllerClient, @unchecked S
         var rect = NSRect.zero
         _ = client.attributes(forCharacterIndex: index, lineHeightRectangle: &rect)
         return rect
+    }
+
+    func characterBeforeCaret() -> Character? {
+        let range = selectedRange
+        guard range.location != NSNotFound,
+              range.length == 0,
+              range.location > 0 else {
+            return nil
+        }
+        let requestedRange = NSRange(location: range.location - 1, length: 1)
+        guard let text = client.attributedSubstring(from: requestedRange)?.string,
+              (text as NSString).length == 1 else {
+            return nil
+        }
+        return text.first
     }
 
     func setMarkedText(

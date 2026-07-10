@@ -21,18 +21,18 @@ carrier table.
 - Unknown hosts use `inlineComposition` so standard AppKit clients keep marked
   text behavior.
 - Browser, editor, IDE, Electron/ToDesktop, JetBrains-style, and unknown hosts
-  default to inline carrier. Code-app preference defaults remain in
-  `InputModeAppPolicy`.
-- Any host uses `asciiPassthrough` while idle when the active input mode is
-  ASCII. Terminal, iTerm, MacVim, and Emacs-style hosts receive that ASCII idle
-  mode from `InputModeAppPolicy` by default.
+  default to inline carrier. Host identity does not choose text or punctuation
+  mode.
+- Any host uses `asciiPassthrough` while idle when the shared input mode is
+  ASCII. Terminal, iTerm, MacVim, and Emacs-style hosts begin in the same linked
+  Chinese mode as all other apps.
 - During active Chinese composition, terminal-style or override commit-only
   hosts use `commitOnlyComposition`: KnowType writes a full-width-space
   attributed marked-text placeholder to keep the host composition and candidate
   anchor alive without exposing raw pinyin in the host text field. The real
   preedit display is owned by candidate-panel state, not by this policy.
-- `Option + /` is the supported session-local path for switching terminal-style
-  hosts between Chinese placeholder composition and idle ASCII passthrough.
+- `Option + /` switches the process-wide mode between Chinese composition and
+  idle ASCII passthrough for every host.
 - Missing clients use `disabled`, allowing printable idle input to return
   unhandled rather than being swallowed.
 - Override keys use `input.client.<bundle id>.writeMode` in the shared
