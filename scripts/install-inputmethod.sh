@@ -29,6 +29,8 @@ STALE_LAUNCHSERVICES_CLEANUP_COUNT="0"
 PROVIDER_MIGRATION_STATUS="not-run"
 PROVIDER_MIGRATION_REVISION=""
 PROVIDER_MIGRATION_ATTEMPTED=0
+SOURCE_PROVIDER_STORAGE_GENERATION=""
+PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE=0
 
 usage() {
   cat <<'EOF'
@@ -219,6 +221,53 @@ provider_storage_generation_for_bundle() {
     "$bundle_path/Contents/Info.plist"
 }
 
+prepare_provider_storage_for_source_bundle() {
+  if [[ "$SOURCE_PROVIDER_STORAGE_GENERATION" =~ ^[0-9]+$ ]] &&
+     (( SOURCE_PROVIDER_STORAGE_GENERATION >= 2 )); then
+    return 0
+  fi
+
+  stop_provider_profile_writer_hosts
+  local current_generation=""
+  current_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)"
+  if [[ "$current_generation" =~ ^[0-9]+$ ]] && (( current_generation >= 2 )); then
+    local current_executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+    local output=""
+    local status=""
+    if [[ ! -x "$current_executable" ]]; then
+      echo "error: current generation-2 executable is unavailable for provider storage downgrade" >&2
+      return 1
+    fi
+    if ! output="$("$current_executable" --knowtype-downgrade-provider-profiles 2>&1)"; then
+      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+      echo "error: provider storage downgrade failed; refusing to install a pre-v2 input method" >&2
+      return 1
+    fi
+    [[ -n "$output" ]] && printf '%s\n' "$output"
+    status="$(printf '%s\n' "$output" | awk -F= '/^provider\.storage\.downgrade\.status=/{print $2; exit}')"
+    case "$status" in
+      downgraded|already_legacy|unmanaged)
+        PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE=1
+        PROVIDER_MIGRATION_STATUS="skipped-pre-v2-$status"
+        return 0
+        ;;
+      *)
+        echo "error: provider storage downgrade returned an unknown status" >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  local canonical_path
+  canonical_path="$(knowtype_app_support_dir)/providers.v2.json"
+  if [[ -e "$canonical_path" ]] || ! knowtype_legacy_provider_storage_is_compatible; then
+    echo "error: provider storage is not compatible with the pre-v2 source bundle and no generation-2 installed app can downgrade it" >&2
+    return 1
+  fi
+  PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE=1
+  PROVIDER_MIGRATION_STATUS="skipped-pre-v2-compatible"
+}
+
 rollback_provider_storage_after_failed_install() {
   local executable="${1:-$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp}"
   if (( PROVIDER_MIGRATION_ATTEMPTED != 1 )); then
@@ -273,7 +322,11 @@ rollback_provider_storage_after_failed_install() {
 
 reapply_provider_migration_best_effort() {
   local executable="$1"
-  if [[ -x "$executable" ]]; then
+  local bundle_path=""
+  bundle_path="$(dirname "$(dirname "$(dirname "$executable")")")"
+  local generation=""
+  generation="$(provider_storage_generation_for_bundle "$bundle_path" || true)"
+  if [[ -x "$executable" && "$generation" =~ ^[0-9]+$ ]] && (( generation >= 2 )); then
     if ! "$executable" --knowtype-migrate-provider-profiles >/dev/null 2>&1; then
       echo "warning: could not reapply provider migration after artifact rollback was abandoned; rerun the installer" >&2
     fi
@@ -361,6 +414,9 @@ rollback_failed_install() {
       fi
       rm -rf "$app_stage" "$current_stage"
       restored_app=1
+      if (( PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE == 1 )); then
+        reapply_provider_migration_best_effort "$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+      fi
     fi
     if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
       mkdir -p "$PREFPANE_TARGET_DIR"
@@ -379,6 +435,9 @@ rollback_failed_install() {
       restore_existing_input_source_after_failed_quiesce
     fi
   else
+    if (( PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE == 1 )); then
+      reapply_provider_migration_best_effort "$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+    fi
     restore_existing_input_source_after_failed_quiesce
   fi
 }
@@ -575,6 +634,14 @@ quiesce_before_replace() {
 migrate_provider_profiles() {
   local executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
   local output=""
+  local installed_generation=""
+  installed_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)"
+  if [[ ! "$installed_generation" =~ ^[0-9]+$ ]] || (( installed_generation < 2 )); then
+    if [[ "$PROVIDER_MIGRATION_STATUS" == "not-run" ]]; then
+      PROVIDER_MIGRATION_STATUS="skipped-pre-v2-compatible"
+    fi
+    return 0
+  fi
   if [[ ! -x "$executable" ]]; then
     echo "error: installed executable is unavailable for provider profile migration: $executable" >&2
     return 1
@@ -857,6 +924,7 @@ prepare_source_artifacts() {
     exit 1
   }
   knowtype_validate_inputmethod_bundle_for_install "$SOURCE_BUNDLE_PATH" "$VERIFY_ENABLED"
+  SOURCE_PROVIDER_STORAGE_GENERATION="$(provider_storage_generation_for_bundle "$SOURCE_BUNDLE_PATH" || true)"
 
   if (( WITH_PREFPANE == 1 )) && [[ -z "$SOURCE_PREFPANE_PATH" ]]; then
     echo "error: --with-prefpane requested but source KnowType.prefPane was not found" >&2
@@ -951,7 +1019,12 @@ if (( DRY_RUN == 1 )); then
   echo
   echo "Text Input Source preference rows would be repaired and menu agents would be restarted."
   echo "Only the canonical installed app would be registered with LaunchServices: $TARGET_PATH"
-  echo "The installed app would migrate provider profiles to providers.v2.json before LaunchServices/TIS registration."
+  if [[ "$SOURCE_PROVIDER_STORAGE_GENERATION" =~ ^[0-9]+$ ]] &&
+     (( SOURCE_PROVIDER_STORAGE_GENERATION >= 2 )); then
+    echo "The installed app would migrate provider profiles to providers.v2.json before LaunchServices/TIS registration."
+  else
+    echo "The source app is pre-v2; current provider metadata would be downgraded or verified compatible before replacement, and the old migration CLI would not be invoked."
+  fi
   echo "Menu acceptance would still require the real macOS input menu to show the K icon and 知键 entry."
   exit 0
 fi
@@ -975,6 +1048,8 @@ if (( BACKUP_ENABLED == 1 )); then
   BACKUP_ID="$KNOWTYPE_CREATED_BACKUP_ID"
   BACKUP_DIR="$KNOWTYPE_CREATED_BACKUP_DIR"
 fi
+
+prepare_provider_storage_for_source_bundle
 
 if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
   knowtype_remove_local_inputmethod_bundle_if_safe "$TARGET_PATH" 0

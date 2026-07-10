@@ -31,9 +31,14 @@
   payload. A missing canonical file after a completed migration is reported
   rather than treated as empty settings.
 - Migration holds the canonical sidecar lock, rejects occupied credential
-  destinations, refreshes the legacy snapshot on retry, publishes the legacy
-  tombstone through an atomic compare-and-claim before canonical metadata, and
-  verifies that no pre-v2 writer replaced it during cutover. Normal canonical
+  destinations, refreshes the legacy snapshot on retry, publishes a provisional
+  `canonicalExpected=false` tombstone through an atomic compare-and-claim, writes
+  canonical metadata, then promotes the tombstone to `canonicalExpected=true`.
+  If the process stops before canonical publication, ordinary reads and writes
+  remain blocked; the next explicit migration restores the exact legacy snapshot
+  only when a matching compare-and-claim artifact proves the interrupted cutover,
+  then retries. It also verifies that no pre-v2 writer replaced the tombstone
+  during cutover. Normal canonical
   saves use the same non-overwriting tombstone preparation. If two legacy writes
   race around the claim, the intermediate payload remains permission-restricted
   as `providers.legacy-conflict.<UUID>.json` instead of being discarded. It

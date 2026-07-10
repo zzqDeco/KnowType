@@ -49,12 +49,17 @@ Installs the locally built KnowType input method bundle into
   System Settings so no legacy provider writer remains active, replaces
   `~/Library/Input Methods/KnowType.app`, clears quarantine, and refreshes the
   installed path with `lsregister -f`.
-- Before LaunchServices or TIS registration, the installed executable runs the
-  explicit `--knowtype-migrate-provider-profiles` command. It migrates numeric
-  `providers.json` metadata to generation-separated `providers.v2.json`,
+- Before LaunchServices or TIS registration, a generation-2 installed executable
+  runs the explicit `--knowtype-migrate-provider-profiles` command. It migrates
+  numeric `providers.json` metadata to generation-separated `providers.v2.json`,
   snapshots the legacy bytes, and rekeys available Keychain credentials.
-  Migration output contains only state, revision, and counts. Failure enters
-  the existing validated artifact rollback path.
+  Migration output contains only state, revision, and counts. Failure enters the
+  existing validated artifact rollback path.
+- A pre-v2 source bundle never receives the unknown migration command. Before
+  replacement, the currently installed generation-2 executable transactionally
+  downgrades provider metadata; without such an executable, the installer
+  requires already-compatible numeric legacy metadata and no canonical file.
+  Otherwise installation fails before publishing the older app.
 - If a later step fails, the installer checks the backup app's declared storage
   generation before publishing it. For a pre-v2 backup, the still-canonical new
   app either rolls back the exact migrated revision or transactionally

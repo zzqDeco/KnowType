@@ -152,25 +152,6 @@ stop_provider_profile_writer_hosts() {
   return 1
 }
 
-legacy_provider_storage_is_compatible() {
-  local legacy_path
-  legacy_path="$(knowtype_app_support_dir)/providers.json"
-  if [[ ! -e "$legacy_path" ]]; then
-    return 0
-  fi
-  "$KNOWTYPE_PYTHON3" - "$legacy_path" <<'PY'
-import json
-import pathlib
-import sys
-
-try:
-    payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-except Exception:
-    raise SystemExit(1)
-raise SystemExit(0 if isinstance(payload.get("schemaVersion"), int) else 1)
-PY
-}
-
 prepare_provider_storage_for_restored_app() {
   local restored_generation current_generation current_executable output status
   restored_generation="$(provider_storage_generation_for_bundle "$backup_dir/KnowType.app" || true)"
@@ -208,7 +189,7 @@ prepare_provider_storage_for_restored_app() {
     return 0
   fi
 
-  if ! legacy_provider_storage_is_compatible; then
+  if ! knowtype_legacy_provider_storage_is_compatible; then
     echo "error: current app cannot downgrade the provider tombstone for this pre-v2 backup" >&2
     echo "Reinstall the current KnowType build, then retry rollback." >&2
     return 1

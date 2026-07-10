@@ -587,11 +587,28 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("knowtype_quit_system_settings_if_running 0"))
         XCTAssertTrue(installScript.contains("close KnowType Settings and System Settings before installing"))
         XCTAssertTrue(installScript.contains("migrate_provider_profiles"))
+        XCTAssertTrue(installScript.contains("prepare_provider_storage_for_source_bundle"))
+        XCTAssertTrue(installScript.contains("SOURCE_PROVIDER_STORAGE_GENERATION"))
+        XCTAssertTrue(installScript.contains("skipped-pre-v2"))
         XCTAssertTrue(installScript.contains("rollback_provider_storage_after_failed_install"))
         XCTAssertTrue(installScript.contains(#""$executable" --knowtype-migrate-provider-profiles"#))
         XCTAssertTrue(installScript.contains(#""$executable" --knowtype-rollback-provider-profile-migration"#))
         XCTAssertTrue(installScript.contains(#""$executable" --knowtype-downgrade-provider-profiles"#))
         XCTAssertTrue(installScript.contains("provider_storage_generation_for_bundle"))
+        XCTAssertTrue(installHelper.contains("knowtype_legacy_provider_storage_is_compatible"))
+        XCTAssertTrue(installHelper.contains(#"payload["schemaVersion"] != 1"#))
+        XCTAssertTrue(installHelper.contains(#"not isinstance(payload.get("profiles"), list)"#))
+        let sourceGenerationGuard = try XCTUnwrap(
+            installScript.range(of: #"installed_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)""#)
+        )
+        let migrationInvocation = try XCTUnwrap(
+            installScript.range(of: #"output="$("$executable" --knowtype-migrate-provider-profiles 2>&1)""#)
+        )
+        XCTAssertLessThan(
+            sourceGenerationGuard.lowerBound,
+            migrationInvocation.lowerBound,
+            "pre-v2 source bundles must be rejected before invoking an unsupported migration command"
+        )
         XCTAssertTrue(installScript.contains("PROVIDER_MIGRATION_REVISION"))
         XCTAssertTrue(installScript.contains("keeping the new app instead of restoring an incompatible old binary"))
         XCTAssertFalse(installScript.contains("restore_provider_storage_snapshot"))
@@ -654,6 +671,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("Quiesce plan: switch away from KnowType, disable old KnowType input-source rows"))
         XCTAssertTrue(installScript.contains("Only the canonical installed app would be registered with LaunchServices"))
         XCTAssertTrue(installScript.contains("migrate provider profiles to providers.v2.json"))
+        XCTAssertTrue(installScript.contains("the old migration CLI would not be invoked"))
         XCTAssertTrue(installScript.contains("require_input_method_host_stopped"))
         XCTAssertTrue(installScript.contains("process shutdown can flush Rime user data"))
         XCTAssertTrue(installScript.contains("--force-stop-host"))

@@ -169,6 +169,9 @@ assert_contains "$install_script_contents" '"$executable" --knowtype-migrate-pro
 assert_contains "$install_script_contents" '"$executable" --knowtype-rollback-provider-profile-migration' "install script"
 assert_contains "$install_script_contents" '"$executable" --knowtype-downgrade-provider-profiles' "install script"
 assert_contains "$install_script_contents" 'provider_storage_generation_for_bundle' "install script"
+assert_contains "$install_script_contents" 'prepare_provider_storage_for_source_bundle' "install script"
+assert_contains "$install_script_contents" 'SOURCE_PROVIDER_STORAGE_GENERATION' "install script"
+assert_contains "$install_script_contents" 'skipped-pre-v2' "install script"
 assert_not_contains "$install_script_contents" 'restore_provider_storage_snapshot' "install script"
 assert_contains "$install_script_contents" 'rollback_provider_storage_after_failed_install' "install script"
 assert_contains "$install_script_contents" 'migrate_provider_profiles
@@ -243,6 +246,25 @@ declare -F knowtype_validate_install_backup_for_restore >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load backup integrity helpers"
 declare -F knowtype_clean_preferencepane_caches >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
+declare -F knowtype_legacy_provider_storage_is_compatible >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load legacy provider validation helpers"
+
+legacy_validation_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-legacy-provider-validation.XXXXXX")"
+printf '%s\n' '{"schemaVersion":1,"profiles":[]}' >"$legacy_validation_root/valid.json"
+printf '%s\n' '{"schemaVersion":2,"profiles":[]}' >"$legacy_validation_root/future.json"
+printf '%s\n' '{"schemaVersion":true,"profiles":[]}' >"$legacy_validation_root/bool.json"
+printf '%s\n' '{"schemaVersion":1,"profiles":[{}]}' >"$legacy_validation_root/incomplete.json"
+knowtype_legacy_provider_storage_is_compatible "$legacy_validation_root/valid.json" ||
+  die "legacy provider validation rejected a valid schema-v1 envelope"
+for invalid_legacy_path in \
+  "$legacy_validation_root/future.json" \
+  "$legacy_validation_root/bool.json" \
+  "$legacy_validation_root/incomplete.json"; do
+  if knowtype_legacy_provider_storage_is_compatible "$invalid_legacy_path"; then
+    die "legacy provider validation accepted incompatible metadata: $invalid_legacy_path"
+  fi
+done
+rm -rf "$legacy_validation_root"
 
 manifest_smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-manifest-smoke.XXXXXX")"
 mkdir -p "$manifest_smoke_root/one" "$manifest_smoke_root/two"
@@ -428,6 +450,22 @@ assert_contains "$install_dry_run_output" "Install state: $fake_support_dir/inst
 assert_contains "$install_dry_run_output" "Backup root: $fake_support_dir/Backups" "install dry run output"
 assert_contains "$install_dry_run_output" "Would create install backup" "install dry run output"
 assert_contains "$install_dry_run_output" "migrate provider profiles to providers.v2.json" "install dry run output"
+
+pre_v2_bundle_path="$install_state_tmp/KnowType-pre-v2.app"
+cp -R "$bundle_path" "$pre_v2_bundle_path"
+/usr/libexec/PlistBuddy -c "Delete :KnowTypeProviderProfileStorageGeneration" \
+  "$pre_v2_bundle_path/Contents/Info.plist"
+pre_v2_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    "$ROOT_DIR/scripts/install-inputmethod.sh" \
+    --dry-run \
+    --no-verify \
+    --from-bundle "$pre_v2_bundle_path"
+)"
+assert_contains "$pre_v2_dry_run_output" "source app is pre-v2" "pre-v2 install dry run output"
+assert_contains "$pre_v2_dry_run_output" "old migration CLI would not be invoked" "pre-v2 install dry run output"
 
 release_zip_path="$install_state_tmp/KnowType-test-release.zip"
 release_zip_checksum_path="$install_state_tmp/KnowType-test-release.zip.sha256"

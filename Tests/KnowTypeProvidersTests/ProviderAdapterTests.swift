@@ -355,7 +355,7 @@ final class ProviderAdapterTests: XCTestCase {
         let provider = GeminiNativeProvider(
             configuration: ProviderConfiguration(
                 kind: .geminiNative,
-                baseURL: URL(string: "https://generativelanguage.googleapis.com")!,
+                baseURL: URL(string: "https://generativelanguage.googleapis.com?tenant=knowtype")!,
                 apiKey: "key",
                 model: "gemini-test"
             ),
@@ -369,10 +369,19 @@ final class ProviderAdapterTests: XCTestCase {
         let contents = try XCTUnwrap(bodyObject["contents"] as? [[String: Any]])
         let parts = try XCTUnwrap(contents.first?["parts"] as? [[String: Any]])
         let prompt = try XCTUnwrap(parts.first?["text"] as? String)
+        let requestURL = try XCTUnwrap(request?.url)
+        let components = try XCTUnwrap(URLComponents(url: requestURL, resolvingAgainstBaseURL: false))
 
         XCTAssertEqual(generationConfig["responseMimeType"] as? String, "application/json")
         XCTAssertNotNil(generationConfig["responseSchema"] as? [String: Any])
         XCTAssertTrue(prompt.hasPrefix(PromptBuilder.systemPrompt(for: .continuation)))
+        XCTAssertEqual(components.path, "/v1beta/models/gemini-test:generateContent")
+        XCTAssertEqual(
+            Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+                item.value.map { (item.name, $0) }
+            }),
+            ["tenant": "knowtype", "key": "key"]
+        )
         XCTAssertEqual(response.candidates.first?.text, "继续推进")
     }
 
@@ -419,6 +428,27 @@ final class ProviderAdapterTests: XCTestCase {
         let request = await client.capturedRequest()
 
         XCTAssertEqual(request?.url?.absoluteString, "https://api.example.com/v1/chat/completions")
+    }
+
+    func testOpenAICompatibleBaseURLPreservesQueryAfterEndpointPath() async throws {
+        let content = #"{"candidates":[{"text":"query-compatible"}]}"#
+        let client = MockHTTPClient(json: #"{"choices":[{"message":{"content":"\#(content.replacingOccurrences(of: "\"", with: "\\\""))"}}]}"#)
+        let provider = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "https://proxy.example.com/v1?tenant=knowtype")!,
+                model: "model"
+            ),
+            httpClient: client
+        )
+
+        _ = try await provider.complete(llmRequest)
+        let request = await client.capturedRequest()
+
+        XCTAssertEqual(
+            request?.url?.absoluteString,
+            "https://proxy.example.com/v1/chat/completions?tenant=knowtype"
+        )
     }
 
     func testPlainTextContextDigestPreservesFullMarkdownAsOneCandidate() throws {

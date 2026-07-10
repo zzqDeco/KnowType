@@ -150,8 +150,10 @@ local-candidate path.
   revision baselines, preserves drafts on conflict, and coordinates secret-first
   immutable API-key updates through `SecretStore`.
 - Canonical provider metadata lives in generation-separated
-  `providers.v2.json`. Install-time migration snapshots and tombstones the
-  legacy path so a pre-v2 Settings writer cannot overwrite runtime state.
+  `providers.v2.json`. Install-time migration snapshots the legacy payload,
+  uses a recoverable provisional tombstone until canonical metadata is durable,
+  then finalizes the tombstone so a pre-v2 Settings writer cannot overwrite
+  runtime state.
 - Provider profile connection tests are transient and do not save profile metadata or draft API keys.
 - `InputModePreferencesViewModel` edits punctuation language and symbol-width defaults stored in the shared `com.knowtype.preferences` defaults domain.
 - `RuntimePreferencesViewModel` edits candidate paging/layout and AI continuation behavior through the same shared defaults domain. The legacy input-scheme value remains persisted for compatibility but is not exposed in the Rime-only settings UI.

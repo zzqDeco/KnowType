@@ -153,7 +153,9 @@ expected revision, increment once, and atomically replace the file. Successful
 commits emit a privacy-safe cross-process revision signal. Runtime cold-start
 paths use the no-create loader, so a genuinely absent provider profile does not
 create `Application Support/KnowType` merely because the IMK host was launched.
-Unmigrated legacy or missing post-migration canonical state fails closed.
+Unmigrated legacy or missing post-migration canonical state fails closed. The
+install migration first publishes a recoverable provisional tombstone and only
+marks canonical metadata expected after the canonical file is durable.
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore`
 stores API keys under the `KnowType` service. New key writes use immutable
@@ -173,6 +175,8 @@ Settings validation rules:
 - display name cannot be empty
 - base URL must be HTTP(S) with a host and cannot include userinfo or a fragment;
   query parameters remain accepted for runtime compatibility
+- provider-specific paths are appended before preserved query items; Gemini
+  replaces only its own `key` item
 - timeout must be positive
 - remote OpenAI-compatible profiles require an explicit model ID
 - local OpenAI-compatible profiles may leave model blank for `/v1/models` discovery

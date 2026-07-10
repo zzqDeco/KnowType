@@ -365,6 +365,122 @@ final class ProviderProfileTests: XCTestCase {
         )
     }
 
+    func testMigrationRecoversInterruptedProvisionalTombstoneFromSnapshot() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-provisional-recovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let snapshotURL = try XCTUnwrap(store.legacySnapshotURL)
+        let profile = ProviderProfile(
+            id: "recovered",
+            displayName: "Recovered",
+            kind: .openAIChat,
+            baseURL: URL(string: "https://example.com/v1")!,
+            model: "model",
+            isDefault: true
+        )
+        let legacyData = try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [profile])
+        )
+        try legacyData.write(to: snapshotURL, options: [.atomic])
+        let claimURL = legacyURL.deletingLastPathComponent().appendingPathComponent(
+            "\(FileProviderProfileStore.legacyConflictFilenamePrefix)interrupted.json"
+        )
+        try legacyData.write(to: claimURL, options: [.atomic])
+        try Data(
+            """
+            {
+              "canonicalFile" : "providers.v2.json",
+              "canonicalExpected" : false,
+              "profiles" : [],
+              "schemaVersion" : "migrated-to-providers.v2.json"
+            }
+            """.utf8
+        ).write(to: legacyURL, options: [.atomic])
+        XCTAssertThrowsError(try store.loadProfiles()) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .migrationRequired(path: legacyURL.path)
+            )
+        }
+
+        let result = try store.migrateLegacyProfiles(secretStore: InMemorySecretStore())
+
+        XCTAssertEqual(result.status, .migrated)
+        XCTAssertEqual(result.profileCount, 1)
+        XCTAssertEqual(try store.loadProfiles().profiles.map(\.id), ["recovered"])
+        let tombstone = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: legacyURL)) as? [String: Any]
+        )
+        XCTAssertEqual(tombstone["canonicalExpected"] as? Bool, true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: claimURL.path))
+    }
+
+    func testMigrationRecoversInterruptedClaimBeforeProvisionalTombstone() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-claim-recovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let snapshotURL = try XCTUnwrap(store.legacySnapshotURL)
+        let legacyData = try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [])
+        )
+        let claimURL = legacyURL.deletingLastPathComponent().appendingPathComponent(
+            "\(FileProviderProfileStore.legacyConflictFilenamePrefix)interrupted.json"
+        )
+        try legacyData.write(to: snapshotURL, options: [.atomic])
+        try legacyData.write(to: claimURL, options: [.atomic])
+
+        XCTAssertThrowsError(try store.loadProfiles()) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .migrationRequired(path: legacyURL.path)
+            )
+        }
+        let result = try store.migrateLegacyProfiles(secretStore: InMemorySecretStore())
+
+        XCTAssertEqual(result.status, .migrated)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.fileURL.path))
+        XCTAssertEqual(store.legacyStorageState(), .tombstone)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: claimURL.path))
+    }
+
+    func testMigrationRejectsSnapshotWithoutMatchingInterruptedClaim() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-unproven-recovery-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let snapshotURL = try XCTUnwrap(store.legacySnapshotURL)
+        let legacyData = try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [])
+        )
+        try legacyData.write(to: snapshotURL, options: [.atomic])
+
+        XCTAssertThrowsError(try store.loadProfiles()) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .migrationRequired(path: legacyURL.path)
+            )
+        }
+        XCTAssertThrowsError(
+            try store.migrateLegacyProfiles(secretStore: InMemorySecretStore())
+        ) { error in
+            XCTAssertEqual(error as? ProviderProfileStoreError, .migrationRollbackFailed)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
+        XCTAssertEqual(try Data(contentsOf: snapshotURL), legacyData)
+    }
+
     func testMigrationDoesNotOverwriteWriterPayloadArrivingDuringCutover() throws {
         let applicationSupport = FileManager.default.temporaryDirectory
             .appendingPathComponent("provider-profile-cutover-writer-\(UUID().uuidString)", isDirectory: true)

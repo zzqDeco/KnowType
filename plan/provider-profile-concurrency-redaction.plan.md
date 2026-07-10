@@ -43,17 +43,22 @@ wire formats or adding a runtime reload observer.
   posts the revision signal.
 - Migration preserves the exact legacy payload as `providers.legacy.json`,
   copies each available Keychain value to a fresh immutable credential
-  reference, atomically claims the exact source payload, publishes a deliberately
-  nonnumeric tombstone without overwriting a competing writer, writes canonical
-  metadata, then verifies that no late pre-v2 writer replaced the tombstone.
+  reference, atomically claims the exact source payload, publishes a recoverable
+  `canonicalExpected=false` tombstone without overwriting a competing writer,
+  writes canonical metadata, promotes the tombstone to `canonicalExpected=true`,
+  then verifies that no late pre-v2 writer replaced it. A process interruption
+  before canonical publication blocks ordinary reads/writes and is recovered
+  only when the exact legacy snapshot matches a preserved claim artifact.
   A late writer payload is retained and migration fails closed instead of
   discarding it; a three-way race preserves the intermediate claim as a
   permission-restricted `providers.legacy-conflict.<UUID>.json`. Legacy credentials remain intact for
   downgrade safety; canonical metadata never references them.
 - The installer closes standalone Settings and System Settings before running
-  the installed app's explicit migration command. Migration completes before
-  LaunchServices/TIS registration; failure enters the existing artifact
-  rollback path.
+  a generation-2 installed app's explicit migration command. Pre-v2 source
+  bundles are detected before replacement and use the current generation-2 app
+  to downgrade metadata, or fail closed if compatibility cannot be proven.
+  Migration completes before LaunchServices/TIS registration; failure enters the
+  existing artifact rollback path.
 - Failed-install recovery checks the backup app's storage generation before it
   is published. For pre-v2 backups, the new app's compare-and-claim rollback or
   downgrade command prepares compatible metadata; the shell never copies an

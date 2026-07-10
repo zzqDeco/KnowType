@@ -35,6 +35,57 @@ knowtype_app_support_dir() {
   printf '%s' "${KNOWTYPE_APP_SUPPORT_DIR:-$HOME/Library/Application Support/KnowType}"
 }
 
+knowtype_legacy_provider_storage_is_compatible() {
+  local legacy_path="${1:-$(knowtype_app_support_dir)/providers.json}"
+  if [[ ! -e "$legacy_path" ]]; then
+    return 0
+  fi
+  "$KNOWTYPE_PYTHON3" - "$legacy_path" <<'PY'
+import json
+import pathlib
+import sys
+
+try:
+    payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+if not isinstance(payload, dict) or type(payload.get("schemaVersion")) is not int:
+    raise SystemExit(1)
+if payload["schemaVersion"] != 1 or not isinstance(payload.get("profiles"), list):
+    raise SystemExit(1)
+required_strings = ("id", "displayName", "kind", "baseURL", "model")
+optional_strings = ("secretName", "customBodyTemplate", "customResponsePath")
+allowed_kinds = {
+    "openai_chat", "openai_responses", "anthropic_messages",
+    "gemini_native", "ollama_native", "custom_http",
+}
+for profile in payload["profiles"]:
+    if not isinstance(profile, dict):
+        raise SystemExit(1)
+    if any(not isinstance(profile.get(field), str) for field in required_strings):
+        raise SystemExit(1)
+    if profile["kind"] not in allowed_kinds:
+        raise SystemExit(1)
+    timeout = profile.get("timeoutSeconds")
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise SystemExit(1)
+    headers = profile.get("headers")
+    if not isinstance(headers, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in headers.items()
+    ):
+        raise SystemExit(1)
+    if not isinstance(profile.get("isDefault"), bool):
+        raise SystemExit(1)
+    if any(
+        profile.get(field) is not None and not isinstance(profile.get(field), str)
+        for field in optional_strings
+    ):
+        raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
 knowtype_install_state_path() {
   printf '%s' "${KNOWTYPE_INSTALL_STATE_PATH:-$(knowtype_app_support_dir)/install-state.json}"
 }
