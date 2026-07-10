@@ -28,11 +28,16 @@ Installs the locally built KnowType input method bundle into
   `~/Library/Application Support/KnowType/Backups/` unless `--no-backup` is
   passed. Backups contain `KnowType.app`, optional `KnowType.prefPane`, and a
   manifest; they do not contain user data.
+- New backups use manifest schema `2` and record complete app and optional pane
+  checksum, bundle identity, short version/build, and signing
+  requirement/identity metadata. Backup creation fails rather than writing an
+  unverifiable rollback point.
 - Successful installs write
   `~/Library/Application Support/KnowType/install-state.json` with source,
   version/build, commit/tag when known, installed paths, and previous backup id.
-- If replacement fails after a backup is created, the script attempts to restore
-  that backup before exiting.
+- If replacement fails after a backup is created, the script validates that
+  schema `2` backup before attempting recovery. Failed-install recovery also
+  refuses to remove or replace a foreign same-name PreferencePane.
 - The script keeps the newest three backups by default. Use `--keep-backups N`
   to adjust retention.
 - The script switches away from any current KnowType source, disables existing
@@ -71,7 +76,9 @@ Installs the locally built KnowType input method bundle into
   not leave the previously working input source disabled.
 - Local installs inject a timestamp `CFBundleVersion` by default so
   LaunchServices and TIS do not keep reusing stale metadata from a previous
-  development build with the same source-controlled version.
+  development build with the same source-controlled version. The installer
+  resolves one short version and one build version and passes both to the app
+  and optional PreferencePane builders.
 - It uses `knowtype-inputsource-tool repair-preferences --add-active` around the
   installed app registration to keep local development caches aligned with the
   current parent-plus-mode model: enabled preferences contain the parent anchor
@@ -98,6 +105,9 @@ Installs the locally built KnowType input method bundle into
   `KnowType.prefPane` so an old pane cannot drift out of version sync with the
   newly installed input-method app. Use `--with-prefpane` to install a matching
   compatibility pane.
+- Any installed `KnowType.prefPane` must be the canonical non-symlink path and
+  declare `CFBundleIdentifier=com.knowtype.preferencepane`. A same-name foreign
+  bundle blocks install before quiescing or replacement.
 - The script removes stale System Settings PreferencePane cache files only when
   they contain stable pane identifiers (`com.knowtype.preferencepane` or
   `KnowType.prefPane`) using fixed-string matching, and asks System Settings to

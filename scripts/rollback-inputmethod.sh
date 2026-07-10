@@ -10,10 +10,11 @@ DRY_RUN=0
 LIST_BACKUPS=0
 TARGET_BACKUP_ID=""
 USE_LATEST=0
+ALLOW_UNVERIFIED_BACKUP=0
 
 usage() {
   cat <<'EOF'
-Usage: scripts/rollback-inputmethod.sh [--list] [--latest | --to BACKUP_ID] [--dry-run]
+Usage: scripts/rollback-inputmethod.sh [--list] [--latest | --to BACKUP_ID] [--dry-run] [--allow-unverified-backup]
 
 Restores a previously backed up KnowType.app and optional KnowType.prefPane.
 Rollback only swaps install artifacts; it does not modify Rime userdb, provider
@@ -24,6 +25,9 @@ Options:
   --latest        Restore the newest backup.
   --to BACKUP_ID  Restore a specific backup ID.
   --dry-run       Print actions without changing files or preferences.
+  --allow-unverified-backup
+                  DANGEROUS: allow schema-v1 legacy backups that lack complete
+                  checksum/version/signing metadata. Schema-v2 failures remain fatal.
   -h, --help      Show this help.
 EOF
 }
@@ -48,6 +52,10 @@ while (($# > 0)); do
       ;;
     --dry-run)
       DRY_RUN=1
+      shift
+      ;;
+    --allow-unverified-backup)
+      ALLOW_UNVERIFIED_BACKUP=1
       shift
       ;;
     -h|--help)
@@ -155,9 +163,10 @@ if [[ ! -d "$backup_dir/KnowType.app" ]]; then
   echo "error: backup does not contain KnowType.app: $backup_dir" >&2
   exit 1
 fi
-if ! knowtype_validate_inputmethod_bundle_for_install "$backup_dir/KnowType.app" 0; then
+if ! knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP"; then
   exit 1
 fi
+backup_validation_status="$KNOWTYPE_BACKUP_VALIDATION_STATUS"
 restored_active_mode_id="$(knowtype_bundle_visible_input_mode_id "$backup_dir/KnowType.app" || true)"
 if [[ -z "$restored_active_mode_id" || "$restored_active_mode_id" == "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
   echo "error: backup KnowType.app does not declare a menu-visible input mode." >&2
@@ -189,11 +198,18 @@ if ((${#restored_legacy_mode_ids[@]} > 0)); then
 fi
 
 backup_id="$(basename "$backup_dir")"
+knowtype_require_safe_local_preferencepane_if_present "$prefpane_path"
 
 if (( DRY_RUN == 1 )); then
   echo "KnowType rollback dry run"
   echo "Backup: $backup_id"
   echo "Backup path: $backup_dir"
+  echo "Backup integrity: $backup_validation_status"
+  if [[ "$backup_validation_status" == "legacy-unverified-override" ]]; then
+    echo "UNVERIFIED LEGACY OVERRIDE: ENABLED"
+  elif (( ALLOW_UNVERIFIED_BACKUP == 1 )); then
+    echo "Legacy override: not applicable; schema-v2 integrity validation remained strict"
+  fi
   echo "Restored active input mode: $restored_active_mode_id"
   echo "Target app: $target_path"
   if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
@@ -238,6 +254,23 @@ if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
   cp -R "$backup_dir/KnowType.prefPane" "$restore_prefpane_staging_dir/KnowType.prefPane"
 fi
 
+knowtype_validate_inputmethod_bundle_for_install "$restore_app_staging_dir/KnowType.app" 1
+if [[ "$backup_validation_status" == verified-schema-* ]]; then
+  knowtype_require_backup_metadata_match \
+    "staged app checksum" \
+    "$(knowtype_backup_manifest_field "$backup_dir/manifest.json" "appChecksum")" \
+    "$(knowtype_path_checksum "$restore_app_staging_dir/KnowType.app" || true)"
+fi
+if [[ -n "$restore_prefpane_staging_dir" ]]; then
+  knowtype_validate_preferencepane_bundle_for_install "$restore_prefpane_staging_dir/KnowType.prefPane" 1
+  if [[ "$backup_validation_status" == verified-schema-* ]]; then
+    knowtype_require_backup_metadata_match \
+      "staged PreferencePane checksum" \
+      "$(knowtype_backup_manifest_field "$backup_dir/manifest.json" "prefPaneChecksum")" \
+      "$(knowtype_path_checksum "$restore_prefpane_staging_dir/KnowType.prefPane" || true)"
+  fi
+fi
+
 if [[ -e "$target_path" || -L "$target_path" ]]; then
   knowtype_remove_local_inputmethod_bundle_if_safe "$target_path" 0
 fi
@@ -246,12 +279,12 @@ rm -rf "$restore_app_staging_dir"
 restore_app_staging_dir=""
 
 if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
-  rm -rf -- "$prefpane_path"
+  knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0
   mv "$restore_prefpane_staging_dir/KnowType.prefPane" "$prefpane_path"
   rm -rf "$restore_prefpane_staging_dir"
   restore_prefpane_staging_dir=""
 else
-  rm -rf -- "$prefpane_path"
+  knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0
 fi
 
 knowtype_clean_preferencepane_caches 0

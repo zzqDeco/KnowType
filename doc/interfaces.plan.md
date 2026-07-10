@@ -195,11 +195,22 @@ If the host process is already running, install/rollback must fail before
 replacement instead of killing it, since forced shutdown can flush Rime userdb
 files and would count as a user-data mutation.
 
-Install backups live under `Backups/<backup-id>/`. Each backup manifest records
-schema version, backup id, creation time, app version/build, bundle identifier,
-app checksum, whether a prefPane was included, and the restore command. Rollback
-restores only `KnowType.app` and optional `KnowType.prefPane`, then refreshes
-LaunchServices and input-source preferences.
+Install backups live under `Backups/<backup-id>/`. Manifest schema `2` records
+the backup id and creation time plus each included artifact's checksum, bundle
+identifier, short version/build, designated signing requirement, and normalized
+signing identity. PreferencePane fields are explicitly null when no pane is
+included. Rollback validates manifest shape and ID, every recorded field,
+`codesign --verify --deep --strict`, the recorded requirement, and staged-copy
+checksums before replacing the canonical app or pane. Schema `1` backups fail
+closed unless the caller supplies the prominent legacy-only
+`--allow-unverified-backup` override; it never bypasses schema `2` failures.
+Rollback restores only `KnowType.app` and optional `KnowType.prefPane`, then
+refreshes LaunchServices and input-source preferences.
+
+Destructive PreferencePane operations accept only the canonical local
+non-symlink `KnowType.prefPane` with
+`CFBundleIdentifier=com.knowtype.preferencepane`. A same-name foreign bundle
+blocks install, uninstall, explicit rollback, and failed-install recovery.
 
 `scripts/diagnose-inputmethod.sh --json` is the stable machine-readable
 diagnostic surface for local tooling. It emits top-level `install`, `bundle`,

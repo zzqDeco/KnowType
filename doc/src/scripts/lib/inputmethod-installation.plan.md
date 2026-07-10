@@ -18,11 +18,13 @@ that entry must match the current `.Hans` input mode id; older component-mode
 bundles that declare another visible mode or retain an extra stale visible mode
 are rejected before install/repair writes `.Hans` preferences.
 
-The safe-removal helper is intentionally strict: if a path resolves outside the
-local Input Methods directory, or does not look like a KnowType input-method
-bundle, it fails instead of removing or replacing it. Install and repair scripts
-must treat that failure as blocking so a symlink or stale LaunchServices path
-cannot redirect local install writes into an unrelated bundle.
+The safe-removal helpers are intentionally strict. An input-method path must
+resolve inside the local Input Methods directory and match the KnowType IMK
+identity. A PreferencePane path must be the canonical local
+`KnowType.prefPane`, must not be a symlink, and must declare
+`CFBundleIdentifier=com.knowtype.preferencepane`. Install, uninstall, rollback,
+and failed-install recovery treat a mismatch as blocking instead of removing or
+replacing a same-name foreign bundle.
 
 Dry-run callers may use the same discovery functions, but final summaries must
 say "would remove" instead of reporting completed removal.
@@ -30,7 +32,10 @@ say "would remove" instead of reporting completed removal.
 Install backups are artifact backups only. They may contain `KnowType.app` and
 `KnowType.prefPane`, but they must not contain provider profiles, Keychain
 secrets, Rime userdb, ENV.md, CORRECTION.md, LEXICAL_PROFILE.md, or local
-lexicon data.
+lexicon data. Schema `2` manifests require each included artifact's checksum,
+bundle identifier, short version, build version, designated signing
+requirement, and normalized signing identity. Pane integrity fields are null
+when no pane is included.
 
 Backup discovery only treats directories with managed backup IDs, matching
 manifests, and a restorable `KnowType.app` as rollback candidates. Unrelated
@@ -42,6 +47,13 @@ Rollback derives the active input mode from the restored bundle's
 declare the parent input method and no menu-visible input mode are rejected
 before restore/repair, because they cannot satisfy the current menu-switchable
 IMK model.
+
+Schema `2` rollback validates manifest shape, recorded metadata, bundle
+contents, `codesign --verify --deep --strict`, the recorded requirement, and
+the staged copy before replacement. Missing or mismatched integrity data is
+fatal. Schema `1` is rejected unless the caller explicitly uses
+`--allow-unverified-backup`; that override remains legacy-only and cannot
+bypass schema `2` failures.
 
 Related scripts:
 

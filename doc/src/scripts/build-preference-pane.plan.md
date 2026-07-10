@@ -8,7 +8,8 @@ The script adds the KnowType icon resource, signs the bundle with the same Apple
 
 `--version` and `--build` override the copied `Info.plist` before signing. The
 source plist stays stable while release artifacts can carry the tag version and
-CI build number.
+CI build number. Local `--with-prefpane` installs pass the same resolved short
+version and dynamic build to both bundle builders.
 
 The pane is a compatibility settings host. The default local install path opens
 KnowType settings from the input-method menu and builds this pane only when the

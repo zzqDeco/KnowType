@@ -158,6 +158,11 @@ if [[ ! "$KEEP_BACKUPS" =~ ^[0-9]+$ ]]; then
 fi
 
 LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
+LOCAL_SHORT_VERSION="${KNOWTYPE_BUNDLE_SHORT_VERSION:-$(knowtype_plist_value "CFBundleShortVersionString" "$ROOT_DIR/Resources/InputMethod/Info.plist")}"
+if [[ -z "$LOCAL_SHORT_VERSION" ]]; then
+  echo "error: local build short version is missing" >&2
+  exit 1
+fi
 TARGET_DIR="$(knowtype_inputmethod_target_dir)"
 TARGET_PATH="$(knowtype_inputmethod_target_path)"
 PREFPANE_TARGET_DIR="$(knowtype_preferencepane_target_dir)"
@@ -231,6 +236,14 @@ rollback_failed_install() {
   fi
   if [[ -n "$BACKUP_DIR" && ( -d "$BACKUP_DIR/KnowType.app" || -d "$BACKUP_DIR/KnowType.prefPane" ) ]]; then
     echo "Install failed; restoring previous KnowType backup: $BACKUP_ID" >&2
+    if ! knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0; then
+      echo "error: failed-install rollback refused an invalid backup; current artifacts were left in place" >&2
+      return 0
+    fi
+    if ! knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"; then
+      echo "error: failed-install rollback left current artifacts in place to protect the foreign PreferencePane" >&2
+      return 0
+    fi
     local app_stage=""
     local current_stage=""
     local restored_app=0
@@ -266,10 +279,12 @@ rollback_failed_install() {
     fi
     if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
       mkdir -p "$PREFPANE_TARGET_DIR"
-      rm -rf -- "$PREFPANE_TARGET_PATH"
+      if ! knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0; then
+        return 0
+      fi
       cp -R "$BACKUP_DIR/KnowType.prefPane" "$PREFPANE_TARGET_PATH"
     else
-      rm -rf -- "$PREFPANE_TARGET_PATH"
+      knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0 || return 0
     fi
     if (( restored_app == 1 )); then
       knowtype_register_launchservices_path "$TARGET_PATH" 0
@@ -615,9 +630,9 @@ prepare_source_artifacts() {
     build)
       SOURCE_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
       SOURCE_GIT_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
-      SOURCE_BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$SCRIPTS_DIR/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+      SOURCE_BUNDLE_PATH="$("$SCRIPTS_DIR/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" --version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION" | tail -n 1)"
       if (( WITH_PREFPANE == 1 )); then
-        SOURCE_PREFPANE_PATH="$("$SCRIPTS_DIR/build-preference-pane.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+        SOURCE_PREFPANE_PATH="$("$SCRIPTS_DIR/build-preference-pane.sh" --configuration "$CONFIGURATION" --version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION" | tail -n 1)"
       fi
       ;;
     bundle)
@@ -694,7 +709,13 @@ prepare_source_artifacts() {
     echo "error: --with-prefpane requested but source KnowType.prefPane was not found" >&2
     exit 1
   fi
+  if (( WITH_PREFPANE == 1 )); then
+    knowtype_validate_preferencepane_bundle_for_install "$SOURCE_PREFPANE_PATH" "$VERIFY_ENABLED"
+    knowtype_validate_app_preferencepane_version_consistency "$SOURCE_BUNDLE_PATH" "$SOURCE_PREFPANE_PATH"
+  fi
 }
+
+knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"
 
 if (( DRY_RUN == 1 )); then
   if [[ "$SOURCE_MODE" != "build" ]]; then
@@ -811,13 +832,13 @@ if [[ "$SOURCE_MODE" == "build" ]]; then
 fi
 
 if (( WITH_PREFPANE == 1 )); then
-  rm -rf "$PREFPANE_TARGET_PATH"
+  knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0
   cp -R "$SOURCE_PREFPANE_PATH" "$PREFPANE_TARGET_PATH"
   if [[ "$SOURCE_MODE" == "build" ]]; then
     rm -rf "$SOURCE_PREFPANE_PATH"
   fi
-elif [[ -d "$PREFPANE_TARGET_PATH" ]]; then
-  rm -rf "$PREFPANE_TARGET_PATH"
+elif [[ -e "$PREFPANE_TARGET_PATH" || -L "$PREFPANE_TARGET_PATH" ]]; then
+  knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0
   REMOVED_STALE_PREFPANE=1
 fi
 

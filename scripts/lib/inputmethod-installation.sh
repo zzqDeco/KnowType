@@ -13,6 +13,7 @@ fi
 KNOWTYPE_SYSTEM_SETTINGS_APP_PATH="/System/Applications/System Settings.app/Contents/MacOS/System Settings"
 KNOWTYPE_SYSTEM_PREFERENCES_APP_PATH="/System/Applications/System Preferences.app/Contents/MacOS/System Preferences"
 KNOWTYPE_DEFAULT_BACKUP_RETENTION=3
+KNOWTYPE_BACKUP_MANIFEST_SCHEMA_VERSION=2
 
 knowtype_inputmethod_target_dir() {
   printf '%s' "${KNOWTYPE_INPUTMETHOD_TARGET_DIR:-$HOME/Library/Input Methods}"
@@ -183,6 +184,92 @@ knowtype_bundle_identifier() {
   knowtype_plist_value "CFBundleIdentifier" "$bundle_path/Contents/Info.plist"
 }
 
+knowtype_bundle_executable() {
+  local bundle_path="$1"
+  knowtype_plist_value "CFBundleExecutable" "$bundle_path/Contents/Info.plist"
+}
+
+knowtype_canonical_preferencepane_target_path() {
+  local target_dir
+  target_dir="$(knowtype_expand_home_path "$(knowtype_preferencepane_target_dir)")"
+  [[ ! -L "$target_dir" ]] || return 1
+  if [[ -d "$target_dir" ]]; then
+    target_dir="$(cd "$target_dir" && pwd -P)"
+  elif [[ ! -e "$target_dir" && -d "$(dirname "$target_dir")" ]]; then
+    target_dir="$(cd "$(dirname "$target_dir")" && pwd -P)/$(basename "$target_dir")"
+  else
+    return 1
+  fi
+  printf '%s/KnowType.prefPane' "$target_dir"
+}
+
+knowtype_is_canonical_local_preferencepane_path() {
+  local bundle_path="$1"
+  local canonical_target
+  local bundle_dir
+  local canonical_bundle_dir
+  canonical_target="$(knowtype_canonical_preferencepane_target_path)" || return 1
+  bundle_path="$(knowtype_expand_home_path "$bundle_path")"
+  [[ "$(basename "$bundle_path")" == "KnowType.prefPane" ]] || return 1
+  bundle_dir="$(dirname "$bundle_path")"
+  [[ ! -L "$bundle_dir" ]] || return 1
+  if [[ -d "$bundle_dir" ]]; then
+    canonical_bundle_dir="$(cd "$bundle_dir" && pwd -P)"
+  elif [[ ! -e "$bundle_dir" && -d "$(dirname "$bundle_dir")" ]]; then
+    canonical_bundle_dir="$(cd "$(dirname "$bundle_dir")" && pwd -P)/$(basename "$bundle_dir")"
+  else
+    return 1
+  fi
+  [[ "$canonical_bundle_dir/KnowType.prefPane" == "$canonical_target" ]]
+}
+
+knowtype_bundle_matches_preferencepane_identity() {
+  local bundle_path="$1"
+  [[ -d "$bundle_path" && ! -L "$bundle_path" ]] || return 1
+  [[ "$(knowtype_bundle_identifier "$bundle_path")" == "$KNOWTYPE_PREFPANE_BUNDLE_ID" ]]
+}
+
+knowtype_is_safe_local_preferencepane_bundle_path() {
+  local bundle_path="$1"
+  [[ -d "$bundle_path" && ! -L "$bundle_path" ]] || return 1
+  knowtype_is_canonical_local_preferencepane_path "$bundle_path" || return 1
+  knowtype_bundle_matches_preferencepane_identity "$bundle_path"
+}
+
+knowtype_require_safe_local_preferencepane_if_present() {
+  local bundle_path="$1"
+  if ! knowtype_is_canonical_local_preferencepane_path "$bundle_path"; then
+    echo "error: unsafe PreferencePane target path; refusing to remove or replace: $bundle_path" >&2
+    return 1
+  fi
+  if [[ ! -e "$bundle_path" && ! -L "$bundle_path" ]]; then
+    return 0
+  fi
+  if knowtype_is_safe_local_preferencepane_bundle_path "$bundle_path"; then
+    return 0
+  fi
+
+  echo "error: foreign or unsafe same-name PreferencePane; refusing to remove or replace: $bundle_path" >&2
+  echo "Expected CFBundleIdentifier=$KNOWTYPE_PREFPANE_BUNDLE_ID at the canonical KnowType.prefPane path." >&2
+  return 1
+}
+
+knowtype_remove_local_preferencepane_bundle_if_safe() {
+  local bundle_path="$1"
+  local dry_run="${2:-0}"
+  knowtype_require_safe_local_preferencepane_if_present "$bundle_path" || return 1
+  if [[ ! -e "$bundle_path" && ! -L "$bundle_path" ]]; then
+    return 0
+  fi
+
+  if [[ "$dry_run" == "1" ]]; then
+    echo "[dry-run] Would remove KnowType compatibility PreferencePane: $bundle_path"
+  else
+    rm -rf -- "$bundle_path"
+    echo "Removed KnowType compatibility PreferencePane: $bundle_path"
+  fi
+}
+
 knowtype_sanitize_backup_component() {
   local value="$1"
   value="${value:-unknown}"
@@ -249,6 +336,102 @@ knowtype_path_checksum() {
       shasum -a 256 |
       awk '{print $1}'
   )
+}
+
+knowtype_codesign_details() {
+  local bundle_path="$1"
+  codesign -dvvv "$bundle_path" 2>&1
+}
+
+knowtype_codesign_value_from_details() {
+  local key="$1"
+  local details="$2"
+  printf '%s\n' "$details" |
+    awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }'
+}
+
+knowtype_codesign_requirement() {
+  local bundle_path="$1"
+  local output
+  local requirement
+  output="$(codesign -dr - "$bundle_path" 2>&1 || true)"
+  requirement="$(
+    printf '%s\n' "$output" |
+      sed -n -e 's/^designated => //p' -e 's/^# designated => //p' |
+      head -n 1
+  )"
+  if [[ -z "$requirement" ]]; then
+    local details
+    local cd_hash
+    details="$(knowtype_codesign_details "$bundle_path" || true)"
+    cd_hash="$(knowtype_codesign_value_from_details "CDHash" "$details")"
+    if [[ -n "$cd_hash" ]]; then
+      requirement="cdhash H\"$cd_hash\""
+    fi
+  fi
+  printf '%s' "$requirement"
+}
+
+knowtype_codesign_identity() {
+  local bundle_path="$1"
+  local details
+  details="$(knowtype_codesign_details "$bundle_path" || true)"
+
+  local identifier
+  local team_identifier
+  local signature_kind
+  local authorities
+  identifier="$(knowtype_codesign_value_from_details "Identifier" "$details")"
+  team_identifier="$(knowtype_codesign_value_from_details "TeamIdentifier" "$details")"
+  authorities="$(
+    printf '%s\n' "$details" |
+      awk -F= '$1 == "Authority" {
+        value = substr($0, index($0, "=") + 1)
+        if (out != "") {
+          out = out " | "
+        }
+        out = out value
+      } END { print out }'
+  )"
+  signature_kind="$(knowtype_codesign_value_from_details "Signature" "$details")"
+  if [[ -z "$signature_kind" ]] && [[ -n "$authorities" ]]; then
+    signature_kind="cms"
+  fi
+
+  [[ -n "$identifier" && -n "$signature_kind" ]] || return 1
+  printf 'identifier=%s\nteamIdentifier=%s\nsignature=%s\nauthorities=%s' \
+    "$identifier" "${team_identifier:-<none>}" "$signature_kind" "${authorities:-<none>}"
+}
+
+knowtype_verify_bundle_codesign() {
+  local bundle_path="$1"
+  if ! command -v codesign >/dev/null 2>&1; then
+    echo "error: codesign is required to verify bundle integrity: $bundle_path" >&2
+    return 1
+  fi
+
+  local output
+  if ! output="$(codesign --verify --deep --strict "$bundle_path" 2>&1)"; then
+    echo "error: codesign --verify --deep --strict failed for: $bundle_path" >&2
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    return 1
+  fi
+}
+
+knowtype_verify_bundle_signing_requirement() {
+  local bundle_path="$1"
+  local requirement="$2"
+  [[ -n "$requirement" ]] || {
+    echo "error: signing requirement is missing for: $bundle_path" >&2
+    return 1
+  }
+
+  local output
+  if ! output="$(codesign --verify --deep --strict -R "=$requirement" "$bundle_path" 2>&1)"; then
+    echo "error: bundle does not satisfy its recorded signing requirement: $bundle_path" >&2
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    return 1
+  fi
 }
 
 knowtype_json_escape() {
@@ -382,6 +565,14 @@ knowtype_create_install_backup() {
     return 0
   fi
 
+  local app_bundle_id
+  app_bundle_id="$(knowtype_bundle_identifier "$app_path")"
+  if [[ "$app_bundle_id" != "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
+    echo "error: refusing to back up unexpected input-method bundle identity '$app_bundle_id': $app_path" >&2
+    return 1
+  fi
+  knowtype_require_safe_local_preferencepane_if_present "$prefpane_path" || return 1
+
   local version
   local build
   version="$(knowtype_bundle_short_version "$app_path")"
@@ -408,6 +599,11 @@ knowtype_create_install_backup() {
     return 0
   fi
 
+  knowtype_verify_bundle_codesign "$app_path" || return 1
+  if [[ -d "$prefpane_path" ]]; then
+    knowtype_validate_preferencepane_bundle_for_install "$prefpane_path" 1 || return 1
+  fi
+
   mkdir -p "$backup_root"
   backup_id=""
   backup_dir=""
@@ -429,41 +625,129 @@ knowtype_create_install_backup() {
   fi
   KNOWTYPE_CREATED_BACKUP_ID="$backup_id"
   KNOWTYPE_CREATED_BACKUP_DIR="$backup_dir"
-  if [[ -d "$app_path" ]]; then
-    cp -R "$app_path" "$backup_dir/KnowType.app"
+  if ! cp -R "$app_path" "$backup_dir/KnowType.app"; then
+    rm -rf -- "$backup_dir"
+    KNOWTYPE_CREATED_BACKUP_ID=""
+    KNOWTYPE_CREATED_BACKUP_DIR=""
+    return 1
   fi
   local included_prefpane="false"
   if [[ -d "$prefpane_path" ]]; then
-    cp -R "$prefpane_path" "$backup_dir/KnowType.prefPane"
+    if ! cp -R "$prefpane_path" "$backup_dir/KnowType.prefPane"; then
+      rm -rf -- "$backup_dir"
+      KNOWTYPE_CREATED_BACKUP_ID=""
+      KNOWTYPE_CREATED_BACKUP_DIR=""
+      return 1
+    fi
     included_prefpane="true"
   fi
 
-  local checksum=""
-  if [[ -d "$backup_dir/KnowType.app" ]]; then
-    checksum="$(knowtype_path_checksum "$backup_dir/KnowType.app" || true)"
+  if ! knowtype_verify_bundle_codesign "$backup_dir/KnowType.app"; then
+    rm -rf -- "$backup_dir"
+    KNOWTYPE_CREATED_BACKUP_ID=""
+    KNOWTYPE_CREATED_BACKUP_DIR=""
+    return 1
+  fi
+  if [[ "$included_prefpane" == "true" ]] &&
+     ! knowtype_validate_preferencepane_bundle_for_install "$backup_dir/KnowType.prefPane" 1; then
+    rm -rf -- "$backup_dir"
+    KNOWTYPE_CREATED_BACKUP_ID=""
+    KNOWTYPE_CREATED_BACKUP_DIR=""
+    return 1
+  fi
+
+  local app_backup_path="$backup_dir/KnowType.app"
+  local app_checksum
+  local app_short_version
+  local app_build_version
+  local app_signing_requirement
+  local app_signing_identity
+  app_checksum="$(knowtype_path_checksum "$app_backup_path" || true)"
+  app_bundle_id="$(knowtype_bundle_identifier "$app_backup_path")"
+  app_short_version="$(knowtype_bundle_short_version "$app_backup_path")"
+  app_build_version="$(knowtype_bundle_build_version "$app_backup_path")"
+  app_signing_requirement="$(knowtype_codesign_requirement "$app_backup_path")"
+  app_signing_identity="$(knowtype_codesign_identity "$app_backup_path" || true)"
+
+  local prefpane_checksum=""
+  local prefpane_bundle_id=""
+  local prefpane_short_version=""
+  local prefpane_build_version=""
+  local prefpane_signing_requirement=""
+  local prefpane_signing_identity=""
+  if [[ "$included_prefpane" == "true" ]]; then
+    local prefpane_backup_path="$backup_dir/KnowType.prefPane"
+    prefpane_checksum="$(knowtype_path_checksum "$prefpane_backup_path" || true)"
+    prefpane_bundle_id="$(knowtype_bundle_identifier "$prefpane_backup_path")"
+    prefpane_short_version="$(knowtype_bundle_short_version "$prefpane_backup_path")"
+    prefpane_build_version="$(knowtype_bundle_build_version "$prefpane_backup_path")"
+    prefpane_signing_requirement="$(knowtype_codesign_requirement "$prefpane_backup_path")"
+    prefpane_signing_identity="$(knowtype_codesign_identity "$prefpane_backup_path" || true)"
+  fi
+
+  local metadata_complete=1
+  if [[ -z "$app_checksum" || -z "$app_bundle_id" || -z "$app_short_version" ||
+        -z "$app_build_version" || -z "$app_signing_requirement" || -z "$app_signing_identity" ]]; then
+    metadata_complete=0
+  fi
+  if [[ "$included_prefpane" == "true" ]] &&
+     [[ -z "$prefpane_checksum" || -z "$prefpane_bundle_id" || -z "$prefpane_short_version" ||
+        -z "$prefpane_build_version" || -z "$prefpane_signing_requirement" || -z "$prefpane_signing_identity" ]]; then
+    metadata_complete=0
+  fi
+  if [[ "$metadata_complete" != "1" ]]; then
+    echo "error: could not record complete checksum, version, identity, and signing metadata for backup: $backup_dir" >&2
+    rm -rf -- "$backup_dir"
+    KNOWTYPE_CREATED_BACKUP_ID=""
+    KNOWTYPE_CREATED_BACKUP_DIR=""
+    return 1
   fi
 
   KNOWTYPE_JSON_PAYLOAD="$(
     KNOWTYPE_BACKUP_ID="$backup_id" \
     KNOWTYPE_BACKUP_CREATED_AT="$(knowtype_iso_timestamp)" \
-    KNOWTYPE_BACKUP_VERSION="$version" \
-    KNOWTYPE_BACKUP_BUILD="$build" \
-    KNOWTYPE_BACKUP_BUNDLE_ID="$(knowtype_bundle_identifier "$app_path")" \
-    KNOWTYPE_BACKUP_APP_CHECKSUM="$checksum" \
+    KNOWTYPE_BACKUP_VERSION="$app_short_version" \
+    KNOWTYPE_BACKUP_BUILD="$app_build_version" \
+    KNOWTYPE_BACKUP_BUNDLE_ID="$app_bundle_id" \
+    KNOWTYPE_BACKUP_APP_CHECKSUM="$app_checksum" \
+    KNOWTYPE_BACKUP_APP_SIGNING_REQUIREMENT="$app_signing_requirement" \
+    KNOWTYPE_BACKUP_APP_SIGNING_IDENTITY="$app_signing_identity" \
     KNOWTYPE_BACKUP_INCLUDED_PREFPANE="$included_prefpane" \
+    KNOWTYPE_BACKUP_PREFPANE_CHECKSUM="$prefpane_checksum" \
+    KNOWTYPE_BACKUP_PREFPANE_BUNDLE_ID="$prefpane_bundle_id" \
+    KNOWTYPE_BACKUP_PREFPANE_VERSION="$prefpane_short_version" \
+    KNOWTYPE_BACKUP_PREFPANE_BUILD="$prefpane_build_version" \
+    KNOWTYPE_BACKUP_PREFPANE_SIGNING_REQUIREMENT="$prefpane_signing_requirement" \
+    KNOWTYPE_BACKUP_PREFPANE_SIGNING_IDENTITY="$prefpane_signing_identity" \
     KNOWTYPE_BACKUP_RESTORE_COMMAND="./scripts/rollback-inputmethod.sh --to $backup_id" \
     "$KNOWTYPE_PYTHON3" - <<'PY'
 import json
 import os
+included_prefpane = os.environ.get("KNOWTYPE_BACKUP_INCLUDED_PREFPANE") == "true"
+
+def prefpane_value(name):
+    return os.environ.get(name, "") if included_prefpane else None
+
 payload = {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "backupID": os.environ["KNOWTYPE_BACKUP_ID"],
     "createdAt": os.environ["KNOWTYPE_BACKUP_CREATED_AT"],
     "sourceVersion": os.environ.get("KNOWTYPE_BACKUP_VERSION", ""),
     "sourceBuild": os.environ.get("KNOWTYPE_BACKUP_BUILD", ""),
     "bundleIdentifier": os.environ.get("KNOWTYPE_BACKUP_BUNDLE_ID", ""),
+    "appBundleIdentifier": os.environ.get("KNOWTYPE_BACKUP_BUNDLE_ID", ""),
+    "appShortVersion": os.environ.get("KNOWTYPE_BACKUP_VERSION", ""),
+    "appBuildVersion": os.environ.get("KNOWTYPE_BACKUP_BUILD", ""),
     "appChecksum": os.environ.get("KNOWTYPE_BACKUP_APP_CHECKSUM", ""),
-    "includedPrefPane": os.environ.get("KNOWTYPE_BACKUP_INCLUDED_PREFPANE") == "true",
+    "appSigningRequirement": os.environ.get("KNOWTYPE_BACKUP_APP_SIGNING_REQUIREMENT", ""),
+    "appSigningIdentity": os.environ.get("KNOWTYPE_BACKUP_APP_SIGNING_IDENTITY", ""),
+    "includedPrefPane": included_prefpane,
+    "prefPaneChecksum": prefpane_value("KNOWTYPE_BACKUP_PREFPANE_CHECKSUM"),
+    "prefPaneBundleIdentifier": prefpane_value("KNOWTYPE_BACKUP_PREFPANE_BUNDLE_ID"),
+    "prefPaneShortVersion": prefpane_value("KNOWTYPE_BACKUP_PREFPANE_VERSION"),
+    "prefPaneBuildVersion": prefpane_value("KNOWTYPE_BACKUP_PREFPANE_BUILD"),
+    "prefPaneSigningRequirement": prefpane_value("KNOWTYPE_BACKUP_PREFPANE_SIGNING_REQUIREMENT"),
+    "prefPaneSigningIdentity": prefpane_value("KNOWTYPE_BACKUP_PREFPANE_SIGNING_IDENTITY"),
     "restoreCommand": os.environ["KNOWTYPE_BACKUP_RESTORE_COMMAND"],
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -486,8 +770,285 @@ try:
 except Exception:
     value = None
 if value is not None:
+    if isinstance(value, bool):
+        print("true" if value else "false")
+    else:
+        print(value)
+PY
+}
+
+knowtype_backup_manifest_schema_version() {
+  local manifest_path="$1"
+  [[ -f "$manifest_path" ]] || return 0
+  KNOWTYPE_BACKUP_MANIFEST_PATH="$manifest_path" "$KNOWTYPE_PYTHON3" - <<'PY'
+import json
+import os
+
+try:
+    with open(os.environ["KNOWTYPE_BACKUP_MANIFEST_PATH"], encoding="utf-8") as handle:
+        value = json.load(handle).get("schemaVersion")
+except Exception:
+    value = None
+if isinstance(value, int) and not isinstance(value, bool):
     print(value)
 PY
+}
+
+knowtype_validate_backup_manifest_v2_shape() {
+  local manifest_path="$1"
+  local backup_id="$2"
+  KNOWTYPE_BACKUP_MANIFEST_PATH="$manifest_path" \
+  KNOWTYPE_BACKUP_EXPECTED_ID="$backup_id" \
+  KNOWTYPE_BACKUP_EXPECTED_SCHEMA="$KNOWTYPE_BACKUP_MANIFEST_SCHEMA_VERSION" \
+    "$KNOWTYPE_PYTHON3" - <<'PY'
+import json
+import os
+import sys
+
+path = os.environ["KNOWTYPE_BACKUP_MANIFEST_PATH"]
+expected_id = os.environ["KNOWTYPE_BACKUP_EXPECTED_ID"]
+expected_schema = int(os.environ["KNOWTYPE_BACKUP_EXPECTED_SCHEMA"])
+
+def fail(message):
+    print(f"error: backup manifest validation failed: {message}: {path}", file=sys.stderr)
+    raise SystemExit(1)
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        manifest = json.load(handle)
+except Exception as error:
+    fail(f"invalid JSON ({type(error).__name__})")
+
+if not isinstance(manifest, dict):
+    fail("root must be an object")
+if manifest.get("schemaVersion") != expected_schema:
+    fail(f"schemaVersion must be {expected_schema}")
+if manifest.get("backupID") != expected_id:
+    fail("backupID does not match its directory")
+if manifest.get("restoreCommand") != f"./scripts/rollback-inputmethod.sh --to {expected_id}":
+    fail("restoreCommand does not match backupID")
+
+required_strings = (
+    "backupID",
+    "createdAt",
+    "sourceVersion",
+    "sourceBuild",
+    "bundleIdentifier",
+    "appBundleIdentifier",
+    "appShortVersion",
+    "appBuildVersion",
+    "appChecksum",
+    "appSigningRequirement",
+    "appSigningIdentity",
+    "restoreCommand",
+)
+for key in required_strings:
+    if not isinstance(manifest.get(key), str) or not manifest[key]:
+        fail(f"required integrity field '{key}' is missing or empty")
+
+if manifest["sourceVersion"] != manifest["appShortVersion"]:
+    fail("sourceVersion and appShortVersion differ")
+if manifest["sourceBuild"] != manifest["appBuildVersion"]:
+    fail("sourceBuild and appBuildVersion differ")
+if manifest["bundleIdentifier"] != manifest["appBundleIdentifier"]:
+    fail("bundleIdentifier and appBundleIdentifier differ")
+
+included_prefpane = manifest.get("includedPrefPane")
+if not isinstance(included_prefpane, bool):
+    fail("includedPrefPane must be a boolean")
+
+prefpane_fields = (
+    "prefPaneChecksum",
+    "prefPaneBundleIdentifier",
+    "prefPaneShortVersion",
+    "prefPaneBuildVersion",
+    "prefPaneSigningRequirement",
+    "prefPaneSigningIdentity",
+)
+for key in prefpane_fields:
+    if key not in manifest:
+        fail(f"required optional-artifact field '{key}' is missing")
+    value = manifest[key]
+    if included_prefpane:
+        if not isinstance(value, str) or not value:
+            fail(f"PreferencePane integrity field '{key}' is missing or empty")
+    elif value is not None:
+        fail(f"PreferencePane integrity field '{key}' must be null when no pane is included")
+PY
+}
+
+knowtype_require_backup_metadata_match() {
+  local label="$1"
+  local expected="$2"
+  local actual="$3"
+  if [[ -z "$expected" || -z "$actual" || "$expected" != "$actual" ]]; then
+    echo "error: backup integrity mismatch for $label" >&2
+    echo "Expected: ${expected:-<missing>}" >&2
+    echo "Actual: ${actual:-<missing>}" >&2
+    return 1
+  fi
+}
+
+KNOWTYPE_BACKUP_VALIDATION_STATUS=""
+
+knowtype_validate_install_backup_for_restore() {
+  local backup_dir="$1"
+  local allow_unverified_legacy="${2:-0}"
+  KNOWTYPE_BACKUP_VALIDATION_STATUS=""
+
+  if ! knowtype_is_managed_backup_dir "$backup_dir"; then
+    echo "error: backup directory or manifest identity is invalid: $backup_dir" >&2
+    return 1
+  fi
+
+  local backup_id
+  local manifest_path
+  local schema_version
+  local app_path
+  local prefpane_path
+  backup_id="$(basename "$backup_dir")"
+  manifest_path="$backup_dir/manifest.json"
+  schema_version="$(knowtype_backup_manifest_schema_version "$manifest_path")"
+  app_path="$backup_dir/KnowType.app"
+  prefpane_path="$backup_dir/KnowType.prefPane"
+
+  if [[ "$schema_version" == "1" ]]; then
+    if [[ "$allow_unverified_legacy" != "1" ]]; then
+      echo "error: legacy backup manifest lacks required integrity metadata: $manifest_path" >&2
+      echo "Rollback fails closed. Use --allow-unverified-backup only after independently trusting this legacy backup." >&2
+      return 1
+    fi
+
+    echo "WARNING: ALLOWING AN UNVERIFIED LEGACY BACKUP" >&2
+    echo "WARNING: checksum, recorded version/build, and recorded signing identity cannot be fully validated." >&2
+    if [[ "$(knowtype_bundle_identifier "$app_path")" != "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
+      echo "error: legacy backup app does not match CFBundleIdentifier=$KNOWTYPE_PARENT_INPUT_SOURCE_ID" >&2
+      return 1
+    fi
+    knowtype_validate_inputmethod_bundle_for_install "$app_path" 1 || return 1
+    if [[ -e "$prefpane_path" || -L "$prefpane_path" ]]; then
+      knowtype_validate_preferencepane_bundle_for_install "$prefpane_path" 1 || return 1
+    fi
+    KNOWTYPE_BACKUP_VALIDATION_STATUS="legacy-unverified-override"
+    return 0
+  fi
+
+  if [[ "$schema_version" != "$KNOWTYPE_BACKUP_MANIFEST_SCHEMA_VERSION" ]]; then
+    echo "error: unsupported or missing backup manifest schemaVersion: ${schema_version:-<missing>}" >&2
+    echo "--allow-unverified-backup applies only to schemaVersion 1 legacy backups." >&2
+    return 1
+  fi
+
+  knowtype_validate_backup_manifest_v2_shape "$manifest_path" "$backup_id" || return 1
+
+  local included_prefpane
+  included_prefpane="$(knowtype_backup_manifest_field "$manifest_path" "includedPrefPane")"
+  if [[ "$included_prefpane" == "true" && ! -d "$prefpane_path" ]]; then
+    echo "error: backup manifest requires KnowType.prefPane but the artifact is missing: $backup_dir" >&2
+    return 1
+  fi
+  if [[ "$included_prefpane" == "false" && ( -e "$prefpane_path" || -L "$prefpane_path" ) ]]; then
+    echo "error: backup contains an unexpected KnowType.prefPane not recorded by its manifest: $backup_dir" >&2
+    return 1
+  fi
+
+  local app_bundle_id
+  local app_short_version
+  local app_build_version
+  local app_checksum
+  local app_signing_requirement
+  local app_signing_identity
+  app_bundle_id="$(knowtype_bundle_identifier "$app_path")"
+  app_short_version="$(knowtype_bundle_short_version "$app_path")"
+  app_build_version="$(knowtype_bundle_build_version "$app_path")"
+  app_checksum="$(knowtype_path_checksum "$app_path" || true)"
+  app_signing_requirement="$(knowtype_codesign_requirement "$app_path")"
+  app_signing_identity="$(knowtype_codesign_identity "$app_path" || true)"
+
+  knowtype_require_backup_metadata_match \
+    "app bundle identifier" \
+    "$(knowtype_backup_manifest_field "$manifest_path" "appBundleIdentifier")" \
+    "$app_bundle_id" || return 1
+  if [[ "$app_bundle_id" != "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
+    echo "error: backup app has unexpected product identity '$app_bundle_id'" >&2
+    return 1
+  fi
+  knowtype_require_backup_metadata_match \
+    "app short version" \
+    "$(knowtype_backup_manifest_field "$manifest_path" "appShortVersion")" \
+    "$app_short_version" || return 1
+  knowtype_require_backup_metadata_match \
+    "app build version" \
+    "$(knowtype_backup_manifest_field "$manifest_path" "appBuildVersion")" \
+    "$app_build_version" || return 1
+  knowtype_require_backup_metadata_match \
+    "app checksum" \
+    "$(knowtype_backup_manifest_field "$manifest_path" "appChecksum")" \
+    "$app_checksum" || return 1
+  knowtype_require_backup_metadata_match \
+    "app signing requirement" \
+    "$(knowtype_backup_manifest_field "$manifest_path" "appSigningRequirement")" \
+    "$app_signing_requirement" || return 1
+  knowtype_require_backup_metadata_match \
+    "app signing identity" \
+    "$(knowtype_backup_manifest_field "$manifest_path" "appSigningIdentity")" \
+    "$app_signing_identity" || return 1
+  knowtype_validate_inputmethod_bundle_for_install "$app_path" 0 || return 1
+  knowtype_verify_bundle_codesign "$app_path" || return 1
+  knowtype_verify_bundle_signing_requirement \
+    "$app_path" \
+    "$(knowtype_backup_manifest_field "$manifest_path" "appSigningRequirement")" || return 1
+
+  if [[ "$included_prefpane" == "true" ]]; then
+    local prefpane_bundle_id
+    local prefpane_short_version
+    local prefpane_build_version
+    local prefpane_checksum
+    local prefpane_signing_requirement
+    local prefpane_signing_identity
+    prefpane_bundle_id="$(knowtype_bundle_identifier "$prefpane_path")"
+    prefpane_short_version="$(knowtype_bundle_short_version "$prefpane_path")"
+    prefpane_build_version="$(knowtype_bundle_build_version "$prefpane_path")"
+    prefpane_checksum="$(knowtype_path_checksum "$prefpane_path" || true)"
+    prefpane_signing_requirement="$(knowtype_codesign_requirement "$prefpane_path")"
+    prefpane_signing_identity="$(knowtype_codesign_identity "$prefpane_path" || true)"
+
+    knowtype_require_backup_metadata_match \
+      "PreferencePane bundle identifier" \
+      "$(knowtype_backup_manifest_field "$manifest_path" "prefPaneBundleIdentifier")" \
+      "$prefpane_bundle_id" || return 1
+    if [[ "$prefpane_bundle_id" != "$KNOWTYPE_PREFPANE_BUNDLE_ID" ]]; then
+      echo "error: backup PreferencePane has unexpected product identity '$prefpane_bundle_id'" >&2
+      return 1
+    fi
+    knowtype_require_backup_metadata_match \
+      "PreferencePane short version" \
+      "$(knowtype_backup_manifest_field "$manifest_path" "prefPaneShortVersion")" \
+      "$prefpane_short_version" || return 1
+    knowtype_require_backup_metadata_match \
+      "PreferencePane build version" \
+      "$(knowtype_backup_manifest_field "$manifest_path" "prefPaneBuildVersion")" \
+      "$prefpane_build_version" || return 1
+    knowtype_require_backup_metadata_match \
+      "PreferencePane checksum" \
+      "$(knowtype_backup_manifest_field "$manifest_path" "prefPaneChecksum")" \
+      "$prefpane_checksum" || return 1
+    knowtype_require_backup_metadata_match \
+      "PreferencePane signing requirement" \
+      "$(knowtype_backup_manifest_field "$manifest_path" "prefPaneSigningRequirement")" \
+      "$prefpane_signing_requirement" || return 1
+    knowtype_require_backup_metadata_match \
+      "PreferencePane signing identity" \
+      "$(knowtype_backup_manifest_field "$manifest_path" "prefPaneSigningIdentity")" \
+      "$prefpane_signing_identity" || return 1
+    knowtype_validate_preferencepane_bundle_for_install "$prefpane_path" 0 || return 1
+    knowtype_verify_bundle_codesign "$prefpane_path" || return 1
+    knowtype_verify_bundle_signing_requirement \
+      "$prefpane_path" \
+      "$(knowtype_backup_manifest_field "$manifest_path" "prefPaneSigningRequirement")" || return 1
+  fi
+
+  KNOWTYPE_BACKUP_VALIDATION_STATUS="verified-schema-$KNOWTYPE_BACKUP_MANIFEST_SCHEMA_VERSION"
 }
 
 knowtype_is_managed_backup_dir() {
@@ -557,6 +1118,51 @@ knowtype_backup_dir_for_id() {
   return 1
 }
 
+knowtype_validate_preferencepane_bundle_for_install() {
+  local bundle_path="$1"
+  local verify_codesign="${2:-1}"
+  if [[ ! -d "$bundle_path" || -L "$bundle_path" ]]; then
+    echo "error: KnowType.prefPane bundle is missing or is a symlink: $bundle_path" >&2
+    return 1
+  fi
+  if ! knowtype_bundle_matches_preferencepane_identity "$bundle_path"; then
+    echo "error: PreferencePane does not match CFBundleIdentifier=$KNOWTYPE_PREFPANE_BUNDLE_ID: $bundle_path" >&2
+    return 1
+  fi
+
+  local executable
+  executable="$(knowtype_bundle_executable "$bundle_path")"
+  if [[ -z "$executable" || ! -x "$bundle_path/Contents/MacOS/$executable" ]]; then
+    echo "error: PreferencePane executable is missing or not executable in: $bundle_path" >&2
+    return 1
+  fi
+  if [[ "$verify_codesign" == "1" ]]; then
+    knowtype_verify_bundle_codesign "$bundle_path"
+  fi
+}
+
+knowtype_validate_app_preferencepane_version_consistency() {
+  local app_path="$1"
+  local prefpane_path="$2"
+  local app_version
+  local app_build
+  local prefpane_version
+  local prefpane_build
+  app_version="$(knowtype_bundle_short_version "$app_path")"
+  app_build="$(knowtype_bundle_build_version "$app_path")"
+  prefpane_version="$(knowtype_bundle_short_version "$prefpane_path")"
+  prefpane_build="$(knowtype_bundle_build_version "$prefpane_path")"
+
+  if [[ -z "$app_version" || -z "$app_build" || -z "$prefpane_version" || -z "$prefpane_build" ]]; then
+    echo "error: app/PreferencePane version consistency check requires non-empty short version and build metadata" >&2
+    return 1
+  fi
+  if [[ "$app_version" != "$prefpane_version" || "$app_build" != "$prefpane_build" ]]; then
+    echo "error: app/PreferencePane version mismatch: app=$app_version ($app_build), prefPane=$prefpane_version ($prefpane_build)" >&2
+    return 1
+  fi
+}
+
 knowtype_validate_inputmethod_bundle_for_install() {
   local bundle_path="$1"
   local verify_codesign="${2:-1}"
@@ -600,8 +1206,8 @@ knowtype_validate_inputmethod_bundle_for_install() {
     echo "error: bundled Rime data directory is missing in: $bundle_path" >&2
     return 1
   fi
-  if [[ "$verify_codesign" == "1" ]] && command -v codesign >/dev/null 2>&1; then
-    codesign --verify --deep --strict "$bundle_path"
+  if [[ "$verify_codesign" == "1" ]]; then
+    knowtype_verify_bundle_codesign "$bundle_path"
   fi
 }
 

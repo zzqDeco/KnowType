@@ -56,6 +56,8 @@ TARGET_PATH="$(knowtype_inputmethod_target_path)"
 BACKUP_ROOT="$(knowtype_backup_root_dir)"
 INSTALL_STATE_PATH="$(knowtype_install_state_path)"
 
+knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"
+
 if (( BACKUP_ENABLED == 1 && PURGE_BACKUPS == 0 )); then
   knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" "$DRY_RUN" "$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
 fi
@@ -78,13 +80,8 @@ done < <(knowtype_find_local_inputmethod_bundle_paths)
 
 knowtype_unregister_launchservices_records_except "" "$DRY_RUN"
 
-if [[ -d "$PREFPANE_TARGET_PATH" ]]; then
-  if (( DRY_RUN == 1 )); then
-    echo "[dry-run] Would remove KnowType compatibility PreferencePane: $PREFPANE_TARGET_PATH"
-  else
-    rm -rf -- "$PREFPANE_TARGET_PATH"
-    echo "Removed KnowType compatibility PreferencePane: $PREFPANE_TARGET_PATH"
-  fi
+if [[ -e "$PREFPANE_TARGET_PATH" || -L "$PREFPANE_TARGET_PATH" ]]; then
+  knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" "$DRY_RUN"
 fi
 
 knowtype_clean_preferencepane_caches "$DRY_RUN"

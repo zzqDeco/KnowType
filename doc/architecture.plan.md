@@ -180,6 +180,11 @@ legacy cleanup without launching the input-method host, selecting KnowType, or
 initializing Rime user data during installation. `install-state.json` and backup
 manifests provide traceability for local upgrade testing without becoming
 product runtime dependencies.
+Backup manifest schema `2` binds each included artifact to its checksum,
+bundle/version/build metadata, and code-signing requirement/identity. Rollback
+validates the backup and staged copy before replacement. Shared canonical-path
+and bundle-ID guards prevent any destructive installer path from treating a
+same-name foreign PreferencePane as KnowType.
 If the previous input-method host is still running, install/rollback stop before
 replacement instead of killing the process, because shutdown can flush live Rime
 LevelDB state.

@@ -20,8 +20,18 @@ uninstall scripts.
   specific backup.
 - `--dry-run` shows target app/prefPane paths and refresh steps without changing
   files or input-source state.
-- Rollback preflights the backed-up app with the same required runtime checks
-  as install source validation before it replaces the current bundle.
+- Schema `2` rollback preflight requires complete app and optional pane
+  checksum, bundle ID, short version/build, signing requirement, and signing
+  identity metadata. It compares every field to the backup, runs
+  `codesign --verify --deep --strict`, tests the recorded requirement, and
+  rechecks staged-copy checksums before replacing the current bundle.
+- Missing or mismatched schema `2` integrity data always fails closed.
+  `--allow-unverified-backup` is a prominent legacy-only override for schema
+  `1`; dry-run output shows when it is active, and it cannot bypass schema `2`
+  validation.
+- Rollback refuses to remove or replace an installed same-name PreferencePane
+  unless it is the canonical non-symlink bundle with
+  `CFBundleIdentifier=com.knowtype.preferencepane`.
 - A real rollback first requires `KnowTypeInputMethodApp` to be stopped, then
   switches away from KnowType, restores the backup app, refreshes
   LaunchServices, clears stale prefPane caches, repairs scoped input-source
