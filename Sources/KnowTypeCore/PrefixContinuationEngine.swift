@@ -88,7 +88,8 @@ public final class PrefixContinuationEngine: Sendable {
         var repaired = false
         if candidate.hasPrefix(prefix) {
             candidate.removeFirst(prefix.count)
-            candidate = trimJoiner(candidate)
+            candidate = trimProtocolJoiners(candidate)
+            candidate = removingDuplicateBoundaryPunctuation(candidate, lockedPrefix: prefix)
             repaired = true
         }
 
@@ -101,13 +102,14 @@ public final class PrefixContinuationEngine: Sendable {
 
         if candidate.hasPrefix("|") || candidate.hasPrefix("｜") {
             candidate.removeFirst()
-            candidate = trimJoiner(candidate)
+            candidate = trimProtocolJoiners(candidate)
         }
 
         guard !candidate.isEmpty else {
             return ContinuationSanitizationResult(text: nil, reason: .noUsableSuffix)
         }
-        if candidate.hasPrefix(prefix) {
+        if candidate.hasPrefix(prefix)
+            || (repaired && repeatsLockedPrefixAfterBoundary(candidate, lockedPrefix: prefix)) {
             return ContinuationSanitizationResult(text: nil, reason: .stillRepeatsPrefix)
         }
 
@@ -252,6 +254,30 @@ public struct ContinuationSanitizationResult: Codable, Sendable, Equatable {
     }
 }
 
-private func trimJoiner(_ value: String) -> String {
-    value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "，,。.；;：:|｜")))
+private let protocolSeparatorCharacters: Set<Character> = ["|", "｜"]
+private let suffixBoundaryPunctuation: Set<Character> = ["，", ",", "。", ".", "；", ";", "：", ":"]
+
+private func trimProtocolJoiners(_ value: String) -> String {
+    value.trimmingCharacters(
+        in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "|｜"))
+    )
+}
+
+private func removingDuplicateBoundaryPunctuation(_ value: String, lockedPrefix: String) -> String {
+    guard let prefixLast = lockedPrefix.last,
+          let suffixFirst = value.first,
+          prefixLast == suffixFirst,
+          suffixBoundaryPunctuation.contains(suffixFirst) else {
+        return value
+    }
+    return String(value.dropFirst())
+}
+
+private func repeatsLockedPrefixAfterBoundary(_ value: String, lockedPrefix: String) -> Bool {
+    let suffixWithoutBoundary = value.drop(while: { character in
+        character.isWhitespace
+            || protocolSeparatorCharacters.contains(character)
+            || suffixBoundaryPunctuation.contains(character)
+    })
+    return suffixWithoutBoundary.hasPrefix(lockedPrefix)
 }
