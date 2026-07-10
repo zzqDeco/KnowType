@@ -32,6 +32,45 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: eventsDirectory.path))
     }
 
+    func testRegistryContextMemorySkipsEventUntilProviderIsUsable() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events", isDirectory: true)
+        )
+        let providerB = NamedLLMProvider(
+            name: "provider-b",
+            responseText: "## Global Style\n- Provider B digest."
+        )
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "0", count: 64),
+            provider: nil
+        )
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source),
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "before-provider", committedText: "早期"))
+        let pendingWithoutProvider = try await eventStore.pendingEvents()
+        XCTAssertTrue(pendingWithoutProvider.isEmpty)
+
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        await runtime.record(makeContextEvent(rawInput: "after-provider", committedText: "后来"))
+
+        let requests = await providerB.recordedRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertFalse(requests[0].rawInput?.contains("before-provider") == true)
+        XCTAssertTrue(requests[0].rawInput?.contains("after-provider") == true)
+    }
+
     func testRecordProcessesBatchAndUpdatesEnvironmentGeneratedSection() async throws {
         let directory = makeTemporaryDirectory()
         let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
@@ -532,7 +571,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertTrue(providerBRequests[0].rawInput?.contains("zaijian") == true)
     }
 
-    func testProtectedOnlyRegistryBatchDoesNotReadProviderFiles() async throws {
+    func testProtectedOnlyPendingRegistryBatchDoesNotReadProviderFiles() async throws {
         let directory = makeTemporaryDirectory()
         let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
         let source = ProviderRuntimeTestSource(
@@ -548,14 +587,15 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             minimumInterval: 600
         )
 
-        await runtime.record(
+        try await eventStore.append(
             AITypingEvent(
-                rawInput: "https://example.com/private",
-                committedText: "https://example.com/private",
+                rawInput: "protected:redacted",
+                committedText: "protected:redacted",
                 commitKind: .raw,
-                candidateSource: "raw"
+                candidateSource: "protected"
             )
         )
+        await runtime.processIfNeeded()
         let pendingEvents = try await eventStore.pendingEvents()
 
         XCTAssertTrue(pendingEvents.isEmpty)
@@ -563,7 +603,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(source.runtimeLoadCount, 0)
     }
 
-    func testRegistryDigestFailureKeepsMinimumIntervalWithoutExtraFileRead() async throws {
+    func testRegistryDigestFailureChecksRevisionBeforeRespectingMinimumInterval() async throws {
         let directory = makeTemporaryDirectory()
         let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
         let provider = FailingDigestLLMProvider()
@@ -581,14 +621,53 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
 
         await runtime.record(makeContextEvent(rawInput: "nihao", committedText: "你好"))
-        await runtime.record(makeContextEvent(rawInput: "zaijian", committedText: "再见"))
+        await runtime.processIfNeeded()
 
         let requestCount = await provider.requestCount
         let pendingEvents = try await eventStore.pendingEvents()
         XCTAssertEqual(requestCount, 1)
-        XCTAssertEqual(source.revisionReadCount, 1)
+        XCTAssertEqual(source.revisionReadCount, 3)
         XCTAssertEqual(source.runtimeLoadCount, 1)
-        XCTAssertEqual(pendingEvents.count, 2)
+        XCTAssertEqual(pendingEvents.count, 1)
+    }
+
+    func testMissedNotificationGenerationChangeBypassesDigestFailureCooldown() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let providerA = FailingDigestLLMProvider()
+        let providerB = NamedLLMProvider(
+            name: "provider-b",
+            responseText: "## Global Style\n- Provider B recovered."
+        )
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: providerA
+        )
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source),
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "nihao", committedText: "你好"))
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        await runtime.record(makeContextEvent(rawInput: "zaijian", committedText: "再见"))
+
+        let providerARequestCount = await providerA.requestCount
+        XCTAssertEqual(providerARequestCount, 1)
+        let providerBRequests = await providerB.recordedRequests
+        XCTAssertEqual(providerBRequests.count, 1)
+        XCTAssertTrue(providerBRequests[0].rawInput?.contains("nihao") == true)
+        XCTAssertTrue(providerBRequests[0].rawInput?.contains("zaijian") == true)
+        let pendingEvents = try await eventStore.pendingEvents()
+        XCTAssertTrue(pendingEvents.isEmpty)
     }
 }
 

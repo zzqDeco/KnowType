@@ -178,6 +178,98 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertEqual(current.readyDisplayText, "B result")
     }
 
+    func testMissedNotificationRevisionChangeDropsSuspendedWork() async throws {
+        let providerA = SuspendedGenerationLLMProvider(name: "provider-a")
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B result")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: providerA
+        )
+        let registry = makeRegistry(source: source)
+        let runtime = LazyDefaultAIRecommendationRuntime(
+            providerRegistry: registry,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceMilliseconds: 0
+        )
+        let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
+
+        let oldRequest = Task { await runtime.recommendation(for: request) }
+        try await waitUntil { await providerA.requestCount == 1 }
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        await providerA.finish(responseText: "A stale result")
+
+        let oldState = await oldRequest.value
+        XCTAssertEqual(oldState, .stale)
+        let current = await runtime.recommendation(for: request)
+        XCTAssertEqual(current.readyDisplayText, "B result")
+    }
+
+    func testMissedNotificationRevisionChangeDropsSuspendedFailure() async throws {
+        let providerA = SuspendedGenerationLLMProvider(name: "provider-a")
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B result")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: providerA
+        )
+        let registry = makeRegistry(source: source)
+        let runtime = LazyDefaultAIRecommendationRuntime(
+            providerRegistry: registry,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceMilliseconds: 0
+        )
+        let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
+
+        let oldRequest = Task { await runtime.recommendation(for: request) }
+        try await waitUntil { await providerA.requestCount == 1 }
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        await providerA.finishWithFailure()
+
+        let oldState = await oldRequest.value
+        XCTAssertEqual(oldState, .stale)
+        let current = await runtime.recommendation(for: request)
+        XCTAssertEqual(current.readyDisplayText, "B result")
+    }
+
+    func testMissedNotificationRevisionChangeRejectsCommitAfterPerform() async throws {
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B result")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: NamedLLMProvider(name: "provider-a", responseText: "A result")
+        )
+        let registry = makeRegistry(source: source)
+        let lease = await registry.leaseForEligibleDispatch()
+
+        let performed = try await registry.perform(using: lease) { _ in "performed" }
+        XCTAssertEqual(performed, "performed")
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+
+        do {
+            try await registry.commitIfCurrent(using: lease) {
+                XCTFail("stale provider work must not commit")
+            }
+            XCTFail("expected stale generation")
+        } catch {
+            XCTAssertEqual(error as? ProviderRuntimeRegistryError, .staleGeneration)
+        }
+        let current = await registry.leaseForEligibleDispatch()
+        XCTAssertEqual(current.provider?.providerName, "provider-b")
+    }
+
     func testIneligibleRecommendationDoesNotReadProviderRevisionOrProfiles() async {
         let source = ProviderRuntimeTestSource(
             revision: 1,
@@ -371,6 +463,11 @@ actor SuspendedGenerationLLMProvider: LLMProvider {
         continuation?.resume(
             returning: LLMResponse(candidates: [LLMCandidate(text: responseText, confidence: 0.9)])
         )
+        continuation = nil
+    }
+
+    func finishWithFailure() {
+        continuation?.resume(throwing: ProviderError.httpStatus(503, "unavailable"))
         continuation = nil
     }
 

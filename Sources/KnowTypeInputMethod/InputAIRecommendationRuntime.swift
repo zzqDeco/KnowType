@@ -320,6 +320,9 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                     self.activeRequestID = nil
                     self.activeTask = nil
                     self.activeRequestPhase = nil
+                    if !context.isProviderAvailabilityProbe {
+                        onStateChange(.idle)
+                    }
                 }
                 diagnosticSink.record(
                     AIRecommendationDiagnosticEvent(

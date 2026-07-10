@@ -595,8 +595,9 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
 - caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
-- rebuilds cache and health state for each provider generation; the internal
-  stale-generation state is dropped before the coordinator UI callback
+- rebuilds cache and health state for each provider generation; an internal
+  stale-generation state clears its own normal pending slot to `.idle`, while an
+  older stale request cannot clear a newer request
 - skips cloud requests for too-short context: with a confirmed locked prefix, fewer than two Han characters or fewer than six visible mixed/Latin characters; without a locked prefix, fewer than three visible raw-input characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
@@ -612,6 +613,8 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 `AIContextMemoryRuntime`:
 
 - records only committed text, not marked text
+- requires a usable provider lease before a registry-backed event is appended,
+  so text entered without an available provider is not retained for later upload
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
 - archives processed event files under `~/.knowtype/events/processed/`
 - summarizes after a batch threshold or interval

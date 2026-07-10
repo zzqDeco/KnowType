@@ -20,12 +20,16 @@
 
 - The distributed revision signal invalidates active leases immediately.
 - Every eligible AI dispatch checks the file revision as a missed-signal
-  fallback; ineligible recommendation and protected-only digest paths do not.
+  fallback. Operation completion and guarded persistence check it again before
+  accepting provider work; ineligible recommendation and protected-only pending
+  digest paths do not.
 - A generation change cancels active operations and clears structured-output
   capability state. Per-generation recommendation runtimes supply fresh cache
   and health state.
-- `perform(using:)` checks generation before and after an operation, so a
-  transport that ignores cancellation still produces only a stale drop.
+- `perform(using:)` refreshes disk revision and checks generation before
+  accepting either success or failure. `commitIfCurrent(using:)` repeats the
+  refresh before persistence, so missed notifications still produce only a
+  stale drop.
 - Diagnostics contain revision, generation, configured state, and only the
   first 12 hexadecimal characters of the SHA-256 fingerprint.
 

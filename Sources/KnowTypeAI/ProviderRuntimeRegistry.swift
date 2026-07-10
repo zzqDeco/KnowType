@@ -129,7 +129,7 @@ public actor ProviderRuntimeRegistry {
 
     public func leaseForEligibleDispatch() async -> ProviderRuntimeLease {
         startObservationIfNeeded()
-        let diskRevision = revisionLoader()
+        let diskRevision = await refreshDiskRevisionIfNeeded()
         let expectedRevision = diskRevision ?? latestSignaledRevision
 
         if let currentLease,
@@ -196,32 +196,36 @@ public actor ProviderRuntimeRegistry {
             try await operation(provider)
         }
         activeOperations[operationID] = { task.cancel() }
+        let value: T
         do {
-            let value = try await withTaskCancellationHandler {
+            value = try await withTaskCancellationHandler {
                 try await task.value
             } onCancel: {
                 task.cancel()
             }
-            activeOperations[operationID] = nil
-            guard isCurrent(lease) else {
-                diagnosticSink.record(event(.staleResultDropped, lease: lease))
-                throw ProviderRuntimeRegistryError.staleGeneration
-            }
-            return value
         } catch {
             activeOperations[operationID] = nil
+            await refreshDiskRevisionIfNeeded()
             if !isCurrent(lease) {
                 diagnosticSink.record(event(.staleResultDropped, lease: lease))
                 throw ProviderRuntimeRegistryError.staleGeneration
             }
             throw error
         }
+        activeOperations[operationID] = nil
+        await refreshDiskRevisionIfNeeded()
+        guard isCurrent(lease) else {
+            diagnosticSink.record(event(.staleResultDropped, lease: lease))
+            throw ProviderRuntimeRegistryError.staleGeneration
+        }
+        return value
     }
 
     public func commitIfCurrent<T: Sendable>(
         using lease: ProviderRuntimeLease,
         operation: @Sendable () throws -> T
-    ) throws -> T {
+    ) async throws -> T {
+        await refreshDiskRevisionIfNeeded()
         guard isCurrent(lease) else {
             diagnosticSink.record(event(.staleResultDropped, lease: lease))
             throw ProviderRuntimeRegistryError.staleGeneration
@@ -259,6 +263,25 @@ public actor ProviderRuntimeRegistry {
             fingerprint: String(repeating: "0", count: 64),
             providerConfigured: false
         )
+    }
+
+    @discardableResult
+    private func refreshDiskRevisionIfNeeded() async -> UInt64? {
+        guard let diskRevision = revisionLoader() else {
+            return nil
+        }
+        guard let currentLease,
+              currentLease.generation == generation,
+              currentLease.revision != diskRevision else {
+            return diskRevision
+        }
+        latestSignaledRevision = max(latestSignaledRevision ?? 0, diskRevision)
+        await advanceGeneration(
+            revision: diskRevision,
+            fingerprint: String(repeating: "0", count: 64),
+            providerConfigured: false
+        )
+        return diskRevision
     }
 
     private func advanceGeneration(

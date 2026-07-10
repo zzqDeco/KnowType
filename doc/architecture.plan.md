@@ -114,10 +114,11 @@ MVP docs warn users not to place bearer tokens directly in headers.
 
 `ProviderRuntimeRegistry` observes that signal and owns process-level leases with
 revision, generation, opaque configuration fingerprint, and provider. A missed
-signal is recovered by checking the file revision only before an eligible AI
-recommendation or context digest; ordinary key handling never polls provider
-storage. Generation changes cancel old transports and clear provider-dependent
-recommendation cache, health, and structured-output capability state.
+signal is recovered by checking the file revision before eligible AI work and
+again before accepting provider completion or guarded persistence; ordinary key
+handling never polls provider storage. Generation changes cancel old transports
+and clear provider-dependent recommendation cache, health, and structured-output
+capability state.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -130,7 +131,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   periodically summarizes them into the generated section of
   `~/.knowtype/ENV.md`. Its snapshot claim, ENV update, and archive commit are
   serialized so later appends remain pending and stale provider generations
-  cannot persist results.
+  cannot persist results. Registry-backed recording requires a usable provider
+  lease before appending, so events entered while no provider is available are
+  not retained for a later provider.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, preserving the user's notes outside the generated section and repairing duplicate generated-section markers.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
@@ -139,8 +142,8 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 - Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction, context digest, and polish keep separate instructions.
 
 The input-method keydown path never awaits this layer. It publishes raw marked text and current-page Rime candidates first, then receives AI slot updates asynchronously. `InputAIRecommendationRuntime` owns request ids, generations, task cancellation, stale-result diagnostics, and `AIRecommendationPatch` validation for the IMK side of the real-time recommendation flow. Matching AI results update only the coordinator's fixed AI slot after request id, generation, composition id, raw revision, and raw input all still match. They cannot change Rime selection, marked text, base candidates, or panel visibility. `InputAIAcceptanceRuntime` owns post-commit AI acceptance side effects: accepted-learning records, typing-context events, accepted-feedback tracking orchestration, and protected/secret gates. It does not write host text or refresh candidate UI. `InputLexicalCommitRuntime` owns local lexical commit/selection side effects: bounded recent commits, protected selection-history recording, lexical profile refresh scheduling, and commit/selection event payload construction. `InputCompositionLifecycleRuntime` owns composition begin/finish lifecycle plans and first-begin trace-once state. `InputCommitDecisionRuntime` owns Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions as value plans. `InputCommitApplicationRuntime` owns commit-result plan and context construction only; the coordinator still performs Rime processing, segment mutation, host insertion, marked-text cleanup, Rime reset, candidate-panel hide, anchor reset, AI/lexical runtime calls, and lifecycle event publication in order. Rime userdb sync is a maintenance action and is not part of commit. Commit/selection profile refresh is executed by `LexicalProfileRuntime` and reads only an already exported userdb snapshot; explicit `sync_user_data` is owned by `RimeMaintenanceService` for manual or idle maintenance paths. Keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime debounces for 350 ms by default and has a 10-second hard timeout; continuing to type still cancels older requests immediately.
-Provider-generation stale results are also dropped before the panel callback,
-in addition to the existing composition id and raw-input guard.
+Provider-generation stale results clear their own normal pending slot to idle;
+an older stale request cannot clear a newer request or reach the panel callback.
 Before a provider request starts, `InputAIRecommendationSchedulePolicy` makes the
 pure schedule/skip decision for input stability, trigger length, secret-like
 text, cloud-continuation preference, and provider availability. The coordinator

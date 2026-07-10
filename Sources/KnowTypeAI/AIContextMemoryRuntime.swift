@@ -207,15 +207,32 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     public func record(_ event: AITypingEvent) async {
+        let dispatchLease: ProviderRuntimeLease?
+        if let providerRegistry {
+            let lease = await providerRegistry.leaseForEligibleDispatch()
+            guard lease.provider != nil else {
+                return
+            }
+            dispatchLease = lease
+        } else {
+            dispatchLease = nil
+        }
         do {
             try await eventStore.append(sanitized(event))
-            await processIfNeeded()
+            await processIfNeeded(now: Date(), dispatchLease: dispatchLease)
         } catch {
             return
         }
     }
 
     public func processIfNeeded(now: Date = Date()) async {
+        await processIfNeeded(now: now, dispatchLease: nil)
+    }
+
+    private func processIfNeeded(
+        now: Date,
+        dispatchLease: ProviderRuntimeLease?
+    ) async {
         guard !digestInFlight,
               provider != nil || providerRegistry != nil else {
             return
@@ -250,12 +267,32 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             }
             return
         }
-        if let providerRegistry,
-           let providerGeneration {
-            let registryGeneration = await providerRegistry.currentGeneration()
-            if registryGeneration > 0, registryGeneration != providerGeneration {
-                resetProviderRuntimeState()
+        let rawEvents = snapshot.rawContent
+        guard !rawEvents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            lastDigestAt = now
+            return
+        }
+        let lease: ProviderRuntimeLease?
+        let activeProvider: (any LLMProvider)?
+        if let providerRegistry {
+            let loadedLease: ProviderRuntimeLease
+            if let dispatchLease {
+                loadedLease = dispatchLease
+            } else {
+                loadedLease = await providerRegistry.leaseForEligibleDispatch()
             }
+            if providerGeneration != loadedLease.generation {
+                resetProviderRuntimeState()
+                providerGeneration = loadedLease.generation
+            }
+            lease = loadedLease
+            activeProvider = loadedLease.provider
+        } else {
+            lease = nil
+            activeProvider = provider
+        }
+        guard let activeProvider else {
+            return
         }
         if let lastDigestFailureAt,
            now.timeIntervalSince(lastDigestFailureAt) < minimumInterval {
@@ -263,29 +300,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
 
         do {
-            let rawEvents = snapshot.rawContent
-            guard !rawEvents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                lastDigestAt = now
-                return
-            }
             let currentEnvironment = try environmentStore.loadSnapshot()
-            let lease: ProviderRuntimeLease?
-            let activeProvider: (any LLMProvider)?
-            if let providerRegistry {
-                let loadedLease = await providerRegistry.leaseForEligibleDispatch()
-                if providerGeneration != loadedLease.generation {
-                    resetProviderRuntimeState()
-                    providerGeneration = loadedLease.generation
-                }
-                lease = loadedLease
-                activeProvider = loadedLease.provider
-            } else {
-                lease = nil
-                activeProvider = provider
-            }
-            guard let activeProvider else {
-                return
-            }
             let request = LLMRequest(
                 task: .contextDigest,
                 rawInput: rawEvents,
