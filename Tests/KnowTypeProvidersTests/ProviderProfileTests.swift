@@ -40,6 +40,11 @@ private struct FailingSecretStore: SecretStore {
     func deleteSecret(named name: String) throws {}
 }
 
+private struct PreV2ProviderProfilesFile: Codable {
+    var schemaVersion: Int
+    var profiles: [ProviderProfile]
+}
+
 private final class ConfigurationCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var capturedConfigurations: [ProviderConfiguration] = []
@@ -245,6 +250,264 @@ final class ProviderProfileTests: XCTestCase {
 
         XCTAssertEqual(profiles, ProviderProfilesFile())
         XCTAssertFalse(fileManager.fileExists(atPath: knowTypeDirectory.path))
+    }
+
+    func testDefaultProfileStoreUsesGenerationSeparatedPaths() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-paths-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+
+        XCTAssertEqual(store.fileURL.lastPathComponent, "providers.v2.json")
+        XCTAssertEqual(store.legacyFileURL?.lastPathComponent, "providers.json")
+        XCTAssertEqual(store.legacySnapshotURL?.lastPathComponent, "providers.legacy.json")
+    }
+
+    func testDefaultProfileStoreRequiresMigrationInsteadOfTreatingLegacyAsEmpty() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-migration-required-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let legacy = PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [])
+        try JSONEncoder().encode(legacy).write(to: legacyURL, options: [.atomic])
+
+        XCTAssertThrowsError(try store.loadProfiles()) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .migrationRequired(path: legacyURL.path)
+            )
+        }
+        XCTAssertThrowsError(try store.transactProfiles(expectedRevision: 0) { $0 }) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .migrationRequired(path: legacyURL.path)
+            )
+        }
+    }
+
+    func testLegacyProfileMigrationRekeysCredentialsAndTombstonesOldPath() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-migrate-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let snapshotURL = try XCTUnwrap(store.legacySnapshotURL)
+        let profile = ProviderProfile(
+            id: "profile-a",
+            displayName: "Legacy",
+            kind: .openAIChat,
+            baseURL: URL(string: "https://example.com/v1")!,
+            model: "model",
+            secretName: "legacy.secret",
+            isDefault: true
+        )
+        let legacyData = try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [profile])
+        )
+        try legacyData.write(to: legacyURL, options: [.atomic])
+        let secrets = InMemorySecretStore(values: ["legacy.secret": "secret-value"])
+
+        let result = try store.migrateLegacyProfiles(
+            secretStore: secrets,
+            credentialReferenceGenerator: { "new.\($0)" }
+        )
+
+        XCTAssertEqual(
+            result,
+            ProviderProfileStorageMigrationResult(
+                status: .migrated,
+                revision: 1,
+                profileCount: 1,
+                credentialsRekeyed: 1
+            )
+        )
+        let migrated = try store.loadProfiles()
+        XCTAssertEqual(migrated.schemaVersion, 2)
+        XCTAssertEqual(migrated.revision, 1)
+        XCTAssertEqual(migrated.profiles.first?.secretName, "new.profile-a")
+        XCTAssertEqual(try secrets.secret(named: "new.profile-a"), "secret-value")
+        XCTAssertEqual(try secrets.secret(named: "legacy.secret"), "secret-value")
+        XCTAssertEqual(try Data(contentsOf: snapshotURL), legacyData)
+        XCTAssertEqual(store.legacyStorageState(), .tombstone)
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                PreV2ProviderProfilesFile.self,
+                from: Data(contentsOf: legacyURL)
+            )
+        )
+    }
+
+    func testLegacyNumericV2WithoutRevisionStillMigrates() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-migrate-v2-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        try Data(#"{"schemaVersion":2,"profiles":[]}"#.utf8)
+            .write(to: legacyURL, options: [.atomic])
+
+        let result = try store.migrateLegacyProfiles(secretStore: InMemorySecretStore())
+
+        XCTAssertEqual(result.status, .migrated)
+        XCTAssertEqual(result.revision, 1)
+        XCTAssertEqual(try store.loadProfiles().revision, 1)
+    }
+
+    func testLegacyWriterAfterCutoverCannotChangeCanonicalProfilesOrCredential() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-old-writer-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let original = ProviderProfile(
+            id: "profile-a",
+            displayName: "Canonical",
+            kind: .openAIChat,
+            baseURL: URL(string: "https://example.com/v1")!,
+            model: "model-a",
+            secretName: "legacy.secret",
+            isDefault: true
+        )
+        try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [original])
+        ).write(to: legacyURL, options: [.atomic])
+        let secrets = InMemorySecretStore(values: ["legacy.secret": "secret-value"])
+        _ = try store.migrateLegacyProfiles(
+            secretStore: secrets,
+            credentialReferenceGenerator: { "new.\($0)" }
+        )
+        let canonical = try store.loadProfiles()
+
+        var overwritten = original
+        overwritten.displayName = "Stale writer"
+        overwritten.model = "model-stale"
+        try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [overwritten])
+        ).write(to: legacyURL, options: [.atomic])
+        try secrets.deleteSecret(named: "legacy.secret")
+
+        XCTAssertEqual(try store.loadProfiles(), canonical)
+        XCTAssertEqual(try secrets.secret(named: "new.profile-a"), "secret-value")
+        XCTAssertThrowsError(
+            try store.transactProfiles(expectedRevision: canonical.revision) { $0 }
+        ) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .legacyWriterDetected(path: legacyURL.path)
+            )
+        }
+
+        let quarantine = try store.migrateLegacyProfiles(secretStore: secrets)
+        XCTAssertEqual(quarantine.status, .legacyWriterQuarantined)
+        XCTAssertEqual(try store.loadProfiles(), canonical)
+        XCTAssertEqual(store.legacyStorageState(), .tombstone)
+        XCTAssertEqual(try secrets.secret(named: "new.profile-a"), "secret-value")
+    }
+
+    func testMigrationClearsMissingCredentialReference() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-missing-secret-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let profile = ProviderProfile(
+            id: "missing",
+            displayName: "Missing",
+            kind: .openAIChat,
+            baseURL: URL(string: "https://example.com/v1")!,
+            model: "model",
+            secretName: "missing.secret",
+            isDefault: true
+        )
+        try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [profile])
+        ).write(to: legacyURL, options: [.atomic])
+
+        let result = try store.migrateLegacyProfiles(secretStore: InMemorySecretStore())
+
+        XCTAssertEqual(result.missingCredentials, 1)
+        XCTAssertEqual(result.credentialsRekeyed, 0)
+        XCTAssertNil(try store.loadProfiles().profiles.first?.secretName)
+    }
+
+    func testMigrationCompensatesCreatedCredentialsWhenReferenceGenerationFails() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-secret-compensation-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        let profiles = ["a", "b"].map { id in
+            ProviderProfile(
+                id: id,
+                displayName: id,
+                kind: .openAIChat,
+                baseURL: URL(string: "https://example.com/v1")!,
+                model: "model",
+                secretName: "legacy.\(id)",
+                isDefault: id == "a"
+            )
+        }
+        let legacyData = try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: profiles)
+        )
+        try legacyData.write(to: legacyURL, options: [.atomic])
+        let secrets = InMemorySecretStore(values: [
+            "legacy.a": "secret-a",
+            "legacy.b": "secret-b"
+        ])
+
+        XCTAssertThrowsError(
+            try store.migrateLegacyProfiles(
+                secretStore: secrets,
+                credentialReferenceGenerator: { _ in "new.duplicate" }
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .invalidMigrationCredentialReference
+            )
+        }
+        XCTAssertNil(try secrets.secret(named: "new.duplicate"))
+        XCTAssertEqual(try Data(contentsOf: legacyURL), legacyData)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+    }
+
+    func testMissingCanonicalAfterCompletedMigrationFailsClosed() throws {
+        let applicationSupport = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-profile-missing-canonical-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: applicationSupport) }
+        let store = try FileProviderProfileStore.defaultStore(
+            applicationSupportDirectory: applicationSupport
+        )
+        let legacyURL = try XCTUnwrap(store.legacyFileURL)
+        try JSONEncoder().encode(
+            PreV2ProviderProfilesFile(schemaVersion: 1, profiles: [])
+        ).write(to: legacyURL, options: [.atomic])
+        _ = try store.migrateLegacyProfiles(secretStore: InMemorySecretStore())
+        try FileManager.default.removeItem(at: store.fileURL)
+
+        XCTAssertThrowsError(try store.loadProfiles()) { error in
+            XCTAssertEqual(
+                error as? ProviderProfileStoreError,
+                .canonicalFileMissing(path: store.fileURL.path)
+            )
+        }
     }
 
     func testInMemorySecretStoreSupportsMutation() throws {
