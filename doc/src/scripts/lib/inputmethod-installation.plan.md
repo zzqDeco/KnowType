@@ -26,6 +26,14 @@ identity. A PreferencePane path must be the canonical local
 and failed-install recovery treat a mismatch as blocking instead of removing or
 replacing a same-name foreign bundle.
 
+The shared pre-v2 provider compatibility validator accepts only a complete
+schema-v1 envelope that the legacy Swift decoder can consume: integer version
+`1`, a profile array, supported provider kinds, required profile fields, string
+headers, numeric timeout, and boolean default state. Install and rollback use
+the same validator and fail closed on malformed, tombstone, future-schema,
+canonical, snapshot, or compare-and-claim metadata. The shared generation-2
+migration runner validates the installed CLI status before rollback proceeds.
+
 PreferencePane replacement copies into a sibling staging directory, validates
 the staged bundle, moves the current canonical pane aside, and only then
 publishes the staged pane. A copy or validation failure leaves the current pane

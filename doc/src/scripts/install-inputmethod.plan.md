@@ -45,9 +45,30 @@ Installs the locally built KnowType input method bundle into
   to adjust retention.
 - The script switches away from any current KnowType source, disables existing
   KnowType TIS rows, restarts text-input menu agents, asks a remaining
-  `KnowTypeInputMethodApp` to exit with `TERM`, replaces
+  `KnowTypeInputMethodApp` to exit with `TERM`, closes standalone Settings and
+  System Settings so no legacy provider writer remains active, replaces
   `~/Library/Input Methods/KnowType.app`, clears quarantine, and refreshes the
   installed path with `lsregister -f`.
+- Before LaunchServices or TIS registration, a generation-2 installed executable
+  runs the explicit `--knowtype-migrate-provider-profiles` command. It migrates
+  numeric `providers.json` metadata to generation-separated `providers.v2.json`,
+  snapshots the legacy bytes, and rekeys available Keychain credentials.
+  Migration output contains only state, revision, and counts. Failure enters the
+  existing validated artifact rollback path.
+- A pre-v2 source bundle never receives the unknown migration command. Before
+  replacement, the currently installed generation-2 executable transactionally
+  downgrades provider metadata; without such an executable, the installer
+  requires already-compatible numeric legacy metadata and no canonical,
+  snapshot, or compare-and-claim file.
+  Otherwise installation fails before publishing the older app.
+- If a later step fails, the installer checks the backup app's declared storage
+  generation before publishing it. For a pre-v2 backup, the still-canonical new
+  app either rolls back the exact migrated revision or transactionally
+  downgrades the latest provider state. The shell never restores provider files
+  from an earlier snapshot, so a late legacy writer cannot be overwritten. If
+  compatibility cannot be proven, the installer keeps the new app rather than
+  pairing a pre-v2 binary with an incompatible tombstone. Revision conflicts or
+  competing legacy writes fail closed and remain intact.
 - `--force-stop-host` is an explicit development escape hatch. The default path
   never sends `KILL`; if `TERM` does not quiesce the host, the install fails
   with instructions instead of risking an unplanned process kill.
@@ -88,10 +109,12 @@ Installs the locally built KnowType input method bundle into
   and `.Hans`; history repair keeps `.Hans` available without moving it ahead of
   the retained current source. The install path does not pass
   `--include-selected`, so it does not rewrite the user's selected input source.
-- The install step must not initialize Rime user data, AI learning/profile
-  files, provider profiles, `ENV.md`, `CORRECTION.md`, or `~/.knowtype`. Real
-  typing after the user manually selects KnowType may initialize Rime as normal
-  product use.
+- Apart from the explicit provider storage migration/tombstone, the install step
+  must not initialize Rime user data, AI learning/profile files, `ENV.md`,
+  `CORRECTION.md`, or `~/.knowtype`. A genuinely new provider store receives
+  only a legacy-path tombstone; canonical defaults remain lazily persisted by
+  Settings. Real typing after the user manually selects KnowType may initialize
+  Rime as normal product use.
 - Postflight uses `diagnose-inputmethod.sh --json` as a static install snapshot
   check. Full `--strict` diagnostics remain explicit because TIS diagnostics may
   cause macOS to prelaunch the IMK host on some systems. A JSON diagnostic that

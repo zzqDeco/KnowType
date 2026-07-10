@@ -3,7 +3,10 @@
 ## Summary
 
 - Add a local install state file, app/prefPane backups, rollback script, and diagnostics status so local installs are traceable and recoverable.
-- Keep user data in place across install and rollback. Rime userdb, provider profiles, Keychain secrets, ENV/CORRECTION/LEXICAL_PROFILE, and lexicon data are not copied or restored by default.
+- Keep user data values in place across install and rollback. Rime userdb,
+  Keychain secrets, ENV/CORRECTION/LEXICAL_PROFILE, and lexicon data are not
+  copied or restored by default. Provider metadata may be format-converted when
+  an older app requires its legacy numeric schema.
 - Keep the settings UI read-only for rollback. Replacing the running input-method bundle is handled by external scripts.
 
 ## Scope
@@ -21,7 +24,9 @@
 - Install preflights validate KnowType identity, executable, Rime dylib/data, and codesign unless `--no-verify` is passed.
 - Install creates a backup before replacing an existing app. If replacement fails after backup, it restores the backup and re-registers LaunchServices.
 - Release zips may carry `release-manifest.json` inside the archive; the installer also accepts a sibling manifest for older packages.
-- Rollback swaps only install artifacts, refreshes LaunchServices and input-source preferences, and writes a fresh install-state file.
+- Rollback prepares a provider metadata format compatible with the target app,
+  swaps install artifacts, refreshes LaunchServices and input-source
+  preferences, and writes a fresh install-state file.
 - `diagnose-inputmethod.sh --json` outputs `install`, `bundle`, `rime`, `ai`, `userData`, `backups`, `warnings`, and `failures`.
 
 ## Test Plan

@@ -35,6 +35,8 @@ diagnostics.
 - Diagnostics includes dynamic read-only install status: app version/build,
   install source, Rime runtime files, AI provider summary, user-data file
   timestamps, backup count, latest backup, and rollback command.
+- Provider endpoint diagnostics remove userinfo, query, and fragment while
+  retaining scheme, host, port, and path.
 - Diagnostics must not execute rollback or overwrite the running input-method
   bundle from inside the settings process.
 - The AI page should lead with user-facing continuation controls, current

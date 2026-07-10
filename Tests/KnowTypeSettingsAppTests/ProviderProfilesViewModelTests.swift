@@ -51,7 +51,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let errors = viewModel.validate(viewModel.draft)
 
         XCTAssertTrue(errors.contains("显示名称不能为空。"))
-        XCTAssertTrue(errors.contains("Base URL 必须是 HTTP 或 HTTPS URL。"))
+        XCTAssertTrue(errors.contains("Base URL 必须是有效的 HTTP 或 HTTPS URL，且不能包含用户名、密码或 fragment。"))
         XCTAssertTrue(errors.contains("模型不能为空。"))
         XCTAssertTrue(errors.contains("超时时间必须大于 0。"))
     }
@@ -66,7 +66,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         let errors = viewModel.validate(viewModel.draft)
 
-        XCTAssertTrue(errors.contains("Base URL 必须是 HTTP 或 HTTPS URL。"))
+        XCTAssertTrue(errors.contains("Base URL 必须是有效的 HTTP 或 HTTPS URL，且不能包含用户名、密码或 fragment。"))
     }
 
     func testSaveCreatesProfileAndWritesAPIKeyToSecretStoreOnly() throws {
@@ -90,7 +90,9 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let savedProfile = try XCTUnwrap(store.savedFiles.last?.profiles.first)
         XCTAssertEqual(savedProfile.displayName, "Work OpenAI")
         XCTAssertEqual(savedProfile.kind, .openAIResponses)
-        XCTAssertEqual(savedProfile.secretName, "knowtype.provider.\(savedProfile.id).apiKey")
+        XCTAssertTrue(
+            savedProfile.secretName?.hasPrefix("knowtype.provider.\(savedProfile.id).credential.") == true
+        )
         XCTAssertEqual(try secrets.secret(named: savedProfile.secretName ?? ""), "sk-secret")
 
         let savedJSON = String(data: try JSONEncoder().encode(store.savedFiles.last), encoding: .utf8)
@@ -148,8 +150,8 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let second = try XCTUnwrap(saved.first(where: { $0.id == secondID }))
 
         XCTAssertNotEqual(first.secretName, second.secretName)
-        XCTAssertEqual(first.secretName, "knowtype.provider.\(firstID).apiKey")
-        XCTAssertEqual(second.secretName, "knowtype.provider.\(secondID).apiKey")
+        XCTAssertTrue(first.secretName?.hasPrefix("knowtype.provider.\(firstID).credential.") == true)
+        XCTAssertTrue(second.secretName?.hasPrefix("knowtype.provider.\(secondID).credential.") == true)
         XCTAssertEqual(try secrets.secret(named: first.secretName ?? ""), "sk-work")
         XCTAssertEqual(try secrets.secret(named: second.secretName ?? ""), "sk-personal")
     }
@@ -356,7 +358,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(saved.first(where: { $0.id == "personal" })?.secretName, "knowtype.openai_chat.apiKey")
     }
 
-    func testDeleteSecretFailureAfterProviderWithoutSecretSaveDoesNotPublishProfiles() throws {
+    func testDeleteSecretFailureAfterProviderWithoutSecretSaveKeepsCommittedMetadata() throws {
         let existing = [
             ProviderProfile(
                 id: "work",
@@ -377,16 +379,18 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         viewModel.changeDraftKind(.ollamaNative)
 
-        XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertEqual(viewModel.lastErrorMessage, "delete failed")
-        XCTAssertEqual(store.savedFiles.count, 2)
-        XCTAssertNil(store.savedFiles.first?.profiles.first?.secretName)
-        XCTAssertEqual(store.savedFiles.last?.profiles, existing)
+        XCTAssertTrue(viewModel.saveDraft())
+        XCTAssertEqual(
+            viewModel.lastErrorMessage,
+            "Provider 配置已保存，但无法清理旧的未引用凭据：delete failed。"
+        )
+        XCTAssertEqual(store.savedFiles.count, 1)
+        XCTAssertNil(store.savedFiles.last?.profiles.first?.secretName)
         XCTAssertEqual(secrets.deleteSecretCalls, ["knowtype.provider.work.apiKey"])
-        XCTAssertEqual(viewModel.profiles, existing)
+        XCTAssertEqual(viewModel.profiles, store.savedFiles.last?.profiles)
     }
 
-    func testSetSecretFailureRollsBackProfileFile() throws {
+    func testSetSecretFailureDoesNotWriteProfileFile() throws {
         let existing = [
             ProviderProfile(
                 id: "work",
@@ -410,13 +414,11 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         XCTAssertFalse(viewModel.saveDraft())
         XCTAssertEqual(viewModel.lastErrorMessage, "set failed")
-        XCTAssertEqual(store.savedFiles.count, 2)
-        XCTAssertEqual(store.savedFiles.first?.profiles.first?.displayName, "Updated Work")
-        XCTAssertEqual(store.savedFiles.last?.profiles, existing)
+        XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertEqual(viewModel.profiles, existing)
     }
 
-    func testSetSecretFailureFromSeededDefaultsRollsBackToLoadedEmptyStore() throws {
+    func testSetSecretFailureFromSeededDefaultsDoesNotWriteProfileFile() throws {
         let loaded = ProviderProfilesFile()
         let store = CapturingProfileStore(file: loaded)
         let secrets = RecordingSecretStore(setError: TestProfileStoreError(message: "set failed"))
@@ -429,15 +431,13 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         XCTAssertFalse(viewModel.saveDraft())
         XCTAssertEqual(viewModel.lastErrorMessage, "set failed")
-        XCTAssertEqual(store.savedFiles.count, 2)
-        XCTAssertEqual(store.savedFiles.first?.profiles.count, ProviderKind.allCases.count)
-        XCTAssertEqual(store.savedFiles.last, loaded)
+        XCTAssertTrue(store.savedFiles.isEmpty)
         XCTAssertEqual(viewModel.profiles.map(\.kind), ProviderKind.allCases)
     }
 
-    func testFailedLegacySecretDeleteRemovesJustCreatedProfileScopedSecret() throws {
+    func testFailedLegacySecretDeleteKeepsCommittedImmutableCredential() throws {
         let oldSecretName = "knowtype.openai_chat.apiKey"
-        let newSecretName = "knowtype.provider.work.apiKey"
+        let newSecretName = "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000001"
         let existing = [
             ProviderProfile(
                 id: "work",
@@ -456,23 +456,28 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         )
         let viewModel = ProviderProfilesViewModel(
             profileStore: store,
-            secretStore: secrets
+            secretStore: secrets,
+            credentialReferenceGenerator: { _ in newSecretName }
         )
 
         viewModel.draft.apiKey = "sk-new"
 
-        XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertEqual(viewModel.lastErrorMessage, "delete failed")
-        XCTAssertEqual(store.savedFiles.count, 2)
-        XCTAssertEqual(store.savedFiles.first?.profiles.first?.secretName, newSecretName)
-        XCTAssertEqual(store.savedFiles.last?.profiles, existing)
+        XCTAssertTrue(viewModel.saveDraft())
+        XCTAssertEqual(
+            viewModel.lastErrorMessage,
+            "Provider 配置已保存，但无法清理旧的未引用凭据：delete failed。"
+        )
+        XCTAssertEqual(store.savedFiles.count, 1)
+        XCTAssertEqual(store.savedFiles.last?.profiles.first?.secretName, newSecretName)
         XCTAssertEqual(secrets.setSecretCalls.map(\.name), [newSecretName])
-        XCTAssertEqual(secrets.deleteSecretCalls, [oldSecretName, newSecretName])
-        XCTAssertNil(try secrets.secret(named: newSecretName))
-        XCTAssertEqual(viewModel.profiles, existing)
+        XCTAssertEqual(secrets.deleteSecretCalls, [oldSecretName])
+        XCTAssertEqual(try secrets.secret(named: newSecretName), "sk-new")
+        XCTAssertEqual(viewModel.profiles, store.savedFiles.last?.profiles)
     }
 
-    func testRollbackFailureReportsMetadataMayBeStaged() throws {
+    func testMetadataFailureCompensatesNewCredentialWithoutChangingExistingMetadata() throws {
+        let oldSecretName = "knowtype.provider.work.apiKey"
+        let newSecretName = "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000001"
         let existing = [
             ProviderProfile(
                 id: "work",
@@ -480,31 +485,33 @@ final class ProviderProfilesViewModelTests: XCTestCase {
                 kind: .openAIChat,
                 baseURL: URL(string: "https://api.openai.com")!,
                 model: "gpt-4.1-mini",
-                secretName: "knowtype.provider.work.apiKey",
+                secretName: oldSecretName,
                 isDefault: true
             )
         ]
-        let store = RollbackFailingProfileStore(
+        let store = SavingThrowingProfileStore(
             file: ProviderProfilesFile(profiles: existing),
-            rollbackError: TestProfileStoreError(message: "rollback failed")
+            error: TestProfileStoreError(message: "save failed")
         )
-        let secrets = RecordingSecretStore(setError: TestProfileStoreError(message: "set failed"))
+        let secrets = RecordingSecretStore(values: [oldSecretName: "sk-old"])
         let viewModel = ProviderProfilesViewModel(
             profileStore: store,
-            secretStore: secrets
+            secretStore: secrets,
+            credentialReferenceGenerator: { _ in newSecretName }
         )
 
         viewModel.draft.displayName = "Updated Work"
         viewModel.draft.apiKey = "sk-new"
 
         XCTAssertFalse(viewModel.saveDraft())
-        XCTAssertEqual(
-            viewModel.lastErrorMessage,
-            "更新 provider secret 失败：set failed。同时恢复 providers.json 失败：rollback failed。Provider 元数据可能已经暂存到磁盘。"
-        )
-        XCTAssertEqual(store.saveAttempts.count, 2)
+        XCTAssertEqual(viewModel.lastErrorMessage, "save failed")
+        XCTAssertEqual(store.saveAttempts.count, 1)
         XCTAssertEqual(store.saveAttempts.first?.profiles.first?.displayName, "Updated Work")
-        XCTAssertEqual(store.saveAttempts.last?.profiles, existing)
+        XCTAssertEqual(store.saveAttempts.first?.profiles.first?.secretName, newSecretName)
+        XCTAssertEqual(secrets.setSecretCalls.map(\.name), [newSecretName])
+        XCTAssertEqual(secrets.deleteSecretCalls, [newSecretName])
+        XCTAssertNil(try secrets.secret(named: newSecretName))
+        XCTAssertEqual(try secrets.secret(named: oldSecretName), "sk-old")
         XCTAssertEqual(viewModel.profiles, existing)
     }
 
@@ -813,6 +820,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
     }
 
     func testSaveFailureDoesNotOverwriteExistingSecretForReplacementAPIKey() throws {
+        let newSecretName = "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000001"
         let existing = [
             ProviderProfile(
                 id: "work",
@@ -831,17 +839,18 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         let secrets = RecordingSecretStore()
         let viewModel = ProviderProfilesViewModel(
             profileStore: store,
-            secretStore: secrets
+            secretStore: secrets,
+            credentialReferenceGenerator: { _ in newSecretName }
         )
 
         viewModel.draft.apiKey = "sk-replacement"
 
         XCTAssertFalse(viewModel.saveDraft())
         XCTAssertEqual(viewModel.lastErrorMessage, "save failed")
-        XCTAssertTrue(secrets.setSecretCalls.isEmpty)
-        XCTAssertTrue(secrets.deleteSecretCalls.isEmpty)
+        XCTAssertEqual(secrets.setSecretCalls.map(\.name), [newSecretName])
+        XCTAssertEqual(secrets.deleteSecretCalls, [newSecretName])
         XCTAssertEqual(viewModel.profiles, existing)
-        XCTAssertEqual(store.saveAttempts.last?.profiles.first?.secretName, "knowtype.provider.work.apiKey")
+        XCTAssertEqual(store.saveAttempts.last?.profiles.first?.secretName, newSecretName)
     }
 
     func testSaveDraftDoesNotPublishProfilesWhenStoreSaveFails() throws {
@@ -981,7 +990,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.saveDraft())
 
         let saved = try XCTUnwrap(store.savedFiles.last?.profiles.first)
-        XCTAssertEqual(saved.secretName, "knowtype.provider.\(saved.id).apiKey")
+        XCTAssertTrue(saved.secretName?.hasPrefix("knowtype.provider.\(saved.id).credential.") == true)
         XCTAssertEqual(secrets.setSecretCalls.count, 1)
         XCTAssertEqual(secrets.setSecretCalls.first?.value, "proxy-secret")
         XCTAssertEqual(secrets.setSecretCalls.first?.name, saved.secretName)
@@ -1644,6 +1653,243 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.connectionStatus, .idle)
         XCTAssertNil(viewModel.lastErrorMessage)
     }
+
+    func testTwoViewModelsRejectStaleSaveWithoutLosingNewProfileAndKeepDraft() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-vm-stale-save-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("providers.json")
+        let storeA = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let storeB = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let initial = ProviderProfile(
+            id: "initial",
+            displayName: "Initial",
+            kind: .ollamaNative,
+            baseURL: URL(string: "http://localhost:11434")!,
+            model: "llama3.2",
+            isDefault: true
+        )
+        _ = try storeA.transactProfiles(expectedRevision: 0) { current in
+            var updated = current
+            updated.profiles = [initial]
+            return updated
+        }
+        let secrets = InMemorySecretStore()
+        let viewModelA = ProviderProfilesViewModel(
+            profileStore: storeA,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+        let viewModelB = ProviderProfilesViewModel(
+            profileStore: storeB,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModelA.createProfile(kind: .ollamaNative)
+        let addedID = viewModelA.draft.id
+        viewModelA.draft.displayName = "Added by A"
+        viewModelA.draft.isDefault = false
+        XCTAssertTrue(viewModelA.saveDraft())
+
+        viewModelB.draft.displayName = "Unsaved edit from B"
+        XCTAssertFalse(viewModelB.saveDraft())
+
+        let disk = try storeA.loadProfiles()
+        XCTAssertEqual(disk.profiles.count, 2)
+        XCTAssertEqual(disk.profiles.first(where: { $0.id == "initial" })?.displayName, "Initial")
+        XCTAssertEqual(disk.profiles.first(where: { $0.id == addedID })?.displayName, "Added by A")
+        XCTAssertEqual(viewModelB.profiles, disk.profiles)
+        XCTAssertEqual(viewModelB.draft.displayName, "Unsaved edit from B")
+        XCTAssertEqual(
+            viewModelB.lastErrorMessage,
+            "Provider 配置已在另一个 KnowType 设置窗口中更新。当前草稿已保留，磁盘配置已刷新；请核对最新内容后重试。"
+        )
+    }
+
+    func testTwoViewModelsRejectStaleDefaultChangeAndRefreshProfiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-vm-stale-default-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("providers.json")
+        let storeA = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let storeB = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let first = ProviderProfile(
+            id: "first",
+            displayName: "First",
+            kind: .ollamaNative,
+            baseURL: URL(string: "http://localhost:11434")!,
+            model: "first-model",
+            isDefault: true
+        )
+        let second = ProviderProfile(
+            id: "second",
+            displayName: "Second",
+            kind: .ollamaNative,
+            baseURL: URL(string: "http://localhost:11435")!,
+            model: "second-model"
+        )
+        _ = try storeA.transactProfiles(expectedRevision: 0) { current in
+            var updated = current
+            updated.profiles = [first, second]
+            return updated
+        }
+        let secrets = InMemorySecretStore()
+        let viewModelA = ProviderProfilesViewModel(
+            profileStore: storeA,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+        let viewModelB = ProviderProfilesViewModel(
+            profileStore: storeB,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false
+        )
+
+        viewModelB.draft.displayName = "Unsaved B draft"
+        viewModelA.draft.displayName = "First updated by A"
+        XCTAssertTrue(viewModelA.saveDraft())
+
+        XCTAssertThrowsError(try viewModelB.setDefaultProfile(id: second.id)) { error in
+            XCTAssertEqual(error as? ProviderProfilesViewModelError, .staleBaseline)
+        }
+
+        let disk = try storeA.loadProfiles()
+        XCTAssertEqual(disk.profiles.filter(\.isDefault).map(\.id), [first.id])
+        XCTAssertEqual(viewModelB.profiles.first(where: { $0.id == first.id })?.displayName, "First updated by A")
+        XCTAssertEqual(viewModelB.draft.displayName, "Unsaved B draft")
+    }
+
+    func testTwoViewModelsRejectStaleDraftAndSavedTestsWithoutSendingK2ToE1() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-vm-stale-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("providers.json")
+        let storeA = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let storeB = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let storeC = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let oldSecretName = "legacy.provider.work.apiKey"
+        let newSecretName = "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000002"
+        let initial = ProviderProfile(
+            id: "work",
+            displayName: "Work",
+            kind: .openAIResponses,
+            baseURL: URL(string: "https://e1.example.com/v1")!,
+            model: "gpt-test",
+            secretName: oldSecretName,
+            isDefault: true
+        )
+        _ = try storeA.transactProfiles(expectedRevision: 0) { current in
+            var updated = current
+            updated.profiles = [initial]
+            return updated
+        }
+        let secrets = InMemorySecretStore(values: [oldSecretName: "K1"])
+        let recorder = ConfigurationRecorder()
+        let viewModelA = ProviderProfilesViewModel(
+            profileStore: storeA,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false,
+            credentialReferenceGenerator: { _ in newSecretName }
+        )
+        let viewModelB = ProviderProfilesViewModel(
+            profileStore: storeB,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false,
+            connectionTester: { configuration in
+                await recorder.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "test", candidateCount: 1)
+            }
+        )
+        let viewModelC = ProviderProfilesViewModel(
+            profileStore: storeC,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false,
+            connectionTester: { configuration in
+                await recorder.append(configuration)
+                return ProviderConnectionDiagnosticResult(providerName: "test", candidateCount: 1)
+            }
+        )
+
+        viewModelA.draft.baseURL = "https://e2.example.com/v1"
+        viewModelA.draft.apiKey = "K2"
+        XCTAssertTrue(viewModelA.saveDraft())
+
+        let staleDraftResult = await viewModelB.testDraftConnection()
+        let staleSavedResult = await viewModelC.testSavedProfileConnection()
+        let refreshedDraftResult = await viewModelB.testDraftConnection()
+        XCTAssertFalse(staleDraftResult)
+        XCTAssertFalse(staleSavedResult)
+        XCTAssertFalse(refreshedDraftResult)
+
+        let configurations = await recorder.configurations
+        XCTAssertTrue(configurations.isEmpty)
+        XCTAssertEqual(viewModelB.draft.baseURL, "https://e1.example.com/v1")
+        XCTAssertEqual(viewModelB.profiles.first?.baseURL.absoluteString, "https://e2.example.com/v1")
+        XCTAssertEqual(try secrets.secret(named: newSecretName), "K2")
+        XCTAssertNil(try secrets.secret(named: oldSecretName))
+    }
+
+    func testInFlightE1TestUsesK1ThenRejectsResultAfterE2K2Commit() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-vm-inflight-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appendingPathComponent("providers.json")
+        let storeA = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let storeB = FileProviderProfileStore(fileURL: fileURL, revisionSignal: NoopRevisionSignal())
+        let oldSecretName = "legacy.provider.work.apiKey"
+        let newSecretName = "knowtype.provider.work.credential.00000000-0000-0000-0000-000000000002"
+        let initial = ProviderProfile(
+            id: "work",
+            displayName: "Work",
+            kind: .openAIResponses,
+            baseURL: URL(string: "https://e1.example.com/v1")!,
+            model: "gpt-test",
+            secretName: oldSecretName,
+            isDefault: true
+        )
+        _ = try storeA.transactProfiles(expectedRevision: 0) { current in
+            var updated = current
+            updated.profiles = [initial]
+            return updated
+        }
+        let secrets = InMemorySecretStore(values: [oldSecretName: "K1"])
+        let tester = BlockingConfigurationTester()
+        let viewModelA = ProviderProfilesViewModel(
+            profileStore: storeA,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false,
+            credentialReferenceGenerator: { _ in newSecretName }
+        )
+        let viewModelB = ProviderProfilesViewModel(
+            profileStore: storeB,
+            secretStore: secrets,
+            loadDefaultsWhenEmpty: false,
+            connectionTester: { configuration in
+                await tester.test(configuration)
+            }
+        )
+
+        let pendingTest = Task { await viewModelB.testDraftConnection() }
+        while await !tester.hasPending {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        viewModelA.draft.baseURL = "https://e2.example.com/v1"
+        viewModelA.draft.apiKey = "K2"
+        XCTAssertTrue(viewModelA.saveDraft())
+        await tester.resume()
+
+        let didConnect = await pendingTest.value
+        let configurations = await tester.configurations
+        XCTAssertFalse(didConnect)
+        let configuration = try XCTUnwrap(configurations.first)
+        XCTAssertEqual(configuration.baseURL.absoluteString, "https://e1.example.com/v1")
+        XCTAssertEqual(configuration.apiKey, "K1")
+        XCTAssertNotEqual(configuration.apiKey, "K2")
+        XCTAssertEqual(viewModelB.profiles.first?.baseURL.absoluteString, "https://e2.example.com/v1")
+        XCTAssertEqual(viewModelB.draft.baseURL, "https://e1.example.com/v1")
+    }
 }
 
 private actor ConfigurationRecorder {
@@ -1652,6 +1898,33 @@ private actor ConfigurationRecorder {
     func append(_ configuration: ProviderConfiguration) {
         configurations.append(configuration)
     }
+}
+
+private actor BlockingConfigurationTester {
+    private var continuation: CheckedContinuation<ProviderConnectionDiagnosticResult, Never>?
+    private(set) var configurations: [ProviderConfiguration] = []
+
+    var hasPending: Bool {
+        continuation != nil
+    }
+
+    func test(_ configuration: ProviderConfiguration) async -> ProviderConnectionDiagnosticResult {
+        configurations.append(configuration)
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume() {
+        continuation?.resume(
+            returning: ProviderConnectionDiagnosticResult(providerName: "test", candidateCount: 1)
+        )
+        continuation = nil
+    }
+}
+
+private struct NoopRevisionSignal: ProviderProfileRevisionSignaling {
+    func postProviderProfilesChanged(revision: UInt64) {}
 }
 
 private actor DelayedConnectionTester {
@@ -1674,19 +1947,25 @@ private actor DelayedConnectionTester {
 }
 
 private final class CapturingProfileStore: ProviderProfileStore, @unchecked Sendable {
-    private let file: ProviderProfilesFile
+    private var file: ProviderProfilesFile
     private(set) var savedFiles: [ProviderProfilesFile] = []
+    private let lock = NSLock()
 
     init(file: ProviderProfilesFile) {
         self.file = file
     }
 
     func loadProfiles() throws -> ProviderProfilesFile {
-        file
+        lock.lock()
+        defer { lock.unlock() }
+        return file
     }
 
     func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+        lock.lock()
+        defer { lock.unlock() }
         savedFiles.append(profiles)
+        file = profiles
     }
 }
 
@@ -1724,28 +2003,6 @@ private final class SavingThrowingProfileStore: ProviderProfileStore, @unchecked
     func saveProfiles(_ profiles: ProviderProfilesFile) throws {
         saveAttempts.append(profiles)
         throw error
-    }
-}
-
-private final class RollbackFailingProfileStore: ProviderProfileStore, @unchecked Sendable {
-    private let file: ProviderProfilesFile
-    private let rollbackError: Error
-    private(set) var saveAttempts: [ProviderProfilesFile] = []
-
-    init(file: ProviderProfilesFile, rollbackError: Error) {
-        self.file = file
-        self.rollbackError = rollbackError
-    }
-
-    func loadProfiles() throws -> ProviderProfilesFile {
-        file
-    }
-
-    func saveProfiles(_ profiles: ProviderProfilesFile) throws {
-        saveAttempts.append(profiles)
-        if saveAttempts.count > 1 {
-            throw rollbackError
-        }
     }
 }
 

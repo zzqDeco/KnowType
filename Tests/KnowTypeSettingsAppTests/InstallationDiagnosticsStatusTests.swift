@@ -125,7 +125,7 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
             isDefault: true
         )
         let profilesData = try JSONEncoder().encode(ProviderProfilesFile(profiles: [profile]))
-        try profilesData.write(to: support.appendingPathComponent("providers.json"))
+        try profilesData.write(to: support.appendingPathComponent("providers.v2.json"))
 
         let backup = support
             .appendingPathComponent("Backups", isDirectory: true)
@@ -187,6 +187,7 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         XCTAssertEqual(value("云端续写", in: status.aiRows), "已启用")
         XCTAssertEqual(value("本地 fallback", in: status.aiRows), "已关闭")
         XCTAssertTrue(value("默认 provider", in: status.aiRows).contains("gpt-5.3-codex-spark"))
+        XCTAssertEqual(value("配置存储", in: status.aiRows), "当前")
         XCTAssertNotEqual(value("ENV.md", in: status.userDataRows), "缺失")
         XCTAssertEqual(value("接受记录数", in: status.acceptedLearningRows), "1")
         XCTAssertEqual(value("Summary 状态", in: status.acceptedLearningRows), "当前")
@@ -230,6 +231,103 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         )
 
         XCTAssertEqual(value("Summary 状态", in: status.acceptedLearningRows), "过期")
+    }
+
+    func testProviderDiagnosticSummaryRemovesUserInfoQueryAndFragment() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-provider-diagnostic-redaction-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("Support/KnowType", isDirectory: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let profile = ProviderProfile(
+            id: "work",
+            displayName: "Work",
+            kind: .openAIResponses,
+            baseURL: URL(string: "https://user:pass@example.com/v1?api_key=TOPSECRET#trace")!,
+            model: "gpt-test",
+            isDefault: true
+        )
+        try JSONEncoder().encode(ProviderProfilesFile(revision: 1, profiles: [profile]))
+            .write(to: support.appendingPathComponent("providers.v2.json"))
+
+        let status = InstallationDiagnosticsStatus(
+            applicationSupportURL: support,
+            homeDirectoryURL: root,
+            inputMethodBundleURL: root.appendingPathComponent("KnowType.app", isDirectory: true),
+            preferencePaneURL: root.appendingPathComponent("KnowType.prefPane", isDirectory: true),
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+
+        let summary = value("默认 provider", in: status.aiRows)
+        XCTAssertTrue(summary.contains("https://example.com/v1"))
+        XCTAssertFalse(summary.contains("user"))
+        XCTAssertFalse(summary.contains("pass"))
+        XCTAssertFalse(summary.contains("api_key"))
+        XCTAssertFalse(summary.contains("TOPSECRET"))
+        XCTAssertFalse(summary.contains("trace"))
+    }
+
+    func testProviderDiagnosticFlagsLegacyWriterWithoutReadingItsProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-provider-diagnostic-legacy-writer-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("Support/KnowType", isDirectory: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let canonical = ProviderProfile(
+            id: "canonical",
+            displayName: "Canonical",
+            kind: .openAIResponses,
+            baseURL: URL(string: "https://canonical.example.com/v1")!,
+            model: "current-model",
+            isDefault: true
+        )
+        let stale = ProviderProfile(
+            id: "stale",
+            displayName: "Stale",
+            kind: .openAIChat,
+            baseURL: URL(string: "https://stale.example.com/v1")!,
+            model: "stale-model",
+            isDefault: true
+        )
+        try JSONEncoder().encode(ProviderProfilesFile(revision: 4, profiles: [canonical]))
+            .write(to: support.appendingPathComponent("providers.v2.json"))
+        try JSONEncoder().encode(ProviderProfilesFile(revision: 1, profiles: [stale]))
+            .write(to: support.appendingPathComponent("providers.json"))
+
+        let status = InstallationDiagnosticsStatus(
+            applicationSupportURL: support,
+            homeDirectoryURL: root,
+            inputMethodBundleURL: root.appendingPathComponent("KnowType.app", isDirectory: true),
+            preferencePaneURL: root.appendingPathComponent("KnowType.prefPane", isDirectory: true),
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+
+        XCTAssertEqual(value("配置存储", in: status.aiRows), "检测到旧版本写入")
+        XCTAssertTrue(value("默认 provider", in: status.aiRows).contains("Canonical"))
+        XCTAssertFalse(value("默认 provider", in: status.aiRows).contains("Stale"))
+    }
+
+    func testProviderDiagnosticReportsExpectedCanonicalAsMissing() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-provider-diagnostic-missing-canonical-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let support = root.appendingPathComponent("Support/KnowType", isDirectory: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try Data(
+            """
+            {"canonicalFile":"providers.v2.json","canonicalExpected":true,"profiles":[],"schemaVersion":"migrated-to-providers.v2.json"}
+            """.utf8
+        ).write(to: support.appendingPathComponent("providers.json"))
+
+        let status = InstallationDiagnosticsStatus(
+            applicationSupportURL: support,
+            homeDirectoryURL: root,
+            inputMethodBundleURL: root.appendingPathComponent("KnowType.app", isDirectory: true),
+            preferencePaneURL: root.appendingPathComponent("KnowType.prefPane", isDirectory: true),
+            preferredLanguages: ["zh-Hans-CN"]
+        )
+
+        XCTAssertEqual(value("配置存储", in: status.aiRows), "迁移后配置缺失")
     }
 
     private func makeBundle(at url: URL, version: String, build: String) throws {

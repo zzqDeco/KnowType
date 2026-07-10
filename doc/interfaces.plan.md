@@ -135,24 +135,57 @@ ProviderProfile {
   customResponsePath?
   isDefault
 }
+
+ProviderProfilesFile {
+  schemaVersion = 2
+  revision
+  profiles
+}
 ```
 
-Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory only on explicit save. Runtime cold-start paths use the no-create loader, so a missing provider profile does not create `Application Support/KnowType` merely because the IMK host was launched.
+Default file-backed profile storage writes canonical `providers.v2.json` under
+the user's Application Support `KnowType` directory only on explicit save.
+During upgrade, numeric legacy `providers.json` is copied exactly to
+`providers.legacy.json`, available credentials are rekeyed, and the legacy path
+becomes an incompatible tombstone. Schema-v1 files decode at revision `0`;
+unknown future schemas fail closed. Production mutations hold a sidecar `flock`, compare the ViewModel's
+expected revision, increment once, and atomically replace the file. Successful
+commits emit a privacy-safe cross-process revision signal. Runtime cold-start
+paths use the no-create loader, so a genuinely absent provider profile does not
+create `Application Support/KnowType` merely because the IMK host was launched.
+Unmigrated legacy or missing post-migration canonical state fails closed. The
+install migration first publishes a recoverable provisional tombstone and only
+marks canonical metadata expected after the canonical file is durable.
 
-`secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys under the `KnowType` service. Tests and non-UI code can use in-memory or read-only dictionary stores.
+`secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore`
+stores API keys under the `KnowType` service. New key writes use immutable
+`knowtype.provider.<profileID>.credential.<UUID>` references. The secret is
+written before metadata; failed metadata commits delete the new secret, while
+successful commits clean old unreferenced secrets afterward. Existing legacy
+references remain readable until the next secret change. Tests and non-UI code
+can use in-memory or read-only dictionary stores.
 
-When `providers.json` is missing or empty, settings and runtime loading share seeded defaults. The default profile is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model` blank for discovery, and does not embed an API key.
+When canonical `providers.v2.json` is missing in a genuinely new store or is
+empty, settings and runtime loading share seeded defaults. The default profile
+is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model`
+blank for discovery, and does not embed an API key.
 
 Settings validation rules:
 
 - display name cannot be empty
-- base URL must be HTTP(S) with a host
+- base URL must be HTTP(S) with a host and cannot include userinfo or a fragment;
+  query parameters remain accepted for runtime compatibility
+- provider-specific paths are appended before preserved query items; Gemini
+  replaces only its own `key` item
 - timeout must be positive
 - remote OpenAI-compatible profiles require an explicit model ID
 - local OpenAI-compatible profiles may leave model blank for `/v1/models` discovery
 - cloud profiles require a new key or an existing non-empty secret
 - custom HTTP profiles require body template and response path, but may omit the API key
-- profile saves publish new settings only after profile metadata and required secret mutations succeed
+- stale ViewModel revisions reject saves and default changes, refresh disk state,
+  and preserve the draft
+- profile saves publish new settings only after a required new secret and the
+  metadata transaction succeed
 
 Settings connection tests:
 
@@ -167,6 +200,10 @@ Settings connection tests:
 - keep transient diagnostic failures out of the persistent save/load error slot
 - preserve existing save/load errors after diagnostic success
 - avoid reusing a saved remote secret when a blank-key draft switches to a local endpoint, another remote endpoint, or another provider protocol
+- compare the provider-file baseline before sending and before publishing the
+  result; stale baselines refresh saved profiles and preserve the draft
+- immutable secret references ensure an E1 snapshot cannot resolve a newer K2
+  reference committed for E2
 
 ## Local Install State
 

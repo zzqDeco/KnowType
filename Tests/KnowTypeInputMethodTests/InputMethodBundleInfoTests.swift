@@ -485,6 +485,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethodApp/main.swift"),
             encoding: .utf8
         )
+        let packageManifest = try String(
+            contentsOf: rootURL.appendingPathComponent("Package.swift"),
+            encoding: .utf8
+        )
         let installScript = try String(
             contentsOf: rootURL.appendingPathComponent("scripts/install-inputmethod.sh"),
             encoding: .utf8
@@ -522,6 +526,18 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("--knowtype-switch-away"))
         XCTAssertTrue(appMain.contains("--knowtype-purge-legacy"))
         XCTAssertTrue(appMain.contains("--knowtype-disable-input-source"))
+        XCTAssertTrue(appMain.contains("--knowtype-migrate-provider-profiles"))
+        XCTAssertTrue(appMain.contains("--knowtype-rollback-provider-profile-migration"))
+        XCTAssertTrue(appMain.contains("ProviderProfileStorageMigrationCommand.run()"))
+        XCTAssertTrue(appMain.contains("ProviderProfileStorageMigrationCommand.rollback("))
+        XCTAssertTrue(appMain.contains("expectedCanonicalRevision: expectedRevision"))
+        XCTAssertTrue(appMain.contains("profileStore().migrateLegacyProfiles"))
+        XCTAssertTrue(appMain.contains("secretStore: KeychainSecretStore()"))
+        XCTAssertTrue(appMain.contains(#"environment["KNOWTYPE_APP_SUPPORT_DIR"]"#))
+        XCTAssertTrue(appMain.contains("provider.migration.credentials.rekeyed"))
+        XCTAssertTrue(appMain.contains("provider.migration.credentials.missing"))
+        XCTAssertFalse(appMain.contains(#"provider.migration.error=\(error.localizedDescription)"#))
+        XCTAssertTrue(packageManifest.contains(#""KnowTypeInputSourceSupport", "KnowTypeProviders""#))
         XCTAssertTrue(appMain.contains("static func handlesCommandLine"))
         XCTAssertTrue(appMain.contains("let explicitSelect"))
         XCTAssertTrue(appMain.contains("|| explicitSelect"))
@@ -567,6 +583,55 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("repair_preferences_best_effort || true"))
         XCTAssertTrue(installScript.contains("quiesce_before_replace\nfi\n\nprepare_source_artifacts"))
         XCTAssertTrue(installScript.contains("stop_input_method_host_after_quiesce\nrequire_input_method_host_stopped"))
+        XCTAssertTrue(installScript.contains("stop_provider_profile_writer_hosts"))
+        XCTAssertTrue(installScript.contains("knowtype_quit_system_settings_if_running 0"))
+        XCTAssertTrue(installScript.contains("close KnowType Settings and System Settings before installing"))
+        XCTAssertTrue(installScript.contains("migrate_provider_profiles"))
+        XCTAssertTrue(installScript.contains("prepare_provider_storage_for_source_bundle"))
+        XCTAssertTrue(installScript.contains("SOURCE_PROVIDER_STORAGE_GENERATION"))
+        XCTAssertTrue(installScript.contains("skipped-pre-v2"))
+        XCTAssertTrue(installScript.contains("rollback_provider_storage_after_failed_install"))
+        XCTAssertTrue(installScript.contains(#""$executable" --knowtype-migrate-provider-profiles"#))
+        XCTAssertTrue(installScript.contains(#""$executable" --knowtype-rollback-provider-profile-migration"#))
+        XCTAssertTrue(installScript.contains(#""$executable" --knowtype-downgrade-provider-profiles"#))
+        XCTAssertTrue(installScript.contains("provider_storage_generation_for_bundle"))
+        XCTAssertTrue(installHelper.contains("knowtype_legacy_provider_storage_is_compatible"))
+        XCTAssertTrue(installHelper.contains("knowtype_provider_storage_is_pre_v2_compatible"))
+        XCTAssertTrue(installHelper.contains("knowtype_migrate_provider_storage_for_bundle"))
+        XCTAssertTrue(installScript.contains("knowtype_provider_storage_is_pre_v2_compatible"))
+        XCTAssertTrue(installHelper.contains(#"payload["schemaVersion"] != 1"#))
+        XCTAssertTrue(installHelper.contains(#"not isinstance(payload.get("profiles"), list)"#))
+        let sourceGenerationGuard = try XCTUnwrap(
+            installScript.range(of: #"installed_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)""#)
+        )
+        let migrationInvocation = try XCTUnwrap(
+            installScript.range(of: #"output="$("$executable" --knowtype-migrate-provider-profiles 2>&1)""#)
+        )
+        XCTAssertLessThan(
+            sourceGenerationGuard.lowerBound,
+            migrationInvocation.lowerBound,
+            "pre-v2 source bundles must be rejected before invoking an unsupported migration command"
+        )
+        XCTAssertTrue(installScript.contains("PROVIDER_MIGRATION_REVISION"))
+        XCTAssertTrue(installScript.contains("keeping the new app instead of restoring an incompatible old binary"))
+        XCTAssertFalse(installScript.contains("restore_provider_storage_snapshot"))
+        XCTAssertTrue(installScript.contains("refusing to register the new input method"))
+        let failedInstallProviderRollback = try XCTUnwrap(
+            installScript.range(of: #"rollback_provider_storage_after_failed_install "$new_executable""#)
+        )
+        let failedInstallOldAppPublish = try XCTUnwrap(
+            installScript.range(of: #"mv "$app_stage/KnowType.app" "$TARGET_PATH""#)
+        )
+        XCTAssertLessThan(
+            failedInstallProviderRollback.lowerBound,
+            failedInstallOldAppPublish.lowerBound,
+            "provider metadata must be restored before a pre-v2 app becomes canonical"
+        )
+        XCTAssertTrue(
+            installScript.contains(
+                "migrate_provider_profiles\n\nlaunchservices_cleanup_output=\"$(knowtype_unregister_launchservices_records_except"
+            )
+        )
         XCTAssertTrue(installScript.contains("switch_away_before_replace"))
         XCTAssertTrue(installScript.contains("disable_input_sources_before_replace"))
         XCTAssertTrue(installScript.contains(#""$tool" disable --bundle-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID""#))
@@ -608,6 +673,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(installScript.contains("--dry-run"))
         XCTAssertTrue(installScript.contains("Quiesce plan: switch away from KnowType, disable old KnowType input-source rows"))
         XCTAssertTrue(installScript.contains("Only the canonical installed app would be registered with LaunchServices"))
+        XCTAssertTrue(installScript.contains("migrate provider profiles to providers.v2.json"))
+        XCTAssertTrue(installScript.contains("the old migration CLI would not be invoked"))
         XCTAssertTrue(installScript.contains("require_input_method_host_stopped"))
         XCTAssertTrue(installScript.contains("process shutdown can flush Rime user data"))
         XCTAssertTrue(installScript.contains("--force-stop-host"))
@@ -665,6 +732,36 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(rollbackScript.contains("restored_legacy_args"))
         XCTAssertTrue(rollbackScript.contains(#"--knowtype-register-input-source --knowtype-enable-input-source"#))
         XCTAssertTrue(rollbackScript.contains("require_input_method_host_stopped"))
+        XCTAssertTrue(rollbackScript.contains("prepare_provider_storage_for_restored_app"))
+        XCTAssertTrue(rollbackScript.contains("migrate_provider_storage_for_restored_app"))
+        XCTAssertTrue(rollbackScript.contains("restore_current_app_after_failed_provider_migration"))
+        XCTAssertTrue(rollbackScript.contains("--knowtype-downgrade-provider-profiles"))
+        XCTAssertTrue(rollbackScript.contains("knowtype_provider_storage_is_pre_v2_compatible"))
+        XCTAssertTrue(rollbackScript.contains("knowtype_migrate_provider_storage_for_bundle"))
+        XCTAssertTrue(rollbackScript.contains("KnowTypeProviderProfileStorageGeneration"))
+        let explicitProviderDowngrade = try XCTUnwrap(
+            rollbackScript.range(of: "\nprepare_provider_storage_for_restored_app\n")
+        )
+        let explicitOldAppPublish = try XCTUnwrap(
+            rollbackScript.range(of: #"mv "$restore_app_staging_dir/KnowType.app" "$target_path""#)
+        )
+        XCTAssertLessThan(
+            explicitProviderDowngrade.lowerBound,
+            explicitOldAppPublish.lowerBound,
+            "explicit rollback must prepare compatible provider metadata before publishing the backup app"
+        )
+        let restoredV2Migration = try XCTUnwrap(
+            rollbackScript.range(of: "\nif ! migrate_provider_storage_for_restored_app; then")
+        )
+        let previousAppCleanup = try XCTUnwrap(
+            rollbackScript.range(of: #"rm -rf "$current_app_staging_dir""#, range: restoredV2Migration.upperBound..<rollbackScript.endIndex)
+        )
+        XCTAssertLessThan(explicitOldAppPublish.lowerBound, restoredV2Migration.lowerBound)
+        XCTAssertLessThan(
+            restoredV2Migration.lowerBound,
+            previousAppCleanup.lowerBound,
+            "generation-2 rollback must migrate legacy provider metadata before discarding the previous app"
+        )
         XCTAssertTrue(rollbackScript.contains("process shutdown can flush Rime user data"))
         XCTAssertTrue(rollbackScript.contains("knowtype_input_method_host_is_running"))
         XCTAssertTrue(rollbackScript.contains("ps -axo command="))
@@ -806,6 +903,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertEqual(plist["TISInputSourceID"] as? String, KnowTypeInputSourceIDs.parent)
         XCTAssertEqual(plist["TICapsLockLanguageSwitchCapable"] as? Bool, true)
         XCTAssertEqual(plist["TISParticipatesInTouchBar"] as? Bool, true)
+        XCTAssertEqual(plist["KnowTypeProviderProfileStorageGeneration"] as? Int, 2)
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "KnowTypeInputMethodIcon.icns")
         XCTAssertEqual(plist["tsInputMethodCharacterRepertoireKey"] as? [String], ["Hans", "Hant", "Hani", "Hanb", "Han"])
 
@@ -923,6 +1021,57 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(warnings.contains("invalid_feedback_history_lines:2"))
     }
 
+    func testProviderEndpointFixturesAndDiagnosticOutputsAreRedacted() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let fixtureURL = rootURL.appendingPathComponent("Tests/Fixtures/provider-endpoint-summary.json")
+        let helperURL = rootURL.appendingPathComponent("scripts/lib/provider_endpoint_summary.py")
+        let fixtureProcess = Process()
+        fixtureProcess.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        fixtureProcess.arguments = [helperURL.path, "--verify-fixtures", fixtureURL.path]
+        try fixtureProcess.run()
+        fixtureProcess.waitUntilExit()
+        XCTAssertEqual(fixtureProcess.terminationStatus, 0)
+
+        let testRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-provider-redaction-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: testRoot) }
+        let home = testRoot.appendingPathComponent("Home", isDirectory: true)
+        let bundle = testRoot.appendingPathComponent("KnowType.app", isDirectory: true)
+        let support = home.appendingPathComponent("Library/Application Support/KnowType", isDirectory: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        try makeMinimalBundle(at: bundle)
+        try Data(
+            """
+            {"schemaVersion":2,"revision":1,"profiles":[{"id":"work","displayName":"Work","kind":"openAIResponses","baseURL":"https://user:pass@example.com/v1?api_key=TOPSECRET#trace","model":"gpt-test","timeoutSeconds":20,"headers":{},"isDefault":true}]}
+            """.utf8
+        ).write(to: support.appendingPathComponent("providers.v2.json"))
+        let scriptURL = rootURL.appendingPathComponent("scripts/diagnose-inputmethod.sh")
+
+        let jsonOutput = try runDiagnoseJSON(scriptURL: scriptURL, homeURL: home, bundleURL: bundle)
+        let snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: jsonOutput) as? [String: Any])
+        let ai = try XCTUnwrap(snapshot["ai"] as? [String: Any])
+        XCTAssertEqual(ai["storageState"] as? String, "canonical")
+        let defaultProfile = try XCTUnwrap(ai["defaultProfile"] as? [String: Any])
+        XCTAssertEqual(
+            defaultProfile["baseURL"] as? String,
+            "https://example.com/v1 [query redacted]"
+        )
+        let jsonText = try XCTUnwrap(String(data: jsonOutput, encoding: .utf8))
+        XCTAssertFalse(jsonText.contains("TOPSECRET"))
+        XCTAssertFalse(jsonText.contains("user:pass"))
+
+        let textOutput = try runDiagnoseText(scriptURL: scriptURL, homeURL: home, bundleURL: bundle)
+        XCTAssertTrue(textOutput.contains(
+            "default AI provider: Work · openAIResponses · gpt-test · https://example.com/v1 [query redacted]"
+        ))
+        XCTAssertFalse(textOutput.contains("TOPSECRET"))
+        XCTAssertFalse(textOutput.contains("user:pass"))
+        XCTAssertFalse(textOutput.contains("api_key"))
+    }
+
     private func makeMinimalBundle(at bundle: URL) throws {
         let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
         let executable = contents.appendingPathComponent("MacOS/KnowTypeInputMethodApp", isDirectory: false)
@@ -971,6 +1120,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = homeURL.path
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        environment["KNOWTYPE_INPUTSOURCE_TOOL"] = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("knowtype-inputsource-tool")
+            .path
         process.environment = environment
         let output = try FileHandle(forWritingTo: outputURL)
         let error = try FileHandle(forWritingTo: errorURL)
@@ -986,5 +1139,48 @@ final class InputMethodBundleInfoTests: XCTestCase {
             XCTFail("diagnose-inputmethod.sh --json failed: \(stderr)")
         }
         return data
+    }
+
+    private func runDiagnoseText(
+        scriptURL: URL,
+        homeURL: URL,
+        bundleURL: URL
+    ) throws -> String {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-stdout-\(UUID().uuidString).txt")
+        let errorURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-diagnose-stderr-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errorURL.path, contents: nil)
+        defer {
+            try? FileManager.default.removeItem(at: outputURL)
+            try? FileManager.default.removeItem(at: errorURL)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptURL.path, "--path", bundleURL.path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = homeURL.path
+        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        environment["KNOWTYPE_INPUTSOURCE_TOOL"] = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("knowtype-inputsource-tool")
+            .path
+        process.environment = environment
+        let output = try FileHandle(forWritingTo: outputURL)
+        let error = try FileHandle(forWritingTo: errorURL)
+        process.standardOutput = output
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        try? output.close()
+        try? error.close()
+        let data = try Data(contentsOf: outputURL)
+        if process.terminationStatus != 0 {
+            let stderr = String(data: try Data(contentsOf: errorURL), encoding: .utf8) ?? ""
+            XCTFail("diagnose-inputmethod.sh text mode failed: \(stderr)")
+        }
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }

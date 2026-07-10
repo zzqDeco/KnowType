@@ -48,7 +48,10 @@ public struct GeminiNativeProvider: LLMProvider {
     ) async throws -> LLMResponse {
         var components = URLComponents(url: configuration.endpoint(path: "/v1beta/models/\(configuration.model):generateContent"), resolvingAgainstBaseURL: false)!
         if let apiKey = configuration.apiKey, !apiKey.isEmpty {
-            components.queryItems = [URLQueryItem(name: "key", value: apiKey)]
+            var queryItems = components.queryItems ?? []
+            queryItems.removeAll { $0.name == "key" }
+            queryItems.append(URLQueryItem(name: "key", value: apiKey))
+            components.queryItems = queryItems
         }
         var urlRequest = URLRequest(url: components.url!)
         applyCommonHeaders(&urlRequest, configuration: configuration)

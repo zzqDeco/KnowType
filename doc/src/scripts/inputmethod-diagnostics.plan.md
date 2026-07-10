@@ -19,7 +19,15 @@ The script does not mutate macOS input-source state. It reports:
 - current Text Input Source ID plus KnowType parent/mode registration, enabled status, select-capable status, localized display names, exact de-duplicated active-mode count, and legacy `.Mode` count;
 - persisted HIToolbox and third-party enabled preference rows for the parent anchor and `.Hans`, plus strict failures when selected/history still point at the non-selectable parent or legacy `.Mode`;
 - KnowType's `AppleInputSourceHistory` position, because `Ctrl+Space` normally toggles the current and previous input sources and can skip KnowType if it is buried behind ABC or Apple Pinyin in history;
-- Gatekeeper assessment status, stale LaunchServices records outside `~/Library/Input Methods/KnowType.app`, optional compatibility `KnowType.prefPane` metadata, `KnowTypeInputMethodApp` process status, provider profile, local lexicon directories, AI lexical profile files, and ENV/CORRECTION/LEXICAL_PROFILE document presence.
+- Gatekeeper assessment status, stale LaunchServices records outside `~/Library/Input Methods/KnowType.app`, optional compatibility `KnowType.prefPane` metadata, `KnowTypeInputMethodApp` process status, privacy-safe provider profile and storage-generation state, local lexicon directories, AI lexical profile files, and ENV/CORRECTION/LEXICAL_PROFILE document presence.
+
+Provider diagnostics distinguish canonical, unmigrated legacy, legacy-writer
+divergence, tombstone-only, and missing-canonical states. Divergence warnings
+state that both canonical and legacy payloads were preserved; migration may
+also retain a permission-restricted `providers.legacy-conflict.<UUID>.json`
+when three legacy writes overlap the atomic cutover. Provider summaries
+always prefer `providers.v2.json` and never expose credentials or removed URL
+query values.
 
 Strict stale LaunchServices failures are install blockers, not cosmetic
 warnings. Records that still point at `dist/KnowType.app`, release extraction
@@ -28,7 +36,7 @@ while the real macOS input menu still resolves a different bundle path. The
 local installer must quiesce the old host before replacement and register only
 the canonical `~/Library/Input Methods/KnowType.app` target.
 
-`--json` prints the stable machine-readable subset used by local tooling and settings diagnostics. It includes `install`, `bundle`, `preferencePane`, `rime`, `ai`, `userData`, `backups`, `warnings`, and `failures`, and avoids API keys, user text, candidate text, complete lexicons, and Rime userdb contents.
+`--json` prints the stable machine-readable subset used by local tooling and settings diagnostics. It includes `install`, `bundle`, `preferencePane`, `rime`, `ai`, `userData`, `backups`, `warnings`, and `failures`, and avoids API keys, user text, candidate text, complete lexicons, and Rime userdb contents. Text and JSON provider summaries both use `scripts/lib/provider_endpoint_summary.py`, which strips URL userinfo, query, and fragment while retaining scheme, host, port, and path. When a query was removed, the summary appends `[query redacted]` without exposing its keys or values.
 
 Use `--strict` only when a failing diagnostic should block a local smoke run. `--legacy-parent-anchor` is retained as a deprecated compatibility flag. Use `--require-selected` only when this diagnostic process's current TIS context is the thing being checked. Use `--logs` when the visible symptom is "the input source is enabled but cannot be selected"; it prints recent KnowType app logs plus `GatekeeperPolicyScanError` and `user-preference-write com.apple.inputsources` entries from unified logging. For manual typing acceptance after diagnostics have already run, run `scripts/select-inputmethod.sh --require-selected --no-diagnose` while the target text app is active as a selection preflight, then type a real probe in that app.
 

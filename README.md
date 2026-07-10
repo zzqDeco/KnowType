@@ -210,6 +210,11 @@ List or restore local rollback points:
 ./scripts/rollback-inputmethod.sh --latest
 ```
 
+Rollback preserves profile values and Keychain secrets. If the selected backup
+predates provider storage generation 2, the current app converts the latest
+profile metadata to the compatible numeric schema before the old app is
+published; an unsafe conversion fails closed.
+
 For a trusted legacy backup only, inspect it first and make the override
 explicit:
 
@@ -247,10 +252,20 @@ The older local MVP zip can still be installed for developer debugging:
 ## Configuration
 
 Provider profiles are stored as JSON metadata; API keys are stored separately.
+The profile file uses a revisioned transactional format so concurrent settings
+windows cannot silently overwrite each other. Changed keys use immutable
+Keychain references. Base URLs may contain runtime query parameters, but not
+userinfo or fragments; diagnostics omit userinfo, query, and fragment.
 
 ```text
-~/Library/Application Support/KnowType/providers.json
+~/Library/Application Support/KnowType/providers.v2.json
 ```
+
+During upgrade, the installer preserves the original `providers.json` as
+`providers.legacy.json`, rekeys Keychain references, and replaces the legacy
+path with a compatibility tombstone. Do not edit either compatibility file. If
+diagnostics report that an older Settings process wrote the legacy path again,
+close that process and preserve both payloads for conflict resolution.
 
 Local candidate-learning history:
 
@@ -277,7 +292,7 @@ The installer downloads a pinned Apache-2.0 Rime dictionary, verifies SHA256,
 converts it into KnowType TSV, and writes local metadata beside the TSV.
 Third-party bulk dictionary data is not committed to this repository.
 
-When `providers.json` is missing or empty, KnowType seeds a local
+When `providers.v2.json` is missing on a genuinely new install or is empty, KnowType seeds a local
 OpenAI-compatible profile at `http://127.0.0.1:8317/v1` with no embedded API
 key. Remote OpenAI-compatible profiles require an explicit model ID; local
 OpenAI-compatible profiles may leave the model blank for `/v1/models`

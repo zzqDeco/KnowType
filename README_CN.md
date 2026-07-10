@@ -176,6 +176,10 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 ./scripts/rollback-inputmethod.sh --latest
 ```
 
+回滚会保留 profile 内容和 Keychain secret。若目标备份早于 provider storage
+generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版可读的数字 schema，
+再发布旧 app；无法证明转换安全时会直接拒绝回滚。
+
 只对已独立确认可信的旧备份，先执行 dry-run 并显式开启兼容覆盖：
 
 ```bash
@@ -208,10 +212,19 @@ shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
 ## 配置
 
 Provider profile 以 JSON 元数据保存，API key 单独保存。
+Profile 文件使用带 revision 的事务格式，多个设置窗口不会静默覆盖彼此的
+修改。变更后的 Keychain 凭据使用不可变引用。Base URL 可以保留运行时兼容
+所需的 query，但不能包含 userinfo 或 fragment；诊断输出会移除 userinfo、
+query 和 fragment。
 
 ```text
-~/Library/Application Support/KnowType/providers.json
+~/Library/Application Support/KnowType/providers.v2.json
 ```
+
+升级时安装器会把旧 `providers.json` 的原始内容保存在
+`providers.legacy.json`，重新绑定 Keychain 引用，再把旧路径写成兼容
+tombstone。请不要手工编辑这两个兼容文件；诊断发现旧版 Settings 回写后，
+先关闭旧进程并保留两份 payload 进行冲突处理，安装器不会静默丢弃旧版回写。
 
 本地候选学习历史：
 
@@ -237,7 +250,7 @@ scripts/install-lexicon-pack.sh rime-pinyin-simp
 安装器会下载固定版本的 Apache-2.0 Rime 词库，校验 SHA256，转换成
 KnowType TSV，并在 TSV 旁写入本地 metadata。第三方大词库数据不会提交到本仓库。
 
-当 `providers.json` 不存在或为空时，KnowType 会使用本地 OpenAI-compatible
+当全新安装的 `providers.v2.json` 不存在或为空时，KnowType 会使用本地 OpenAI-compatible
 默认 profile：`http://127.0.0.1:8317/v1`，不内置 API key。远程
 OpenAI-compatible profile 必须显式填写 model ID；本地 OpenAI-compatible
 profile 可以留空 model，并通过 `/v1/models` 发现。

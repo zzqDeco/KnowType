@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "input": "https://user:pass@example.com/v1?api_key=TOPSECRET#trace",
+      "summary": "https://example.com/v1 [query redacted]"
+    },
+    {
+      "input": "https://example.com/v1?token=TOPSECRET",
+      "summary": "https://example.com/v1 [query redacted]"
+    },
+    {
+      "input": "https://example.com:8443/api/",
+      "summary": "https://example.com:8443/api/"
+    },
+    {
+      "input": "http://[::1]:8317/v1?debug=true#fragment",
+      "summary": "http://[::1]:8317/v1 [query redacted]"
+    }
+  ]
+}

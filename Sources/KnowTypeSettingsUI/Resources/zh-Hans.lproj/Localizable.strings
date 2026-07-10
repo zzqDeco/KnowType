@@ -132,7 +132,7 @@
 "settings.provider.connection.fixValidationBeforeTesting" = "请先修复校验错误再测试连接。";
 "settings.provider.validation" = "校验";
 "settings.provider.validation.displayNameRequired" = "显示名称不能为空。";
-"settings.provider.validation.baseURLHTTP" = "Base URL 必须是 HTTP 或 HTTPS URL。";
+"settings.provider.validation.baseURLHTTP" = "Base URL 必须是有效的 HTTP 或 HTTPS URL，且不能包含用户名、密码或 fragment。";
 "settings.provider.validation.modelRequired" = "模型不能为空。";
 "settings.provider.validation.timeoutPositive" = "超时时间必须大于 0。";
 "settings.provider.validation.customHTTPBodyRequired" = "Custom HTTP 请求体模板不能为空。";
@@ -141,7 +141,12 @@
 "settings.provider.validation.customHTTPPlaceholder" = "请先在高级服务配置中完成 Custom HTTP 的 Base URL 后再设为当前服务。";
 "settings.provider.lastError" = "最近错误";
 "settings.provider.error.missingAPIKey" = "此 provider 需要 API Key。";
-"settings.provider.error.rollbackFailed" = "更新 provider secret 失败：%@。同时恢复 providers.json 失败：%@。Provider 元数据可能已经暂存到磁盘。";
+"settings.provider.error.invalidCredentialReference" = "无法分配新的不可变凭据引用。";
+"settings.provider.error.rollbackFailed" = "更新 provider secret 失败：%@。同时恢复 provider 元数据失败：%@。Provider 元数据可能已经暂存到磁盘。";
+"settings.provider.error.secretCompensationFailed" = "保存 provider 元数据失败：%@。同时清理未引用的新凭据失败：%@。";
+"settings.provider.error.credentialCleanupFailed" = "Provider 配置已保存，但无法清理旧的未引用凭据：%@。";
+"settings.provider.error.staleBaseline" = "Provider 配置已在另一个 KnowType 设置窗口中更新。当前草稿已保留，磁盘配置已刷新；请核对最新内容后重试。";
+"settings.provider.error.staleBaselineCompensationFailed" = "Provider 配置已在另一个 KnowType 设置窗口中更新。当前草稿已保留，磁盘配置已刷新；但清理未引用的新凭据失败：%@。";
 "settings.provider.section.continuation" = "续写";
 "settings.provider.cloudContinuation" = "启用云端续写";
 "settings.provider.localContinuation" = "没有 provider 时显示本地续写";
@@ -209,6 +214,13 @@
 "settings.diagnostics.ai.cloud" = "云端续写";
 "settings.diagnostics.ai.localFallback" = "本地 fallback";
 "settings.diagnostics.ai.provider" = "默认 provider";
+"settings.diagnostics.ai.storage" = "配置存储";
+"settings.diagnostics.ai.storage.canonical" = "当前";
+"settings.diagnostics.ai.storage.legacyDiverged" = "检测到旧版本写入";
+"settings.diagnostics.ai.storage.legacyUnmigrated" = "待迁移";
+"settings.diagnostics.ai.storage.canonicalMissing" = "迁移后配置缺失";
+"settings.diagnostics.ai.storage.initialized" = "已初始化";
+"settings.diagnostics.ai.storage.missing" = "未创建";
 "settings.diagnostics.userData.lexicalJSON" = "lexical-profile.json";
 "settings.diagnostics.userData.env" = "ENV.md";
 "settings.diagnostics.userData.correction" = "CORRECTION.md";

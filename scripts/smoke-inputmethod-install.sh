@@ -164,6 +164,19 @@ assert_not_contains "$install_script_contents" 'open -g "$TARGET_PATH"' "install
 assert_contains "$install_script_contents" '--version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION"' "install script"
 assert_contains "$install_script_contents" 'knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0' "install script"
 assert_contains "$install_script_contents" 'knowtype_replace_local_preferencepane_bundle_atomically' "install script"
+assert_contains "$install_script_contents" 'stop_provider_profile_writer_hosts' "install script"
+assert_contains "$install_script_contents" '"$executable" --knowtype-migrate-provider-profiles' "install script"
+assert_contains "$install_script_contents" '"$executable" --knowtype-rollback-provider-profile-migration' "install script"
+assert_contains "$install_script_contents" '"$executable" --knowtype-downgrade-provider-profiles' "install script"
+assert_contains "$install_script_contents" 'provider_storage_generation_for_bundle' "install script"
+assert_contains "$install_script_contents" 'prepare_provider_storage_for_source_bundle' "install script"
+assert_contains "$install_script_contents" 'SOURCE_PROVIDER_STORAGE_GENERATION' "install script"
+assert_contains "$install_script_contents" 'skipped-pre-v2' "install script"
+assert_not_contains "$install_script_contents" 'restore_provider_storage_snapshot' "install script"
+assert_contains "$install_script_contents" 'rollback_provider_storage_after_failed_install' "install script"
+assert_contains "$install_script_contents" 'migrate_provider_profiles
+
+launchservices_cleanup_output="$(knowtype_unregister_launchservices_records_except' "install script"
 
 assert_contains "$rollback_script_contents" "purge_args=(" "rollback script"
 assert_contains "$rollback_script_contents" "bootstrap_args=(" "rollback script"
@@ -181,6 +194,9 @@ assert_not_contains "$rollback_script_contents" 'open -g "$target_path"' "rollba
 assert_contains "$rollback_script_contents" "--allow-unverified-backup" "rollback script"
 assert_contains "$rollback_script_contents" 'knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP"' "rollback script"
 assert_contains "$rollback_script_contents" 'knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0' "rollback script"
+assert_contains "$rollback_script_contents" '--knowtype-downgrade-provider-profiles' "rollback script"
+assert_contains "$rollback_script_contents" 'prepare_provider_storage_for_restored_app' "rollback script"
+assert_contains "$rollback_script_contents" 'provider_storage_generation_for_bundle' "rollback script"
 assert_not_contains "$rollback_script_contents" 'rm -rf -- "$prefpane_path"' "rollback script"
 
 assert_contains "$uninstall_script_contents" 'knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"' "uninstall script"
@@ -230,6 +246,51 @@ declare -F knowtype_validate_install_backup_for_restore >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load backup integrity helpers"
 declare -F knowtype_clean_preferencepane_caches >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
+declare -F knowtype_legacy_provider_storage_is_compatible >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load legacy provider validation helpers"
+declare -F knowtype_provider_storage_is_pre_v2_compatible >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load provider storage compatibility helpers"
+declare -F knowtype_migrate_provider_storage_for_bundle >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load provider storage migration helpers"
+
+legacy_validation_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-legacy-provider-validation.XXXXXX")"
+printf '%s\n' '{"schemaVersion":1,"profiles":[]}' >"$legacy_validation_root/valid.json"
+printf '%s\n' '{"schemaVersion":2,"profiles":[]}' >"$legacy_validation_root/future.json"
+printf '%s\n' '{"schemaVersion":true,"profiles":[]}' >"$legacy_validation_root/bool.json"
+printf '%s\n' '{"schemaVersion":1,"profiles":[{}]}' >"$legacy_validation_root/incomplete.json"
+knowtype_legacy_provider_storage_is_compatible "$legacy_validation_root/valid.json" ||
+  die "legacy provider validation rejected a valid schema-v1 envelope"
+for invalid_legacy_path in \
+  "$legacy_validation_root/future.json" \
+  "$legacy_validation_root/bool.json" \
+  "$legacy_validation_root/incomplete.json"; do
+  if knowtype_legacy_provider_storage_is_compatible "$invalid_legacy_path"; then
+    die "legacy provider validation accepted incompatible metadata: $invalid_legacy_path"
+  fi
+done
+
+pre_v2_storage_root="$legacy_validation_root/storage"
+mkdir -p "$pre_v2_storage_root"
+knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root" ||
+  die "pre-v2 provider compatibility rejected empty storage"
+cp "$legacy_validation_root/valid.json" "$pre_v2_storage_root/providers.json"
+knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root" ||
+  die "pre-v2 provider compatibility rejected a valid legacy envelope"
+printf '{}\n' >"$pre_v2_storage_root/providers.v2.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted canonical metadata"
+fi
+rm -f "$pre_v2_storage_root/providers.v2.json"
+printf '{}\n' >"$pre_v2_storage_root/providers.legacy.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted an interrupted migration snapshot"
+fi
+rm -f "$pre_v2_storage_root/providers.legacy.json"
+printf '{}\n' >"$pre_v2_storage_root/providers.legacy-conflict.interrupted.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted an interrupted migration claim"
+fi
+rm -rf "$legacy_validation_root"
 
 manifest_smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-manifest-smoke.XXXXXX")"
 mkdir -p "$manifest_smoke_root/one" "$manifest_smoke_root/two"
@@ -330,6 +391,9 @@ assert_equals "$smoke_short_version" \
 assert_equals "$smoke_build_version" \
   "$(plist_read ":CFBundleVersion" "$bundle_path/Contents/Info.plist")" \
   "input-method build version override"
+assert_equals "2" \
+  "$(plist_read ":KnowTypeProviderProfileStorageGeneration" "$bundle_path/Contents/Info.plist")" \
+  "provider profile storage generation"
 
 prefpane_path=""
 if (( WITH_PREFPANE == 1 )); then
@@ -360,6 +424,47 @@ if (( WITH_PREFPANE == 1 )); then
   cp -R "$prefpane_path" "$fake_prefpane_dir/KnowType.prefPane"
 fi
 
+migration_support_dir="$install_state_tmp/provider-migration"
+mkdir -p "$migration_support_dir"
+legacy_provider_fixture='{"schemaVersion":1,"profiles":[]}'
+printf '%s\n' "$legacy_provider_fixture" >"$migration_support_dir/providers.json"
+migration_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    knowtype_migrate_provider_storage_for_bundle "$bundle_path"
+})"
+assert_contains "$migration_output" "provider.migration.status=migrated" "provider migration CLI output"
+migration_revision="$(printf '%s\n' "$migration_output" | awk -F= '/^provider\.migration\.revision=/{print $2; exit}')"
+[[ "$migration_revision" =~ ^[0-9]+$ ]] || die "provider migration CLI did not report a revision"
+assert_file "$migration_support_dir/providers.v2.json"
+assert_file "$migration_support_dir/providers.legacy.json"
+rollback_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rollback-provider-profile-migration "$migration_revision"
+})"
+assert_contains "$rollback_output" "provider.migration.rollback=ok" "provider migration rollback CLI output"
+[[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider migration rollback left canonical metadata"
+assert_equals "$legacy_provider_fixture" "$(cat "$migration_support_dir/providers.json")" "provider migration rollback legacy metadata"
+second_migration_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-migrate-provider-profiles
+})"
+assert_contains "$second_migration_output" "provider.migration.status=migrated" "second provider migration CLI output"
+downgrade_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-downgrade-provider-profiles
+})"
+assert_contains "$downgrade_output" "provider.storage.downgrade.status=downgraded" "provider downgrade CLI output"
+[[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider downgrade left canonical metadata"
+"$KNOWTYPE_PYTHON3" - "$migration_support_dir/providers.json" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if payload.get("schemaVersion") != 1 or "revision" in payload:
+    raise SystemExit("provider downgrade did not produce a pre-v2-compatible payload")
+PY
+
 install_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
@@ -370,6 +475,23 @@ assert_contains "$install_dry_run_output" "Source mode: bundle" "install dry run
 assert_contains "$install_dry_run_output" "Install state: $fake_support_dir/install-state.json" "install dry run output"
 assert_contains "$install_dry_run_output" "Backup root: $fake_support_dir/Backups" "install dry run output"
 assert_contains "$install_dry_run_output" "Would create install backup" "install dry run output"
+assert_contains "$install_dry_run_output" "migrate provider profiles to providers.v2.json" "install dry run output"
+
+pre_v2_bundle_path="$install_state_tmp/KnowType-pre-v2.app"
+cp -R "$bundle_path" "$pre_v2_bundle_path"
+/usr/libexec/PlistBuddy -c "Delete :KnowTypeProviderProfileStorageGeneration" \
+  "$pre_v2_bundle_path/Contents/Info.plist"
+pre_v2_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    "$ROOT_DIR/scripts/install-inputmethod.sh" \
+    --dry-run \
+    --no-verify \
+    --from-bundle "$pre_v2_bundle_path"
+)"
+assert_contains "$pre_v2_dry_run_output" "source app is pre-v2" "pre-v2 install dry run output"
+assert_contains "$pre_v2_dry_run_output" "old migration CLI would not be invoked" "pre-v2 install dry run output"
 
 release_zip_path="$install_state_tmp/KnowType-test-release.zip"
 release_zip_checksum_path="$install_state_tmp/KnowType-test-release.zip.sha256"
@@ -560,6 +682,7 @@ rollback_dry_run_output="$(
 assert_contains "$rollback_dry_run_output" "KnowType rollback dry run" "rollback dry run output"
 assert_contains "$rollback_dry_run_output" "$backup_id" "rollback dry run output"
 assert_contains "$rollback_dry_run_output" "Backup integrity: verified-schema-2" "rollback dry run output"
+assert_contains "$rollback_dry_run_output" "supports provider storage generation 2" "rollback dry run output"
 rollback_latest_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \

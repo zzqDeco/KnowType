@@ -18,9 +18,17 @@ The view uses top-level native tabs:
 
 ## Provider Secrets
 
-The AI Provider tab preserves the existing profile editing flow. The API key field remains a write-only `SecureField`: leaving it blank keeps the existing secret, while entering a new value writes through `SecretStore`. On macOS, the default path uses Keychain. Provider profile JSON stores `secretName` references only.
+The AI Provider tab preserves the existing profile editing flow. The API key
+field remains a write-only `SecureField`: leaving it blank keeps a resolvable
+secret only for the same provider kind and endpoint scope, while entering a new
+value writes a new immutable reference through `SecretStore`. On macOS, the
+default path uses Keychain. Provider profile JSON stores `secretName` references
+only.
 
-The connection test uses the current draft profile and may use a typed API key for one request, but it does not save metadata or mutate `SecretStore`.
+The connection test uses the current draft profile and may use a typed API key
+for one request, but it does not save metadata or mutate `SecretStore`. Stale
+provider-file baselines fail closed and refresh saved profiles without replacing
+the draft.
 
 Provider and lexicon display decisions that are easy to regress now live in testable presenter structs:
 
@@ -43,4 +51,6 @@ The Diagnostics tab documents the local developer loop through `DebugInstallGuid
 - approve the macOS System Settings prompt that asks whether to allow `知键` to enable `KnowType`, then enable KnowType in System Settings;
 - inspect `KnowTypeInputMethodApp`, Gatekeeper, and input-source sandbox messages with `scripts/diagnose-inputmethod.sh --strict --logs`, Console.app, or `log stream`.
 
-This guidance is intentionally not an installer UI and does not store or display API keys.
+Provider endpoint diagnostics keep scheme, host, port, and path while removing
+userinfo, query, and fragment. This guidance is intentionally not an installer
+UI and does not store or display API keys.
