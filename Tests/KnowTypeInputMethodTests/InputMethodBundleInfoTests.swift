@@ -435,7 +435,47 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("TISRegisterInputSource"))
     }
 
-    func testInputMethodAppSelfEnablesFromInstalledAppContext() throws {
+    func testInputMethodAppNormalLaunchIsServeOnly() throws {
+        let rootURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appMain = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethodApp/main.swift"),
+            encoding: .utf8
+        )
+        let delegateStart = try XCTUnwrap(appMain.range(of: "final class KnowTypeAppDelegate"))
+        let startupStart = try XCTUnwrap(
+            appMain.range(
+                of: "\nlet arguments = CommandLine.arguments",
+                range: delegateStart.upperBound..<appMain.endIndex
+            )
+        )
+        let delegateSource = String(appMain[delegateStart.lowerBound..<startupStart.lowerBound])
+
+        XCTAssertTrue(delegateSource.contains("server = IMKServer"))
+        XCTAssertTrue(delegateSource.contains("inputMethodLogger.notice"))
+        for forbiddenCall in [
+            "TextInputSourceActivation",
+            "TISRegisterInputSource",
+            "TISEnableInputSource",
+            "TISSelectInputSource",
+            "waitForInputSource",
+            "waitForCurrentInputSourceID",
+            "Thread.sleep"
+        ] {
+            XCTAssertFalse(
+                delegateSource.contains(forbiddenCall),
+                "Normal host startup must not call \(forbiddenCall)"
+            )
+        }
+        XCTAssertFalse(appMain.contains("registerAndEnableInstalledBundle"))
+        XCTAssertTrue(appMain.contains("KnowTypeInputMethodStartupPolicy.run("))
+        XCTAssertTrue(appMain.contains("explicitCommandRequested: TextInputSourceActivation.handlesCommandLine(arguments)"))
+        XCTAssertTrue(appMain.contains("application.run()"))
+    }
+
+    func testInputMethodAppKeepsExplicitInstalledActivationCommands() throws {
         let rootURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -482,6 +522,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("--knowtype-switch-away"))
         XCTAssertTrue(appMain.contains("--knowtype-purge-legacy"))
         XCTAssertTrue(appMain.contains("--knowtype-disable-input-source"))
+        XCTAssertTrue(appMain.contains("static func handlesCommandLine"))
         XCTAssertTrue(appMain.contains("let explicitSelect"))
         XCTAssertTrue(appMain.contains("|| explicitSelect"))
         XCTAssertTrue(appMain.contains("input-method-app"))
@@ -492,6 +533,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(appMain.contains("TISSupport.bestSelectionTarget"))
         XCTAssertTrue(appMain.contains("TISSupport.bestSelectionTarget(TISSupport.inputSources(id: activeInputSourceID))"))
         XCTAssertTrue(appMain.contains("TISSupport.waitForCurrentInputSourceID(activeInputSourceID, timeout: 2.0)"))
+        XCTAssertTrue(appMain.contains("TISSupport.waitForInputSource(id: parentInputSourceID, timeout: 5.0)"))
+        XCTAssertTrue(appMain.contains("TISSupport.waitForInputSource(id: activeInputSourceID, timeout: 5.0)"))
         XCTAssertTrue(appMain.contains("TISSupport.inputSources(id: activeInputSourceID)"))
         XCTAssertTrue(appMain.contains("usesSingleInputSource"))
         XCTAssertTrue(appMain.contains("TISSupport.disableModesBeforeParent"))

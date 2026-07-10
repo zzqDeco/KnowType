@@ -124,7 +124,7 @@ required for every test file.
 
 - [KnowTypeDemo](Sources/KnowTypeDemo/README.plan.md)
 - [KnowTypeInputMethodApp](Sources/KnowTypeInputMethodApp/README.plan.md)
-- [KnowTypeInputSourceSupport shared IDs and TIS/LaunchServices helpers](Sources/KnowTypeInputSourceSupport/README.plan.md)
+- [KnowTypeInputSourceSupport shared IDs, startup policy, and TIS/LaunchServices helpers](Sources/KnowTypeInputSourceSupport/README.plan.md)
 - [KnowTypeInputSourceTool](Sources/KnowTypeInputSourceTool/README.plan.md)
 - [KnowTypeLexiconTool](Sources/KnowTypeLexiconTool/README.plan.md)
 - [KnowTypePreferencePane](Sources/KnowTypePreferencePane/README.plan.md)

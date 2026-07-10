@@ -71,6 +71,7 @@ when converting a shipped plan into a short record.
 | [install-user-data-isolation.plan.md](install-user-data-isolation.plan.md) | Keep local install, rollback, and repair from launching the host or mutating user data | Active |
 | [inputmethod-install-canonical-registration.plan.md](inputmethod-install-canonical-registration.plan.md) | Quiesce the old IMK host before local installs and register only the canonical installed app path | Active |
 | [imk-host-cold-start-no-userdata-write.plan.md](imk-host-cold-start-no-userdata-write.plan.md) | Keep IMK host prelaunch from initializing Rime, provider, or AI learning user data | Active |
+| [inputmethod-startup-registration.plan.md](inputmethod-startup-registration.plan.md) | Keep normal IMK host startup serve-only while explicit installer and repair commands own registration waits | Active |
 | [input-source-layer-model.plan.md](input-source-layer-model.plan.md) | Earlier parent/mode separation plan, superseded by menu-visible mode registration | Absorbed |
 | [input-source-parent-anchor-registration.plan.md](input-source-parent-anchor-registration.plan.md) | Earlier parent-anchor enablement plan, superseded by menu-visible mode registration | Absorbed |
 | [input-source-single-source-model.plan.md](input-source-single-source-model.plan.md) | Parent-only single-source attempt, absorbed after menu-bar switching failed | Absorbed |
