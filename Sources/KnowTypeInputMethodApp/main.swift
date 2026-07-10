@@ -20,6 +20,24 @@ private enum TextInputSourceActivation {
     private typealias LSSupport = KnowTypeLaunchServicesSupport
     private typealias TISSupport = KnowTypeTISSupport
 
+    private static let explicitCommandFlags: Set<String> = [
+        "--knowtype-rime-smoke",
+        "--knowtype-switch-away",
+        "--knowtype-purge-legacy",
+        "--knowtype-disable-input-source",
+        "--knowtype-install-activate",
+        "--knowtype-register-input-source",
+        "--register-input-source",
+        "--knowtype-enable-input-source",
+        "--enable-input-source",
+        "--knowtype-select-input-source",
+        "--select-input-source"
+    ]
+
+    static func handlesCommandLine(_ arguments: [String]) -> Bool {
+        !Set(arguments.dropFirst()).isDisjoint(with: explicitCommandFlags)
+    }
+
     static func handleCommandLineActivation(_ bundle: Bundle, arguments: [String]) -> Int32? {
         let args = Set(arguments.dropFirst())
         if args.contains("--knowtype-rime-smoke") {
@@ -70,19 +88,6 @@ private enum TextInputSourceActivation {
             return selectVisibleMode() ? 0 : 1
         }
         return 0
-    }
-
-    static func registerAndEnableInstalledBundle(_ bundle: Bundle, selectMode: Bool) {
-        guard bundle.bundleIdentifier == parentInputSourceID else {
-            inputMethodLogger.warning("Skipping input source activation for unexpected bundle id \(bundle.bundleIdentifier ?? "<missing>", privacy: .public)")
-            return
-        }
-
-        registerInstalledBundle(bundle)
-        _ = enableInstalledInputSource()
-        if selectMode {
-            _ = selectVisibleMode()
-        }
     }
 
     private static func registerInstalledBundle(_ bundle: Bundle) {
@@ -331,20 +336,28 @@ final class KnowTypeAppDelegate: NSObject, NSApplicationDelegate {
         inputMethodLogger.notice(
             "KnowTypeInputMethodApp launched bundle=\(bundleIdentifier, privacy: .public) connection=\(connectionName, privacy: .public)"
         )
-        let shouldSelectMode = CommandLine.arguments.contains("--knowtype-install-activate")
-        TextInputSourceActivation.registerAndEnableInstalledBundle(bundle, selectMode: shouldSelectMode)
     }
 }
 
-if let exitCode = TextInputSourceActivation.handleCommandLineActivation(Bundle.main, arguments: CommandLine.arguments) {
-    exit(exitCode)
+let arguments = CommandLine.arguments
+let startupExitCode = KnowTypeInputMethodStartupPolicy.run(
+    explicitCommandRequested: TextInputSourceActivation.handlesCommandLine(arguments),
+    serveInputMethod: {
+        let application = NSApplication.shared
+        let delegate = KnowTypeAppDelegate()
+        application.delegate = delegate
+        application.setActivationPolicy(.accessory)
+        withExtendedLifetime(delegate) {
+            application.run()
+        }
+    },
+    runExplicitCommand: {
+        TextInputSourceActivation.handleCommandLineActivation(Bundle.main, arguments: arguments) ?? 1
+    }
+)
+if let startupExitCode {
+    exit(startupExitCode)
 }
-
-let application = NSApplication.shared
-let delegate = KnowTypeAppDelegate()
-application.delegate = delegate
-application.setActivationPolicy(.accessory)
-application.run()
 #else
 import Foundation
 

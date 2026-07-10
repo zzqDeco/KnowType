@@ -13,6 +13,7 @@ Swift code must import this target instead of hardcoding these IDs. Shell script
 
 This target also contains the shared LaunchServices and Text Input Source helper layer for install/debug plumbing:
 
+- Input-method startup routing: `KnowTypeInputMethodStartupPolicy.run` keeps normal serve-only host launch mutually exclusive from explicit installer/repair command execution. Its injected closures let tests model parent and mode records that never become visible without performing a real wait.
 - LaunchServices parsing and cleanup: `stripLSRegisterSuffix`, `expandedPath`, `canonicalBundlePath`, `parseLaunchServicesPaths`, `launchServicesPaths`, and `unregisterStaleLaunchServices`.
 - TIS source access: id, bundle id, current-source lookup, string/bool/input-mode property reads, distributed notification posting, source signatures, dedupe, activation/selection target preference, parent-before-mode enable ordering, mode-before-parent disable ordering, visible user-mode counting, and bounded wait helpers.
 

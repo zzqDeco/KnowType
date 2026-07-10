@@ -11,6 +11,20 @@ public struct KnowTypeProcessResult: Equatable, Sendable {
     }
 }
 
+public enum KnowTypeInputMethodStartupPolicy {
+    public static func run(
+        explicitCommandRequested: Bool,
+        serveInputMethod: () -> Void,
+        runExplicitCommand: () -> Int32
+    ) -> Int32? {
+        guard explicitCommandRequested else {
+            serveInputMethod()
+            return nil
+        }
+        return runExplicitCommand()
+    }
+}
+
 public enum KnowTypeLaunchServicesSupport {
     public static let defaultLSRegisterPath =
         "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
