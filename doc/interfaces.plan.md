@@ -84,10 +84,11 @@ non-selectable preedit row above candidates, then commits with `insertText`.
 punctuation. `Option + .` is a Chinese-mode-only manual punctuation override
 that expires on the next text-mode switch. `Shift + Space` toggles the
 independent process-wide half-width/full-width state. ASCII mode passes idle
-half-width printable input back to the focused app; full-width printable input
-is transformed and inserted by KnowType. Missing clients use `disabled`;
-printable idle input is returned as unhandled so the host can keep normal
-typing behavior. All write modes keep
+half-width printable input back to the focused app; in full-width mode KnowType
+transforms only mapped ASCII characters and space, while unchanged Unicode text
+continues through ASCII passthrough. Missing clients use `disabled`; printable
+idle input is returned as unhandled before any full-width fast path so a stale
+host client is never reused. All write modes keep
 replacement ranges as `{NSNotFound, NSNotFound}` unless a future reconversion
 feature introduces an explicit owned range.
 `InputClientCompositionWriter` is the internal boundary that applies this mode

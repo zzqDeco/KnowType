@@ -368,12 +368,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .append(let text):
             if !hasActiveTextComposition() {
                 reloadInputModePreferencesIfNeeded()
+                if shouldPassThroughIdleText(text, client: client, reason: "idle_append") {
+                    return false
+                }
                 if inputModeSnapshot.state.textMode == .ascii,
                    let fullWidthText = fullWidthIdleText(for: text) {
                     return insertDirectPassthroughText(fullWidthText, client: client)
-                }
-                if shouldPassThroughIdleText(text, client: client, reason: "idle_append") {
-                    return false
                 }
                 if Self.isDirectPassthroughDigitText(text) {
                     return insertDirectPassthroughText(text, client: client)
@@ -444,11 +444,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             if action == .space,
                !hasActiveTextComposition() {
                 reloadInputModePreferencesIfNeeded()
-                if let fullWidthSpace = fullWidthIdleText(for: " ") {
-                    return insertDirectPassthroughText(fullWidthSpace, client: client)
-                }
                 if shouldPassThroughIdleText(" ", client: client, reason: "idle_space") {
                     return false
+                }
+                if let fullWidthSpace = fullWidthIdleText(for: " ") {
+                    return insertDirectPassthroughText(fullWidthSpace, client: client)
                 }
             }
             return commit(action: action, client: client)
@@ -463,11 +463,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
             guard hasActiveTextComposition() else {
                 reloadInputModePreferencesIfNeeded()
                 let text = String(number)
-                if let fullWidthDigit = fullWidthIdleText(for: text) {
-                    return insertDirectPassthroughText(fullWidthDigit, client: client)
-                }
                 if shouldPassThroughIdleText(text, client: client, reason: "idle_digit") {
                     return false
+                }
+                if let fullWidthDigit = fullWidthIdleText(for: text) {
+                    return insertDirectPassthroughText(fullWidthDigit, client: client)
                 }
                 return insertDirectPassthroughText(text, client: client)
             }
@@ -1005,6 +1005,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         reason: String
     ) -> Bool {
         if inputModeSnapshot.state.symbolWidth == .fullWidth,
+           fullWidthIdleText(for: text) != nil,
            inputClientCompositionWriter.writeMode(
                client: client,
                state: writeState(hasActiveComposition: false)

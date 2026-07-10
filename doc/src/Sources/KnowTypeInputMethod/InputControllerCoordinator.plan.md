@@ -34,6 +34,9 @@ Current behavior:
 - commits through `InputControllerClient.insertText` with a centralized write
   stack; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
+- checks idle passthrough/disabled mode before full-width letter, digit, space,
+  or symbol fast paths; missing callback clients never fall back to a stale host
+  client, and unchanged Unicode remains passthrough in ASCII mode
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
 - tracks KnowType-owned marked text by client and clears only that owned mark;
   `InputClientCompositionWriter` owns the tracked client id and clear-before-

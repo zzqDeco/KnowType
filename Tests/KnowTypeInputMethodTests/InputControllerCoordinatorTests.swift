@@ -1931,6 +1931,38 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testFullWidthASCIIIdleInputDoesNotUseStaleHostClient() {
+        let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
+        _ = runtime.transition(.toggleTextMode)
+        var preferences = InputModePreferences.standard
+        preferences.globalSymbolWidth = .fullWidth
+        let staleClient = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: staleClient,
+            inputModePreferences: preferences,
+            inputModeStateRuntime: runtime
+        )
+        host.currentClientValue = staleClient
+
+        XCTAssertFalse(coordinator.handleText("A", client: nil))
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: 18),
+                client: nil
+            )
+        )
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: " ", keyCode: 49),
+                client: nil
+            )
+        )
+
+        XCTAssertTrue(staleClient.markedTextWrites.isEmpty)
+        XCTAssertTrue(staleClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
     func testCommitOnlyCancelClearsOwnedPlaceholderAndHidesPanel() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
@@ -2066,6 +2098,25 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("@", client: client))
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["Ａ", "１", "　", "＠"])
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+    }
+
+    func testFullWidthASCIIModePassesThroughUnchangedUnicodeText() {
+        let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
+        _ = runtime.transition(.toggleTextMode)
+        var preferences = InputModePreferences.standard
+        preferences.globalSymbolWidth = .fullWidth
+        let client = FakeInputControllerClient()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            inputModePreferences: preferences,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertFalse(coordinator.handleText("é", client: client))
+
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
