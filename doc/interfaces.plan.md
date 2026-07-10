@@ -101,7 +101,9 @@ half-width quote keys ask the IMK adapter for the single UTF-16 unit immediately
 before a collapsed caret; English and full-width quote output does not read
 document context.
 Whitespace and opening punctuation open a quote; text, digits, and closing
-punctuation close it; unknown context falls back to session alternation. An
+punctuation close it. A preceding Chinese quote and unknown context fall back
+to session alternation so consecutive quote keys still form an opening/closing
+pair. An
 idle `.` uses only a client-bound, expected-caret record of the last KnowType
 insertion, so an ASCII digit produces `.` even in Chinese punctuation or
 full-width mode without reading host document text. Diagnostics record only

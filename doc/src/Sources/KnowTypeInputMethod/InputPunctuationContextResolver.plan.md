@@ -24,8 +24,8 @@ exception.
   keys. English and full-width quotes skip the query. Period decisions use the
   recorded insertion path so the decimal exception does not add a document read.
 - Whitespace and Unicode opening/initial punctuation open quotes. Text, digits,
-  and closing/final punctuation close quotes. Unknown context remains available
-  to the punctuator's session alternation.
+  and closing/final punctuation close quotes. Chinese quote characters and
+  unknown context remain available to the punctuator's session alternation.
 - Fallback evidence is invalidated by external navigation, deletion, focus
   change, or other unowned changes.
 - Diagnostics may record classification and source but never the character or

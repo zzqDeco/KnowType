@@ -103,6 +103,8 @@ final class InputPunctuationContextResolverTests: XCTestCase {
         for (character, expectedKind, expectedQuoteContext) in [
             (Character(" "), InputPreviousCharacterKind.whitespace, InputQuoteContext.opening),
             (Character("（"), .openingPunctuation, .opening),
+            (Character("“"), .quotePunctuation, .unknown),
+            (Character("”"), .quotePunctuation, .unknown),
             (Character("文"), .text, .closing),
             (Character("）"), .closingPunctuation, .closing)
         ] {

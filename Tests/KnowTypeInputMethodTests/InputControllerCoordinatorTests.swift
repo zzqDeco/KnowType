@@ -1661,6 +1661,19 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(client.characterBeforeCaretReadCount, 2)
     }
 
+    func testConsecutiveQuotesUsePairAlternationAfterRecordedOpeningQuote() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 0, length: 0)
+        let (coordinator, _, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+        client.selectedRangeValue = NSRange(location: 1, length: 0)
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["“", "”"])
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
+    }
+
     func testQuoteAlternationResetsAfterSelectionChange() {
         let client = FakeInputControllerClient()
         client.selectedRangeValue = NSRange(location: 10, length: 0)

@@ -32,6 +32,7 @@ public enum InputPreviousCharacterKind: String, Sendable, Equatable {
     case whitespace
     case openingPunctuation
     case closingPunctuation
+    case quotePunctuation
     case text
     case unknown
 }

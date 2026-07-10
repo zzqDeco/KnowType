@@ -17,7 +17,7 @@ struct InputPreviousCharacterContext: Sendable, Equatable {
             return .opening
         case .asciiDigit, .closingPunctuation, .text:
             return .closing
-        case .unknown:
+        case .quotePunctuation, .unknown:
             return .unknown
         }
     }
@@ -155,6 +155,12 @@ struct InputPunctuationContextResolver: Sendable {
         }
         if (48...57).contains(scalar.value) || (0xFF10...0xFF19).contains(scalar.value) {
             return .asciiDigit
+        }
+        switch character {
+        case "“", "”", "‘", "’":
+            return .quotePunctuation
+        default:
+            break
         }
         switch scalar.properties.generalCategory {
         case .openPunctuation, .initialPunctuation:
