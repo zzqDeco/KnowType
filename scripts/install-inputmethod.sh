@@ -157,11 +157,15 @@ if [[ ! "$KEEP_BACKUPS" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
-LOCAL_SHORT_VERSION="${KNOWTYPE_BUNDLE_SHORT_VERSION:-$(knowtype_plist_value "CFBundleShortVersionString" "$ROOT_DIR/Resources/InputMethod/Info.plist")}"
-if [[ -z "$LOCAL_SHORT_VERSION" ]]; then
-  echo "error: local build short version is missing" >&2
-  exit 1
+LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-}"
+LOCAL_SHORT_VERSION="${KNOWTYPE_BUNDLE_SHORT_VERSION:-}"
+if [[ "$SOURCE_MODE" == "build" ]]; then
+  LOCAL_BUILD_VERSION="${LOCAL_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
+  LOCAL_SHORT_VERSION="${LOCAL_SHORT_VERSION:-$(knowtype_plist_value "CFBundleShortVersionString" "$ROOT_DIR/Resources/InputMethod/Info.plist")}"
+  if [[ -z "$LOCAL_SHORT_VERSION" ]]; then
+    echo "error: local build short version is missing" >&2
+    exit 1
+  fi
 fi
 TARGET_DIR="$(knowtype_inputmethod_target_dir)"
 TARGET_PATH="$(knowtype_inputmethod_target_path)"
@@ -279,10 +283,13 @@ rollback_failed_install() {
     fi
     if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
       mkdir -p "$PREFPANE_TARGET_DIR"
-      if ! knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0; then
+      if ! knowtype_replace_local_preferencepane_bundle_atomically \
+        "$BACKUP_DIR/KnowType.prefPane" \
+        "$PREFPANE_TARGET_PATH" \
+        1; then
+        echo "error: failed-install rollback could not restore the validated PreferencePane backup" >&2
         return 0
       fi
-      cp -R "$BACKUP_DIR/KnowType.prefPane" "$PREFPANE_TARGET_PATH"
     else
       knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0 || return 0
     fi
@@ -832,8 +839,10 @@ if [[ "$SOURCE_MODE" == "build" ]]; then
 fi
 
 if (( WITH_PREFPANE == 1 )); then
-  knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0
-  cp -R "$SOURCE_PREFPANE_PATH" "$PREFPANE_TARGET_PATH"
+  knowtype_replace_local_preferencepane_bundle_atomically \
+    "$SOURCE_PREFPANE_PATH" \
+    "$PREFPANE_TARGET_PATH" \
+    "$VERIFY_ENABLED"
   if [[ "$SOURCE_MODE" == "build" ]]; then
     rm -rf "$SOURCE_PREFPANE_PATH"
   fi

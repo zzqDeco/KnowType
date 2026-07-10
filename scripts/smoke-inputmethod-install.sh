@@ -163,7 +163,7 @@ assert_not_contains "$install_script_contents" "pgrep -x KnowTypeInputMethodApp"
 assert_not_contains "$install_script_contents" 'open -g "$TARGET_PATH"' "install script"
 assert_contains "$install_script_contents" '--version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION"' "install script"
 assert_contains "$install_script_contents" 'knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0' "install script"
-assert_contains "$install_script_contents" 'knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0' "install script"
+assert_contains "$install_script_contents" 'knowtype_replace_local_preferencepane_bundle_atomically' "install script"
 
 assert_contains "$rollback_script_contents" "purge_args=(" "rollback script"
 assert_contains "$rollback_script_contents" "bootstrap_args=(" "rollback script"
@@ -420,6 +420,44 @@ dmg_payload_dry_run_output="$(
 assert_contains "$dmg_payload_dry_run_output" "Source mode: dmg-dev-preview" "DMG payload install dry run output"
 assert_contains "$dmg_payload_dry_run_output" "Source DMG payload: $dmg_payload_root" "DMG payload install dry run output"
 assert_contains "$dmg_payload_dry_run_output" "Release commit: fixture-commit" "DMG payload install dry run output"
+
+packaged_dmg_root="$install_state_tmp/packaged-dmg-root"
+mkdir -p "$packaged_dmg_root/Payload" "$packaged_dmg_root/Resources" "$packaged_dmg_root/Scripts/lib"
+cp -R "$bundle_path" "$packaged_dmg_root/Payload/KnowType.app"
+cp "$release_stage/release-manifest.json" "$packaged_dmg_root/Resources/release-manifest.json"
+cp "$ROOT_DIR/scripts/install-inputmethod.sh" "$packaged_dmg_root/Scripts/"
+cp "$ROOT_DIR/scripts/lib/inputsource-ids.sh" "$packaged_dmg_root/Scripts/lib/"
+cp "$ROOT_DIR/scripts/lib/inputsource-tool.sh" "$packaged_dmg_root/Scripts/lib/"
+cp "$ROOT_DIR/scripts/lib/inputmethod-installation.sh" "$packaged_dmg_root/Scripts/lib/"
+packaged_dmg_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$packaged_dmg_root/Scripts/install-inputmethod.sh" \
+    --dry-run \
+    --from-dmg-payload "$packaged_dmg_root" \
+    --no-backup
+)"
+assert_contains "$packaged_dmg_dry_run_output" "Source mode: dmg-dev-preview" "packaged DMG install dry run output"
+assert_not_contains "$packaged_dmg_dry_run_output" "local build short version is missing" "packaged DMG install dry run output"
+
+if (( WITH_PREFPANE == 1 )); then
+  staged_failure_source="$install_state_tmp/staged-failure-source/KnowType.prefPane"
+  mkdir -p "$(dirname "$staged_failure_source")"
+  cp -R "$prefpane_path" "$staged_failure_source"
+  "$PLIST_BUDDY" -c "Set :CFBundleShortVersionString 9.9.9-stage-failure" \
+    "$staged_failure_source/Contents/Info.plist"
+  if KNOWTYPE_TEST_CORRUPT_STAGED_PREFPANE=1 \
+    knowtype_replace_local_preferencepane_bundle_atomically \
+      "$staged_failure_source" \
+      "$fake_prefpane_dir/KnowType.prefPane" \
+      0 >/dev/null 2>&1; then
+    die "atomic PreferencePane replacement accepted an invalid staged copy"
+  fi
+  assert_equals "$smoke_short_version" \
+    "$(plist_read ":CFBundleShortVersionString" "$fake_prefpane_dir/KnowType.prefPane/Contents/Info.plist")" \
+    "failed staged PreferencePane replacement preserved current pane"
+fi
 
 assert_equals "0.2.0+build-bad-value" \
   "$(knowtype_sanitize_backup_component "0.2.0+build bad/value")" \

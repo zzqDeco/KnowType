@@ -20,7 +20,9 @@ Installs the locally built KnowType input method bundle into
   `--from-release-zip`, or a mounted Developer Preview DMG root via
   `--from-dmg-payload`.
 - Developer Preview DMG installs record `source=dmg-dev-preview`, release
-  commit/tag, and manifest digest in install state.
+  commit/tag, and manifest digest in install state. Packaged copies do not
+  require the source-tree `Resources/InputMethod/Info.plist`; source version
+  lookup is limited to local-build mode.
 - Release archive provenance is accepted only when the extracted archive has a
   single unambiguous `release-manifest.json`; older archives may still use one
   sibling manifest beside the zip.
@@ -37,7 +39,8 @@ Installs the locally built KnowType input method bundle into
   version/build, commit/tag when known, installed paths, and previous backup id.
 - If replacement fails after a backup is created, the script validates that
   schema `2` backup before attempting recovery. Failed-install recovery also
-  refuses to remove or replace a foreign same-name PreferencePane.
+  refuses to remove or replace a foreign same-name PreferencePane. App and pane
+  recovery copies are staged and validated before the canonical targets change.
 - The script keeps the newest three backups by default. Use `--keep-backups N`
   to adjust retention.
 - The script switches away from any current KnowType source, disables existing
@@ -107,7 +110,9 @@ Installs the locally built KnowType input method bundle into
   compatibility pane.
 - Any installed `KnowType.prefPane` must be the canonical non-symlink path and
   declare `CFBundleIdentifier=com.knowtype.preferencepane`. A same-name foreign
-  bundle blocks install before quiescing or replacement.
+  bundle blocks install before quiescing or replacement. A new pane is copied
+  and validated in a sibling staging directory before the existing pane is
+  moved aside and the staged bundle is atomically published.
 - The script removes stale System Settings PreferencePane cache files only when
   they contain stable pane identifiers (`com.knowtype.preferencepane` or
   `KnowType.prefPane`) using fixed-string matching, and asks System Settings to

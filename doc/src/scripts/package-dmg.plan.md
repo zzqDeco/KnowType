@@ -15,6 +15,8 @@ download while Developer ID notarization is unavailable.
   `README_FIRST.txt`.
 - The install command calls `scripts/install-inputmethod.sh --from-dmg-payload`
   from inside the mounted image and records `source=dmg-dev-preview`.
+  This self-contained path reads version/provenance from the payload and release
+  manifest rather than requiring source-tree plist files.
   It inherits the installer boundary: no input-method host launch, no automatic
   typing probe, and no Rime/user-profile initialization during install.
 - The DMG is ad-hoc signed/not notarized. Gatekeeper rejection is expected for

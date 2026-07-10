@@ -270,6 +270,61 @@ knowtype_remove_local_preferencepane_bundle_if_safe() {
   fi
 }
 
+knowtype_replace_local_preferencepane_bundle_atomically() {
+  local source_path="$1"
+  local target_path="$2"
+  local verify_codesign="${3:-1}"
+  local target_dir
+  local staged_root=""
+  local staged_path=""
+  local current_root=""
+
+  knowtype_require_safe_local_preferencepane_if_present "$target_path" || return 1
+  knowtype_validate_preferencepane_bundle_for_install "$source_path" "$verify_codesign" || return 1
+
+  target_dir="$(dirname "$target_path")"
+  mkdir -p "$target_dir" || return 1
+  staged_root="$(mktemp -d "$target_dir/.KnowType.prefPane.install.XXXXXX")" || return 1
+  staged_path="$staged_root/KnowType.prefPane"
+
+  if ! cp -R "$source_path" "$staged_path"; then
+    rm -rf "$staged_root"
+    echo "error: could not stage KnowType.prefPane before replacement" >&2
+    return 1
+  fi
+  if [[ "${KNOWTYPE_TEST_CORRUPT_STAGED_PREFPANE:-0}" == "1" ]]; then
+    rm -f "$staged_path/Contents/Info.plist"
+  fi
+  if ! knowtype_validate_preferencepane_bundle_for_install "$staged_path" "$verify_codesign"; then
+    rm -rf "$staged_root"
+    echo "error: staged KnowType.prefPane failed validation; the installed pane was not changed" >&2
+    return 1
+  fi
+
+  if [[ -e "$target_path" || -L "$target_path" ]]; then
+    current_root="$(mktemp -d "$target_dir/.KnowType.prefPane.current.XXXXXX")" || {
+      rm -rf "$staged_root"
+      return 1
+    }
+    if ! mv "$target_path" "$current_root/KnowType.prefPane"; then
+      rm -rf "$staged_root" "$current_root"
+      return 1
+    fi
+  fi
+
+  if ! mv "$staged_path" "$target_path"; then
+    if [[ -n "$current_root" && -d "$current_root/KnowType.prefPane" && ! -e "$target_path" ]]; then
+      mv "$current_root/KnowType.prefPane" "$target_path" 2>/dev/null || true
+    fi
+    rm -rf "$staged_root" "$current_root"
+    echo "error: could not publish staged KnowType.prefPane; restored the previous pane when available" >&2
+    return 1
+  fi
+
+  rm -rf "$staged_root" "$current_root"
+  echo "Installed KnowType compatibility PreferencePane: $target_path"
+}
+
 knowtype_sanitize_backup_component() {
   local value="$1"
   value="${value:-unknown}"

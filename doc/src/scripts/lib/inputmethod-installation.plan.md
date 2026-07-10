@@ -26,6 +26,12 @@ identity. A PreferencePane path must be the canonical local
 and failed-install recovery treat a mismatch as blocking instead of removing or
 replacing a same-name foreign bundle.
 
+PreferencePane replacement copies into a sibling staging directory, validates
+the staged bundle, moves the current canonical pane aside, and only then
+publishes the staged pane. A copy or validation failure leaves the current pane
+untouched; a publish failure restores the moved-aside pane when available. The
+same helper is used by normal install and failed-install recovery.
+
 Dry-run callers may use the same discovery functions, but final summaries must
 say "would remove" instead of reporting completed removal.
 

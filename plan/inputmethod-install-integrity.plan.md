@@ -37,8 +37,13 @@ Status: Active
 - PreferencePane removal is restricted to the canonical local
   `KnowType.prefPane`, rejects symlinks, and requires
   `CFBundleIdentifier=com.knowtype.preferencepane`.
+- PreferencePane install and failed-install recovery validate a staged copy
+  before atomically replacing the canonical target, so a partial copy cannot
+  block or defeat rollback.
 - Local builders receive the same resolved short version and timestamp build.
   Debug guidance uses `X.Y.Z`/`N` placeholders instead of an obsolete release.
+- Packaged DMG installs resolve version metadata from their payload and release
+  manifest; only source-build mode reads the repository input-method plist.
 
 ## Test Plan
 

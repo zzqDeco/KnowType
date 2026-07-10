@@ -756,6 +756,8 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("knowtype_is_canonical_local_preferencepane_path"))
         XCTAssertTrue(helperSource.contains("knowtype_is_safe_local_preferencepane_bundle_path"))
         XCTAssertTrue(helperSource.contains("knowtype_remove_local_preferencepane_bundle_if_safe"))
+        XCTAssertTrue(helperSource.contains("knowtype_replace_local_preferencepane_bundle_atomically"))
+        XCTAssertTrue(helperSource.contains("staged KnowType.prefPane failed validation"))
         XCTAssertTrue(helperSource.contains("foreign or unsafe same-name PreferencePane"))
 
         XCTAssertTrue(rollbackScript.contains("--allow-unverified-backup"))
@@ -765,8 +767,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertFalse(rollbackScript.contains(#"rm -rf -- "$prefpane_path""#))
 
         XCTAssertTrue(installScript.contains(#"--version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION""#))
+        XCTAssertTrue(installScript.contains(#"if [[ "$SOURCE_MODE" == "build" ]]; then"#))
         XCTAssertTrue(installScript.contains("build-inputmethod-bundle.sh"))
         XCTAssertTrue(installScript.contains("build-preference-pane.sh"))
+        XCTAssertTrue(installScript.contains("knowtype_replace_local_preferencepane_bundle_atomically"))
         XCTAssertTrue(installScript.contains(#"knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0"#))
         XCTAssertTrue(installScript.contains(#"knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH""#))
         XCTAssertTrue(installScript.contains(#"knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0"#))
