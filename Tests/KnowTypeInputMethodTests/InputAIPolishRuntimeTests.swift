@@ -98,6 +98,45 @@ final class InputAIPolishRuntimeTests: XCTestCase {
         guard case .unavailable = secretState else {
             return XCTFail("expected secret-like input to be unavailable")
         }
+
+        let disabledSnapshot = PolishSnapshotBox(
+            rawInput: "需要润色的句子",
+            compositionID: 7,
+            rawRevision: 7
+        )
+        let disabledState = runtime.request(
+            context: context(snapshot: disabledSnapshot, cloudAIEnabled: false),
+            currentSnapshot: { disabledSnapshot.value },
+            onStateChange: { _ in }
+        )
+        guard case .unavailable(_, let disabledReason) = disabledState else {
+            return XCTFail("expected disabled cloud AI to be unavailable")
+        }
+        XCTAssertEqual(disabledReason, "AI 润色已禁用")
+
+        let rawLevelZeroSnapshot = PolishSnapshotBox(
+            rawInput: "https://example.com/private",
+            compositionID: 8,
+            rawRevision: 8
+        )
+        let rawLevelZeroState = runtime.request(
+            context: InputAIPolishRequestContext(
+                text: "普通候选文本",
+                rawInput: rawLevelZeroSnapshot.value.rawInput,
+                appBundleID: "com.example.Editor",
+                locale: .zhCN,
+                compositionID: rawLevelZeroSnapshot.value.compositionID,
+                rawRevision: rawLevelZeroSnapshot.value.rawRevision,
+                hasActiveComposition: true,
+                cloudAIEnabled: true
+            ),
+            currentSnapshot: { rawLevelZeroSnapshot.value },
+            onStateChange: { _ in }
+        )
+        guard case .unavailable(_, let rawLevelZeroReason) = rawLevelZeroState else {
+            return XCTFail("expected raw Level 0 input to be unavailable")
+        }
+        XCTAssertEqual(rawLevelZeroReason, "当前内容不可润色")
         let requestCount = await providerRuntime.requestCount
         XCTAssertEqual(requestCount, 0)
     }
@@ -216,7 +255,8 @@ final class InputAIPolishRuntimeTests: XCTestCase {
 
     private func context(
         snapshot: PolishSnapshotBox,
-        appBundleID: String? = "com.example.Editor"
+        appBundleID: String? = "com.example.Editor",
+        cloudAIEnabled: Bool = true
     ) -> InputAIPolishRequestContext {
         InputAIPolishRequestContext(
             text: snapshot.value.rawInput,
@@ -225,7 +265,8 @@ final class InputAIPolishRuntimeTests: XCTestCase {
             locale: .zhCN,
             compositionID: snapshot.value.compositionID,
             rawRevision: snapshot.value.rawRevision,
-            hasActiveComposition: true
+            hasActiveComposition: true,
+            cloudAIEnabled: cloudAIEnabled
         )
     }
 

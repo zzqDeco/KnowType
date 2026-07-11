@@ -45,7 +45,9 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
   不发送给 provider。
 - 前缀锁定的 AI 推荐：第一候选固定为 Rime 转换，第二候选固定为 AI 推荐；
   显式 polish 才是改写路径。`Option + R` 会为当前 marked composition 打开
-  独立润色候选层，只有显式选择 ready 结果才会上屏改写文本。润色接受不会写入
+  独立润色候选层，只有显式选择 ready 结果才会上屏改写文本。
+  显式润色服从云端 AI 开关；即使当前展示的是不同的 Rime 候选，受保护或疑似
+  密钥的原始 composition 也不会发给 provider。润色接受不会写入
   context-memory 或 continuation-learning 历史，相关诊断只包含元数据。
 - macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及紧凑、
   原生风格并能覆盖 Spotlight/search 浮层的 AppKit 候选窗。

@@ -50,6 +50,9 @@ polish.
   the second slot is reserved for AI, and explicit polish is the only rewrite
   path. `Option + R` opens a separate polish overlay for the current marked
   composition; only choosing a ready polish result commits rewritten text.
+  Explicit polish follows the cloud AI toggle and rejects protected or
+  secret-like raw composition before dispatch, even when a different Rime
+  candidate is displayed.
   Polish acceptance does not enter context-memory or continuation-learning
   history, and its diagnostics contain metadata only.
 - macOS input method flow: marked text, candidate selection, paging,

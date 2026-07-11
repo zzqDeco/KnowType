@@ -257,6 +257,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func commitCandidatePanelSelection(_ selection: CandidatePanelSelection, client: InputControllerClient?) {
         if case .polishCandidate(let index) = selection {
+            if synchronizeInputModeSnapshot(client: client) {
+                updateCandidatePanelImmediately(
+                    suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
+                    client: client
+                )
+                return
+            }
             _ = acceptPolishCandidate(at: index, client: client)
             return
         }
@@ -613,11 +620,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 cancelPolish(restoringCompositionPanel: true, client: client)
                 return true
             }
-            cancelPolish(restoringCompositionPanel: false, client: client)
             switch intent {
             case .hostShortcut, .modifierFlagsChanged, .ignored:
+                cancelPolish(restoringCompositionPanel: true, client: client)
                 return false
             default:
+                cancelPolish(restoringCompositionPanel: false, client: client)
                 return nil
             }
         }
@@ -631,16 +639,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             _ = acceptPolishCandidate(at: selectedIndex, client: client)
             return true
-        case .selectCandidate(1):
-            let selectedIndex: Int
-            if case .polishCandidate(let index) = candidatePanelPublicationRuntime.state.windowState.selection {
-                selectedIndex = index
-            } else {
-                selectedIndex = 0
-            }
-            _ = acceptPolishCandidate(at: selectedIndex, client: client)
-            return true
-        case .selectCandidate(let number) where number > 1:
+        case .selectCandidate(let number):
             guard let result = candidatePanelPublicationRuntime.selectVisibleNumberShortcut(number),
                   case .polishCandidate(let index) = result.selection else {
                 return true
@@ -661,7 +660,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         case .cancelComposition:
             cancelPolish(restoringCompositionPanel: true, client: client)
             return true
-        case .append, .symbol, .deleteBackward, .selectCandidate:
+        case .append, .symbol, .deleteBackward:
             cancelPolish(restoringCompositionPanel: false, client: client)
             return nil
         case .action(.optionR):
@@ -689,7 +688,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
             locale: locale,
             compositionID: compositionID,
             rawRevision: rawRevision,
-            hasActiveComposition: hasActiveTextComposition()
+            hasActiveComposition: hasActiveTextComposition(),
+            cloudAIEnabled: runtimePreferences.cloudContinuationEnabled
         )
         aiPolishState = aiPolishRuntime.request(
             context: context,
@@ -2052,10 +2052,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
         clearSymbolCandidateSession()
     }
 
-    private func synchronizeInputModeSnapshot(client: InputControllerClient?) {
+    @discardableResult
+    private func synchronizeInputModeSnapshot(client: InputControllerClient?) -> Bool {
         let latest = inputModeStateRuntime.currentSnapshot()
         guard latest.generation != inputModeSnapshot.generation else {
-            return
+            return false
         }
         inputModeSnapshot = latest
         conversionEngine.synchronizeInputMode(inputModeSnapshot)
@@ -2066,6 +2067,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         } else {
             clearSymbolCandidateSession(restoringAIRecommendation: true)
         }
+        return true
     }
 
     private func applyInputModeTransition(_ event: InputModeTransitionEvent) {

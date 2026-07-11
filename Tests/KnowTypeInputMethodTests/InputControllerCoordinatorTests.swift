@@ -4885,10 +4885,54 @@ final class InputControllerCoordinatorTests: XCTestCase {
             return XCTFail("expected unavailable polish state")
         }
 
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "v", keyCode: 9, modifiers: [.command]),
+                client: client
+            )
+        )
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.aiPolish.isActive ?? true)
+        XCTAssertEqual(coordinator.originalString().string, "n")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+
         XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: " ", keyCode: 49), client: client))
         XCTAssertEqual(client.insertTextWrites.last?.text, "你")
         XCTAssertEqual(coordinator.originalString().string, "")
         XCTAssertGreaterThan(host.hideCandidatePanelCount, 0)
+    }
+
+    @MainActor
+    func testDisabledCloudAIBlocksPolishProviderDispatch() async {
+        let client = FakeInputControllerClient()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [LLMCandidate(text: "不应请求")])
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider),
+            runtimePreferences: InputMethodRuntimePreferences(cloudContinuationEnabled: false)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+
+        guard case .unavailable(_, let reason) = host.panelStates.last?.windowState.viewModel.aiPolish else {
+            return XCTFail("expected disabled polish state")
+        }
+        XCTAssertEqual(reason, "AI 润色已禁用")
+        let requests = await polishProvider.requests
+        XCTAssertTrue(requests.isEmpty)
     }
 
     @MainActor
@@ -4923,6 +4967,40 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(client.insertTextWrites.contains { $0.text == "不应提交的旧润色" })
         XCTAssertEqual(coordinator.originalString().string, "")
         XCTAssertGreaterThan(host.hideCandidatePanelCount, 0)
+    }
+
+    @MainActor
+    func testSharedModeGenerationChangeRejectsMousePolishAcceptance() async {
+        let client = FakeInputControllerClient()
+        let inputModeStateRuntime = ProcessInputModeStateRuntime()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [LLMCandidate(text: "不应点击提交的旧润色")])
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider),
+            inputModeStateRuntime: inputModeStateRuntime
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        let becameReady = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.selection == .polishCandidate(0)
+        }
+        XCTAssertTrue(becameReady)
+
+        _ = inputModeStateRuntime.transition(.togglePunctuationMode)
+        coordinator.commitCandidatePanelSelection(.polishCandidate(0), client: client)
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.originalString().string, "n")
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.aiPolish.isActive ?? true)
     }
 
     @MainActor
@@ -5024,7 +5102,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{F701}", keyCode: 125), client: client))
         XCTAssertEqual(host.candidatePanelFrames.last?.panelModel.windowState.selection, .polishCandidate(1))
-        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "1", keyCode: 18), client: client))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "2", keyCode: 19), client: client))
 
         let committed = await waitUntilOnMainActor {
             client.insertTextWrites.last?.text == "第二条润色"

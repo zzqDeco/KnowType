@@ -63,7 +63,10 @@ Explicit polish uses `task: polish`, puts the current commit-ready composition
 text in `rawInput` (the highlighted native Rime candidate when available),
 leaves `lockedPrefix` unset, and requests up to three complete rewrites. The
 result is trimmed and de-duplicated only; continuation prefix sanitization must
-not run on polish output.
+not run on polish output. Dispatch requires the cloud AI preference to be
+enabled and applies the protected/Level 0/secret gate to both the commit-ready
+text and the underlying raw composition, so selecting a benign Rime candidate
+cannot release protected raw input.
 
 Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from unconfirmed raw input:
 
@@ -592,14 +595,18 @@ reason; they do not include user text or raw geometry.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
 - While the polish overlay is active, pending/error rows are nonselectable;
-  arrows move ready selection, `Space` or `1` accepts the selected/first ready
-  result, visible digits accept their polish row, and `Escape` cancels.
+  arrows move ready selection, `Space` accepts the selected ready result,
+  visible digits accept the row carrying that digit label, and `Escape`
+  cancels.
 - Printable input cancels polish before normal input handling. Only explicit
   acceptance inserts the rewrite into the current marked composition; it never
   replaces host text that was already committed.
 - An unavailable polish row is informational: the next normal command cancels
-  it and continues through ordinary input handling. Provider revision or shared
-  input-mode generation changes cancel pending or ready polish state.
+  it and continues through ordinary input handling. Command/Control host
+  shortcuts clear the row and still pass through to the host. Provider revision
+  or shared input-mode generation changes cancel pending or ready polish state;
+  keyboard, mouse, and accessibility acceptance all synchronize that generation
+  before committing.
 - Accepted polish is classified as `AITypingCommitKind.polish` for commit
   routing, but is excluded from context-memory typing events,
   accepted-continuation learning, feedback-span replacement learning, lexical

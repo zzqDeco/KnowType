@@ -78,9 +78,13 @@ Current behavior:
   sends the highlighted native Rime candidate when available, and never commits
   a rewrite until a current ready `polishCandidate` is explicitly accepted
 - while polish is active, arrows move only polish selection, Space and visible
-  digits accept ready rows, Escape cancels, and printable/delete input cancels
-  before continuing through normal handling; unavailable rows also cancel and
-  fall through to the next ordinary command
+  digit labels accept their corresponding ready rows, Escape cancels, and
+  printable/delete input cancels before continuing through normal handling;
+  unavailable rows also cancel and fall through to the next ordinary command,
+  including Command/Control shortcuts passed through to the host
+- synchronizes the shared input-mode generation before keyboard, mouse, or
+  accessibility polish acceptance, so an overlay published before a mode
+  transition cannot commit stale rewritten text
 - when native Rime is active, hover and arrow selection go through
   `InputNativeCandidateNavigationRuntime` so Rime's current-page highlight stays
   authoritative instead of making the custom panel selection authoritative on

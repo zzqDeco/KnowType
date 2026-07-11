@@ -72,6 +72,7 @@ struct InputAIPolishRequestContext: Sendable, Equatable {
     var compositionID: Int
     var rawRevision: Int
     var hasActiveComposition: Bool
+    var cloudAIEnabled: Bool
 }
 
 struct InputAIPolishCompositionSnapshot: Sendable, Equatable {
@@ -91,8 +92,12 @@ enum InputAIPolishGate {
         guard context.hasActiveComposition, !trimmed.isEmpty else {
             return .deny(reason: "当前没有可润色内容")
         }
+        guard context.cloudAIEnabled else {
+            return .deny(reason: "AI 润色已禁用")
+        }
         guard !TextProtection.requiresNoCorrection("knowtype", appBundleID: context.appBundleID),
-              !TextProtection.requiresNoCorrection(context.text, appBundleID: context.appBundleID) else {
+              !TextProtection.requiresNoCorrection(context.text, appBundleID: context.appBundleID),
+              !TextProtection.requiresNoCorrection(context.rawInput, appBundleID: context.appBundleID) else {
             return .deny(reason: "当前内容不可润色")
         }
         guard !TextProtection.containsSecretLikeContent(context.text),

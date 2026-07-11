@@ -17,8 +17,10 @@ validation.
 
 ## Behavior Notes
 
-- The strict polish gate requires an active nonempty composition and rejects
-  protected-app, Level 0, and secret-like text before provider leasing.
+- The strict polish gate requires enabled cloud AI and an active nonempty
+  composition. It rejects protected-app, Level 0, and secret-like content in
+  both the commit-ready display text and underlying raw composition before
+  provider leasing.
 - Pending, ready, and unavailable state carries request/composition/revision
   identity plus provider generation when known.
 - Provider completion and explicit acceptance both revalidate current identity;
