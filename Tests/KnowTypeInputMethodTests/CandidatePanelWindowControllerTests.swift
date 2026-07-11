@@ -570,6 +570,93 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNotNil(controller)
     }
 
+    func testTrackpadGestureAccumulatesAndPagesOnlyOnceBeforeMomentum() {
+        var state = CandidatePanelScrollPagingState()
+
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -1,
+                phase: .began,
+                momentumPhase: [],
+                timestamp: 1
+            )
+        )
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: -2,
+                phase: .changed,
+                momentumPhase: [],
+                timestamp: 1.01
+            ),
+            .pageDown
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -20,
+                phase: .changed,
+                momentumPhase: [],
+                timestamp: 1.02
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -5,
+                phase: .ended,
+                momentumPhase: [],
+                timestamp: 1.03
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -30,
+                phase: [],
+                momentumPhase: .began,
+                timestamp: 1.04
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -30,
+                phase: [],
+                momentumPhase: .changed,
+                timestamp: 1.05
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -10,
+                phase: [],
+                momentumPhase: .ended,
+                timestamp: 1.06
+            )
+        )
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: 4,
+                phase: .began,
+                momentumPhase: [],
+                timestamp: 2
+            ),
+            .pageUp
+        )
+    }
+
+    func testTraditionalWheelPagingRespectsCooldown() {
+        var state = CandidatePanelScrollPagingState()
+
+        XCTAssertEqual(
+            state.navigation(forDelta: -4, phase: [], momentumPhase: [], timestamp: 2),
+            .pageDown
+        )
+        XCTAssertNil(
+            state.navigation(forDelta: -4, phase: [], momentumPhase: [], timestamp: 2.05)
+        )
+        XCTAssertEqual(
+            state.navigation(forDelta: 4, phase: [], momentumPhase: [], timestamp: 2.121),
+            .pageUp
+        )
+    }
+
     private func fakeScreenProvider() -> FakeCandidatePanelScreenProvider {
         FakeCandidatePanelScreenProvider(screens: fakeScreens())
     }

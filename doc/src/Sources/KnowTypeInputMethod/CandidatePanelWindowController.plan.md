@@ -34,8 +34,13 @@ Current behavior:
 - renders pending AI status rows with a fixed small indeterminate spinner
   accessory and no visible status text, reserving width in layout while keeping
   the row disabled, non-selectable, and accessible as `AI 状态，AI 推荐中`
-- maps scroll-wheel up/down to PageUp/PageDown with a threshold so trackpad jitter does not page accidentally
-- exposes each visible row as an accessibility element; enabled candidates use button semantics, disabled AI status uses static-text semantics, and selection changes post focused-element and selected-children notifications
+- accumulates trackpad deltas and emits at most one PageUp/PageDown action from
+  began through ended, ignores momentum, and applies a 120 ms cooldown to
+  phase-less mouse-wheel paging
+- exposes each visible row as an accessibility element; enabled candidates
+  retain their real selection and forward VoiceOver press through the same
+  commit handler as mouse-up, disabled/status rows do not press, and selection
+  changes post focused-element and selected-children notifications
 - avoids preview text, section headers, and raw-input rows once correction candidates are available
 
 Selection shortcuts:

@@ -230,6 +230,9 @@ LevelDB state.
   InputMethodKit's default click-outside `commitComposition(_:)` behavior.
   Shortcut modifiers are derived from each key-down event's flags, so separate
   `keyUp` and `flagsChanged` registration is not required.
+- Command/Control key-down maps to a host-shortcut intent. An active symbol
+  overlay is cancelled before the event returns to the host, while key-up and
+  flags-changed remain outside the production event registration.
 - `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses Rime prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
 - `CompositionBuffer` remains available for legacy/session tests, but native Rime preedit is the production marked-text source during active Chinese composition.
 - `InputMethodLexiconRuntime` remains available for legacy demos/tests and settings visibility, but local lexicon rebuilds are not part of the IMK key path.
@@ -320,8 +323,11 @@ scheduled snapshot. It hides raw-empty and stale-suggestion snapshots with
 explicit reasons, and delayed re-anchor callbacks can republish only the latest
 same-raw-input, same-composition active panel.
 
-Mouse hover selects enabled visible rows, click commits the same target as keyboard selection, and scroll-wheel
-events page the panel. `InputNativeCandidateNavigationRuntime` maps visible
+Mouse hover selects enabled visible rows, click and VoiceOver press commit the
+same target as keyboard selection, and disabled/status rows cannot commit.
+Trackpad deltas accumulate to at most one page per began-to-ended gesture,
+momentum is ignored, and phase-less wheel paging has a 120 ms cooldown.
+`InputNativeCandidateNavigationRuntime` maps visible
 panel selections to native selection identities and drives Rime navigation
 keys. Arrow keys update Rime's highlighted candidate: right/down at the page end moves to the
 next page's first row, while left/up at the page start moves to the previous page's last row. Explicit
@@ -329,7 +335,7 @@ next page's first row, while left/up at the page start moves to the previous pag
 Rime-compatible paging punctuation (`-`/`=`, `,`/`.`) also drives the native Rime page state before punctuation
 commit fallback. Pending, unavailable, or ineligible AI state rows are visible but disabled; ready AI rows use Tab
 as their visible shortcut and do not take ordinary number keys from Rime candidates. Row accessibility elements expose button-like
-labels for enabled candidates, static-text semantics for disabled AI status, and selected-children notifications
+labels and press actions for enabled candidates, static-text semantics for disabled AI status, and selected-children notifications
 when the highlighted row changes. Candidate-panel screenshot baselines live under
 `Tests/KnowTypeInputMethodTests/__Snapshots__/` and cover light horizontal, dark vertical, and AI-status examples.
 

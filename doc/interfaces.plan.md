@@ -415,8 +415,10 @@ rendering:
 Ready AI recommendations are selectable through Tab, explicit Option-number, and mouse click, but they do not take
 ordinary numeric shortcuts from Rime candidates. Pending, unavailable, and ineligible AI states are rendered as
 disabled status rows: they preserve the visible slot but have no selection identity, no numeric shortcut, and no
-commit behavior. Mouse hover, click commit, keyboard selection, and accessibility selected children all consume the
-same `CandidatePanelSelection` values so click commits match keyboard commits.
+commit behavior. Mouse hover, click commit, keyboard selection, accessibility
+selected children, and VoiceOver press all consume the same
+`CandidatePanelSelection` values so pointer and accessibility commits match
+keyboard commits. Disabled/status rows have no press action.
 
 ## Rime Hot Path
 
@@ -515,8 +517,11 @@ KnowType owns; native handled/no-commit end states clear that owned marked text 
 inserted text.
 
 The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
-that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use
-static-text semantics. Selection changes post focused-element and selected-children notifications. Screenshot
+that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; their press action forwards
+the retained selection through the normal commit handler. Disabled AI status rows use static-text semantics and do
+not press. Selection changes post focused-element and selected-children notifications. Trackpad scroll deltas
+accumulate to at most one page action per began-to-ended gesture and momentum is ignored; phase-less mouse-wheel
+events use a 120 ms paging cooldown. Screenshot
 regression tests render fixed examples to PNG baselines under `Tests/KnowTypeInputMethodTests/__Snapshots__/`.
 
 `CompositionBuffer` keeps `rawInput`, resolved segments, active range, display text, and commit text separate for legacy/session tests. The production IMK path no longer generates local segment candidates; Rime owns composition and candidate commit for Chinese input.
@@ -556,6 +561,10 @@ reason; they do not include user text or raw geometry.
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
 - plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, context-selected Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao. Full-width mode transforms printable ASCII `!...~` and U+0020, but never control characters, Tab, or newline.
 - symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
+- Command/Control key-down is a host-shortcut intent. If a symbol-candidate
+  session is active, KnowType cancels its session and overlay before returning
+  the key to the host; key-up remains ignored and flags-changed remains a
+  separate non-commit intent.
 - `Option + .` toggles a manual Chinese/English punctuation override only while
   process-wide text mode is Chinese. In ASCII mode it is a state no-op that
   republishes the current status.

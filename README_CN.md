@@ -334,6 +334,7 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点、显示符号候选、直接插入标点，或在兼容宿主中直通给宿主。 |
 | `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。 |
+| Command/Control 宿主快捷键 | 先取消已打开的符号候选 overlay，再把快捷键交给当前宿主，避免后续 `Space` 提交旧符号。 |
 | `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
 | `Option + /` | 切换进程级中文/ASCII 输入模式，同时恢复中文/英文标点联动；所有 App 共享。 |
 | `Shift + Space` | 切换进程级半角/全角字符，不改变中英输入或标点模式。全角会转换 ASCII `!` 到 `~` 及普通空格，不转换控制字符、Tab 或换行。 |
@@ -369,7 +370,8 @@ bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline ma
 终端/override commit-only placeholder 宿主中的真实 preedit，以及没有建议时的 raw input。preedit 行没有
 快捷键、不可选、不能提交；inline 宿主不会额外显示这一行，避免和宿主输入框里的
 preedit 重复。它是紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标
-hover/click 选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，
+hover/click 选择、一次 trackpad 手势最多翻一页，并支持 VoiceOver press 提交启用的
+候选行；禁用状态行只读、不能提交。配置 provider 后，
 KnowType 会先发布 Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider
 失败时，不会把固定本地 fallback 文本伪装成 AI 输出。
 

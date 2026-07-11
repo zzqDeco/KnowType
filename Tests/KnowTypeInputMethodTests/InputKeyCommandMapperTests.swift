@@ -133,21 +133,35 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
     }
 
-    func testCommandAndControlModifiedInputIsIgnored() {
+    func testCommandAndControlKeyDownMapsToHostShortcut() {
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: "c", keyCode: 8, modifiers: [.command])),
-            .ignored
+            .hostShortcut
         )
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: "v", keyCode: 9, modifiers: [.control])),
-            .ignored
+            .hostShortcut
         )
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.command])),
-            .ignored
+            .hostShortcut
         )
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: " ", keyCode: 49, modifiers: [.control])),
+            .hostShortcut
+        )
+    }
+
+    func testCommandKeyUpRemainsIgnored() {
+        XCTAssertEqual(
+            mapper.intent(
+                for: InputKeyStroke(
+                    text: "v",
+                    keyCode: 9,
+                    modifiers: [.command],
+                    eventKind: .keyUp
+                )
+            ),
             .ignored
         )
     }

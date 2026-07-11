@@ -4493,6 +4493,24 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
+    func testHostShortcutCancelsIdleSymbolSessionBeforeFollowingSpace() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertFalse(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "v", keyCode: 9, modifiers: [.command]),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+
+        _ = coordinator.handleText(" ", client: client)
+
+        XCTAssertFalse(client.insertTextWrites.contains { $0.text == "、" })
+    }
+
     func testActiveSymbolCandidateFallthroughRestoresCompositionPanel() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)

@@ -94,6 +94,36 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertEqual(children[1].accessibilityLabel(), "1，你")
     }
 
+    func testEnabledAccessibilityPressCommitsExactSelection() throws {
+        let view = CandidatePanelContentView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 73),
+            appearance: .snapshotLight
+        )
+        let interactionHandler = AccessibilityInteractionRecorder()
+        view.interactionHandler = interactionHandler
+        view.update(model: accessibilityModel(selectedIndex: 0), layoutPlan: verticalLayoutPlan())
+
+        let children = try XCTUnwrap(view.accessibilityChildren() as? [NSAccessibilityElement])
+
+        XCTAssertTrue(children[2].accessibilityPerformPress())
+        XCTAssertEqual(interactionHandler.committedSelections, [.prefixCandidate(1)])
+    }
+
+    func testDisabledAccessibilityRowDoesNotPress() throws {
+        let view = CandidatePanelContentView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 73),
+            appearance: .snapshotLight
+        )
+        let interactionHandler = AccessibilityInteractionRecorder()
+        view.interactionHandler = interactionHandler
+        view.update(model: accessibilityModel(selectedIndex: 0), layoutPlan: verticalLayoutPlan())
+
+        let children = try XCTUnwrap(view.accessibilityChildren() as? [NSAccessibilityElement])
+
+        XCTAssertFalse(children[1].accessibilityPerformPress())
+        XCTAssertTrue(interactionHandler.committedSelections.isEmpty)
+    }
+
     private func accessibilityModel(selectedIndex: Int) -> CandidatePanelRenderModel {
         CandidatePanelRenderModel(
             title: "KnowType",
@@ -160,5 +190,18 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
             ]
         )
     }
+}
+
+@MainActor
+private final class AccessibilityInteractionRecorder: CandidatePanelContentInteractionHandling {
+    private(set) var committedSelections: [CandidatePanelSelection] = []
+
+    func candidatePanelContentDidHover(_ selection: CandidatePanelSelection) {}
+
+    func candidatePanelContentDidCommit(_ selection: CandidatePanelSelection) {
+        committedSelections.append(selection)
+    }
+
+    func candidatePanelContentDidScroll(_ navigation: InputCandidateNavigation) {}
 }
 #endif
