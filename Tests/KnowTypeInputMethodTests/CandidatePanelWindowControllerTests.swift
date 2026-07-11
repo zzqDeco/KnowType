@@ -570,6 +570,143 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNotNil(controller)
     }
 
+    func testTrackpadGestureAccumulatesAndPagesOnlyOnceBeforeMomentum() {
+        var state = CandidatePanelScrollPagingState()
+
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -1,
+                hasPreciseScrollingDeltas: true,
+                phase: .began,
+                momentumPhase: [],
+                timestamp: 1
+            )
+        )
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: -2,
+                hasPreciseScrollingDeltas: true,
+                phase: .changed,
+                momentumPhase: [],
+                timestamp: 1.01
+            ),
+            .pageDown
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -20,
+                hasPreciseScrollingDeltas: true,
+                phase: .changed,
+                momentumPhase: [],
+                timestamp: 1.02
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -5,
+                hasPreciseScrollingDeltas: true,
+                phase: .ended,
+                momentumPhase: [],
+                timestamp: 1.03
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -30,
+                hasPreciseScrollingDeltas: true,
+                phase: [],
+                momentumPhase: .began,
+                timestamp: 1.04
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -30,
+                hasPreciseScrollingDeltas: true,
+                phase: [],
+                momentumPhase: .changed,
+                timestamp: 1.05
+            )
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -10,
+                hasPreciseScrollingDeltas: true,
+                phase: [],
+                momentumPhase: .ended,
+                timestamp: 1.06
+            )
+        )
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: 4,
+                hasPreciseScrollingDeltas: true,
+                phase: .began,
+                momentumPhase: [],
+                timestamp: 2
+            ),
+            .pageUp
+        )
+    }
+
+    func testNonPreciseTraditionalWheelDeltaOnePagesAndRespectsCooldown() {
+        var state = CandidatePanelScrollPagingState()
+
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: -1,
+                hasPreciseScrollingDeltas: false,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 2
+            ),
+            .pageDown
+        )
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -1,
+                hasPreciseScrollingDeltas: false,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 2.05
+            )
+        )
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: 1,
+                hasPreciseScrollingDeltas: false,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 2.121
+            ),
+            .pageUp
+        )
+    }
+
+    func testPrecisePhaseNoneWheelKeepsDeltaThreshold() {
+        var state = CandidatePanelScrollPagingState()
+
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -1,
+                hasPreciseScrollingDeltas: true,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 3
+            )
+        )
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: -3,
+                hasPreciseScrollingDeltas: true,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 3.01
+            ),
+            .pageDown
+        )
+    }
+
     private func fakeScreenProvider() -> FakeCandidatePanelScreenProvider {
         FakeCandidatePanelScreenProvider(screens: fakeScreens())
     }

@@ -34,6 +34,7 @@ when converting a shipped plan into a short record.
 | [user-selection-ranking.plan.md](user-selection-ranking.plan.md) | Local ranking boost from recent prefix selections | Active |
 | [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Persist local candidate learning across IMK restarts | Active |
 | [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Candidate-window geometry resolver behavior | Active |
+| [candidate-panel-interaction-accessibility.plan.md](candidate-panel-interaction-accessibility.plan.md) | Harden host-shortcut symbol cleanup, VoiceOver press, and pointer paging | Active |
 | [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | PageDown/PageUp offset-preserving candidate paging | Active |
 | [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive candidate panel layout | Active |
 | [candidate-panel-row-builder-refactor.plan.md](candidate-panel-row-builder-refactor.plan.md) | Share candidate-panel row ordering between state and renderer | Active |

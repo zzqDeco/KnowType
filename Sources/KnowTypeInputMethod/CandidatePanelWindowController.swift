@@ -370,6 +370,92 @@ private struct AppKitCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
     }
 }
 
+struct CandidatePanelScrollPagingState {
+    static let deltaThreshold: CGFloat = 3
+    static let wheelCooldown: TimeInterval = 0.120
+
+    private var accumulatedGestureDelta: CGFloat = 0
+    private var isGestureActive = false
+    private var didPageDuringGesture = false
+    private var lastWheelPageTimestamp: TimeInterval?
+
+    mutating func navigation(
+        forDelta delta: CGFloat,
+        hasPreciseScrollingDeltas: Bool,
+        phase: NSEvent.Phase,
+        momentumPhase: NSEvent.Phase,
+        timestamp: TimeInterval
+    ) -> InputCandidateNavigation? {
+        guard momentumPhase.isEmpty else {
+            return nil
+        }
+
+        if phase.isEmpty {
+            return wheelNavigation(
+                forDelta: delta,
+                hasPreciseScrollingDeltas: hasPreciseScrollingDeltas,
+                timestamp: timestamp
+            )
+        }
+
+        if phase.contains(.cancelled) {
+            endGesture()
+            return nil
+        }
+        if phase.contains(.began) || !isGestureActive {
+            beginGesture()
+        }
+
+        accumulatedGestureDelta += delta
+        var navigation: InputCandidateNavigation?
+        if !didPageDuringGesture,
+           abs(accumulatedGestureDelta) >= Self.deltaThreshold {
+            didPageDuringGesture = true
+            navigation = Self.navigation(forDelta: accumulatedGestureDelta)
+        }
+
+        if phase.contains(.ended) {
+            endGesture()
+        }
+        return navigation
+    }
+
+    private mutating func wheelNavigation(
+        forDelta delta: CGFloat,
+        hasPreciseScrollingDeltas: Bool,
+        timestamp: TimeInterval
+    ) -> InputCandidateNavigation? {
+        let reachesPagingThreshold = hasPreciseScrollingDeltas
+            ? abs(delta) >= Self.deltaThreshold
+            : delta != 0
+        guard reachesPagingThreshold else {
+            return nil
+        }
+        if let lastWheelPageTimestamp,
+           timestamp - lastWheelPageTimestamp < Self.wheelCooldown {
+            return nil
+        }
+        lastWheelPageTimestamp = timestamp
+        return Self.navigation(forDelta: delta)
+    }
+
+    private mutating func beginGesture() {
+        accumulatedGestureDelta = 0
+        isGestureActive = true
+        didPageDuringGesture = false
+    }
+
+    private mutating func endGesture() {
+        accumulatedGestureDelta = 0
+        isGestureActive = false
+        didPageDuringGesture = false
+    }
+
+    private static func navigation(forDelta delta: CGFloat) -> InputCandidateNavigation {
+        delta < 0 ? .pageDown : .pageUp
+    }
+}
+
 @MainActor
 final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
     private let backgroundView: NSView
@@ -381,6 +467,8 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
     private var hoverSelection: CandidatePanelSelection?
     private var mouseDownSelection: CandidatePanelSelection?
     private var trackingArea: NSTrackingArea?
+    private var scrollPagingState = CandidatePanelScrollPagingState()
+    private var accessibilityRenderGeneration: UInt64 = 0
     weak var interactionHandler: CandidatePanelContentInteractionHandling?
 
     var appKitView: NSView {
@@ -431,6 +519,7 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
     }
 
     func update(model: CandidatePanelRenderModel, layoutPlan: CandidatePanelLayoutPlan) {
+        accessibilityRenderGeneration &+= 1
         stackView.arrangedSubviews.forEach {
             stackView.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -649,17 +738,23 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
               upSelection == mouseDownSelection else {
             return
         }
-        interactionHandler?.candidatePanelContentDidCommit(upSelection)
+        commitSelection(upSelection)
     }
 
     override func scrollWheel(with event: NSEvent) {
         let dominantDelta = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
             ? event.scrollingDeltaY
             : event.scrollingDeltaX
-        guard abs(dominantDelta) >= 3 else {
+        guard let navigation = scrollPagingState.navigation(
+            forDelta: dominantDelta,
+            hasPreciseScrollingDeltas: event.hasPreciseScrollingDeltas,
+            phase: event.phase,
+            momentumPhase: event.momentumPhase,
+            timestamp: event.timestamp
+        ) else {
             return
         }
-        interactionHandler?.candidatePanelContentDidScroll(dominantDelta < 0 ? .pageDown : .pageUp)
+        interactionHandler?.candidatePanelContentDidScroll(navigation)
     }
 
     override func isAccessibilityElement() -> Bool {
@@ -692,6 +787,8 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
                 frame: target.frame,
                 screenFrame: accessibilityScreenFrame(for: target.frame),
                 label: target.accessibilityLabel,
+                selection: target.selection,
+                renderGeneration: accessibilityRenderGeneration,
                 isEnabled: target.isEnabled,
                 isSelected: target.isSelected
             )
@@ -707,6 +804,25 @@ final class CandidatePanelContentView: NSView, CandidatePanelContentRendering {
             return frame
         }
         return window.convertToScreen(convert(frame, to: nil))
+    }
+
+    @discardableResult
+    fileprivate func commitSelection(_ selection: CandidatePanelSelection) -> Bool {
+        guard let interactionHandler else {
+            return false
+        }
+        interactionHandler.candidatePanelContentDidCommit(selection)
+        return true
+    }
+
+    fileprivate func commitAccessibilitySelection(
+        _ selection: CandidatePanelSelection,
+        renderGeneration: UInt64
+    ) -> Bool {
+        guard renderGeneration == accessibilityRenderGeneration else {
+            return false
+        }
+        return commitSelection(selection)
     }
 
     private func textColor(for role: CandidatePanelVisualRole, isSelected: Bool, isEnabled: Bool) -> NSColor {
@@ -732,6 +848,8 @@ private final class CandidatePanelAccessibilityRow: NSAccessibilityElement {
     let rowFrame: NSRect
     let screenFrame: NSRect
     let label: String
+    let selection: CandidatePanelSelection?
+    let renderGeneration: UInt64
     let isEnabled: Bool
     let isSelected: Bool
 
@@ -741,6 +859,8 @@ private final class CandidatePanelAccessibilityRow: NSAccessibilityElement {
         frame: NSRect,
         screenFrame: NSRect,
         label: String,
+        selection: CandidatePanelSelection?,
+        renderGeneration: UInt64,
         isEnabled: Bool,
         isSelected: Bool
     ) {
@@ -749,6 +869,8 @@ private final class CandidatePanelAccessibilityRow: NSAccessibilityElement {
         self.rowFrame = frame
         self.screenFrame = screenFrame
         self.label = label
+        self.selection = selection
+        self.renderGeneration = renderGeneration
         self.isEnabled = isEnabled
         self.isSelected = isSelected
         super.init()
@@ -780,6 +902,20 @@ private final class CandidatePanelAccessibilityRow: NSAccessibilityElement {
 
     override func accessibilityFrame() -> NSRect {
         screenFrame
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled,
+              let selection else {
+            return false
+        }
+        let expectedRenderGeneration = renderGeneration
+        return MainActor.assumeIsolated { [weak owner] in
+            owner?.commitAccessibilitySelection(
+                selection,
+                renderGeneration: expectedRenderGeneration
+            ) ?? false
+        }
     }
 }
 #endif

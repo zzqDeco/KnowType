@@ -50,6 +50,7 @@ public enum InputKeyIntent: Sendable, Equatable {
     case selectCandidate(Int)
     case moveCandidateSelection(InputCandidateNavigation)
     case modifierFlagsChanged(Set<InputModifier>)
+    case hostShortcut
     case ignored
 }
 
@@ -67,7 +68,7 @@ public struct InputKeyCommandMapper: Sendable {
         }
 
         if stroke.modifiers.contains(.command) || stroke.modifiers.contains(.control) {
-            return .ignored
+            return .hostShortcut
         }
 
         if stroke.modifiers.contains(.option) {

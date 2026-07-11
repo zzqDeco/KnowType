@@ -388,6 +388,7 @@ placement.
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
 | Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, show symbol candidates, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
 | `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. |
+| Command/Control host shortcuts | Cancel an open symbol-candidate overlay before passing the shortcut to the focused host, so a later `Space` cannot commit a stale symbol. |
 | `Option + .` | In Chinese text mode, manually toggle Chinese/English punctuation until the next text-mode switch. In ASCII mode it leaves punctuation English and only repeats the mode status. |
 | `Option + /` | Toggle the process-wide Chinese/ASCII text mode. The switch also restores linked Chinese/English punctuation and is shared across apps. |
 | `Shift + Space` | Toggle process-wide half-width/full-width characters without changing text or punctuation mode. Full width maps ASCII `!` through `~` and normal space; controls, Tab, and newline are unchanged. |
@@ -436,7 +437,9 @@ placeholder carrier, and raw input only when no suggestion is available. The
 preedit row has no shortcut, selection, or commit action, and inline hosts do
 not render it because the focused text field already shows preedit. The panel is
 a compact AppKit panel using macOS material, system highlight colors,
-mouse hover/click selection, scroll paging, and row accessibility labels. When a
+mouse hover/click selection, one-page-per-trackpad-gesture scroll paging, and
+VoiceOver press for enabled candidate rows. Disabled status rows remain readable
+but cannot commit. When a
 provider is configured, Rime prefix candidates appear immediately and
 provider-backed AI recommendations update
 asynchronously. Provider failures do not show fixed local fallback text as if it

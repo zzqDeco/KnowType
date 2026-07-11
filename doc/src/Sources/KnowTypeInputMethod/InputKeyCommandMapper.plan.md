@@ -18,6 +18,9 @@ actions.
 - `Shift + Space` toggles process-wide half-width/full-width characters.
 - `Option + number` maps to continuation shortcuts.
 - `Option + R` is the explicit polish path.
+- Command/Control key-down maps to the explicit `hostShortcut` intent so the
+  coordinator can clean transient input-method UI before passing the event to
+  the host. Key-up remains ignored and flags-changed remains separately modeled.
 - Plain punctuation remains a symbol intent; the coordinator decides whether a composing native Rime session should consume `-`/`=`, `,`/`.` as page shortcuts before punctuation commit fallback.
 - Unmatched digits can continue composing as literal digits when they are not
   visible shortcuts.

@@ -9,6 +9,9 @@ event publication side effects in the required order.
 Current behavior:
 
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
+- cancels an active symbol-candidate overlay before returning `false` for a
+  Command/Control host shortcut, preventing the next Space from committing a
+  stale symbol while preserving host handling
 - delegates raw input, `CompositionBuffer`, composition id, raw revision, and
   delete-count state to `InputCompositionStateRuntime`
 - delegates composition begin and finish lifecycle planning to

@@ -520,6 +520,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return moveCandidateSelection(navigation)
         case .modifierFlagsChanged:
             return false
+        case .hostShortcut:
+            resetPunctuationSessionContext()
+            return false
         case .ignored:
             resetPunctuationSessionContext()
             return false
@@ -587,6 +590,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             cancelSymbolCandidateSession(client: client)
             return true
         case .modifierFlagsChanged:
+            return false
+        case .hostShortcut:
+            clearSymbolCandidateSessionBeforeFallthrough(client: client)
+            resetPunctuationSessionContext()
             return false
         case .ignored:
             return false
@@ -2355,7 +2362,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 private extension InputKeyIntent {
     var clearsTransientModeStatus: Bool {
         switch self {
-        case .modifierFlagsChanged, .ignored:
+        case .modifierFlagsChanged, .hostShortcut, .ignored:
             return false
         case .action(.toggleSymbolMode), .action(.toggleTextMode), .action(.toggleSymbolWidth):
             return false
