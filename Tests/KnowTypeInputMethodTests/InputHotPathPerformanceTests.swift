@@ -114,6 +114,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(aiRecommendationDiagnostics.contains("fputs("))
         XCTAssertFalse(candidateAnchorResolver.contains("fputs("))
         XCTAssertFalse(candidateAnchorResolver.contains("NSLog("))
+        XCTAssertTrue(candidateAnchorResolver.contains(".init(.probeCount, probeCount)"))
+        XCTAssertTrue(candidateAnchorResolver.contains("reason: \"throttled\""))
         XCTAssertFalse(candidatePanelWindowController.contains("fputs("))
         XCTAssertTrue(candidatePanelPublicationRuntime.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
         XCTAssertTrue(candidatePanelWindowController.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
@@ -134,6 +136,31 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(inputRuntimeBoundaries.contains("fputs("))
         XCTAssertFalse(aiRecommendationDiagnostics.contains("candidateCount="))
         XCTAssertFalse(aiRecommendationDiagnostics.contains("acceptedCount="))
+    }
+
+    func testCandidateAnchorProbeBudgetsStayFixed() {
+        XCTAssertEqual(CandidateAnchorPolicy.maximumFirstRectProbes, 4)
+        XCTAssertEqual(CandidateAnchorPolicy.maximumLineHeightProbes, 4)
+        XCTAssertEqual(CandidateAnchorResolver.accessibilityThrottleInterval, 0.1)
+
+        let firstRectRequests = CandidateAnchorPolicy.characterRangeRequests(
+            selectedRange: NSRange(location: 1_000, length: 1),
+            markedRange: NSRange(location: 10, length: 80)
+        )
+        let lineHeightIndexes = CandidateAnchorPolicy.lineHeightCharacterIndexes(
+            selectedRange: NSRange(location: 50, length: 0),
+            markedRange: NSRange(location: 10, length: 80)
+        )
+
+        XCTAssertLessThanOrEqual(
+            firstRectRequests.count,
+            CandidateAnchorPolicy.maximumFirstRectProbes
+        )
+        XCTAssertEqual(lineHeightIndexes, [79, 40, 0])
+        XCTAssertLessThanOrEqual(
+            lineHeightIndexes.count,
+            CandidateAnchorPolicy.maximumLineHeightProbes
+        )
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {

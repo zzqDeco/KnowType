@@ -12,8 +12,11 @@ panel geometry from IMK clients.
 
 ## Behavior Notes
 
-- The policy chooses marked, selected, insertion-point, and line-height ranges
-  without assuming every host app reports complete IMK geometry.
+- The policy emits at most four deduplicated marked/selected `firstRect`
+  requests.
+- Line-height requests are limited to at most four deduplicated IMK-inline
+  strategic positions: marked end, in-range selection end, marked start, and
+  zero. It never performs per-character backtracking.
 - It supports safe fallback behavior for browsers and Electron-style clients
   where marked-text ranges can lag behind key handling.
 
