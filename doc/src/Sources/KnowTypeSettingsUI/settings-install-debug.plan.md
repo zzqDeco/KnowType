@@ -46,7 +46,7 @@ The Diagnostics tab documents the local developer loop through `DebugInstallGuid
 - remind developers that the selection script is only a preflight and final acceptance still requires typing a real probe in the target app;
 - run `scripts/diagnose-inputmethod.sh` to verify bundle metadata, signing, packaged resources, Text Input Source registration, and local data paths without changing system state;
 - run `scripts/repair-inputmethod-selection.sh` when stale LaunchServices records, legacy `.Hans` / `.Mode` TIS rows, or stale selected/history rows make selection bounce back to another source;
-- use `scripts/select-inputmethod.sh --require-selected` as the installed-app selection preflight before typing in the active text app;
+- use `scripts/select-inputmethod.sh --require-selected` as the standalone-helper selection preflight before typing in the active text app;
 - log out and back in only after the repair script still leaves macOS on stale session state;
 - approve the macOS System Settings prompt that asks whether to allow `知键` to enable `KnowType`, then enable KnowType in System Settings;
 - inspect `KnowTypeInputMethodApp`, Gatekeeper, and input-source sandbox messages with `scripts/diagnose-inputmethod.sh --strict --logs`, Console.app, or `log stream`.

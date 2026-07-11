@@ -258,6 +258,14 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("System Settings PreferencePane caches still contain stale KnowType prefPane metadata"))
         XCTAssertTrue(scripts.contains("--no-diagnostic"))
         XCTAssertTrue(scripts.contains("--logs"))
+
+        let selectScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/select-inputmethod.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(selectScript.contains(#"knowtype_inputsource_tool "$ROOT_DIR""#))
+        XCTAssertTrue(selectScript.contains(#""$INPUTSOURCE_TOOL" "${bootstrap_args[@]}""#))
+        XCTAssertFalse(selectScript.contains(#"KnowTypeInputMethodApp" --knowtype-register-input-source"#))
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
         XCTAssertTrue(scripts.contains("com.apple.macl"))
         XCTAssertTrue(scripts.contains("com.apple.quarantine"))

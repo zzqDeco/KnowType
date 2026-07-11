@@ -145,6 +145,7 @@ install_script_contents="$(cat "$ROOT_DIR/scripts/install-inputmethod.sh")"
 rollback_script_contents="$(cat "$ROOT_DIR/scripts/rollback-inputmethod.sh")"
 uninstall_script_contents="$(cat "$ROOT_DIR/scripts/uninstall-inputmethod.sh")"
 repair_script_contents="$(cat "$ROOT_DIR/scripts/repair-inputmethod-selection.sh")"
+select_script_contents="$(cat "$ROOT_DIR/scripts/select-inputmethod.sh")"
 
 assert_contains "$install_script_contents" "purge_legacy_best_effort" "install script"
 assert_contains "$install_script_contents" "bootstrap_input_source_best_effort" "install script"
@@ -215,6 +216,12 @@ assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-i
 assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-purge-legacy' "repair script"
 assert_not_contains "$repair_script_contents" "killall KnowTypeInputMethodApp" "repair script"
 assert_not_contains "$repair_script_contents" 'open -g "$BUNDLE_PATH"' "repair script"
+
+assert_contains "$select_script_contents" 'knowtype_inputsource_tool "$ROOT_DIR"' "select script"
+assert_contains "$select_script_contents" '"$INPUTSOURCE_TOOL" "${bootstrap_args[@]}"' "select script"
+assert_contains "$select_script_contents" 'select.current=$KNOWTYPE_ACTIVE_INPUT_MODE_ID' "select script"
+assert_not_contains "$select_script_contents" 'KnowTypeInputMethodApp" --knowtype-register-input-source' "select script"
+assert_not_contains "$select_script_contents" 'KnowTypeInputMethodApp" --knowtype-select-input-source' "select script"
 
 help_scripts=(
   "$ROOT_DIR/scripts/accept-inputmethod-local.sh"

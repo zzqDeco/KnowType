@@ -22,7 +22,7 @@ Repairs common local Text Input Source and LaunchServices state problems for the
   `TISSelectInputSource` status alone is not enough to rewrite selected
   preferences.
 - If selection fails or cannot be verified, the script skips selected repair instead of claiming KnowType is selected.
-- The script unregisters stale LaunchServices records, restarts menu agents, and continues refresh/diagnostics if installed app selection fails.
+- The script unregisters stale LaunchServices records, restarts menu agents, and continues refresh/diagnostics if helper-local selection fails.
 
 ## Tests
 

@@ -31,7 +31,8 @@ installed app's main executable for diagnostics, registration, provider-storage
 maintenance, and scoped preference cleanup. The main app retains compatible
 maintenance flags for direct development use, but install, rollback, and repair
 must remain helper-only so they cannot be terminated by IMK launch policy.
-Manual selection still goes through `scripts/select-inputmethod.sh`. The helper
+Manual selection still goes through `scripts/select-inputmethod.sh`, which
+resolves this helper and runs `bootstrap --select`. The helper
 deliberately labels selection verification as helper-local because another app
 or the menu bar can keep its own current input source until the user activates
 that app and selects KnowType.

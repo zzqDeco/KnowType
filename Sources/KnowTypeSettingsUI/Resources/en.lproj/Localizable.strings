@@ -264,7 +264,7 @@
 "settings.diagnostics.step.diagnose.title" = "Diagnose Install";
 "settings.diagnostics.step.diagnose.detail" = "Run the read-only diagnostics to check bundle metadata, signing, packaged resources, Text Input Source registration, local data paths, and optional Gatekeeper or sandbox log clues.";
 "settings.diagnostics.step.select.title" = "Request Switch";
-"settings.diagnostics.step.select.detail" = "Activate the text app you want to test, then run the selection script as a preflight. The script asks the installed KnowType app to switch; final acceptance still requires typing a probe in that app.";
+"settings.diagnostics.step.select.detail" = "Activate the text app you want to test, then run the selection script as a preflight. The script asks the standalone helper to switch; final acceptance still requires typing a probe in that app.";
 "settings.diagnostics.step.enable.title" = "Enable Input Source";
 "settings.diagnostics.step.enable.detail" = "If macOS asks whether to allow KnowType as an input method, click Allow. Then open System Settings > Keyboard > Text Input > Input Sources; if it does not switch automatically, manually enable or select KnowType.";
 "settings.diagnostics.step.refresh.title" = "Refresh Registration";
