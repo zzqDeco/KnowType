@@ -81,6 +81,14 @@ restore_app_staging_dir=""
 current_app_staging_dir=""
 restore_prefpane_staging_dir=""
 provider_storage_downgraded=0
+provider_profile_tool=""
+
+provider_profile_tool_path() {
+  if [[ -z "$provider_profile_tool" ]]; then
+    provider_profile_tool="$(knowtype_inputsource_tool "$ROOT_DIR")"
+  fi
+  printf '%s\n' "$provider_profile_tool"
+}
 
 cleanup_restore_staging() {
   [[ -n "$restore_app_staging_dir" && -d "$restore_app_staging_dir" ]] && rm -rf "$restore_app_staging_dir"
@@ -153,7 +161,7 @@ stop_provider_profile_writer_hosts() {
 }
 
 prepare_provider_storage_for_restored_app() {
-  local restored_generation current_generation current_executable output status
+  local restored_generation current_generation provider_tool output status
   restored_generation="$(provider_storage_generation_for_bundle "$backup_dir/KnowType.app" || true)"
   stop_provider_profile_writer_hosts
   if [[ "$restored_generation" =~ ^[0-9]+$ ]] && (( restored_generation >= 2 )); then
@@ -162,13 +170,13 @@ prepare_provider_storage_for_restored_app() {
 
   current_generation="$(provider_storage_generation_for_bundle "$target_path" || true)"
   if [[ "$current_generation" =~ ^[0-9]+$ ]] && (( current_generation >= 2 )); then
-    current_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
-    if [[ ! -x "$current_executable" ]]; then
-      echo "error: current generation-2 executable is unavailable for provider storage downgrade" >&2
+    provider_tool="$(provider_profile_tool_path)"
+    if [[ ! -x "$provider_tool" ]]; then
+      echo "error: provider profile helper is unavailable for storage downgrade" >&2
       return 1
     fi
     output=""
-    if ! output="$("$current_executable" --knowtype-downgrade-provider-profiles 2>&1)"; then
+    if ! output="$("$provider_tool" downgrade-provider-profiles 2>&1)"; then
       [[ -n "$output" ]] && printf '%s\n' "$output" >&2
       echo "error: provider storage downgrade failed; refusing to publish an incompatible pre-v2 app" >&2
       return 1
@@ -202,7 +210,7 @@ migrate_provider_storage_for_restored_app() {
   if [[ ! "$restored_generation" =~ ^[0-9]+$ ]] || (( restored_generation < 2 )); then
     return 0
   fi
-  if ! knowtype_migrate_provider_storage_for_bundle "$target_path"; then
+  if ! knowtype_migrate_provider_storage_for_bundle "$target_path" "$(provider_profile_tool_path)"; then
     echo "error: provider profile migration failed; refusing to finalize the generation-2 rollback" >&2
     return 1
   fi
@@ -211,15 +219,16 @@ migrate_provider_storage_for_restored_app() {
 restore_current_app_after_failed_provider_migration() {
   local previous_app="$current_app_staging_dir/KnowType.app"
   local previous_generation=""
-  local restored_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
+  local provider_tool=""
   local output=""
   local status=""
 
   [[ -d "$previous_app" ]] || return 1
   previous_generation="$(provider_storage_generation_for_bundle "$previous_app" || true)"
   if [[ ! "$previous_generation" =~ ^[0-9]+$ ]] || (( previous_generation < 2 )); then
-    if [[ ! -x "$restored_executable" ]] ||
-       ! output="$("$restored_executable" --knowtype-downgrade-provider-profiles 2>&1)"; then
+    provider_tool="$(provider_profile_tool_path)"
+    if [[ ! -x "$provider_tool" ]] ||
+       ! output="$("$provider_tool" downgrade-provider-profiles 2>&1)"; then
       [[ -n "$output" ]] && printf '%s\n' "$output" >&2
       echo "error: provider metadata could not be returned to a pre-v2-compatible state; keeping the generation-2 app" >&2
       return 1
@@ -244,11 +253,12 @@ restore_current_app_after_failed_provider_migration() {
 }
 
 reapply_provider_migration_after_abandoned_rollback() {
-  local executable="$1"
+  local provider_tool=""
   if (( provider_storage_downgraded != 1 )); then
     return 0
   fi
-  if [[ -x "$executable" ]] && "$executable" --knowtype-migrate-provider-profiles >/dev/null 2>&1; then
+  provider_tool="$(provider_profile_tool_path)"
+  if [[ -x "$provider_tool" ]] && "$provider_tool" migrate-provider-profiles >/dev/null 2>&1; then
     provider_storage_downgraded=0
     return 0
   fi
@@ -487,11 +497,6 @@ fi
 
 knowtype_unregister_launchservices_records_except "$target_path" 0
 knowtype_register_launchservices_path "$target_path" 0
-
-restored_executable="$target_path/Contents/MacOS/KnowTypeInputMethodApp"
-if [[ -x "$restored_executable" ]]; then
-  "$restored_executable" --knowtype-register-input-source --knowtype-enable-input-source >/dev/null 2>&1 || true
-fi
 
 if [[ -n "$inputsource_tool" ]]; then
   purge_args=(

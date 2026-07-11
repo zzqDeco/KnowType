@@ -188,8 +188,10 @@ development, diagnostics, and lexicon management:
 - `knowtype-demo` exercises the package-level correction, continuation, and
   commit flow without installing the input method.
 - `knowtype-inputsource-tool` owns macOS Text Input Source status,
-  TIS registration, legacy-mode disablement, and selection calls used by local
-  scripts.
+  TIS registration, legacy-mode disablement, selection calls, and explicit
+  provider-storage migration commands used by local scripts. Provider metadata
+  commands delegate to `KnowTypeProviders`; keeping them in the standalone
+  helper avoids launching the installed IMK host during install or rollback.
 - `knowtype-lexicon-tool` installs managed local lexicon packs through
   `ManagedLexiconPackInstaller`.
 - `scripts/build-inputmethod-bundle.sh` packages the local InputMethodKit app

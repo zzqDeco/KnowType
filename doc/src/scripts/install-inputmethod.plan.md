@@ -49,14 +49,15 @@ Installs the locally built KnowType input method bundle into
   System Settings so no legacy provider writer remains active, replaces
   `~/Library/Input Methods/KnowType.app`, clears quarantine, and refreshes the
   installed path with `lsregister -f`.
-- Before LaunchServices or TIS registration, a generation-2 installed executable
-  runs the explicit `--knowtype-migrate-provider-profiles` command. It migrates
+- Before LaunchServices or TIS registration, the standalone
+  `knowtype-inputsource-tool` runs the explicit `migrate-provider-profiles`
+  command. It migrates
   numeric `providers.json` metadata to generation-separated `providers.v2.json`,
   snapshots the legacy bytes, and rekeys available Keychain credentials.
   Migration output contains only state, revision, and counts. Failure enters the
   existing validated artifact rollback path.
 - A pre-v2 source bundle never receives the unknown migration command. Before
-  replacement, the currently installed generation-2 executable transactionally
+  replacement, the standalone helper transactionally
   downgrades provider metadata; without such an executable, the installer
   requires already-compatible numeric legacy metadata and no canonical,
   snapshot, or compare-and-claim file.
@@ -78,8 +79,9 @@ Installs the locally built KnowType input method bundle into
   Registering `dist/KnowType.app` directly is not a supported local install
   state because it can split helper/TIS state from the real menu-bar state.
 - It switches away, disables stale `.Mode` TIS modes, registers/enables the
-  parent anchor and visible `.Hans` mode from the installed app CLI context, and
-  repairs scoped preference rows through `knowtype-inputsource-tool`.
+  parent anchor and visible `.Hans` mode, and repairs scoped preference rows
+  through `knowtype-inputsource-tool`. Installer paths never execute the
+  installed bundle's main IMK executable directly.
   These default install steps return before the app run loop starts and do not
   select KnowType.
 - After the post-registration `cfprefsd` and menu-agent refresh, it runs one

@@ -1,6 +1,7 @@
 import Carbon
 import Foundation
 import KnowTypeInputSourceSupport
+import KnowTypeProviders
 
 private let defaultParentID = KnowTypeInputSourceIDs.parent
 private let defaultModeID = KnowTypeInputSourceIDs.activeMode
@@ -30,6 +31,9 @@ private func usage() -> Never {
           knowtype-inputsource-tool bootstrap --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID] [--select]
           knowtype-inputsource-tool purge-legacy --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool select [--parent-id ID] [--mode-id ID] [--require-selected]
+          knowtype-inputsource-tool migrate-provider-profiles
+          knowtype-inputsource-tool downgrade-provider-profiles
+          knowtype-inputsource-tool rollback-provider-profile-migration --expected-revision REVISION
 
         This helper performs KnowType Text Input Source diagnostics and legacy
         cleanup through TIS APIs. switch-away can clear stale KnowType selected
@@ -834,6 +838,7 @@ private func selectMode(parentID: String, modeID: String, requireSelected: Bool,
         Thread.sleep(forTimeInterval: 0.1)
         currentID = TISSupport.currentInputSourceID()
     }
+    print("select.current=\(currentID ?? "")")
 
     if currentID == modeID {
         print("Verified KnowType only in this helper-local TIS context: \(modeID)")
@@ -948,6 +953,19 @@ case "select":
     let requireSelected = arguments.flag("--require-selected")
     arguments.ensureConsumed()
     selectMode(parentID: parentID, modeID: modeID, requireSelected: requireSelected)
+case "migrate-provider-profiles":
+    arguments.ensureConsumed()
+    exit(ProviderProfileStorageCommand.migrate())
+case "downgrade-provider-profiles":
+    arguments.ensureConsumed()
+    exit(ProviderProfileStorageCommand.downgradeForLegacyRuntime())
+case "rollback-provider-profile-migration":
+    guard let rawRevision = arguments.option("--expected-revision"),
+          let revision = UInt64(rawRevision) else {
+        usage()
+    }
+    arguments.ensureConsumed()
+    exit(ProviderProfileStorageCommand.rollback(expectedCanonicalRevision: revision))
 default:
     usage()
 }

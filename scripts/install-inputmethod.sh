@@ -231,14 +231,15 @@ prepare_provider_storage_for_source_bundle() {
   local current_generation=""
   current_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)"
   if [[ "$current_generation" =~ ^[0-9]+$ ]] && (( current_generation >= 2 )); then
-    local current_executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+    local provider_tool=""
     local output=""
     local status=""
-    if [[ ! -x "$current_executable" ]]; then
-      echo "error: current generation-2 executable is unavailable for provider storage downgrade" >&2
+    provider_tool="$(inputsource_tool_path)"
+    if [[ ! -x "$provider_tool" ]]; then
+      echo "error: provider profile helper is unavailable for provider storage downgrade" >&2
       return 1
     fi
-    if ! output="$("$current_executable" --knowtype-downgrade-provider-profiles 2>&1)"; then
+    if ! output="$("$provider_tool" downgrade-provider-profiles 2>&1)"; then
       [[ -n "$output" ]] && printf '%s\n' "$output" >&2
       echo "error: provider storage downgrade failed; refusing to install a pre-v2 input method" >&2
       return 1
@@ -267,10 +268,11 @@ prepare_provider_storage_for_source_bundle() {
 }
 
 rollback_provider_storage_after_failed_install() {
-  local executable="${1:-$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp}"
+  local provider_tool=""
   if (( PROVIDER_MIGRATION_ATTEMPTED != 1 )); then
     return 0
   fi
+  provider_tool="$(inputsource_tool_path)"
   local restored_generation=""
   restored_generation="$(provider_storage_generation_for_bundle "$BACKUP_DIR/KnowType.app" || true)"
   if [[ "$restored_generation" =~ ^[0-9]+$ ]] && (( restored_generation >= 2 )); then
@@ -278,15 +280,15 @@ rollback_provider_storage_after_failed_install() {
   fi
   local output=""
   if [[ "$PROVIDER_MIGRATION_STATUS" == "migrated" ]]; then
-    if [[ ! -x "$executable" ]]; then
-      echo "error: cannot roll back provider migration because the new executable is unavailable" >&2
+    if [[ ! -x "$provider_tool" ]]; then
+      echo "error: cannot roll back provider migration because the provider helper is unavailable" >&2
       return 1
     fi
     if [[ ! "$PROVIDER_MIGRATION_REVISION" =~ ^[0-9]+$ ]]; then
       echo "error: provider migration rollback is missing its expected canonical revision" >&2
       return 1
     fi
-    if ! output="$("$executable" --knowtype-rollback-provider-profile-migration "$PROVIDER_MIGRATION_REVISION" 2>&1)"; then
+    if ! output="$("$provider_tool" rollback-provider-profile-migration --expected-revision "$PROVIDER_MIGRATION_REVISION" 2>&1)"; then
       [[ -n "$output" ]] && printf '%s\n' "$output" >&2
       echo "error: provider migration rollback failed; keeping the new app instead of restoring an incompatible old binary" >&2
       return 1
@@ -295,11 +297,11 @@ rollback_provider_storage_after_failed_install() {
     return 0
   fi
 
-  if [[ ! -x "$executable" ]]; then
-    echo "error: cannot verify provider storage compatibility because the new executable is unavailable" >&2
+  if [[ ! -x "$provider_tool" ]]; then
+    echo "error: cannot verify provider storage compatibility because the provider helper is unavailable" >&2
     return 1
   fi
-  if ! output="$("$executable" --knowtype-downgrade-provider-profiles 2>&1)"; then
+  if ! output="$("$provider_tool" downgrade-provider-profiles 2>&1)"; then
     [[ -n "$output" ]] && printf '%s\n' "$output" >&2
     echo "error: provider storage compatibility check failed; keeping the new app instead of restoring an incompatible old binary" >&2
     return 1
@@ -319,13 +321,13 @@ rollback_provider_storage_after_failed_install() {
 }
 
 reapply_provider_migration_best_effort() {
-  local executable="$1"
-  local bundle_path=""
-  bundle_path="$(dirname "$(dirname "$(dirname "$executable")")")"
+  local bundle_path="$1"
+  local provider_tool=""
   local generation=""
   generation="$(provider_storage_generation_for_bundle "$bundle_path" || true)"
-  if [[ -x "$executable" && "$generation" =~ ^[0-9]+$ ]] && (( generation >= 2 )); then
-    if ! "$executable" --knowtype-migrate-provider-profiles >/dev/null 2>&1; then
+  provider_tool="$(inputsource_tool_path)"
+  if [[ -x "$provider_tool" && "$generation" =~ ^[0-9]+$ ]] && (( generation >= 2 )); then
+    if ! "$provider_tool" migrate-provider-profiles >/dev/null 2>&1; then
       echo "warning: could not reapply provider migration after artifact rollback was abandoned; rerun the installer" >&2
     fi
   fi
@@ -392,12 +394,12 @@ rollback_failed_install() {
       fi
       if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
         current_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.current.XXXXXX")" || {
-          reapply_provider_migration_best_effort "$new_executable"
+          reapply_provider_migration_best_effort "$TARGET_PATH"
           rm -rf "$app_stage"
           return 0
         }
         if ! mv "$TARGET_PATH" "$current_stage/KnowType.app"; then
-          reapply_provider_migration_best_effort "$new_executable"
+          reapply_provider_migration_best_effort "$TARGET_PATH"
           rm -rf "$app_stage" "$current_stage"
           return 0
         fi
@@ -406,14 +408,14 @@ rollback_failed_install() {
         if [[ -n "$current_stage" && -d "$current_stage/KnowType.app" && ! -e "$TARGET_PATH" ]]; then
           mv "$current_stage/KnowType.app" "$TARGET_PATH" 2>/dev/null || true
         fi
-        reapply_provider_migration_best_effort "$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+        reapply_provider_migration_best_effort "$TARGET_PATH"
         rm -rf "$app_stage" "$current_stage"
         return 0
       fi
       rm -rf "$app_stage" "$current_stage"
       restored_app=1
       if (( PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE == 1 )); then
-        reapply_provider_migration_best_effort "$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+        reapply_provider_migration_best_effort "$TARGET_PATH"
       fi
     fi
     if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
@@ -434,7 +436,7 @@ rollback_failed_install() {
     fi
   else
     if (( PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE == 1 )); then
-      reapply_provider_migration_best_effort "$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+      reapply_provider_migration_best_effort "$TARGET_PATH"
     fi
     restore_existing_input_source_after_failed_quiesce
   fi
@@ -630,7 +632,7 @@ quiesce_before_replace() {
 }
 
 migrate_provider_profiles() {
-  local executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+  local provider_tool=""
   local output=""
   local installed_generation=""
   installed_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)"
@@ -640,13 +642,14 @@ migrate_provider_profiles() {
     fi
     return 0
   fi
-  if [[ ! -x "$executable" ]]; then
-    echo "error: installed executable is unavailable for provider profile migration: $executable" >&2
+  provider_tool="$(inputsource_tool_path)"
+  if [[ ! -x "$provider_tool" ]]; then
+    echo "error: provider profile helper is unavailable for migration" >&2
     return 1
   fi
   stop_provider_profile_writer_hosts
   PROVIDER_MIGRATION_ATTEMPTED=1
-  if ! output="$("$executable" --knowtype-migrate-provider-profiles 2>&1)"; then
+  if ! output="$("$provider_tool" migrate-provider-profiles 2>&1)"; then
     [[ -n "$output" ]] && printf '%s\n' "$output" >&2
     echo "error: provider profile migration failed; refusing to register the new input method" >&2
     return 1
@@ -672,16 +675,6 @@ purge_legacy_best_effort() {
 }
 
 bootstrap_input_source_best_effort() {
-  local executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
-  if [[ -x "$executable" ]]; then
-    if "$executable" --knowtype-register-input-source --knowtype-enable-input-source; then
-      return 0
-    fi
-    echo "warning: installed app input-source registration failed; falling back to helper bootstrap" >&2
-  else
-    echo "warning: installed KnowType executable is unavailable for input-source registration: $executable" >&2
-  fi
-
   local tool
   if ! tool="$(inputsource_tool_path)"; then
     echo "warning: input-source helper is unavailable; continuing without input-source bootstrap" >&2
@@ -1170,7 +1163,7 @@ else
   fi
 fi
 
-echo "Registered and enabled input source via installed app context: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+echo "Registered and enabled input source via standalone helper: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 echo "Postflight uses the JSON install snapshot only; run ./scripts/diagnose-inputmethod.sh --strict for full TIS diagnostics."
 if [[ -n "$BACKUP_ID" ]]; then
   echo "Rollback command: ./scripts/rollback-inputmethod.sh --to $BACKUP_ID"

@@ -53,6 +53,10 @@
   the provisional tombstone or compare-and-claim step, downgrade restores the
   exact snapshot only when the matching claim proves ownership; it never
   replaces recoverable profiles with an empty legacy payload.
+- `ProviderProfileStorageCommand` is the shared privacy-safe command surface for
+  migration, exact-revision rollback, and legacy downgrade. Both the standalone
+  input-source helper and the input-method app compatibility CLI delegate to it,
+  so persistence semantics and output contracts cannot drift.
 - A successful production commit posts only the new revision through
   `ProviderProfileRevisionSignaling`; the default signal crosses process
   boundaries and exposes no profile or credential contents.

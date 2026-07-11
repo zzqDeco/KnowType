@@ -260,7 +260,7 @@
 "settings.diagnostics.step.build.title" = "构建并签名";
 "settings.diagnostics.step.build.detail" = "运行输入法 bundle 构建脚本。脚本会优先选择可用的 Apple Development 签名身份，只有找不到证书时才回退到 ad-hoc 签名。";
 "settings.diagnostics.step.install.title" = "安装 bundle";
-"settings.diagnostics.step.install.detail" = "将 KnowType.app 复制到 ~/Library/Input Methods。安装脚本会清理过期的 .Mode 开发状态，然后从已安装 app 上下文注册并启用 KnowType parent anchor 与可见 .Hans 输入模式。设置入口在输入法菜单里的 KnowType 设置...";
+"settings.diagnostics.step.install.detail" = "将 KnowType.app 复制到 ~/Library/Input Methods。安装脚本会清理过期的 .Mode 开发状态，然后通过独立 helper 注册并启用 KnowType parent anchor 与可见 .Hans 输入模式。设置入口在输入法菜单里的 KnowType 设置...";
 "settings.diagnostics.step.diagnose.title" = "诊断安装";
 "settings.diagnostics.step.diagnose.detail" = "运行只读诊断，检查 bundle metadata、签名、打包资源、Text Input Source 注册、本地数据路径，以及可选的 Gatekeeper 或 sandbox 日志线索。";
 "settings.diagnostics.step.select.title" = "请求切换";

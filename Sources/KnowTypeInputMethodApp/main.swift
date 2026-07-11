@@ -48,10 +48,10 @@ private enum TextInputSourceActivation {
             return RimeRuntimeSmoke.run()
         }
         if args.contains("--knowtype-migrate-provider-profiles") {
-            return ProviderProfileStorageMigrationCommand.run()
+            return ProviderProfileStorageCommand.migrate()
         }
         if args.contains("--knowtype-downgrade-provider-profiles") {
-            return ProviderProfileStorageMigrationCommand.downgradeForLegacyRuntime()
+            return ProviderProfileStorageCommand.downgradeForLegacyRuntime()
         }
         if args.contains("--knowtype-rollback-provider-profile-migration") {
             guard let expectedRevision = argumentValue(
@@ -61,7 +61,7 @@ private enum TextInputSourceActivation {
                 fputs("provider.migration.rollback.error=expected-revision-required\n", stderr)
                 return 2
             }
-            return ProviderProfileStorageMigrationCommand.rollback(
+            return ProviderProfileStorageCommand.rollback(
                 expectedCanonicalRevision: expectedRevision
             )
         }
@@ -314,107 +314,6 @@ private enum TextInputSourceActivation {
         print("purge.active.inputsource.id=\(activeInputSourceID)")
         print("purge.active.mode.id=\(activeInputSourceID)")
         print("purge.launchservices.unregistered=\(unregistered)")
-    }
-}
-
-private enum ProviderProfileStorageMigrationCommand {
-    static func run() -> Int32 {
-        do {
-            let result = try profileStore().migrateLegacyProfiles(
-                secretStore: KeychainSecretStore()
-            )
-            print("provider.migration.status=\(result.status.rawValue)")
-            print("provider.migration.revision=\(result.revision)")
-            print("provider.migration.profiles=\(result.profileCount)")
-            print("provider.migration.credentials.rekeyed=\(result.credentialsRekeyed)")
-            print("provider.migration.credentials.missing=\(result.missingCredentials)")
-            return 0
-        } catch let error as ProviderProfileStoreError {
-            fputs("provider.migration.error=\(errorCode(error))\n", stderr)
-            return 1
-        } catch {
-            fputs("provider.migration.error=unexpected\n", stderr)
-            return 1
-        }
-    }
-
-    static func rollback(expectedCanonicalRevision: UInt64) -> Int32 {
-        do {
-            let result = try profileStore().rollbackLegacyMigration(
-                expectedCanonicalRevision: expectedCanonicalRevision,
-                secretStore: KeychainSecretStore()
-            )
-            print("provider.migration.rollback=ok")
-            print("provider.migration.rollback.credentials.removed=\(result.credentialsRemoved)")
-            print("provider.migration.rollback.credentials.cleanupFailures=\(result.credentialCleanupFailures)")
-            return 0
-        } catch let error as ProviderProfileStoreError {
-            fputs("provider.migration.rollback.error=\(errorCode(error))\n", stderr)
-            return 1
-        } catch {
-            fputs("provider.migration.rollback.error=unexpected\n", stderr)
-            return 1
-        }
-    }
-
-    static func downgradeForLegacyRuntime() -> Int32 {
-        do {
-            let result = try profileStore().downgradeCanonicalProfilesForLegacyRuntime()
-            print("provider.storage.downgrade.status=\(result.status.rawValue)")
-            print("provider.storage.downgrade.revision=\(result.revision)")
-            print("provider.storage.downgrade.profiles=\(result.profileCount)")
-            return 0
-        } catch let error as ProviderProfileStoreError {
-            fputs("provider.storage.downgrade.error=\(errorCode(error))\n", stderr)
-            return 1
-        } catch {
-            fputs("provider.storage.downgrade.error=unexpected\n", stderr)
-            return 1
-        }
-    }
-
-    private static func profileStore() throws -> FileProviderProfileStore {
-        if let override = ProcessInfo.processInfo.environment["KNOWTYPE_APP_SUPPORT_DIR"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !override.isEmpty {
-            let directory = URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            return FileProviderProfileStore(
-                fileURL: directory.appendingPathComponent(FileProviderProfileStore.canonicalFilename),
-                legacyFileURL: directory.appendingPathComponent(FileProviderProfileStore.legacyFilename),
-                legacySnapshotURL: directory.appendingPathComponent(FileProviderProfileStore.legacySnapshotFilename)
-            )
-        }
-        return try FileProviderProfileStore.defaultStore()
-    }
-
-    private static func errorCode(_ error: ProviderProfileStoreError) -> String {
-        switch error {
-        case .unsupportedSchemaVersion:
-            return "unsupported-schema"
-        case .revisionConflict:
-            return "revision-conflict"
-        case .revisionOverflow:
-            return "revision-overflow"
-        case .lockFailed:
-            return "lock-failed"
-        case .migrationRequired:
-            return "migration-required"
-        case .canonicalFileMissing:
-            return "canonical-missing"
-        case .legacyWriterDetected:
-            return "legacy-writer-detected"
-        case .legacyChangedDuringMigration:
-            return "legacy-changed"
-        case .invalidMigrationCredentialReference:
-            return "invalid-credential-reference"
-        case .filePermissionUpdateFailed:
-            return "permission-update-failed"
-        case .migrationRollbackFailed:
-            return "migration-rollback-failed"
-        case .metadataRollbackFailed:
-            return "metadata-rollback-failed"
-        }
     }
 }
 
