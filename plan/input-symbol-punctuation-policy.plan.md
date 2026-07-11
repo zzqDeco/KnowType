@@ -1,5 +1,9 @@
 # Input Symbol Punctuation Policy
 
+Status: Absorbed by
+[input-mode-punctuation-linkage.plan.md](input-mode-punctuation-linkage.plan.md)
+and [rime-mode-option-sync.plan.md](rime-mode-option-sync.plan.md).
+
 ## Summary
 
 Fix the Chinese punctuation path so Chinese input mode no longer feels like an
@@ -12,8 +16,8 @@ than treating Chinese punctuation as a full-width symbol switch.
 ## Scope
 
 - Narrow local Chinese punctuation mapping in the input-method target.
-- Change built-in code-app defaults to Chinese text input with English
-  punctuation and half-width symbols, while preserving saved user preferences.
+- Keep host compatibility independent from the process-global text,
+  punctuation, and width state.
 - Clarify Settings copy so users see "punctuation style" and "character width"
   as separate controls.
 - Update source notes, README shortcut docs, and regression tests.
@@ -29,12 +33,8 @@ installer changes, or preference migration that overwrites saved user choices.
 - Code/path/operator symbols such as `-`, `_`, `+`, `=`, `\`, `@`, `#`, `$`,
   `%`, `^`, `&`, `*`, `|`, `~`, `` ` ``, `{`, and `}` stay ASCII unless the
   explicit full-width setting is enabled.
-- `InputModePreferences.standard.codeAppState` uses English punctuation and
-  half-width symbols. Non-terminal code apps still inherit the normal Chinese
-  text mode, so composition can start immediately while idle symbols stay
-  code-friendly.
-- Saved `input.codeApp.*` preferences continue to win over the built-in
-  defaults.
+- Legacy default/code-app fields remain readable but do not influence the
+  process runtime.
 
 ## Test Plan
 
@@ -49,13 +49,12 @@ Manual acceptance:
 
 - In TextEdit or Chrome, `nihao,` commits the Rime candidate plus `，`.
 - In TextEdit or Chrome, `- _ + = @ #` remain ASCII in half-width mode.
-- In Codex, VS Code, or Xcode, Chinese composition still starts on letters, but
-  idle `/`, `{}`, `-`, and `_` remain ASCII.
-- When full-width symbols are explicitly enabled, ASCII symbols become
-  full-width as expected.
+- Switching among TextEdit, Codex, VS Code, Xcode, and Terminal preserves the
+  current process-global mode.
+- When full width is enabled, printable ASCII and normal space become
+  full-width characters in every app.
 
 ## Assumptions
 
 - `/` remains the normal Chinese dunhao entry in non-code Chinese punctuation.
-- Code-app English punctuation defaults apply only when no saved user
-  preference exists or after reset-to-defaults.
+- Host carrier overrides do not change input mode.

@@ -20,8 +20,8 @@ surprise where changing apps silently changed punctuation.
 - Stop applying bundle-specific text, punctuation, or width defaults.
 - Keep only one persisted global default width and retain old preference shapes
   and keys as read-only compatibility data.
-- Classify the character before the caret only for an idle period and apply the
-  numeric-period exception without logging document text.
+- Preserve the numeric-period exception from the recorded KnowType insertion
+  without logging or repeatedly reading document text.
 - Simplify Settings and update mode, punctuator, coordinator, host-seam, and
   interface documentation.
 
@@ -39,7 +39,8 @@ installation, or registration changes.
   generation each turn and reset quote pairing and symbol-candidate overlays
   after external transitions.
 - `InputControllerClient.characterBeforeCaret()` defaults to unavailable. The
-  IMK adapter requests one preceding UTF-16 unit only for a collapsed caret.
+  IMK adapter requests one preceding UTF-16 unit only for a collapsed caret and
+  only when the current key needs quote context.
 - `InputPunctuationContextResolver` prefers client context and otherwise uses a
   client- and expected-caret-bound insertion fallback.
 - An idle `.` after ASCII `0...9` commits `.` before punctuation or full-width

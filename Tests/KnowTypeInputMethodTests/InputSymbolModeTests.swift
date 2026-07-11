@@ -86,6 +86,26 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(transformer.text(for: "@", state: state), "＠")
     }
 
+    func testFullWidthCharacterTransformCoversPrintableASCIIAndSpace() {
+        XCTAssertEqual(
+            InputSymbolTransformer.textWithWidth(for: " !09AZaz~", width: .fullWidth),
+            "　！０９ＡＺａｚ～"
+        )
+    }
+
+    func testFullWidthCharacterTransformPreservesControlAndNonASCIIText() {
+        let input = "\t\n\r\u{7F}中文"
+
+        XCTAssertEqual(
+            InputSymbolTransformer.textWithWidth(for: input, width: .fullWidth),
+            input
+        )
+        XCTAssertEqual(
+            InputSymbolTransformer.textWithWidth(for: "A 1", width: .halfWidth),
+            "A 1"
+        )
+    }
+
     func testLegacyAppPreferencesDoNotDefineTheRuntimeInitialState() {
         let preferences = InputModePreferences(
             defaultState: InputModeState(

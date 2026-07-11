@@ -24,9 +24,10 @@ Current seams:
   payloads as attributed objects instead of flattening them to plain strings.
   For a collapsed known caret, it can request exactly one preceding UTF-16 unit
   through `attributedSubstring(from:)`. The coordinator invokes this only for
-  idle period punctuation; ordinary keys never read document context.
+  quote keys; period and ordinary keys never read document context.
 
-The context seam returns only a `Character?` and diagnostics classify it as
-digit, other, or unknown. Raw surrounding text must not cross into logs.
+The context seam returns only a `Character?`; diagnostics retain only its
+privacy-safe classification and source. Raw surrounding text must not cross
+into logs.
 
 Provider adapters and product logic must not depend on these seams. They are only for the input-method host/client boundary.

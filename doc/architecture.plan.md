@@ -37,8 +37,9 @@ placeholder during Chinese composition for IMK ownership and candidate anchoring
 The real raw/preedit string is rendered in KnowType's candidate panel only when
 the host receives a placeholder carrier. A UserDefaults write-mode override can
 force any bundle into `commitOnlyComposition`; committed text still goes through
-`insertText`. When the global text mode is ASCII, idle printable input passes
-through regardless of carrier profile.
+`insertText`. When the global text mode is ASCII, idle half-width printable
+input passes through regardless of carrier profile; full-width printable input
+is transformed and inserted by KnowType.
 
 Level 0 protected input remains a correction/local-protection concept: it avoids
 rewriting URLs, paths, commands, code-like text, and protected app contexts.
@@ -278,8 +279,9 @@ LevelDB state.
   frame cannot fit the natural height.
 
 The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Inline hosts receive Rime preedit as an attributed marked-text payload, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Terminal-style or override commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real preedit row above candidate rows for those hosts. Commit planning is value-only, then the coordinator clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
-`InputClientCompositionWriter` owns the host carrier write state, idle ASCII
-passthrough decisions, and KnowType-owned marked-text cleanup. The lower-level
+`InputClientCompositionWriter` owns the host carrier write state, idle
+half-width ASCII passthrough decisions, and KnowType-owned marked-text cleanup.
+The lower-level
 `InputClientWriteCoordinator` still owns the actual `setMarkedText`/`insertText`
 calls, `NSNotFound` replacement ranges, and privacy-safe diagnostics.
 

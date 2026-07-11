@@ -92,8 +92,11 @@ non-selectable preedit row above candidates, then commits with `insertText`.
 punctuation. `Option + .` is a Chinese-mode-only manual punctuation override
 that expires on the next text-mode switch. `Shift + Space` toggles the
 independent process-wide half-width/full-width state. ASCII mode passes idle
-printable input back to the focused app. Missing clients use `disabled`; printable idle input is returned as
-unhandled so the host can keep normal typing behavior. All write modes keep
+half-width printable input back to the focused app; in full-width mode KnowType
+transforms only mapped ASCII characters and space, while unchanged Unicode text
+continues through ASCII passthrough. Missing clients use `disabled`; printable
+idle input is returned as unhandled before any full-width fast path so a stale
+host client is never reused. All write modes keep
 replacement ranges as `{NSNotFound, NSNotFound}` unless a future reconversion
 feature introduces an explicit owned range.
 `InputClientCompositionWriter` is the internal boundary that applies this mode
@@ -101,14 +104,18 @@ to inline marked text, placeholder marked text, idle passthrough, and owned
 marked-text cleanup. `InputClientWriteCoordinator` remains the lower-level
 writer for `setMarkedText`, `insertText`, replacement ranges, and debug logs.
 
-The local punctuator receives `InputPunctuatorContext`. Only an idle `.` asks
-the IMK adapter for the single UTF-16 unit immediately before a collapsed
-caret. An ASCII digit produces `.` even in Chinese punctuation or full-width
-mode. Active Rime composition, non-empty selection, unavailable ranges, and
-unknown or moved carets use the ordinary punctuation path. A client-bound,
-expected-caret fallback may use the last KnowType insertion when the client
-cannot provide document text. Diagnostics record only `digit`, `other`, or
-`unknown` plus the context source, never document text.
+The local punctuator receives `InputPunctuatorContext`. Only Chinese
+half-width quote keys ask the IMK adapter for the single UTF-16 unit immediately
+before a collapsed caret; English and full-width quote output does not read
+document context.
+Whitespace and opening punctuation open a quote; text, digits, and closing
+punctuation close it. A preceding Chinese quote and unknown context fall back
+to session alternation so consecutive quote keys still form an opening/closing
+pair. An
+idle `.` uses only a client-bound, expected-caret record of the last KnowType
+insertion, so an ASCII digit produces `.` even in Chinese punctuation or
+full-width mode without reading host document text. Diagnostics record only
+the character classification and context source, never document text.
 
 ## Provider Kinds
 
@@ -537,17 +544,17 @@ reason; they do not include user text or raw geometry.
 ## Shortcut Contract
 
 - `Space` commits the highlighted/current Rime candidate for the current raw input.
-- with no active composition, `Space` inserts a normal space instead of being consumed by the input method.
+- with no active composition, `Space` inserts U+0020 in half-width mode or U+3000 in full-width mode.
 - when Rime is unavailable, `Space` commits raw input instead of blocking to compute hidden local candidates.
 - `1...9` select Rime current-page candidates during native composition, independent of candidate-panel visibility.
-- with no active composition, `0...9` are inserted as ordinary digits and do not open the candidate panel.
+- with no active composition, `0...9` are inserted as half-width or full-width digits according to the process width and do not open the candidate panel.
 - `Return` / `Enter` commits the original raw composition.
 - `Tab` commits the AI recommendation only when the AI slot is ready; pending, unavailable, disabled, or ineligible AI keeps the composition.
 - `Tab` does not trigger AI continuation while the composition is in a legacy partial-segment state.
 - `0` commits raw composition when correction candidates are visible.
 - visible numeric shortcuts commit rows on the current Rime candidate page only; after the AI slot, native alternatives keep their visible row numbers.
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
-- plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, paired Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao, but keeps code/path/operator symbols half-width unless full-width symbols are explicitly enabled.
+- plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, context-selected Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao. Full-width mode transforms printable ASCII `!...~` and U+0020, but never control characters, Tab, or newline.
 - symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
 - `Option + .` toggles a manual Chinese/English punctuation override only while
   process-wide text mode is Chinese. In ASCII mode it is a state no-op that
@@ -555,9 +562,9 @@ reason; they do not include user text or raw geometry.
 - `Option + /` toggles process-wide Chinese/ASCII text mode, synchronizes
   punctuation to Chinese/English, clears the manual override, and publishes a
   transient mode-status row shared across apps.
-- `Shift + Space` toggles process-wide half-width/full-width symbols without
+- `Shift + Space` toggles process-wide half-width/full-width characters without
   changing text or punctuation. Plain `Space` still commits candidates or
-  inserts/passes through a normal space. The transient row is cleared before
+  inserts a width-appropriate space. The transient row is cleared before
   the next real input key publishes composition, symbol candidates, commit, or
   passthrough output, so it does not remain mixed into active candidate content.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
@@ -573,6 +580,22 @@ Changing app or window does not reload mode. A host restart creates a fresh
 linked Chinese state. `InputModePreferences` persists only
 `input.global.symbolWidth`; legacy normal/code app fields remain readable but
 do not influence runtime mode.
+
+`RimeConversionEngine` maps every process snapshot to native session options:
+Chinese/ASCII text controls `ascii_mode`, Chinese/English punctuation controls
+`ascii_punct`, and half/full width controls `full_shape`. The desired snapshot
+is cached without creating Rime during cold start, then applied after schema
+selection for every new session and whenever generation changes. The C bridge
+checks `RimeApi.data_size` and null option pointers so older librime builds fail
+closed rather than reading beyond their API struct.
+
+The local quote fallback reads the preceding document character only on quote
+keys. Whitespace and Unicode opening punctuation choose an opening quote;
+text, digits, and closing punctuation choose a closing quote. Unknown context
+uses session alternation. External delete, focus or selection changes, and mode
+generation changes reset alternation. The ASCII-digit-plus-period exception is
+evaluated from the last recorded KnowType insertion before punctuation and width
+conversion and therefore remains `.` without a period-key document read.
 
 Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation preference for legacy paths, continuation length, and continuation count. These preferences use the same shared defaults domain and are read by the input method at startup and new composition boundaries. The Rime-only settings UI no longer exposes the legacy input-scheme picker; production conversion uses the bundled Rime full-pinyin schema. Defaults preserve the current production behavior: six adaptive candidates per page, adaptive horizontal panel layout, cloud continuation enabled, medium continuation length, and six continuation candidates. If an older preference stores nine candidates per page, adaptive layout caps the effective page size at six; vertical-list mode uses the saved page size.
 

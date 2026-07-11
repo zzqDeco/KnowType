@@ -40,11 +40,12 @@ when converting a shipped plan into a short record.
 | [native-candidate-panel-spotlight-ui.plan.md](native-candidate-panel-spotlight-ui.plan.md) | macOS-native compact candidate panel styling and Spotlight window-level fix | Active |
 | [candidate-panel-lifecycle-teardown.plan.md](candidate-panel-lifecycle-teardown.plan.md) | Hide, sequence, and invalidate candidate-panel frames across commit, deactivate, close, and stale async updates | Active |
 | [candidate-panel-search-overlay-placement.plan.md](candidate-panel-search-overlay-placement.plan.md) | Place the candidate panel above Spotlight search overlays while preserving ordinary text-field placement | Active |
-| [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Visible candidate, punctuation, Space commit, and anchoring alignment | Active |
-| [input-symbol-punctuation-policy.plan.md](input-symbol-punctuation-policy.plan.md) | Keep Chinese punctuation, full-width symbols, and code-app ASCII operator defaults separated | Active |
+| [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Visible candidate, process-global punctuation, Space commit, and anchoring alignment | Active |
+| [input-symbol-punctuation-policy.plan.md](input-symbol-punctuation-policy.plan.md) | Earlier punctuation/width policy, absorbed by process-global mode semantics | Absorbed |
 | [input-mode-feedback-punctuator-candidates.plan.md](input-mode-feedback-punctuator-candidates.plan.md) | Add transient mode feedback, mature punctuator decisions, and panel-backed symbol candidates | Active |
-| [input-mode-shortcuts-width-feedback.plan.md](input-mode-shortcuts-width-feedback.plan.md) | Add Shift+Space symbol-width toggling and keep text, punctuation, and width feedback explicit | Active |
+| [input-mode-shortcuts-width-feedback.plan.md](input-mode-shortcuts-width-feedback.plan.md) | Earlier Shift+Space width-feedback slice, absorbed by process/global native synchronization | Absorbed |
 | [input-mode-punctuation-linkage.plan.md](input-mode-punctuation-linkage.plan.md) | Share one host-lifetime mode across apps, link punctuation to text mode, and keep numeric periods ASCII | Active |
+| [rime-mode-option-sync.plan.md](rime-mode-option-sync.plan.md) | Synchronize process-wide mode options into native Rime and complete character-width/quote semantics | Active |
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
 | [input-method-first-key-performance.plan.md](input-method-first-key-performance.plan.md) | Reduce post-install/process-cold first-key stall and repeated hot-path overhead | Active |
 | [input-method-first-key-review-followup.plan.md](input-method-first-key-review-followup.plan.md) | Resolve PR #150 first-key performance review regressions | Active |
@@ -115,8 +116,8 @@ when converting a shipped plan into a short record.
 | [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |
 | [imk-owned-marked-range-commit.plan.md](imk-owned-marked-range-commit.plan.md) | Prevent cursor misplacement by ignoring stale host marked ranges on ordinary IMK writes | Active |
 | [imk-default-mouse-commit.plan.md](imk-default-mouse-commit.plan.md) | Restore InputMethodKit's default click-outside composition commit | Active |
-| [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
-| [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persisted punctuation and symbol-width preferences | Active |
+| [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Earlier explicit mode-state slice, absorbed by the process runtime | Absorbed |
+| [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Earlier per-app preference slice, absorbed by global-width persistence | Absorbed |
 | [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Active |
 | [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual gates | Active |
 | [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active |

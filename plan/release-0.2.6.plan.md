@@ -18,8 +18,8 @@ local MVP zip, both unsigned and not notarized.
 
 ## Included Changes
 
-- Chinese punctuation and symbol-width policy now keeps Chinese punctuation,
-  full-width symbols, and code-app ASCII defaults separate.
+- Chinese punctuation and character width are separate process-global modes;
+  app changes no longer load code-app defaults.
 - Mode feedback and mature punctuator behavior add visible mode status,
   pair/list punctuation decisions, and panel-backed symbol candidates.
 - `Shift+Space` now toggles half-width/full-width symbol output, while

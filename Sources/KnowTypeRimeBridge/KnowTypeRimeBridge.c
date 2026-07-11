@@ -534,6 +534,28 @@ bool ktb_rime_change_page(KTBRimeSession *session, bool backward) {
     return session->api->change_page(session->session_id, backward);
 }
 
+bool ktb_rime_set_option(KTBRimeSession *session, const char *option, bool value) {
+    if (!session || !session->api || session->session_id == 0 ||
+        !option || option[0] == '\0' ||
+        !KTB_RIME_API_HAS(session->api, set_option) ||
+        !session->api->set_option) {
+        return false;
+    }
+    session->api->set_option(session->session_id, option, value);
+    return true;
+}
+
+bool ktb_rime_get_option(KTBRimeSession *session, const char *option, bool *value) {
+    if (!session || !session->api || session->session_id == 0 ||
+        !option || option[0] == '\0' || !value ||
+        !KTB_RIME_API_HAS(session->api, get_option) ||
+        !session->api->get_option) {
+        return false;
+    }
+    *value = session->api->get_option(session->session_id, option);
+    return true;
+}
+
 bool ktb_rime_sync_user_data(KTBRimeSession *session) {
     if (!session || !session->api ||
         !KTB_RIME_API_HAS(session->api, sync_user_data) ||

@@ -16,6 +16,8 @@ of `InputModeStateMachine` shared by all production IMK coordinators.
 ## Behavior Notes
 
 - App, window, and input-session changes do not create or reload mode state.
+- Coordinators synchronize each new generation to the live Rime session options;
+  the process runtime itself remains free of Rime side effects.
 - A fresh host process creates a fresh linked Chinese state using the saved
   global symbol width.
 - The runtime tracks the last observed configured width separately from the

@@ -36,6 +36,28 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("‘"))
     }
 
+    func testQuoteContextOverridesAlternationAndUpdatesUnknownFallback() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: "\"",
+                context: InputPunctuatorContext(state: state, quoteContext: .closing)
+            ),
+            .commit("”")
+        )
+        XCTAssertEqual(runtime.decision(for: "\"", state: state), .commit("“"))
+        XCTAssertEqual(
+            runtime.decision(
+                for: "'",
+                context: InputPunctuatorContext(state: state, quoteContext: .opening)
+            ),
+            .commit("‘")
+        )
+        XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("’"))
+    }
+
     func testChineseHalfWidthEllipsisDashAndAsciiMinus() {
         var runtime = InputPunctuatorRuntime()
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
@@ -149,7 +171,7 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
                 for: ".",
                 context: InputPunctuatorContext(
                     state: state,
-                    previousCharacterKind: .other
+                    previousCharacterKind: .text
                 )
             ),
             .commit("。")

@@ -6,8 +6,11 @@ This fix aligns punctuation defaults, candidate visibility, and commit behavior 
 
 ## Behavior
 
-- Code-style applications still use the separate `codeAppState` preference, but the built-in default punctuation mode is Chinese instead of English. Users can still override code-style apps back to English punctuation in settings.
-- `Option + .` remains a session-local Chinese/English punctuation toggle and does not rewrite saved preferences.
+- Input mode is process-global for the input-method host. Legacy `codeAppState`
+  preference data remains readable for migration but does not select runtime
+  punctuation mode.
+- `Option + .` updates the process-global Chinese/English punctuation mode and
+  synchronizes the active native Rime session.
 - The async input path publishes raw marked text and an immediate local prefix-only candidate snapshot. It does not publish hidden local fallback continuations while a provider-backed continuation request is pending.
 - `Space` commits only the current visible candidate snapshot for the current raw input. If only raw input is visible, `Space` must not commit a hidden Chinese fallback.
 - `Return` / `Enter` still commits the raw composition.

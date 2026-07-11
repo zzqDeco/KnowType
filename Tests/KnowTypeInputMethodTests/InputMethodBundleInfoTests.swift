@@ -40,6 +40,10 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, change_page)"))
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, get_current_schema)"))
         XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, get_status)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, set_option)"))
+        XCTAssertTrue(source.contains("KTB_RIME_API_HAS(session->api, get_option)"))
+        XCTAssertTrue(source.contains("!session->api->set_option"))
+        XCTAssertTrue(source.contains("!session->api->get_option"))
     }
 
     func testRimeBridgeUsesCurrentPageCandidatesForNativeSnapshots() throws {
