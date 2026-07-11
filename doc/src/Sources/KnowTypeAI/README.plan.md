@@ -24,7 +24,13 @@ Current responsibilities:
   app selection history out of lexical profile inputs, but those correction
   protection rules are not the cloud-AI disabled-state gate.
 - `AIContextMemoryRuntime` records committed typing events and periodically asks the provider to summarize them into `ENV.md`.
-- `TypingEventStore` stores event batches as JSONL and archives processed batches after a successful digest.
+- `ProviderRuntimeRegistry` owns process-level provider leases and cancels
+  recommendation/context work when the revision generation changes. Disk
+  revision fallback runs only before eligible AI dispatch.
+- Production shares one `AIContextMemoryRuntime` actor across all input
+  controllers. `TypingEventStore` stores event batches as JSONL and atomically
+  claims the processed prefix while ENV and archive persistence remain guarded
+  by the current provider generation.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, replacing only the generated section. Loaded snapshots normalize duplicate generated markers and persist the repair best-effort while still returning the repaired in-memory content if write-back fails.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; deterministic traditional input does not read this file.
 - `AIHealthMonitor` keeps transient provider failures from hammering the provider or blocking input.
@@ -44,4 +50,6 @@ Testing concerns:
 - failure cooldown must suppress repeated provider calls
 - cancellation must not enter failure cooldown or surface `AI 暂不可用`
 - context digest must preserve `User Notes` in `ENV.md`
+- one pending context snapshot must produce at most one process-level digest;
+  stale generations must not write ENV or archive newly appended events
 - accepted AI learning must skip secret-like content, record only explicit AI commits, and never write Rime userdb

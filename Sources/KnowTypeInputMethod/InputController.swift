@@ -36,6 +36,12 @@ private enum InputMethodInputModeRuntime {
     )
 }
 
+private enum InputMethodAIRuntime {
+    static let contextMemory = AIContextMemoryRuntime(
+        providerRegistry: ProviderRuntimeRegistry.shared
+    )
+}
+
 private final class InputMethodRimePrewarmer: @unchecked Sendable {
     static let shared = InputMethodRimePrewarmer()
 
@@ -76,7 +82,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             providerAvailability: aiProviderAvailability,
             debounceMilliseconds: 0
         )
-        let aiContextEventRecorder: any AIContextEventRecording = LazyDefaultAIContextMemoryRuntime()
+        let aiContextEventRecorder: any AIContextEventRecording = InputMethodAIRuntime.contextMemory
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()

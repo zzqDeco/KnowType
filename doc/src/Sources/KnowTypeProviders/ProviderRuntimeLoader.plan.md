@@ -2,8 +2,8 @@
 
 ## Responsibility
 
-`ProviderRuntimeLoader` resolves saved provider profiles and creates the runtime
-provider used by the input method.
+`ProviderRuntimeLoader` resolves saved provider profiles and creates the
+revisioned runtime source used by the input method.
 
 ## Boundaries
 
@@ -23,9 +23,15 @@ provider used by the input method.
   not create `Application Support/KnowType` only because the host was launched.
 - Runtime loading should fail transparently enough for diagnostics without
   leaking secret values.
+- Runtime load results carry the canonical revision, an opaque SHA-256
+  fingerprint of the resolved configuration, and the optional provider. The
+  fingerprint can distinguish runtime generations without exposing endpoints,
+  models, headers, or secrets.
+- `loadProviderRevision()` is the lightweight missed-notification fallback used
+  by `ProviderRuntimeRegistry` only before eligible AI dispatch.
 
 ## Tests
 
 - `ProviderProfileTests`
 - `ProviderProfilesViewModelTests`
-- Input-method provider fallback tests
+- `ProviderRuntimeRegistryTests`

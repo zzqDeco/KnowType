@@ -291,7 +291,56 @@ public struct DistributedProviderProfileRevisionSignal: ProviderProfileRevisionS
         )
         #endif
     }
+
+    public func revisionUpdates() -> AsyncStream<UInt64> {
+        #if os(macOS)
+        return AsyncStream { continuation in
+            let observation = DistributedProviderProfileRevisionObservation(
+                continuation: continuation
+            )
+            continuation.onTermination = { _ in
+                observation.cancel()
+            }
+        }
+        #else
+        return AsyncStream { _ in }
+        #endif
+    }
 }
+
+#if os(macOS)
+private final class DistributedProviderProfileRevisionObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var token: NSObjectProtocol?
+
+    init(continuation: AsyncStream<UInt64>.Continuation) {
+        token = DistributedNotificationCenter.default().addObserver(
+            forName: DistributedProviderProfileRevisionSignal.notificationName,
+            object: nil,
+            queue: nil
+        ) { notification in
+            guard let number = notification.userInfo?["revision"] as? NSNumber else {
+                return
+            }
+            continuation.yield(number.uint64Value)
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        let token = self.token
+        self.token = nil
+        lock.unlock()
+        if let token {
+            DistributedNotificationCenter.default().removeObserver(token)
+        }
+    }
+
+    deinit {
+        cancel()
+    }
+}
+#endif
 
 public struct FileProviderProfileStore: ProviderProfileStore {
     public static let canonicalFilename = "providers.v2.json"

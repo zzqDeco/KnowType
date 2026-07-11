@@ -25,8 +25,16 @@ construction, cache interaction, health reporting, and the final
   and colon. A single exact duplicate at the prefix boundary stays removed.
 - Sanitizer repair and rejection reasons are emitted through privacy-safe AI
   diagnostics without logging candidate text.
+- `LazyDefaultAIRecommendationRuntime` obtains a registry lease only after the
+  request passes provider-dispatch eligibility. It caches one recommendation
+  runtime per provider generation, so cache and health state do not cross a
+  configuration change.
+- Registry generation changes cancel the old runtime operation. A provider that
+  ignores cancellation returns `.stale`, which is an internal control state and
+  must be dropped before candidate UI publication.
 
 ## Tests
 
 - `AIRecommendationRuntimeTests`
 - `InputAIRecommendationRuntimeTests`
+- `ProviderRuntimeRegistryTests`

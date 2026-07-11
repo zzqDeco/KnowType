@@ -167,6 +167,12 @@ actor StructuredOutputCapabilityCache {
     }
 }
 
+public enum ProviderRuntimeCapabilityState {
+    public static func reset() async {
+        await StructuredOutputCapabilityCache.shared.reset()
+    }
+}
+
 enum StructuredOutputFallback {
     enum Mode: Equatable, Sendable {
         case jsonObject

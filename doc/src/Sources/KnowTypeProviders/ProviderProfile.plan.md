@@ -56,6 +56,9 @@
 - A successful production commit posts only the new revision through
   `ProviderProfileRevisionSignaling`; the default signal crosses process
   boundaries and exposes no profile or credential contents.
+- `DistributedProviderProfileRevisionSignal.revisionUpdates()` is the runtime
+  observation surface. It yields only monotonic revision numbers and never
+  causes profile reads on the ordinary key path.
 - Validation differs for local and remote OpenAI-compatible profiles: local
   profiles may leave model blank for discovery, remote profiles may not.
 - Saved profiles override seeded defaults.
