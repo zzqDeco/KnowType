@@ -165,9 +165,10 @@ assert_contains "$install_script_contents" '--version "$LOCAL_SHORT_VERSION" --b
 assert_contains "$install_script_contents" 'knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0' "install script"
 assert_contains "$install_script_contents" 'knowtype_replace_local_preferencepane_bundle_atomically' "install script"
 assert_contains "$install_script_contents" 'stop_provider_profile_writer_hosts' "install script"
-assert_contains "$install_script_contents" '"$executable" --knowtype-migrate-provider-profiles' "install script"
-assert_contains "$install_script_contents" '"$executable" --knowtype-rollback-provider-profile-migration' "install script"
-assert_contains "$install_script_contents" '"$executable" --knowtype-downgrade-provider-profiles' "install script"
+assert_contains "$install_script_contents" '"$provider_tool" migrate-provider-profiles' "install script"
+assert_contains "$install_script_contents" '"$provider_tool" rollback-provider-profile-migration' "install script"
+assert_contains "$install_script_contents" '"$provider_tool" downgrade-provider-profiles' "install script"
+assert_not_contains "$install_script_contents" 'KnowTypeInputMethodApp" --knowtype-migrate-provider-profiles' "install script"
 assert_contains "$install_script_contents" 'provider_storage_generation_for_bundle' "install script"
 assert_contains "$install_script_contents" 'prepare_provider_storage_for_source_bundle' "install script"
 assert_contains "$install_script_contents" 'SOURCE_PROVIDER_STORAGE_GENERATION' "install script"
@@ -194,7 +195,9 @@ assert_not_contains "$rollback_script_contents" 'open -g "$target_path"' "rollba
 assert_contains "$rollback_script_contents" "--allow-unverified-backup" "rollback script"
 assert_contains "$rollback_script_contents" 'knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP"' "rollback script"
 assert_contains "$rollback_script_contents" 'knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0' "rollback script"
-assert_contains "$rollback_script_contents" '--knowtype-downgrade-provider-profiles' "rollback script"
+assert_contains "$rollback_script_contents" '"$provider_tool" downgrade-provider-profiles' "rollback script"
+assert_contains "$rollback_script_contents" '"$provider_tool" migrate-provider-profiles' "rollback script"
+assert_not_contains "$rollback_script_contents" 'KnowTypeInputMethodApp" --knowtype-downgrade-provider-profiles' "rollback script"
 assert_contains "$rollback_script_contents" 'prepare_provider_storage_for_restored_app' "rollback script"
 assert_contains "$rollback_script_contents" 'provider_storage_generation_for_bundle' "rollback script"
 assert_not_contains "$rollback_script_contents" 'rm -rf -- "$prefpane_path"' "rollback script"
@@ -204,8 +207,10 @@ assert_contains "$uninstall_script_contents" 'knowtype_remove_local_preferencepa
 assert_not_contains "$uninstall_script_contents" 'rm -rf -- "$PREFPANE_TARGET_PATH"' "uninstall script"
 
 assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" purge-legacy' "repair script"
-assert_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-register-input-source --knowtype-enable-input-source' "repair script"
-assert_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-select-input-source' "repair script"
+assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" "${bootstrap_args[@]}"' "repair script"
+assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" select' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-register-input-source' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-select-input-source' "repair script"
 assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-install-activate' "repair script"
 assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-purge-legacy' "repair script"
 assert_not_contains "$repair_script_contents" "killall KnowTypeInputMethodApp" "repair script"
@@ -426,11 +431,13 @@ fi
 
 migration_support_dir="$install_state_tmp/provider-migration"
 mkdir -p "$migration_support_dir"
+provider_tool_path="$(CONFIGURATION=debug knowtype_inputsource_tool "$ROOT_DIR")"
+export KNOWTYPE_INPUTSOURCE_TOOL="$provider_tool_path"
 legacy_provider_fixture='{"schemaVersion":1,"profiles":[]}'
 printf '%s\n' "$legacy_provider_fixture" >"$migration_support_dir/providers.json"
 migration_output="$({
   KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
-    knowtype_migrate_provider_storage_for_bundle "$bundle_path"
+    knowtype_migrate_provider_storage_for_bundle "$bundle_path" "$provider_tool_path"
 })"
 assert_contains "$migration_output" "provider.migration.status=migrated" "provider migration CLI output"
 migration_revision="$(printf '%s\n' "$migration_output" | awk -F= '/^provider\.migration\.revision=/{print $2; exit}')"
@@ -439,19 +446,19 @@ assert_file "$migration_support_dir/providers.v2.json"
 assert_file "$migration_support_dir/providers.legacy.json"
 rollback_output="$({
   KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
-    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-rollback-provider-profile-migration "$migration_revision"
+    "$provider_tool_path" rollback-provider-profile-migration --expected-revision "$migration_revision"
 })"
 assert_contains "$rollback_output" "provider.migration.rollback=ok" "provider migration rollback CLI output"
 [[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider migration rollback left canonical metadata"
 assert_equals "$legacy_provider_fixture" "$(cat "$migration_support_dir/providers.json")" "provider migration rollback legacy metadata"
 second_migration_output="$({
   KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
-    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-migrate-provider-profiles
+    "$provider_tool_path" migrate-provider-profiles
 })"
 assert_contains "$second_migration_output" "provider.migration.status=migrated" "second provider migration CLI output"
 downgrade_output="$({
   KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
-    "$bundle_path/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-downgrade-provider-profiles
+    "$provider_tool_path" downgrade-provider-profiles
 })"
 assert_contains "$downgrade_output" "provider.storage.downgrade.status=downgraded" "provider downgrade CLI output"
 [[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider downgrade left canonical metadata"

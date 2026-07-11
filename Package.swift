@@ -111,7 +111,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "KnowTypeInputSourceTool",
-            dependencies: ["KnowTypeInputSourceSupport"],
+            dependencies: ["KnowTypeInputSourceSupport", "KnowTypeProviders"],
             path: "Sources/KnowTypeInputSourceTool",
             linkerSettings: [
                 .linkedFramework("Carbon", .when(platforms: [.macOS]))

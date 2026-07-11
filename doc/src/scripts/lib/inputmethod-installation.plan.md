@@ -32,7 +32,9 @@ schema-v1 envelope that the legacy Swift decoder can consume: integer version
 headers, numeric timeout, and boolean default state. Install and rollback use
 the same validator and fail closed on malformed, tombstone, future-schema,
 canonical, snapshot, or compare-and-claim metadata. The shared generation-2
-migration runner validates the installed CLI status before rollback proceeds.
+migration runner invokes `knowtype-inputsource-tool` and validates its
+privacy-safe status before rollback proceeds; it never launches the installed
+IMK app executable.
 
 PreferencePane replacement copies into a sibling staging directory, validates
 the staged bundle, moves the current canonical pane aside, and only then

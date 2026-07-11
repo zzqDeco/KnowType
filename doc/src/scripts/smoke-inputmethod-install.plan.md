@@ -29,11 +29,14 @@ Runs CI-safe smoke checks for local input-method scripts and bundle packaging.
 - A self-contained packaged-DMG fixture runs the copied installer without the
   repository `Resources/InputMethod/Info.plist`, preventing source-only version
   lookup from regressing the mounted-image install command.
-- Static and dry-run checks require provider-writer quiescing and the installed
-  app's provider migration command to occur before LaunchServices registration.
+- Static and dry-run checks require provider-writer quiescing and the standalone
+  helper's provider migration command to occur before LaunchServices registration.
   A temporary empty-credential fixture executes legacy-to-canonical migration
-  and rollback through the bundled app with `KNOWTYPE_APP_SUPPORT_DIR`; CI does
+  and rollback through `knowtype-inputsource-tool` with
+  `KNOWTYPE_APP_SUPPORT_DIR`; CI does
   not access the user's real Keychain or Application Support files.
+  Nested installer and rollback fixtures reuse that exact helper through
+  `KNOWTYPE_INPUTSOURCE_TOOL` instead of rebuilding or re-signing it mid-smoke.
 - The default run validates the primary `KnowType.app` install path. Passing
   `--with-prefpane` additionally builds and load-checks the compatibility
   `KnowType.prefPane`; CI and release workflows run that explicit compatibility

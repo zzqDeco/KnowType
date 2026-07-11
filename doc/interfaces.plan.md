@@ -185,6 +185,11 @@ writes.
 Unmigrated legacy or missing post-migration canonical state fails closed. The
 install migration first publishes a recoverable provisional tombstone and only
 marks canonical metadata expected after the canonical file is durable.
+Install and rollback invoke these explicit migration, rollback, and downgrade
+operations through `knowtype-inputsource-tool`. The input-method app keeps
+compatible command-line aliases, but shell tooling does not execute the
+installed bundle's main IMK executable because macOS may terminate that process
+outside its normal host launch context.
 
 `secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore`
 stores API keys under the `KnowType` service. New key writes use immutable
@@ -827,8 +832,8 @@ registration, and cleanup in KnowType scripts:
   refreshes LaunchServices without starting `KnowTypeInputMethodApp`.
 - `bootstrap --path ... [--select]` registers the installed bundle, enables the
   parent anchor and visible `.Hans` input mode through TIS APIs, and optionally
-  requests helper-local selection of `.Hans`. Default install/repair registration
-  uses the installed app CLI context before helper preference repair; explicit
+  requests helper-local selection of `.Hans`. Default install/repair
+  registration and preference repair remain helper-only; explicit
   repair/selection tooling owns user-visible selection.
 - `register --path ... [--select]` remains a lower-level manual register path
   for debug use.

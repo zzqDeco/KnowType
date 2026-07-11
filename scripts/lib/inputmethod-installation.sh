@@ -107,15 +107,18 @@ knowtype_provider_storage_is_pre_v2_compatible() {
 
 knowtype_migrate_provider_storage_for_bundle() {
   local bundle_path="$1"
-  local executable="$bundle_path/Contents/MacOS/KnowTypeInputMethodApp"
+  local tool_path="${2:-${KNOWTYPE_PROVIDER_PROFILE_TOOL:-${KNOWTYPE_INPUTSOURCE_TOOL:-}}}"
   local output=""
   local status=""
 
-  if [[ ! -x "$executable" ]]; then
-    echo "error: restored generation-2 executable is unavailable for provider profile migration" >&2
+  if [[ -z "$tool_path" ]] && declare -F inputsource_tool_path >/dev/null; then
+    tool_path="$(inputsource_tool_path)"
+  fi
+  if [[ ! -x "$tool_path" ]]; then
+    echo "error: provider profile helper is unavailable for generation-2 migration: $bundle_path" >&2
     return 1
   fi
-  if ! output="$("$executable" --knowtype-migrate-provider-profiles 2>&1)"; then
+  if ! output="$("$tool_path" migrate-provider-profiles 2>&1)"; then
     [[ -n "$output" ]] && printf '%s\n' "$output" >&2
     return 1
   fi
