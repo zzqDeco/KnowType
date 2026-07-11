@@ -28,9 +28,11 @@ Status: Active
 - `InputControllerCoordinator` restores or hides the symbol overlay before
   returning `false` for `.hostShortcut`, allowing the host to handle the key.
 - `CandidatePanelAccessibilityRow` retains its real optional selection. Only
-  enabled rows with a selection implement a successful accessibility press.
+  enabled rows with a selection and the current render generation implement a
+  successful accessibility press.
 - `CandidatePanelScrollPagingState` owns gesture accumulation, momentum
-  rejection, direction mapping, and the traditional-wheel cooldown.
+  rejection, direction mapping, device-precision normalization, and the
+  traditional-wheel cooldown.
 
 ## Test Plan
 

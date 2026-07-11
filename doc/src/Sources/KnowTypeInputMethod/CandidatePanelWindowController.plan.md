@@ -36,11 +36,13 @@ Current behavior:
   the row disabled, non-selectable, and accessible as `AI 状态，AI 推荐中`
 - accumulates trackpad deltas and emits at most one PageUp/PageDown action from
   began through ended, ignores momentum, and applies a 120 ms cooldown to
-  phase-less mouse-wheel paging
+  phase-less mouse-wheel paging; non-precise line wheels page on any nonzero
+  tick while precise phase-less deltas retain the jitter threshold
 - exposes each visible row as an accessibility element; enabled candidates
   retain their real selection and forward VoiceOver press through the same
-  commit handler as mouse-up, disabled/status rows do not press, and selection
-  changes post focused-element and selected-children notifications
+  commit handler as mouse-up only while their render generation is current,
+  stale rows and disabled/status rows do not press, and selection changes post
+  focused-element and selected-children notifications
 - avoids preview text, section headers, and raw-input rows once correction candidates are available
 
 Selection shortcuts:

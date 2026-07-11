@@ -109,6 +109,36 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertEqual(interactionHandler.committedSelections, [.prefixCandidate(1)])
     }
 
+    func testStaleAccessibilityRowDoesNotCommitReusedSelectionIndex() throws {
+        let view = CandidatePanelContentView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 73),
+            appearance: .snapshotLight
+        )
+        let interactionHandler = AccessibilityInteractionRecorder()
+        view.interactionHandler = interactionHandler
+        view.update(model: accessibilityModel(selectedIndex: 0), layoutPlan: verticalLayoutPlan())
+        let staleChildren = try XCTUnwrap(view.accessibilityChildren() as? [NSAccessibilityElement])
+        let staleRow = staleChildren[2]
+        XCTAssertEqual(staleRow.accessibilityLabel(), "2，我觉得这套方案")
+
+        view.update(
+            model: accessibilityModel(
+                selectedIndex: 0,
+                firstText: "新的第一项",
+                secondText: "新的第二项"
+            ),
+            layoutPlan: verticalLayoutPlan()
+        )
+        let freshChildren = try XCTUnwrap(view.accessibilityChildren() as? [NSAccessibilityElement])
+        let freshRow = freshChildren[2]
+
+        XCTAssertFalse(staleRow.accessibilityPerformPress())
+        XCTAssertTrue(interactionHandler.committedSelections.isEmpty)
+        XCTAssertEqual(freshRow.accessibilityLabel(), "2，新的第二项")
+        XCTAssertTrue(freshRow.accessibilityPerformPress())
+        XCTAssertEqual(interactionHandler.committedSelections, [.prefixCandidate(1)])
+    }
+
     func testDisabledAccessibilityRowDoesNotPress() throws {
         let view = CandidatePanelContentView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 73),
@@ -124,7 +154,11 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertTrue(interactionHandler.committedSelections.isEmpty)
     }
 
-    private func accessibilityModel(selectedIndex: Int) -> CandidatePanelRenderModel {
+    private func accessibilityModel(
+        selectedIndex: Int,
+        firstText: String = "我觉得这个方案",
+        secondText: String = "我觉得这套方案"
+    ) -> CandidatePanelRenderModel {
         CandidatePanelRenderModel(
             title: "KnowType",
             previewText: nil,
@@ -133,7 +167,7 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
                     kind: .prefixCandidate,
                     selection: .prefixCandidate(0),
                     shortcutLabel: "1",
-                    text: "我觉得这个方案",
+                    text: firstText,
                     isSelected: selectedIndex == 0,
                     visualRole: .lockedPrefix
                 ),
@@ -152,7 +186,7 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
                     kind: .prefixCandidate,
                     selection: .prefixCandidate(1),
                     shortcutLabel: "2",
-                    text: "我觉得这套方案",
+                    text: secondText,
                     isSelected: selectedIndex == 2,
                     visualRole: .lockedPrefix
                 )

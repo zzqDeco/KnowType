@@ -576,6 +576,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNil(
             state.navigation(
                 forDelta: -1,
+                hasPreciseScrollingDeltas: true,
                 phase: .began,
                 momentumPhase: [],
                 timestamp: 1
@@ -584,6 +585,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(
             state.navigation(
                 forDelta: -2,
+                hasPreciseScrollingDeltas: true,
                 phase: .changed,
                 momentumPhase: [],
                 timestamp: 1.01
@@ -593,6 +595,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNil(
             state.navigation(
                 forDelta: -20,
+                hasPreciseScrollingDeltas: true,
                 phase: .changed,
                 momentumPhase: [],
                 timestamp: 1.02
@@ -601,6 +604,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNil(
             state.navigation(
                 forDelta: -5,
+                hasPreciseScrollingDeltas: true,
                 phase: .ended,
                 momentumPhase: [],
                 timestamp: 1.03
@@ -609,6 +613,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNil(
             state.navigation(
                 forDelta: -30,
+                hasPreciseScrollingDeltas: true,
                 phase: [],
                 momentumPhase: .began,
                 timestamp: 1.04
@@ -617,6 +622,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNil(
             state.navigation(
                 forDelta: -30,
+                hasPreciseScrollingDeltas: true,
                 phase: [],
                 momentumPhase: .changed,
                 timestamp: 1.05
@@ -625,6 +631,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertNil(
             state.navigation(
                 forDelta: -10,
+                hasPreciseScrollingDeltas: true,
                 phase: [],
                 momentumPhase: .ended,
                 timestamp: 1.06
@@ -633,6 +640,7 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         XCTAssertEqual(
             state.navigation(
                 forDelta: 4,
+                hasPreciseScrollingDeltas: true,
                 phase: .began,
                 momentumPhase: [],
                 timestamp: 2
@@ -641,19 +649,61 @@ final class CandidatePanelWindowControllerTests: XCTestCase {
         )
     }
 
-    func testTraditionalWheelPagingRespectsCooldown() {
+    func testNonPreciseTraditionalWheelDeltaOnePagesAndRespectsCooldown() {
         var state = CandidatePanelScrollPagingState()
 
         XCTAssertEqual(
-            state.navigation(forDelta: -4, phase: [], momentumPhase: [], timestamp: 2),
+            state.navigation(
+                forDelta: -1,
+                hasPreciseScrollingDeltas: false,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 2
+            ),
             .pageDown
         )
         XCTAssertNil(
-            state.navigation(forDelta: -4, phase: [], momentumPhase: [], timestamp: 2.05)
+            state.navigation(
+                forDelta: -1,
+                hasPreciseScrollingDeltas: false,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 2.05
+            )
         )
         XCTAssertEqual(
-            state.navigation(forDelta: 4, phase: [], momentumPhase: [], timestamp: 2.121),
+            state.navigation(
+                forDelta: 1,
+                hasPreciseScrollingDeltas: false,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 2.121
+            ),
             .pageUp
+        )
+    }
+
+    func testPrecisePhaseNoneWheelKeepsDeltaThreshold() {
+        var state = CandidatePanelScrollPagingState()
+
+        XCTAssertNil(
+            state.navigation(
+                forDelta: -1,
+                hasPreciseScrollingDeltas: true,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 3
+            )
+        )
+        XCTAssertEqual(
+            state.navigation(
+                forDelta: -3,
+                hasPreciseScrollingDeltas: true,
+                phase: [],
+                momentumPhase: [],
+                timestamp: 3.01
+            ),
+            .pageDown
         )
     }
 
