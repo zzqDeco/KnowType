@@ -824,7 +824,7 @@ registration, and cleanup in KnowType scripts:
   changing selected preferences. `--include-history` repairs history to `.Hans`
   without moving it ahead of the retained current source unless selected repair
   is also requested. `--include-selected` is reserved for explicit selection
-  repair after installed app selection is verified and rewrites selected
+  repair after helper-local selection is verified and rewrites selected
   preferences to `.Hans`. `--remove-parent-anchor` is reserved for uninstall
   cleanup after the bundle is gone.
   `--legacy-parent-anchor` is accepted as a deprecated compatibility no-op.
@@ -849,7 +849,7 @@ Script contracts:
   input-method host or selecting KnowType.
 - `scripts/diagnose-inputmethod.sh` is the read-only install status and recent
   log diagnostic path.
-- `scripts/select-inputmethod.sh` requests selection through the installed app,
+- `scripts/select-inputmethod.sh` requests selection through the standalone helper,
   but selection remains scoped to the active macOS input context and is not proof
   of typing behavior.
 - `scripts/accept-inputmethod-local.sh` generates the local acceptance report

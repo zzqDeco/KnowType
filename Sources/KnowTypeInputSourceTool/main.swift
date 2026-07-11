@@ -28,7 +28,7 @@ private func usage() -> Never {
           knowtype-inputsource-tool repair-preferences [--bundle-id ID] [--mode-id ID] [--legacy-mode-id ID] [--include-history] [--include-selected] [--add-active] [--remove-parent-anchor] [--legacy-parent-anchor]
           knowtype-inputsource-tool switch-away [--prefix ID_PREFIX] [--fallback-id ID] [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool register --path PATH [--parent-id ID] [--mode-id ID] [--select]
-          knowtype-inputsource-tool bootstrap --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID] [--select]
+          knowtype-inputsource-tool bootstrap --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID] [--select] [--require-selected]
           knowtype-inputsource-tool purge-legacy --path PATH [--parent-id ID] [--mode-id ID] [--legacy-mode-id ID]
           knowtype-inputsource-tool select [--parent-id ID] [--mode-id ID] [--require-selected]
           knowtype-inputsource-tool migrate-provider-profiles
@@ -720,17 +720,28 @@ private func switchAway(
     print("switch-away.current.after=\(TISSupport.currentInputSourceID() ?? "")")
 }
 
-private func bootstrap(path: String, parentID: String, modeID: String, legacyModeIDs: [String], select: Bool) {
+private func bootstrap(
+    path: String,
+    parentID: String,
+    modeID: String,
+    legacyModeIDs: [String],
+    select: Bool,
+    requireSelected: Bool = false
+) {
     let registrationStatus = TISRegisterInputSource(URL(fileURLWithPath: path) as CFURL)
     if registrationStatus != noErr {
         fputs("Warning: TISRegisterInputSource returned \(registrationStatus)\n", stderr)
     }
 
-    guard let parent = TISSupport.waitForInputSource(id: parentID, timeout: 5.0) else {
+    guard TISSupport.waitForInputSource(id: parentID, timeout: 5.0) != nil,
+          let parent = TISSupport.bestActivationTarget(TISSupport.inputSources(id: parentID)) else {
         fputs("KnowType input source was not found after bootstrap.\n", stderr)
         exit(ExitCode.failure.rawValue)
     }
-    guard let mode = TISSupport.waitForInputSource(id: modeID, timeout: 5.0) else {
+    guard TISSupport.waitForInputSource(id: modeID, timeout: 5.0) != nil,
+          let mode = select
+            ? TISSupport.bestSelectionTarget(TISSupport.inputSources(id: modeID))
+            : TISSupport.bestActivationTarget(TISSupport.inputSources(id: modeID)) else {
         fputs("KnowType active input source was not found after bootstrap.\n", stderr)
         exit(ExitCode.failure.rawValue)
     }
@@ -742,7 +753,12 @@ private func bootstrap(path: String, parentID: String, modeID: String, legacyMod
 
     var selectStatus = noErr
     if select {
-        selectStatus = selectMode(parentID: parentID, modeID: modeID, requireSelected: true, exitOnFailure: false)
+        selectStatus = selectMode(
+            parentID: parentID,
+            modeID: modeID,
+            requireSelected: requireSelected,
+            exitOnFailure: false
+        )
     }
 
     print("bootstrap.path=\(path)")
@@ -799,14 +815,14 @@ private func register(path: String, parentID: String, modeID: String, select: Bo
 
 @discardableResult
 private func selectMode(parentID: String, modeID: String, requireSelected: Bool, exitOnFailure: Bool = true) -> OSStatus {
-    guard let parent = TISSupport.inputSource(id: parentID) else {
+    guard let parent = TISSupport.bestActivationTarget(TISSupport.inputSources(id: parentID)) else {
         fputs("KnowType input source was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
         if exitOnFailure {
             exit(ExitCode.failure.rawValue)
         }
         return OSStatus(paramErr)
     }
-    guard let mode = TISSupport.inputSource(id: modeID) else {
+    guard let mode = TISSupport.bestSelectionTarget(TISSupport.inputSources(id: modeID)) else {
         fputs("KnowType active input source was not found. Run ./scripts/install-inputmethod.sh first.\n", stderr)
         if exitOnFailure {
             exit(ExitCode.failure.rawValue)
@@ -936,8 +952,16 @@ case "bootstrap":
     let modeID = arguments.option("--mode-id", default: defaultModeID) ?? defaultModeID
     let legacyModeIDs = legacyModeIDs(from: &arguments)
     let select = arguments.flag("--select")
+    let requireSelected = arguments.flag("--require-selected")
     arguments.ensureConsumed()
-    bootstrap(path: path, parentID: parentID, modeID: modeID, legacyModeIDs: legacyModeIDs, select: select)
+    bootstrap(
+        path: path,
+        parentID: parentID,
+        modeID: modeID,
+        legacyModeIDs: legacyModeIDs,
+        select: select,
+        requireSelected: requireSelected
+    )
 case "purge-legacy":
     guard let path = arguments.option("--path") else {
         usage()

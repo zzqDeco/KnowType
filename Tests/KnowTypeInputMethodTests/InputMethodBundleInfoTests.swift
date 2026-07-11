@@ -258,6 +258,22 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(scripts.contains("System Settings PreferencePane caches still contain stale KnowType prefPane metadata"))
         XCTAssertTrue(scripts.contains("--no-diagnostic"))
         XCTAssertTrue(scripts.contains("--logs"))
+
+        let selectScript = try String(
+            contentsOf: rootURL.appendingPathComponent("scripts/select-inputmethod.sh"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(selectScript.contains(#"knowtype_inputsource_tool "$ROOT_DIR""#))
+        XCTAssertTrue(selectScript.contains(#""$INPUTSOURCE_TOOL" "${bootstrap_args[@]}""#))
+        XCTAssertFalse(selectScript.contains(#"KnowTypeInputMethodApp" --knowtype-register-input-source"#))
+
+        let helperMain = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputSourceTool/main.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(helperMain.contains("requireSelected: requireSelected"))
+        XCTAssertTrue(helperMain.contains("TISSupport.bestActivationTarget(TISSupport.inputSources(id: parentID))"))
+        XCTAssertTrue(helperMain.contains("TISSupport.bestSelectionTarget(TISSupport.inputSources(id: modeID))"))
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
         XCTAssertTrue(scripts.contains("com.apple.macl"))
         XCTAssertTrue(scripts.contains("com.apple.quarantine"))
@@ -431,7 +447,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("enableInputSource(parent, label: \"parent\")"))
         XCTAssertTrue(helperSource.contains("enableInputSource(mode, label: \"mode\")"))
         XCTAssertTrue(helperSource.contains("exitOnFailure: false"))
-        XCTAssertTrue(helperSource.contains("requireSelected: true"))
+        XCTAssertTrue(helperSource.contains("requireSelected: requireSelected"))
         XCTAssertTrue(helperSource.contains("return OSStatus(paramErr)"))
         XCTAssertFalse(helperSource.contains("preferencesContainInputModeOrParent"))
         XCTAssertFalse(helperSource.contains("removeParent: !addLegacyParentAnchor"))
