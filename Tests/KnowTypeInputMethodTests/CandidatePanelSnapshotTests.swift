@@ -345,7 +345,7 @@ private struct SnapshotCandidatePanelTextMeasurer: CandidatePanelTextMeasuring {
         switch row.visualRole {
         case .lockedPrefix:
             return min(CGFloat(row.text.count) * 16, 210)
-        case .aiRecommendation:
+        case .aiRecommendation, .aiPolish:
             return min(CGFloat(row.text.count) * 15, 290)
         case .continuation:
             return min(CGFloat(row.text.count) * 15, 230)

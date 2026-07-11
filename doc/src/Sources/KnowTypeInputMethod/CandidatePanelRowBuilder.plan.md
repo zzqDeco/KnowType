@@ -44,6 +44,10 @@ It converts a `CandidatePanelViewModel` into:
   accept them through Tab, Option-number, click, hover, or another explicit
   selection action rather than ordinary Space accidentally committing an
   auto-selected AI row.
+- An active explicit-polish overlay replaces ordinary pageable rows. Pending
+  polish is a spinner-only disabled row, unavailable polish is a disabled status
+  row, and ready rewrites use distinct `polishCandidate` selections with the
+  first ready result as the overlay default.
 - Prefix rows and symbol-candidate rows are number-shortcut eligible.
 - Full and segment candidate selection identity is derived from the candidate
   raw range in the builder so state and rendering cannot drift.

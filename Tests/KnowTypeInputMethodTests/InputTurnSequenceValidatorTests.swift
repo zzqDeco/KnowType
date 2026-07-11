@@ -74,6 +74,7 @@ final class InputTurnSequenceValidatorTests: XCTestCase {
                 .recordCommitSideEffects(
                     text: "secret-user-text",
                     acceptedAIRecommendation: nil,
+                    commitKindOverride: nil,
                     clientScope: .provided
                 )
             ],
@@ -95,6 +96,7 @@ final class InputTurnSequenceValidatorTests: XCTestCase {
                 .recordCommitSideEffects(
                     text: "committed",
                     acceptedAIRecommendation: nil,
+                    commitKindOverride: nil,
                     clientScope: .provided
                 ),
                 .schedulePostInsertCaretVerification,

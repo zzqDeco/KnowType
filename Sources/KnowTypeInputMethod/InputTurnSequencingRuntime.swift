@@ -37,6 +37,7 @@ enum InputTurnEffect: Sendable, Equatable {
     case recordCommitSideEffects(
         text: String,
         acceptedAIRecommendation: AIRecommendationCandidate?,
+        commitKindOverride: AITypingCommitKind?,
         clientScope: InputTurnClientScope
     )
     case insertCommittedText(String, clientScope: InputTurnClientScope)
@@ -75,6 +76,7 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
         token: InputTurnToken,
         applicationPlan: InputCommitApplicationPlan,
         acceptedAIRecommendation: AIRecommendationCandidate?,
+        commitKindOverride: AITypingCommitKind? = nil,
         resetPlan: InputCompositionLifecycleFinishPlan?
     ) -> InputTurnEffectSequence {
         switch applicationPlan {
@@ -84,6 +86,7 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 .recordCommitSideEffects(
                     text: text,
                     acceptedAIRecommendation: acceptedAIRecommendation,
+                    commitKindOverride: commitKindOverride,
                     clientScope: .provided
                 ),
                 .insertCommittedText(text, clientScope: .provided)
@@ -126,6 +129,7 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 .recordCommitSideEffects(
                     text: text,
                     acceptedAIRecommendation: nil,
+                    commitKindOverride: nil,
                     clientScope: .provided
                 ),
                 .insertCommittedText(text, clientScope: .provided),
@@ -187,6 +191,7 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 .recordCommitSideEffects(
                     text: commitText,
                     acceptedAIRecommendation: nil,
+                    commitKindOverride: nil,
                     clientScope: .effective
                 )
             )

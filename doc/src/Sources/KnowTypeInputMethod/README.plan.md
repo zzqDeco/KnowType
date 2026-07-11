@@ -117,7 +117,9 @@ degraded; `Return` commits raw composition, `Tab` commits ready AI, and numeric
 shortcuts call Rime current-page selection. Punctuation commits the current
 Rime candidate/composition plus mapped punctuation; an idle period after an
 ASCII digit stays `.`. `Option+/` changes the process-wide linked text mode and
-`Option+R` requests explicit polish only. `InputNativeCandidateNavigationRuntime`
+`Option+R` starts `InputAIPolishRuntime` for the current marked composition;
+only explicit selection of a current ready rewrite commits it.
+`InputNativeCandidateNavigationRuntime`
 owns Rime navigation decisions; the coordinator still applies commit results,
 learning, marked text, insertion, and panel publication. Idle printable input
 is returned unhandled whenever the shared mode is ASCII and width is half;

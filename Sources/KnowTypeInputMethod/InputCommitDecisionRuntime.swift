@@ -288,6 +288,8 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
             return nil
         case .aiRecommendation:
             return nil
+        case .polishCandidate:
+            return nil
         case .continuationCandidate:
             return suggestion?.prefixCandidates.first?.text
         case .symbolCandidate:

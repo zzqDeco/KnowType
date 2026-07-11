@@ -51,6 +51,7 @@ final class InputCommitApplicationRuntime: @unchecked Sendable {
         acceptID: UUID?,
         selectedNativeCandidateSource: String?,
         prefixCandidateSource: String?,
+        commitKindOverride: AITypingCommitKind? = nil,
         compositionSnapshot: InputCompositionStateSnapshot,
         client: InputControllerClient?
     ) -> InputCommitApplicationSideEffectContexts {
@@ -65,7 +66,8 @@ final class InputCommitApplicationRuntime: @unchecked Sendable {
                 selectedNativeCandidateSource: selectedNativeCandidateSource,
                 prefixCandidateSource: prefixCandidateSource,
                 deleteCountBeforeCommit: compositionSnapshot.deleteCountBeforeCommit,
-                client: client
+                client: client,
+                commitKindOverride: commitKindOverride
             ),
             lexicalCommit: InputLexicalCommitContext(
                 text: text,

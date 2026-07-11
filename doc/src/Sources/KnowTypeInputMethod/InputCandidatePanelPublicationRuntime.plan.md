@@ -20,8 +20,8 @@ generation, visibility decisions, and privacy-safe panel diagnostics.
   write marked text, insert text, schedule AI provider requests, or decide host
   carrier modes.
 - The coordinator still supplies raw input, composition id, raw revision,
-  suggestion snapshots, preferred native highlight, AI slot state, placement,
-  preedit display text, and resolved anchor facts.
+  suggestion snapshots, preferred native highlight, recommendation and polish
+  state, placement, preedit display text, and resolved anchor facts.
 
 ## Behavior Notes
 
@@ -43,6 +43,9 @@ generation, visibility decisions, and privacy-safe panel diagnostics.
   close.
 - Selection helpers mutate visible panel rows but leave Rime/native commit and
   highlight semantics in `InputControllerCoordinator`.
+- Explicit polish uses the normal publication path rather than a separate
+  AppKit callback, so pending/error and ready rows keep the same frame and
+  accessibility generation guards as ordinary candidate updates.
 
 ## Tests
 

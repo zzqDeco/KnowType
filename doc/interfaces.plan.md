@@ -59,6 +59,15 @@ diagnostics use the same adapter request builder.
 
 Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; unselected Rime candidates are not sent to the provider and must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
+Explicit polish uses `task: polish`, puts the current commit-ready composition
+text in `rawInput` (the highlighted native Rime candidate when available),
+leaves `lockedPrefix` unset, and requests up to three complete rewrites. The
+result is trimmed and de-duplicated only; continuation prefix sanitization must
+not run on polish output. Dispatch requires the cloud AI preference to be
+enabled and applies the protected/Level 0/secret gate to both the commit-ready
+text and the underlying raw composition, so selecting a benign Rime candidate
+cannot release protected raw input.
+
 Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from unconfirmed raw input:
 
 - when `lockedPrefix` is present, candidate `text` must be directly appendable after it and must not repeat, paraphrase, translate, rewrite, or polish the locked prefix
@@ -310,6 +319,12 @@ Core candidate types:
 - `ContinuationCandidate`: text after the locked prefix only.
 - `AIRecommendationCandidate`: ready AI slot payload with the locked prefix, optional continuation, display text, provider, confidence, and context version.
 - `AIRecommendationState`: input-method AI slot state: idle, pending, ready, ineligible, or unavailable.
+- `InputAIPolishState`: explicit polish overlay state: idle, pending, ready, or
+  unavailable. Every non-idle state carries a request id, composition id, raw
+  revision, and the provider generation once a lease is available.
+- `InputAIPolishRuntime`: standalone explicit-polish owner for privacy gating,
+  provider lease/request lifecycle and revision observation, stale result
+  rejection, acceptance revalidation, and cancellation.
 - `InputAIRecommendationSchedulePolicy`: input-method value policy that returns
   either an AI recommendation schedule decision or the skipped AI state plus
   diagnostic stage and reason before provider tasks are started.
@@ -579,6 +594,24 @@ reason; they do not include user text or raw geometry.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
 - `Option + R` requests polish and may rewrite the prefix.
+- While the polish overlay is active, pending/error rows are nonselectable;
+  arrows move ready selection, `Space` accepts the selected ready result,
+  visible digits accept the row carrying that digit label, and `Escape`
+  cancels.
+- Printable input cancels polish before normal input handling. Only explicit
+  acceptance inserts the rewrite into the current marked composition; it never
+  replaces host text that was already committed.
+- An unavailable polish row is informational: the next normal command cancels
+  it and continues through ordinary input handling. Command/Control host
+  shortcuts clear the row and still pass through to the host. Provider revision
+  or shared input-mode generation changes cancel pending or ready polish state;
+  keyboard, mouse, and accessibility acceptance all synchronize that generation
+  before committing.
+- Accepted polish is classified as `AITypingCommitKind.polish` for commit
+  routing, but is excluded from context-memory typing events,
+  accepted-continuation learning, feedback-span replacement learning, lexical
+  commit learning, and prefix-selection history. Polish diagnostics contain
+  metadata only.
 
 Input attributes are represented by `InputModeState`: text mode, punctuation
 language, and symbol width are separate fields. `InputModeStateMachine` adds

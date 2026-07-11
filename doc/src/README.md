@@ -82,6 +82,7 @@ required for every test file.
 - [CandidatePanelWindowController](Sources/KnowTypeInputMethod/CandidatePanelWindowController.plan.md)
 - [CompositionBuffer](Sources/KnowTypeInputMethod/CompositionBuffer.plan.md)
 - [InputAIAcceptanceRuntime](Sources/KnowTypeInputMethod/InputAIAcceptanceRuntime.plan.md)
+- [InputAIPolishRuntime](Sources/KnowTypeInputMethod/InputAIPolishRuntime.plan.md)
 - [InputAIRecommendationRuntime](Sources/KnowTypeInputMethod/InputAIRecommendationRuntime.plan.md)
 - [InputAIRecommendationSchedulePolicy](Sources/KnowTypeInputMethod/InputAIRecommendationSchedulePolicy.plan.md)
 - [InputActions](Sources/KnowTypeInputMethod/InputActions.plan.md)
