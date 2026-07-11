@@ -447,7 +447,7 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(helperSource.contains("enableInputSource(parent, label: \"parent\")"))
         XCTAssertTrue(helperSource.contains("enableInputSource(mode, label: \"mode\")"))
         XCTAssertTrue(helperSource.contains("exitOnFailure: false"))
-        XCTAssertTrue(helperSource.contains("requireSelected: true"))
+        XCTAssertTrue(helperSource.contains("requireSelected: requireSelected"))
         XCTAssertTrue(helperSource.contains("return OSStatus(paramErr)"))
         XCTAssertFalse(helperSource.contains("preferencesContainInputModeOrParent"))
         XCTAssertFalse(helperSource.contains("removeParent: !addLegacyParentAnchor"))
