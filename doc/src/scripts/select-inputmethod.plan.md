@@ -21,6 +21,9 @@ Requests selection of the KnowType input source through
   when that helper-local context still reports another current source.
 - The helper bootstraps registration and enablement before requesting selection;
   the script never executes the installed IMK app as a maintenance process.
+- Bootstrap selects the best enabled/select-capable `.Hans` record when stale
+  duplicate TIS rows exist, and receives `--require-selected` only for the
+  script's corresponding strict mode.
 - A successful selection preflight still requires a manual typing probe.
 
 ## Tests

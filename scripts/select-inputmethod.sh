@@ -77,6 +77,9 @@ bootstrap_args=(
 for legacy_mode_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
   bootstrap_args+=(--legacy-mode-id "$legacy_mode_id")
 done
+if (( REQUIRE_SELECTED == 1 )); then
+  bootstrap_args+=(--require-selected)
+fi
 
 if ! SELECT_OUTPUT="$("$INPUTSOURCE_TOOL" "${bootstrap_args[@]}" 2>&1)"; then
   printf '%s\n' "$SELECT_OUTPUT"

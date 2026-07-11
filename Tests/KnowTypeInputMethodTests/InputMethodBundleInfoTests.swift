@@ -266,6 +266,14 @@ final class InputMethodBundleInfoTests: XCTestCase {
         XCTAssertTrue(selectScript.contains(#"knowtype_inputsource_tool "$ROOT_DIR""#))
         XCTAssertTrue(selectScript.contains(#""$INPUTSOURCE_TOOL" "${bootstrap_args[@]}""#))
         XCTAssertFalse(selectScript.contains(#"KnowTypeInputMethodApp" --knowtype-register-input-source"#))
+
+        let helperMain = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputSourceTool/main.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(helperMain.contains("requireSelected: requireSelected"))
+        XCTAssertTrue(helperMain.contains("TISSupport.bestActivationTarget(TISSupport.inputSources(id: parentID))"))
+        XCTAssertTrue(helperMain.contains("TISSupport.bestSelectionTarget(TISSupport.inputSources(id: modeID))"))
         XCTAssertTrue(scripts.contains("GatekeeperPolicyScanError"))
         XCTAssertTrue(scripts.contains("com.apple.macl"))
         XCTAssertTrue(scripts.contains("com.apple.quarantine"))
