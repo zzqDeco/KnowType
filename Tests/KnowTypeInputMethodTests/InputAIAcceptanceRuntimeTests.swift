@@ -149,6 +149,33 @@ final class InputAIAcceptanceRuntimeTests: XCTestCase {
         XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
     }
 
+    func testPolishCommitSkipsContextContinuationAndLexicalLearning() async {
+        let recorder = RecordingAcceptanceContextRecorder()
+        let acceptedLearning = AIAcceptedLearningStore.inMemory()
+        let runtime = InputAIAcceptanceRuntime(
+            contextEventRecorder: recorder,
+            acceptedLearningRecorder: acceptedLearning,
+            acceptedFeedbackRecorder: nil,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            canRequestAIRecommendations: true,
+            runtimePreferences: InputMethodRuntimePreferences(cloudContinuationEnabled: false)
+        )
+
+        let effects = runtime.recordCommit(
+            context: commitContext(
+                text: "这个接口的响应速度偏慢。",
+                rawInput: "我觉得这个接口慢",
+                commitKindOverride: .polish
+            )
+        )
+
+        XCTAssertFalse(effects.shouldRecordLexicalCommit)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let events = await recorder.events
+        XCTAssertTrue(events.isEmpty)
+        XCTAssertTrue(acceptedLearning.allRecords().isEmpty)
+    }
+
     func testProtectedAppSkipsAcceptedLearningAndFeedbackTracking() async {
         let acceptedLearning = AIAcceptedLearningStore.inMemory()
         let acceptedFeedback = AIAcceptedFeedbackStore.inMemory()
@@ -315,7 +342,8 @@ final class InputAIAcceptanceRuntimeTests: XCTestCase {
         selectedNativeCandidateSource: String? = nil,
         prefixCandidateSource: String? = nil,
         deleteCountBeforeCommit: Int = 0,
-        client: InputControllerClient? = nil
+        client: InputControllerClient? = nil,
+        commitKindOverride: AITypingCommitKind? = nil
     ) -> InputAIAcceptanceCommitContext {
         InputAIAcceptanceCommitContext(
             text: text,
@@ -327,7 +355,8 @@ final class InputAIAcceptanceRuntimeTests: XCTestCase {
             selectedNativeCandidateSource: selectedNativeCandidateSource,
             prefixCandidateSource: prefixCandidateSource,
             deleteCountBeforeCommit: deleteCountBeforeCommit,
-            client: client
+            client: client,
+            commitKindOverride: commitKindOverride
         )
     }
 

@@ -127,6 +127,8 @@ final class InputNativeCandidateNavigationRuntime: @unchecked Sendable {
                 return nil
             }
             return InputCandidateSelection(text: text, kind: .aiRecommendation)
+        case .polishCandidate:
+            return nil
         case .symbolCandidate(let index):
             guard viewModel.symbolCandidates.indices.contains(index) else {
                 return nil

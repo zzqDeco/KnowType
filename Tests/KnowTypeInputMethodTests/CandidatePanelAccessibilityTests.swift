@@ -109,6 +109,39 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertEqual(interactionHandler.committedSelections, [.prefixCandidate(1)])
     }
 
+    func testPolishAccessibilityPressUsesGenericSelectionCallback() throws {
+        let view = CandidatePanelContentView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 29),
+            appearance: .snapshotLight
+        )
+        let interactionHandler = AccessibilityInteractionRecorder()
+        view.interactionHandler = interactionHandler
+        view.update(
+            model: CandidatePanelRenderModel(
+                title: "KnowType",
+                previewText: nil,
+                rows: [
+                    CandidatePanelRenderRow(
+                        kind: .aiPolish,
+                        selection: .polishCandidate(0),
+                        shortcutLabel: "1",
+                        text: "这个接口的响应速度偏慢。",
+                        isSelected: true,
+                        visualRole: .aiPolish
+                    )
+                ]
+            ),
+            layoutPlan: singleRowLayoutPlan()
+        )
+
+        let children = try XCTUnwrap(view.accessibilityChildren() as? [NSAccessibilityElement])
+
+        XCTAssertEqual(children.first?.accessibilityRole(), .button)
+        XCTAssertEqual(children.first?.accessibilityLabel(), "AI 润色，1，这个接口的响应速度偏慢。")
+        XCTAssertTrue(children.first?.accessibilityPerformPress() == true)
+        XCTAssertEqual(interactionHandler.committedSelections, [.polishCandidate(0)])
+    }
+
     func testStaleAccessibilityRowDoesNotCommitReusedSelectionIndex() throws {
         let view = CandidatePanelContentView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 73),
@@ -218,6 +251,25 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
                 CandidatePanelLayoutItem(
                     rowIndex: 2,
                     frame: CGRect(x: 6, y: 49, width: 308, height: 19),
+                    textWidthLimit: 260,
+                    isTruncated: false
+                )
+            ]
+        )
+    }
+
+    private func singleRowLayoutPlan() -> CandidatePanelLayoutPlan {
+        CandidatePanelLayoutPlan(
+            orientation: .vertical,
+            verticalPlacement: .visualBelowCaret,
+            panelSize: CGSize(width: 320, height: 29),
+            panelOrigin: .zero,
+            contentInsets: CandidatePanelLayoutInsets(top: 5, left: 6, bottom: 5, right: 6),
+            itemSpacing: 0,
+            items: [
+                CandidatePanelLayoutItem(
+                    rowIndex: 0,
+                    frame: CGRect(x: 6, y: 5, width: 308, height: 19),
                     textWidthLimit: 260,
                     isTruncated: false
                 )

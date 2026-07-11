@@ -4775,12 +4775,271 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.isVisible, true)
     }
 
+    @MainActor
+    func testOptionRShowsPolishOverlayAndSpaceExplicitlyAcceptsWithoutSelectionLearning() async {
+        let client = FakeInputControllerClient()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [
+                LLMCandidate(text: "润色后的完整文本", confidence: 0.94)
+            ])
+        )
+        let typingEvents = CoordinatorTypingEventRecorder()
+        let (coordinator, host, persistence) = makeCoordinator(
+            client: client,
+            provider: CoordinatorPolishLeaseProvider(),
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider),
+            aiContextEventRecorder: typingEvents
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        let pendingRows = CandidatePanelRowBuilder().buildRows(
+            in: host.panelStates.last?.windowState.viewModel
+                ?? CandidatePanelViewModel(rawInput: "", prefixCandidates: [], continuationCandidates: [])
+        ).pageableRows
+        XCTAssertEqual(pendingRows.map(\.kind), [.aiPolish])
+        XCTAssertNil(pendingRows.first?.selection)
+        XCTAssertEqual(pendingRows.first?.accessory, .spinner)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+
+        let becameReady = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiPolish.candidates.first?.text == "润色后的完整文本"
+        }
+        XCTAssertTrue(becameReady)
+        let polishRequests = await polishProvider.requests
+        XCTAssertEqual(polishRequests.count, 1)
+        XCTAssertEqual(polishRequests.first?.rawInput, "你")
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .polishCandidate(0))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: " ", keyCode: 49), client: client))
+        let committed = await waitUntilOnMainActor {
+            client.insertTextWrites.last?.text == "润色后的完整文本"
+        }
+        XCTAssertTrue(committed)
+        XCTAssertTrue(persistence.recordedSelections.isEmpty)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let recordedEvents = await typingEvents.events
+        XCTAssertTrue(recordedEvents.isEmpty)
+    }
+
+    @MainActor
+    func testPolishOverlayCancelsBeforePunctuationModeToggle() async {
+        let client = FakeInputControllerClient()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [LLMCandidate(text: "润色后的文本")])
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        let becameReady = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiPolish.candidates.first?.text == "润色后的文本"
+        }
+        XCTAssertTrue(becameReady)
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .chinese)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: ".", keyCode: 47, modifiers: [.option]),
+                client: client
+            )
+        )
+
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.aiPolish.isActive ?? true)
+        XCTAssertEqual(coordinator.currentInputModeState().punctuationMode, .english)
+    }
+
+    @MainActor
+    func testUnavailablePolishFallsThroughToNormalSpaceCommit() async {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(
+                providerRuntime: CoordinatorPolishProviderRuntime(
+                    response: LLMResponse(candidates: [LLMCandidate(text: "不应使用")])
+                )
+            )
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        guard case .unavailable = host.panelStates.last?.windowState.viewModel.aiPolish else {
+            return XCTFail("expected unavailable polish state")
+        }
+
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: " ", keyCode: 49), client: client))
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertEqual(coordinator.originalString().string, "")
+        XCTAssertGreaterThan(host.hideCandidatePanelCount, 0)
+    }
+
+    @MainActor
+    func testSharedModeGenerationChangeCancelsReadyPolishBeforeSpace() async {
+        let client = FakeInputControllerClient()
+        let inputModeStateRuntime = ProcessInputModeStateRuntime()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [LLMCandidate(text: "不应提交的旧润色")])
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider),
+            inputModeStateRuntime: inputModeStateRuntime
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        let becameReady = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiPolish.candidates.first?.text == "不应提交的旧润色"
+        }
+        XCTAssertTrue(becameReady)
+
+        _ = inputModeStateRuntime.transition(.togglePunctuationMode)
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: " ", keyCode: 49), client: client))
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "你")
+        XCTAssertFalse(client.insertTextWrites.contains { $0.text == "不应提交的旧润色" })
+        XCTAssertEqual(coordinator.originalString().string, "")
+        XCTAssertGreaterThan(host.hideCandidatePanelCount, 0)
+    }
+
+    @MainActor
+    func testPolishEscapeAndNewPrintableInputCancelWithoutCommitting() async {
+        let client = FakeInputControllerClient()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [LLMCandidate(text: "不应提交")]),
+            delayNanoseconds: 150_000_000
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText("x", client: client))
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.aiPolish.isActive == true)
+        XCTAssertEqual(coordinator.originalString().string, "nx")
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
+        XCTAssertEqual(coordinator.originalString().string, "nx")
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertFalse(host.panelStates.last?.windowState.viewModel.aiPolish.isActive == true)
+    }
+
+    @MainActor
+    func testPolishCandidateAccessibilityCallbackCommitsOnlyCurrentMarkedComposition() async {
+        let client = FakeInputControllerClient()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [LLMCandidate(text: "无障碍润色结果")])
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        let becameReady = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.selection == .polishCandidate(0)
+        }
+        XCTAssertTrue(becameReady)
+
+        coordinator.commitCandidatePanelSelection(.polishCandidate(0), client: client)
+
+        let committed = await waitUntilOnMainActor {
+            client.insertTextWrites.last?.text == "无障碍润色结果"
+        }
+        XCTAssertTrue(committed)
+        XCTAssertEqual(client.insertTextWrites.count, 1)
+        XCTAssertEqual(client.insertTextWrites.last?.replacementRange.location, NSNotFound)
+    }
+
+    @MainActor
+    func testPolishOverlayArrowsMoveAndDigitsAcceptSelectedResult() async {
+        let client = FakeInputControllerClient()
+        let polishProvider = CoordinatorPolishProviderRuntime(
+            response: LLMResponse(candidates: [
+                LLMCandidate(text: "第一条润色"),
+                LLMCandidate(text: "第二条润色")
+            ])
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            aiPolishRuntime: InputAIPolishRuntime(providerRuntime: polishProvider)
+        )
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "r", keyCode: 15, modifiers: [.option]),
+                client: client
+            )
+        )
+        let becameReady = await waitUntilOnMainActor {
+            host.panelStates.last?.windowState.viewModel.aiPolish.candidates.count == 2
+        }
+        XCTAssertTrue(becameReady)
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .polishCandidate(0))
+
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{F701}", keyCode: 125), client: client))
+        XCTAssertEqual(host.candidatePanelFrames.last?.panelModel.windowState.selection, .polishCandidate(1))
+        XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "1", keyCode: 18), client: client))
+
+        let committed = await waitUntilOnMainActor {
+            client.insertTextWrites.last?.text == "第二条润色"
+        }
+        XCTAssertTrue(committed)
+        XCTAssertEqual(client.insertTextWrites.count, 1)
+    }
+
     private func makeCoordinator(
         client: FakeInputControllerClient,
         persistence: FakeUserSelectionHistoryPersistence = FakeUserSelectionHistoryPersistence(),
         provider: (any LLMProvider)? = nil,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
+        aiPolishRuntime: InputAIPolishRuntime? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
@@ -4821,6 +5080,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             userSelectionHistoryPersistence: persistence,
             aiRecommendationProvider: aiRecommendationProvider,
             aiRecommendationProviderAvailability: aiRecommendationProviderAvailability,
+            aiPolishRuntime: aiPolishRuntime,
             aiContextEventRecorder: aiContextEventRecorder,
             aiAcceptedLearning: aiAcceptedLearning,
             aiAcceptedFeedback: aiAcceptedFeedback,
@@ -4977,6 +5237,53 @@ final class InputControllerCoordinatorTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return (await provider.requests).count
+    }
+}
+
+private actor CoordinatorPolishLeaseProvider: LLMProvider {
+    nonisolated let providerName = "coordinator-polish"
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        LLMResponse(candidates: [])
+    }
+}
+
+private actor CoordinatorPolishProviderRuntime: InputAIPolishProviderRuntime {
+    private let provider = CoordinatorPolishLeaseProvider()
+    private let response: LLMResponse
+    private let delayNanoseconds: UInt64
+    private(set) var requests: [LLMRequest] = []
+
+    init(response: LLMResponse, delayNanoseconds: UInt64 = 0) {
+        self.response = response
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func leaseForEligibleDispatch() async -> ProviderRuntimeLease {
+        ProviderRuntimeLease(
+            revision: 1,
+            generation: 1,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: provider
+        )
+    }
+
+    func performPolish(_ request: LLMRequest, using lease: ProviderRuntimeLease) async throws -> LLMResponse {
+        requests.append(request)
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        return response
+    }
+
+    func validateForAcceptance(_ lease: ProviderRuntimeLease) async throws {}
+}
+
+private actor CoordinatorTypingEventRecorder: AIContextEventRecording {
+    private(set) var events: [AITypingEvent] = []
+
+    func record(_ event: AITypingEvent) async {
+        events.append(event)
     }
 }
 

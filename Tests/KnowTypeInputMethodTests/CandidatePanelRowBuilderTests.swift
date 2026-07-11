@@ -113,6 +113,47 @@ final class CandidatePanelRowBuilderTests: XCTestCase {
         XCTAssertNil(CandidatePanelRowBuilder().defaultSelection(in: viewModel))
     }
 
+    func testPolishOverlayUsesNonselectablePendingAndDistinctReadyRows() {
+        let binding = InputAIPolishBinding(
+            requestID: UUID(),
+            compositionID: 4,
+            rawRevision: 9,
+            providerGeneration: 3
+        )
+        let pendingModel = CandidatePanelViewModel(
+            rawInput: "需要润色",
+            prefixCandidates: [prefix("普通候选")],
+            continuationCandidates: [],
+            aiPolish: .pending(binding)
+        )
+        let builder = CandidatePanelRowBuilder()
+        let pendingRows = builder.buildRows(in: pendingModel).pageableRows
+
+        XCTAssertEqual(pendingRows.map(\.kind), [.aiPolish])
+        XCTAssertEqual(pendingRows.map(\.selection), [nil])
+        XCTAssertEqual(pendingRows.first?.accessory, .spinner)
+        XCTAssertFalse(pendingRows.first?.isEnabled == true)
+
+        let readyModel = CandidatePanelViewModel(
+            rawInput: "需要润色",
+            prefixCandidates: [prefix("普通候选")],
+            continuationCandidates: [],
+            aiPolish: .ready(
+                binding,
+                candidates: [
+                    InputAIPolishCandidate(text: "润色一", confidence: 0.9, provider: "test"),
+                    InputAIPolishCandidate(text: "润色二", confidence: 0.8, provider: "test")
+                ]
+            )
+        )
+        let readyRows = builder.buildRows(in: readyModel).pageableRows
+
+        XCTAssertEqual(readyRows.map(\.kind), [.aiPolish, .aiPolish])
+        XCTAssertEqual(readyRows.map(\.selection), [.polishCandidate(0), .polishCandidate(1)])
+        XCTAssertEqual(readyRows.map(\.isNumberShortcutEligible), [true, true])
+        XCTAssertEqual(builder.defaultSelection(in: readyModel), .polishCandidate(0))
+    }
+
     func testModeStatusIsFixedDisabledRowWithoutSelectionTarget() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "",

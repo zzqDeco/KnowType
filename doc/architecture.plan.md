@@ -272,6 +272,12 @@ LevelDB state.
   AI/lexical side-effect context construction, accepted-feedback context
   construction. It returns values only; the coordinator remains the
   order-sensitive side-effect owner.
+- `InputAIPolishRuntime` owns the explicit rewrite lifecycle independently of
+  real-time continuation. It leases `ProviderRuntimeRegistry.shared`, sends
+  `task: polish` with no locked-prefix sanitizer, binds non-idle state to the
+  request, composition, raw revision, and provider generation, and revalidates
+  the provider lease before acceptance. Accepted polish bypasses context-memory
+  and continuation-learning pipelines; polish diagnostics contain metadata only.
 - `CandidatePanelPresenter` consumes `CandidatePanelFrame` values with
   composition id, raw revision, anchor source, panel model, and explicit
   visibility reason before touching the host's AppKit panel adapter.
@@ -306,6 +312,10 @@ order and `CandidatePanelState` and `CandidatePanelRenderer` both consume it:
 - remaining Rime prefix candidates appear after the AI slot
 - legacy continuation candidates may still be represented by core/session tests, but the production IMK panel uses the AI slot for provider-backed continuation
 - raw input appears only when no suggestion is available
+- an active polish overlay temporarily replaces ordinary pageable rows with a
+  disabled spinner/error row or selectable polish candidates; it does not
+  mutate Rime selection or marked text, and mode shortcuts cancel the overlay
+  before their normal action runs
 - adaptive layout pages up to 6 visible rows; vertical-list mode can show up to 9 visible rows
 
 Candidate-window layout keeps those row semantics but derives horizontal versus vertical presentation from measured
@@ -325,6 +335,9 @@ same-raw-input, same-composition active panel.
 
 Mouse hover selects enabled visible rows, click and VoiceOver press commit the
 same target as keyboard selection, and disabled/status rows cannot commit.
+Polish rows use that same generation-guarded selection callback. Only explicit
+acceptance inserts a ready rewrite for the current marked composition; new
+input, lifecycle teardown, or stale provider/composition identity drops it.
 Trackpad deltas accumulate to at most one page per began-to-ended gesture,
 momentum is ignored, and phase-less wheel paging has a 120 ms cooldown.
 `InputNativeCandidateNavigationRuntime` maps visible

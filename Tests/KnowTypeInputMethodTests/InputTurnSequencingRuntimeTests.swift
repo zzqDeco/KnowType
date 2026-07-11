@@ -34,6 +34,7 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
                 .recordCommitSideEffects(
                     text: "你好",
                     acceptedAIRecommendation: aiCandidate,
+                    commitKindOverride: nil,
                     clientScope: .provided
                 ),
                 .insertCommittedText("你好", clientScope: .provided),
@@ -72,6 +73,7 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
                 .recordCommitSideEffects(
                     text: "ni",
                     acceptedAIRecommendation: nil,
+                    commitKindOverride: nil,
                     clientScope: .effective
                 ),
                 .insertCommittedText("ni", clientScope: .effective),
@@ -100,6 +102,7 @@ final class InputTurnSequencingRuntimeTests: XCTestCase {
                 .recordCommitSideEffects(
                     text: "你",
                     acceptedAIRecommendation: nil,
+                    commitKindOverride: nil,
                     clientScope: .provided
                 ),
                 .insertCommittedText("你", clientScope: .provided),

@@ -5,7 +5,6 @@ import KnowTypeCore
 import KnowTypeProviders
 
 final class InputControllerCoordinator: @unchecked Sendable {
-    private var sessionController: InputSessionController
     private let canRequestAIRecommendations: Bool
     private var conversionEngine: any KnowTypeConversionEngine
     private let keyMapper = InputKeyCommandMapper()
@@ -39,8 +38,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let aiAcceptedFeedbackProvider: (any AIAcceptedFeedbackSnapshotProviding)?
     private let aiRecommendationRuntime: InputAIRecommendationRuntime
     private let aiRecommendationSchedulePolicy = InputAIRecommendationSchedulePolicy.default
+    private let aiPolishRuntime: InputAIPolishRuntime
     private let aiAcceptanceRuntime: InputAIAcceptanceRuntime
     private var aiRecommendationState: AIRecommendationState = .idle
+    private var aiPolishState: InputAIPolishState = .idle
     private let inputClientCompositionWriter: InputClientCompositionWriter
     private let taskSupervisor = InputTaskSupervisor()
     private let candidatePanelPublicationRuntime: InputCandidatePanelPublicationRuntime
@@ -85,6 +86,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
+        aiPolishRuntime: InputAIPolishRuntime? = nil,
         aiContextEventRecorder: (any AIContextEventRecording)? = nil,
         aiAcceptedLearning: (any AIAcceptedLearningRecording & AIAcceptedLearningSnapshotProviding)? = nil,
         aiAcceptedFeedback: (any AIAcceptedFeedbackRecording & AIAcceptedFeedbackSnapshotProviding)? = nil,
@@ -118,7 +120,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         } else {
             self.conversionEngine = RimeConversionEngine()
         }
-        self.sessionController = Self.polishOnlySessionController()
         self.inputModePreferenceStore = inputModePreferenceStore
         self.inputModeStateRuntime = resolvedInputModeStateRuntime
         self.inputModeSnapshot = resolvedInputModeStateRuntime.currentSnapshot()
@@ -137,6 +138,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             dispatchDebounceMilliseconds: aiRecommendationDispatchDebounceMilliseconds,
             diagnosticSink: aiDiagnosticSink
         )
+        self.aiPolishRuntime = aiPolishRuntime ?? InputAIPolishRuntime(diagnosticSink: aiDiagnosticSink)
         self.aiAcceptanceRuntime = InputAIAcceptanceRuntime(
             contextEventRecorder: aiContextEventRecorder,
             acceptedLearningRecorder: aiAcceptedLearning,
@@ -173,17 +175,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
         self.asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
         self.conversionEngine.synchronizeInputMode(self.inputModeSnapshot)
-    }
-
-    private static func polishOnlySessionController() -> InputSessionController {
-        InputSessionController { _ in
-            SuggestionResponse(
-                prefixCandidates: [],
-                lockedPrefix: nil,
-                continuationCandidates: [],
-                latencyMs: 0
-            )
-        }
     }
 
     func handleText(_ string: String?, client: InputControllerClient?) -> Bool {
@@ -265,6 +256,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func commitCandidatePanelSelection(_ selection: CandidatePanelSelection, client: InputControllerClient?) {
+        if case .polishCandidate(let index) = selection {
+            _ = acceptPolishCandidate(at: index, client: client)
+            return
+        }
         if case .symbolCandidate(let index) = selection {
             _ = commitSymbolCandidate(at: index, client: client)
             return
@@ -318,6 +313,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func hidePalettes() {
         clearSymbolCandidateSession(restoringAIRecommendation: true)
+        aiPolishState = aiPolishRuntime.reset()
         hideCandidatePanel(reason: .escape)
     }
 
@@ -336,6 +332,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawLength: rawBuffer.count,
             reason: "input_controller_will_close"
         )
+        aiPolishState = aiPolishRuntime.reset()
         aiAcceptanceRuntime.cancelFeedback(reason: "input_controller_will_close")
         lexicalCommitRuntime.cancelRefresh()
         taskSupervisor.cancelAll()
@@ -360,6 +357,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let client = client ?? (hasActiveTextComposition() ? host?.currentClient : nil)
         synchronizeInputModeSnapshot(client: client)
         clearTransientModeStatusBeforeUserInputIfNeeded(intent)
+        if aiPolishState.isActive,
+           let handled = handleActivePolishIntent(intent, client: client) {
+            return handled
+        }
         if symbolCandidateSession != nil,
            let handled = handleActiveSymbolCandidateIntent(intent, client: client) {
             return handled
@@ -601,6 +602,183 @@ final class InputControllerCoordinator: @unchecked Sendable {
             clearSymbolCandidateSessionBeforeFallthrough(client: client)
             return nil
         }
+    }
+
+    private func handleActivePolishIntent(
+        _ intent: InputKeyIntent,
+        client: InputControllerClient?
+    ) -> Bool? {
+        if case .unavailable = aiPolishState {
+            if case .cancelComposition = intent {
+                cancelPolish(restoringCompositionPanel: true, client: client)
+                return true
+            }
+            cancelPolish(restoringCompositionPanel: false, client: client)
+            switch intent {
+            case .hostShortcut, .modifierFlagsChanged, .ignored:
+                return false
+            default:
+                return nil
+            }
+        }
+        switch intent {
+        case .action(.space):
+            let selectedIndex: Int
+            if case .polishCandidate(let index) = candidatePanelPublicationRuntime.state.windowState.selection {
+                selectedIndex = index
+            } else {
+                selectedIndex = 0
+            }
+            _ = acceptPolishCandidate(at: selectedIndex, client: client)
+            return true
+        case .selectCandidate(1):
+            let selectedIndex: Int
+            if case .polishCandidate(let index) = candidatePanelPublicationRuntime.state.windowState.selection {
+                selectedIndex = index
+            } else {
+                selectedIndex = 0
+            }
+            _ = acceptPolishCandidate(at: selectedIndex, client: client)
+            return true
+        case .selectCandidate(let number) where number > 1:
+            guard let result = candidatePanelPublicationRuntime.selectVisibleNumberShortcut(number),
+                  case .polishCandidate(let index) = result.selection else {
+                return true
+            }
+            _ = acceptPolishCandidate(at: index, client: client)
+            return true
+        case .moveCandidateSelection(let navigation):
+            if candidatePanelPublicationRuntime.moveLocalSelection(navigation) != nil {
+                candidatePanelPublicationRuntime.applyCurrentFrame(
+                    reason: .compositionActive,
+                    compositionID: compositionID,
+                    rawRevision: rawRevision,
+                    rawLength: rawBuffer.count,
+                    locale: locale
+                )
+            }
+            return true
+        case .cancelComposition:
+            cancelPolish(restoringCompositionPanel: true, client: client)
+            return true
+        case .append, .symbol, .deleteBackward, .selectCandidate:
+            cancelPolish(restoringCompositionPanel: false, client: client)
+            return nil
+        case .action(.optionR):
+            cancelPolish(restoringCompositionPanel: false, client: client)
+            return nil
+        case .action(.toggleSymbolMode), .action(.toggleTextMode), .action(.toggleSymbolWidth):
+            cancelPolish(restoringCompositionPanel: false, client: client)
+            return nil
+        case .hostShortcut:
+            cancelPolish(restoringCompositionPanel: true, client: client)
+            return false
+        case .modifierFlagsChanged, .ignored:
+            return false
+        case .action:
+            return true
+        }
+    }
+
+    private func requestPolish(_ text: String, client: InputControllerClient?) {
+        let requestText = currentPolishRequestText(fallback: text)
+        let context = InputAIPolishRequestContext(
+            text: requestText,
+            rawInput: rawBuffer,
+            appBundleID: appBundleIdentifier(client: client),
+            locale: locale,
+            compositionID: compositionID,
+            rawRevision: rawRevision,
+            hasActiveComposition: hasActiveTextComposition()
+        )
+        aiPolishState = aiPolishRuntime.request(
+            context: context,
+            currentSnapshot: { [weak self] in
+                self?.currentPolishSnapshot()
+                    ?? InputAIPolishCompositionSnapshot(rawInput: "", compositionID: -1, rawRevision: -1)
+            },
+            onStateChange: { [weak self, weak client] state in
+                self?.applyPolishState(state, client: client)
+            }
+        )
+        updateCandidatePanelImmediately(
+            suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
+            client: client
+        )
+    }
+
+    @discardableResult
+    private func acceptPolishCandidate(at index: Int, client: InputControllerClient?) -> Bool {
+        aiPolishRuntime.acceptCandidate(
+            at: index,
+            currentSnapshot: { [weak self] in
+                self?.currentPolishSnapshot()
+                    ?? InputAIPolishCompositionSnapshot(rawInput: "", compositionID: -1, rawRevision: -1)
+            },
+            onStateChange: { [weak self, weak client] state in
+                self?.applyPolishState(state, client: client)
+            },
+            onAccept: { [weak self, weak client] candidate in
+                guard let self, self.hasActiveTextComposition() else {
+                    return
+                }
+                _ = self.applyCommitResult(
+                    .commit(candidate.text),
+                    client: client,
+                    commitKindOverride: .polish
+                )
+            }
+        )
+    }
+
+    private func cancelPolish(restoringCompositionPanel: Bool, client: InputControllerClient?) {
+        aiPolishState = aiPolishRuntime.reset()
+        guard restoringCompositionPanel else {
+            return
+        }
+        if hasActiveTextComposition() {
+            updateCandidatePanelImmediately(
+                suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
+                client: client
+            )
+        } else {
+            hideCandidatePanel(reason: .escape)
+        }
+    }
+
+    private func applyPolishState(_ state: InputAIPolishState, client: InputControllerClient?) {
+        aiPolishState = state
+        guard hasActiveTextComposition() else {
+            hideCandidatePanel(reason: .compositionEnded)
+            return
+        }
+        updateCandidatePanelImmediately(
+            suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
+            client: client ?? host?.currentClient
+        )
+    }
+
+    private func currentPolishSnapshot() -> InputAIPolishCompositionSnapshot {
+        InputAIPolishCompositionSnapshot(
+            rawInput: rawBuffer,
+            compositionID: compositionID,
+            rawRevision: rawRevision
+        )
+    }
+
+    private func currentPolishRequestText(fallback: String) -> String {
+        if compositionBuffer.hasResolvedSegments {
+            return compositionBuffer.commitText
+        }
+        guard conversionEngine.isNativeActive else {
+            return fallback
+        }
+        let snapshot = conversionEngine.snapshot
+        guard !snapshot.candidates.isEmpty else {
+            return fallback
+        }
+        let highlightedIndex = min(max(snapshot.highlightedIndex, 0), snapshot.candidates.count - 1)
+        return snapshot.candidates[highlightedIndex].text
     }
 
     private func commitSelectedSymbolCandidate(client: InputControllerClient?) -> Bool {
@@ -1333,7 +1511,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func applyCommitResult(
         _ result: InputCommitResult,
         client: InputControllerClient?,
-        acceptedAIRecommendation: AIRecommendationCandidate? = nil
+        acceptedAIRecommendation: AIRecommendationCandidate? = nil,
+        commitKindOverride: AITypingCommitKind? = nil
     ) -> Bool {
         let turn = turnSequencingRuntime.beginTurn(
             kind: .commitResult,
@@ -1349,6 +1528,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             token: turn,
             applicationPlan: commitApplicationRuntime.plan(for: result, hasComposition: !rawBuffer.isEmpty),
             acceptedAIRecommendation: acceptedAIRecommendation,
+            commitKindOverride: commitKindOverride,
             resetPlan: resetPlan
         )
         return executeTurnEffectSequence(sequence, client: client)
@@ -1570,6 +1750,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         acceptedAIRecommendation: AIRecommendationCandidate? = nil,
         acceptID: UUID? = nil,
+        commitKindOverride: AITypingCommitKind? = nil,
         compositionSnapshot: InputCompositionStateSnapshot
     ) -> InputCommitApplicationSideEffectContexts {
         commitApplicationRuntime.sideEffectContexts(
@@ -1580,6 +1761,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             acceptID: acceptID,
             selectedNativeCandidateSource: nativeCandidateNavigationRuntime.selectedCandidate?.kind.analyticsSource,
             prefixCandidateSource: suggestionStateRuntime.currentSnapshot().suggestion?.prefixCandidates.first?.source,
+            commitKindOverride: commitKindOverride,
             compositionSnapshot: compositionSnapshot,
             client: client
         )
@@ -1619,6 +1801,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         commitPolicy: InputCompositionLifecycleCommitPolicy
     ) -> Bool {
         clearSymbolCandidateSession()
+        aiPolishState = aiPolishRuntime.reset()
         if reason != .commit && reason != .nativeEnded {
             punctuatorRuntime.resetPairingState()
         }
@@ -1661,7 +1844,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
                         client: client
                     )
                 )
-            case .recordCommitSideEffects(let text, let acceptedAIRecommendation, let clientScope):
+            case .recordCommitSideEffects(
+                let text,
+                let acceptedAIRecommendation,
+                let commitKindOverride,
+                let clientScope
+            ):
                 let effectClient = turnClient(for: clientScope, providedClient: client)
                 recordCommitSideEffects(
                     commitSideEffectContexts(
@@ -1669,6 +1857,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                         client: effectClient,
                         acceptedAIRecommendation: acceptedAIRecommendation,
                         acceptID: acceptedAIRecommendation == nil ? nil : preparedAcceptedFeedbackID,
+                        commitKindOverride: commitKindOverride,
                         compositionSnapshot: sequence.token.compositionSnapshot
                     )
                 )
@@ -1682,9 +1871,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
                 }
             case .requestPolish(let text):
-                Task { [sessionController] in
-                    await sessionController.requestPolish(rawInput: text)
-                }
+                requestPolish(text, client: client)
             case .refreshComposition:
                 refreshComposition(client: client)
             case .hideCandidatePanel(let reason):
@@ -1873,6 +2060,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         inputModeSnapshot = latest
         conversionEngine.synchronizeInputMode(inputModeSnapshot)
         resetPunctuationSessionContext()
+        aiPolishState = aiPolishRuntime.reset()
         if symbolCandidateSession != nil {
             restoreCompositionPanelAfterSymbolCandidate(client: client)
         } else {
@@ -1907,7 +2095,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         runtimePreferences = preferences
         aiAcceptanceRuntime.updateRuntimePreferences(preferences)
-        sessionController = Self.polishOnlySessionController()
         invalidateSuggestion(reason: "runtime_preferences_changed")
         return true
     }
@@ -1925,6 +2112,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private func invalidateSuggestion(reason: String = "composition_invalidated") {
         suggestionStateRuntime.invalidate()
         nativeCandidateNavigationRuntime.clearSelectedCandidate()
+        aiPolishState = aiPolishRuntime.reset()
         aiRecommendationState = aiRecommendationRuntime.reset(
             compositionID: compositionID,
             rawLength: rawBuffer.count,
@@ -2110,16 +2298,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
             placementPreference: candidatePanelPlacementPreference(client: client),
             preeditDisplayText: candidatePanelPreeditDisplayText(client: client),
             aiRecommendation: aiRecommendationState,
+            aiPolish: aiPolishState,
             modeStatusText: modeStatusText,
             symbolCandidates: symbolCandidateSession?.candidates ?? [],
             savedPageSize: runtimePreferences.candidatePageSize,
             effectivePageSize: runtimePreferences.effectiveCandidatePageSize,
             layoutMode: runtimePreferences.candidateLayoutMode,
-            preferredSelection: nativeCandidateNavigationRuntime.nativeHighlightedSelection(
-                suggestion: suggestion,
-                rawInput: rawBuffer,
-                engine: conversionEngine
-            )
+            preferredSelection: aiPolishState.isActive
+                ? candidatePanelPublicationRuntime.state.windowState.selection
+                : nativeCandidateNavigationRuntime.nativeHighlightedSelection(
+                    suggestion: suggestion,
+                    rawInput: rawBuffer,
+                    engine: conversionEngine
+                )
         )
     }
 
