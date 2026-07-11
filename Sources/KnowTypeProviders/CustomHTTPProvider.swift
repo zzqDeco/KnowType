@@ -45,21 +45,36 @@ public struct CustomHTTPProvider: LLMProvider {
     }
 
     private func render(template: String, request: LLMRequest) throws -> String {
-        let requestData = try JSONEncoder().encode(request)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let requestData = try encoder.encode(request)
         let requestJSON = String(data: requestData, encoding: .utf8) ?? "{}"
-        var output = template
         let replacements: [String: String] = [
-            "{{task}}": request.task.rawValue,
-            "{{raw_input}}": escapeJSONString(request.rawInput ?? ""),
-            "{{locked_prefix}}": escapeJSONString(request.lockedPrefix ?? ""),
-            "{{locale}}": request.locale.rawValue,
-            "{{max_candidates}}": String(request.maxCandidates),
-            "{{length_level}}": request.lengthLevel?.rawValue ?? "",
-            "{{request_json}}": requestJSON
+            "task": request.task.rawValue,
+            "raw_input": escapeJSONString(request.rawInput ?? ""),
+            "locked_prefix": escapeJSONString(request.lockedPrefix ?? ""),
+            "locale": request.locale.rawValue,
+            "max_candidates": String(request.maxCandidates),
+            "length_level": request.lengthLevel?.rawValue ?? "",
+            "request_json": requestJSON
         ]
-        for (key, value) in replacements {
-            output = output.replacingOccurrences(of: key, with: value)
+
+        var output = ""
+        var cursor = template.startIndex
+        while let opening = template[cursor...].range(of: "{{") {
+            output.append(contentsOf: template[cursor..<opening.lowerBound])
+            guard let closing = template[opening.upperBound...].range(of: "}}") else {
+                throw ProviderError.invalidTemplate("unclosed placeholder")
+            }
+
+            let name = String(template[opening.upperBound..<closing.lowerBound])
+            guard let replacement = replacements[name] else {
+                throw ProviderError.invalidTemplate("unknown placeholder: \(name)")
+            }
+            output.append(replacement)
+            cursor = closing.upperBound
         }
+        output.append(contentsOf: template[cursor...])
         return output
     }
 

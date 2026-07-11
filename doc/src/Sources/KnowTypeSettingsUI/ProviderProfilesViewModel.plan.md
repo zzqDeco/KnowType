@@ -5,6 +5,8 @@
 ## Responsibilities
 
 - Load provider profiles from `ProviderProfileStore`, seeding default profiles when the store is empty.
+- Apply the provider-layer revision-aware retired-template model migration before
+  publishing loaded profiles.
 - Use `KnowTypeProviders.ProviderProfileTemplates` so settings defaults match IMK runtime defaults.
 - Delegate draft validation, save-plan construction, profile-scoped secret mutation, and transient connection-test configuration to `ProviderProfileEditingPolicy`.
 - Test the current provider draft by asking the policy for a transient `ProviderConfiguration` and running `ProviderConnectionDiagnostic` without saving provider metadata.

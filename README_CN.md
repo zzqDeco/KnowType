@@ -255,6 +255,12 @@ KnowType TSV，并在 TSV 旁写入本地 metadata。第三方大词库数据不
 OpenAI-compatible profile 必须显式填写 model ID；本地 OpenAI-compatible
 profile 可以留空 model，并通过 `/v1/models` 发现。
 
+新建 Anthropic 和 Gemini profile 分别使用 `claude-haiku-4-5-20251001` 与
+`gemini-3.5-flash`。已有 profile 只有在 model 精确等于退役模板 ID、且 endpoint
+仍是对应官方 API 时才会按 revision 一次性更新；自定义代理 endpoint 保留原 model。
+Custom HTTP body placeholder 只对原始模板扫描一次，因此用户输入中的 placeholder
+字面量不会被二次替换；未知或未闭合的 `{{...}}` 会在发请求前报模板无效。
+
 AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
 记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明，`LEXICAL_PROFILE.md`
 是由 Rime userdb 词频、KnowType 近期提交、选择历史，以及用户明确接受过的

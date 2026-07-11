@@ -30,6 +30,81 @@ private struct StubProfileStore: ProviderProfileStore {
     func saveProfiles(_ profiles: ProviderProfilesFile) throws {}
 }
 
+private final class RecordingProfileStore: ProviderProfileStore, @unchecked Sendable {
+    private(set) var file: ProviderProfilesFile
+    private(set) var savedFiles: [ProviderProfilesFile] = []
+    private let lock = NSLock()
+
+    init(file: ProviderProfilesFile) {
+        self.file = file
+    }
+
+    func loadProfiles() throws -> ProviderProfilesFile {
+        lock.lock()
+        defer { lock.unlock() }
+        return file
+    }
+
+    func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        file = profiles
+        savedFiles.append(profiles)
+    }
+}
+
+private final class RevisionConflictOnceProfileStore: ProviderProfileStore, @unchecked Sendable {
+    private var file: ProviderProfilesFile
+    private var shouldConflict = true
+    private let lock = NSLock()
+
+    init(file: ProviderProfilesFile) {
+        self.file = file
+    }
+
+    func loadProfiles() throws -> ProviderProfilesFile {
+        lock.lock()
+        defer { lock.unlock() }
+        return file
+    }
+
+    func saveProfiles(_ profiles: ProviderProfilesFile) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        file = profiles
+    }
+
+    func transactProfiles(
+        expectedRevision: UInt64,
+        _ mutation: (ProviderProfilesFile) throws -> ProviderProfilesFile
+    ) throws -> ProviderProfilesFile {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if shouldConflict {
+            shouldConflict = false
+            file.revision += 1
+            file.profiles[0].displayName = "Concurrent edit"
+            throw ProviderProfileStoreError.revisionConflict(
+                expected: expectedRevision,
+                actual: file.revision
+            )
+        }
+        guard expectedRevision == file.revision else {
+            throw ProviderProfileStoreError.revisionConflict(
+                expected: expectedRevision,
+                actual: file.revision
+            )
+        }
+
+        var updated = try mutation(file)
+        updated.schemaVersion = ProviderProfilesFile.currentSchemaVersion
+        updated.revision = file.revision + 1
+        file = updated
+        return updated
+    }
+}
+
 private struct FailingSecretStore: SecretStore {
     func secret(named name: String) throws -> String? {
         throw ProviderError.invalidResponse("secret unavailable")
@@ -83,6 +158,140 @@ private final class ConfigurationCapture: @unchecked Sendable {
 }
 
 final class ProviderProfileTests: XCTestCase {
+    func testRemoteProfileTemplatesUseCurrentModelIDs() {
+        XCTAssertEqual(
+            ProviderProfileTemplates.defaultProfile(kind: .anthropicMessages).model,
+            "claude-haiku-4-5-20251001"
+        )
+        XCTAssertEqual(
+            ProviderProfileTemplates.defaultProfile(kind: .geminiNative).model,
+            "gemini-3.5-flash"
+        )
+    }
+
+    func testRetiredModelMigrationIsOfficialExactAndOneTime() throws {
+        let store = RecordingProfileStore(file: ProviderProfilesFile(
+            revision: 41,
+            profiles: [
+                ProviderProfile(
+                    displayName: "Official Anthropic",
+                    kind: .anthropicMessages,
+                    baseURL: URL(string: "https://api.anthropic.com/")!,
+                    model: "claude-3-5-haiku-latest"
+                ),
+                ProviderProfile(
+                    displayName: "Official Gemini",
+                    kind: .geminiNative,
+                    baseURL: URL(string: "https://generativelanguage.googleapis.com")!,
+                    model: "gemini-1.5-flash"
+                ),
+                ProviderProfile(
+                    displayName: "Anthropic Proxy",
+                    kind: .anthropicMessages,
+                    baseURL: URL(string: "https://proxy.example.com/anthropic")!,
+                    model: "claude-3-5-haiku-latest"
+                ),
+                ProviderProfile(
+                    displayName: "Custom Anthropic Model",
+                    kind: .anthropicMessages,
+                    baseURL: URL(string: "https://api.anthropic.com")!,
+                    model: "claude-3-5-haiku-latest-custom"
+                ),
+                ProviderProfile(
+                    displayName: "Gemini Query Proxy",
+                    kind: .geminiNative,
+                    baseURL: URL(string: "https://generativelanguage.googleapis.com?tenant=custom")!,
+                    model: "gemini-1.5-flash"
+                )
+            ]
+        ))
+
+        let migrated = try ProviderProfileTemplates.loadProfilesMigratingRetiredModels(from: store)
+        let loadedAgain = try ProviderProfileTemplates.loadProfilesMigratingRetiredModels(from: store)
+
+        XCTAssertEqual(migrated.revision, 42)
+        XCTAssertEqual(loadedAgain.revision, 42)
+        XCTAssertEqual(store.savedFiles.count, 1)
+        XCTAssertEqual(migrated.profiles.map(\.model), [
+            "claude-haiku-4-5-20251001",
+            "gemini-3.5-flash",
+            "claude-3-5-haiku-latest",
+            "claude-3-5-haiku-latest-custom",
+            "gemini-1.5-flash"
+        ])
+    }
+
+    func testAnthropicRetiredModelMigrationAcceptsOnlyOfficialRootAndV1Paths() {
+        let retiredModel = "claude-3-5-haiku-latest"
+        let replacementModel = "claude-haiku-4-5-20251001"
+        let officialURLs = [
+            "https://api.anthropic.com",
+            "https://api.anthropic.com/",
+            "https://api.anthropic.com/v1",
+            "https://api.anthropic.com/v1/"
+        ]
+        let excludedURLs = [
+            "https://proxy.example.com/v1",
+            "https://api.anthropic.com/proxy",
+            "https://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com/v1beta",
+            "https://api.anthropic.com/v1?tenant=custom",
+            "https://user@api.anthropic.com/v1",
+            "https://api.anthropic.com/v1#custom",
+            "https://api.anthropic.com:8443/v1"
+        ]
+
+        for urlString in officialURLs {
+            let profile = ProviderProfile(
+                displayName: "Anthropic",
+                kind: .anthropicMessages,
+                baseURL: URL(string: urlString)!,
+                model: retiredModel
+            )
+
+            XCTAssertEqual(
+                ProviderProfileTemplates.migratingRetiredModels(in: [profile]).first?.model,
+                replacementModel,
+                urlString
+            )
+        }
+
+        for urlString in excludedURLs {
+            let profile = ProviderProfile(
+                displayName: "Anthropic",
+                kind: .anthropicMessages,
+                baseURL: URL(string: urlString)!,
+                model: retiredModel
+            )
+
+            XCTAssertEqual(
+                ProviderProfileTemplates.migratingRetiredModels(in: [profile]).first?.model,
+                retiredModel,
+                urlString
+            )
+        }
+    }
+
+    func testRetiredModelMigrationRetriesAgainstLatestRevision() throws {
+        let store = RevisionConflictOnceProfileStore(file: ProviderProfilesFile(
+            revision: 7,
+            profiles: [
+                ProviderProfile(
+                    displayName: "Anthropic",
+                    kind: .anthropicMessages,
+                    baseURL: URL(string: "https://api.anthropic.com")!,
+                    model: "claude-3-5-haiku-latest"
+                )
+            ]
+        ))
+
+        let migrated = try ProviderProfileTemplates.loadProfilesMigratingRetiredModels(from: store)
+
+        XCTAssertEqual(migrated.revision, 9)
+        XCTAssertEqual(migrated.profiles.first?.displayName, "Concurrent edit")
+        XCTAssertEqual(migrated.profiles.first?.model, "claude-haiku-4-5-20251001")
+    }
+
     func testProfileResolverDoesNotPersistAPIKeyInProfile() throws {
         let profile = ProviderProfileDefaults.openAICompatible(
             baseURL: URL(string: "https://api.example.com/v1")!,
@@ -1321,6 +1530,37 @@ final class ProviderProfileTests: XCTestCase {
                 model: ""
             )
         ])
+    }
+
+    func testRuntimeLoaderMigratesRetiredOfficialModelBeforeBuildingProvider() throws {
+        let store = RecordingProfileStore(file: ProviderProfilesFile(
+            revision: 3,
+            profiles: [
+                ProviderProfile(
+                    displayName: "Anthropic",
+                    kind: .anthropicMessages,
+                    baseURL: URL(string: "https://api.anthropic.com")!,
+                    model: "claude-3-5-haiku-latest",
+                    isDefault: true
+                )
+            ]
+        ))
+        let capture = ConfigurationCapture()
+        let loader = ProviderRuntimeLoader(
+            profileStore: store,
+            secretStore: DictionarySecretStore(values: [:]),
+            providerBuilder: { configuration in
+                capture.append(configuration)
+                return StubProvider()
+            }
+        )
+
+        let provider = loader.loadDefaultProvider()
+
+        XCTAssertEqual(provider?.providerName, "stub")
+        XCTAssertEqual(capture.configurations.first?.model, "claude-haiku-4-5-20251001")
+        XCTAssertEqual(store.file.revision, 4)
+        XCTAssertEqual(store.savedFiles.count, 1)
     }
 
     func testRuntimeLoaderCanDisableSeededDefaultsForEmptyStore() throws {

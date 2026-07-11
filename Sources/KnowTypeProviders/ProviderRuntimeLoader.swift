@@ -25,7 +25,9 @@ public struct ProviderRuntimeLoader: Sendable {
 
     public func loadDefaultProvider() -> (any LLMProvider)? {
         do {
-            let profilesFile = try profileStore.loadProfiles()
+            let profilesFile = try ProviderProfileTemplates.loadProfilesMigratingRetiredModels(
+                from: profileStore
+            )
             let profiles = profilesFile.profiles.isEmpty && loadDefaultsWhenEmpty
                 ? ProviderProfileTemplates.defaultProfiles()
                 : profilesFile.profiles

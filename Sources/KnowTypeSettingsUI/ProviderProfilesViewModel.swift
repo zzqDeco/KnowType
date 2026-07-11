@@ -60,7 +60,9 @@ public final class ProviderProfilesViewModel: ObservableObject {
         let resolvedErrorMessage: String?
 
         do {
-            let loaded = try profileStore.loadProfiles()
+            let loaded = try ProviderProfileTemplates.loadProfilesMigratingRetiredModels(
+                from: profileStore
+            )
             if loaded.profiles.isEmpty && loadDefaultsWhenEmpty {
                 let defaults = ProviderProfileEditingPolicy.profileScopedSecrets(ProviderProfileTemplates.defaultProfiles())
                 resolvedFile = loaded

@@ -14,8 +14,11 @@ provider interface.
 ## Behavior Notes
 
 - The adapter maps task-specific prompts into a non-streaming Responses request.
-- It extracts usable output text and passes it through shared response
-  normalization.
+- It requires completed output, skips reasoning and other non-message items,
+  traverses every message and `output_text` content item, and decodes the
+  concatenated text once.
+- Any refusal, incomplete response, or incomplete message is rejected before
+  structured decoding, even if an earlier text item looks parseable.
 - Requests prefer `text.format.type=json_schema` with `strict=true`.
 - If an OpenAI-compatible Responses runtime rejects only `json_schema`, fallback
   retries once with `text.format.type=json_object`.

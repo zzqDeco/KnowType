@@ -22,6 +22,31 @@ final class ProviderProfilesViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.profiles.first(where: { $0.kind == .customHTTP })?.customResponsePath, "candidates")
     }
 
+    func testLoadMigratesRetiredOfficialModelAtCurrentRevision() throws {
+        let store = CapturingProfileStore(file: ProviderProfilesFile(
+            revision: 5,
+            profiles: [
+                ProviderProfile(
+                    displayName: "Gemini",
+                    kind: .geminiNative,
+                    baseURL: URL(string: "https://generativelanguage.googleapis.com")!,
+                    model: "gemini-1.5-flash",
+                    isDefault: true
+                )
+            ]
+        ))
+
+        let viewModel = ProviderProfilesViewModel(
+            profileStore: store,
+            secretStore: InMemorySecretStore(),
+            loadDefaultsWhenEmpty: false
+        )
+
+        XCTAssertEqual(viewModel.profiles.first?.model, "gemini-3.5-flash")
+        XCTAssertEqual(store.savedFiles.last?.revision, 6)
+        XCTAssertEqual(store.savedFiles.count, 1)
+    }
+
     func testSeededProviderDefaultsUseProfileScopedSecretNames() {
         let viewModel = ProviderProfilesViewModel(
             profileStore: CapturingProfileStore(file: ProviderProfilesFile()),
@@ -203,7 +228,7 @@ final class ProviderProfilesViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.draft.kind, .geminiNative)
         XCTAssertEqual(viewModel.draft.baseURL, "https://generativelanguage.googleapis.com")
-        XCTAssertEqual(viewModel.draft.model, "gemini-1.5-flash")
+        XCTAssertEqual(viewModel.draft.model, "gemini-3.5-flash")
         XCTAssertTrue(viewModel.draft.headers.isEmpty)
         XCTAssertEqual(viewModel.draft.secretName, "knowtype.openai_chat.apiKey")
         XCTAssertEqual(viewModel.draft.customBodyTemplate, "")
