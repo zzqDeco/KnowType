@@ -187,6 +187,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
+    func handle(commandSelectorName: String, client: InputControllerClient?) -> Bool {
+        guard let intent = keyMapper.intent(forCommandSelectorName: commandSelectorName) else {
+            return false
+        }
+        return latencyTracer.trace("handle_key_total") {
+            handle(intent: intent, client: client)
+        }
+    }
+
     func composedString() -> Any {
         nativeMarkedText() ?? compositionBuffer.displayText
     }

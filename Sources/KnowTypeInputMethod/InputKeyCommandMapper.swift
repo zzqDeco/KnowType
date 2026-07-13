@@ -121,6 +121,13 @@ public struct InputKeyCommandMapper: Sendable {
         return .append(stroke.text)
     }
 
+    func intent(forCommandSelectorName selectorName: String) -> InputKeyIntent? {
+        guard let navigation = Self.navigationByCommandSelectorName[selectorName] else {
+            return nil
+        }
+        return .moveCandidateSelection(navigation)
+    }
+
     private func optionDigit(for keyCode: Int) -> Int? {
         Self.digitKeyCodes[keyCode]
     }
@@ -180,5 +187,20 @@ public struct InputKeyCommandMapper: Sendable {
         126: .up,
         116: .pageUp,
         121: .pageDown
+    ]
+
+    private static let navigationByCommandSelectorName: [String: InputCandidateNavigation] = [
+        "moveLeft:": .left,
+        "moveRight:": .right,
+        "moveUp:": .up,
+        "moveDown:": .down,
+        "pageUp:": .pageUp,
+        "pageDown:": .pageDown,
+        "moveLeftAndModifySelection:": .left,
+        "moveRightAndModifySelection:": .right,
+        "moveUpAndModifySelection:": .up,
+        "moveDownAndModifySelection:": .down,
+        "pageUpAndModifySelection:": .pageUp,
+        "pageDownAndModifySelection:": .pageDown
     ]
 }

@@ -4410,6 +4410,89 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
+    func testSymbolCandidateResponderArrowsAreConsumedWithoutChangingHostSelection() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 42, length: 3)
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        let markedWriteCount = client.markedTextWrites.count
+        let insertWriteCount = client.insertTextWrites.count
+
+        XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(1))
+        XCTAssertEqual(client.selectedRangeValue, NSRange(location: 42, length: 3))
+        XCTAssertEqual(client.markedTextWrites.count, markedWriteCount)
+        XCTAssertEqual(client.insertTextWrites.count, insertWriteCount)
+
+        XCTAssertTrue(
+            coordinator.handle(
+                commandSelectorName: "moveLeftAndModifySelection:",
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
+        XCTAssertEqual(client.selectedRangeValue, NSRange(location: 42, length: 3))
+        XCTAssertEqual(client.markedTextWrites.count, markedWriteCount)
+        XCTAssertEqual(client.insertTextWrites.count, insertWriteCount)
+    }
+
+    func testSymbolCandidateResponderArrowsStayConsumedAtListBoundaries() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 24, length: 0)
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        XCTAssertTrue(coordinator.handle(commandSelectorName: "moveLeft:", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
+
+        for expectedIndex in 1...3 {
+            XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+            XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(expectedIndex))
+        }
+
+        XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(3))
+        XCTAssertEqual(client.selectedRangeValue, NSRange(location: 24, length: 0))
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+    }
+
+    func testResponderArrowMatchesKeyCodePathAndPassesThroughAfterSymbolCommit() {
+        let keyClient = FakeInputControllerClient()
+        let commandClient = FakeInputControllerClient()
+        let (keyCoordinator, keyHost, _) = makeCoordinator(client: keyClient)
+        let (commandCoordinator, commandHost, _) = makeCoordinator(client: commandClient)
+
+        XCTAssertTrue(keyCoordinator.handleText("/", client: keyClient))
+        XCTAssertTrue(commandCoordinator.handleText("/", client: commandClient))
+        XCTAssertTrue(
+            keyCoordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: keyClient
+            )
+        )
+        XCTAssertTrue(commandCoordinator.handle(commandSelectorName: "moveRight:", client: commandClient))
+        XCTAssertEqual(
+            commandHost.panelStates.last?.windowState.selection,
+            keyHost.panelStates.last?.windowState.selection
+        )
+
+        XCTAssertTrue(commandCoordinator.handleText(" ", client: commandClient))
+        XCTAssertEqual(commandClient.insertTextWrites.last?.text, "/")
+        XCTAssertFalse(commandCoordinator.handle(commandSelectorName: "moveRight:", client: commandClient))
+
+        XCTAssertTrue(commandCoordinator.handleText("/", client: commandClient))
+        XCTAssertTrue(
+            commandCoordinator.handle(
+                stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53),
+                client: commandClient
+            )
+        )
+        XCTAssertFalse(commandCoordinator.handle(commandSelectorName: "moveRight:", client: commandClient))
+    }
+
     func testIdleSlashSymbolCandidateNumberTwoCommitsAsciiSlash() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(client: client)

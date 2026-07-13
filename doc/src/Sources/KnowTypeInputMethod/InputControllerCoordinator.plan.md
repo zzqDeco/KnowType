@@ -9,6 +9,13 @@ event publication side effects in the required order.
 Current behavior:
 
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
+- maps IMK responder command-selector names through the same mapper, latency
+  trace, and intent handler as raw key events; unknown commands return to the
+  host
+- consumes arrow and paging navigation for active symbol-candidate sessions at
+  every list position, including clamped boundaries, without marked-text,
+  insert-text, caret, or selection writes; the same commands pass through after
+  commit or cancellation
 - cancels an active symbol-candidate overlay before returning `false` for a
   Command/Control host shortcut, preventing the next Space from committing a
   stale symbol while preserving host handling

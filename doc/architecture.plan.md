@@ -239,6 +239,10 @@ LevelDB state.
   InputMethodKit's default click-outside `commitComposition(_:)` behavior.
   Shortcut modifiers are derived from each key-down event's flags, so separate
   `keyUp` and `flagsChanged` registration is not required.
+- `KnowTypeInputController.didCommand(by:client:)` forwards standard responder
+  navigation selectors to the coordinator. The selector path and raw key-event
+  path share one candidate-navigation intent and handled contract; unknown
+  selectors remain available to the focused host.
 - Command/Control key-down maps to a host-shortcut intent. An active symbol
   overlay is cancelled before the event returns to the host, while key-up and
   flags-changed remain outside the production event registration.
@@ -264,6 +268,9 @@ LevelDB state.
 - `InputNativeCandidateNavigationRuntime` owns displayed native selection
   state, panel selection mapping, Rime highlight, current-page select, paging,
   and boundary paging decisions.
+- While a symbol-candidate session is active, arrow and paging navigation is
+  consumed even when its clamped selection cannot move. Ending the session
+  restores ordinary host navigation without a host text or selection write.
 - `InputCompositionStateRuntime` owns raw input, `CompositionBuffer`,
   composition id/revision, and delete-count state. The coordinator still owns
   Rime calls, host insertion, marked text, panel publication, and lifecycle

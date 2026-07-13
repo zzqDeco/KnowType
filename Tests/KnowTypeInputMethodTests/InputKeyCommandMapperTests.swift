@@ -111,6 +111,37 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
     }
 
+    func testMapsResponderNavigationCommandsToCandidateNavigation() {
+        let mappings: [(String, InputCandidateNavigation)] = [
+            ("moveLeft:", .left),
+            ("moveRight:", .right),
+            ("moveUp:", .up),
+            ("moveDown:", .down),
+            ("pageUp:", .pageUp),
+            ("pageDown:", .pageDown),
+            ("moveLeftAndModifySelection:", .left),
+            ("moveRightAndModifySelection:", .right),
+            ("moveUpAndModifySelection:", .up),
+            ("moveDownAndModifySelection:", .down),
+            ("pageUpAndModifySelection:", .pageUp),
+            ("pageDownAndModifySelection:", .pageDown)
+        ]
+
+        for (selectorName, navigation) in mappings {
+            XCTAssertEqual(
+                mapper.intent(forCommandSelectorName: selectorName),
+                .moveCandidateSelection(navigation),
+                selectorName
+            )
+        }
+    }
+
+    func testUnknownResponderCommandIsNotMapped() {
+        XCTAssertNil(mapper.intent(forCommandSelectorName: "deleteBackward:"))
+        XCTAssertNil(mapper.intent(forCommandSelectorName: "insertNewline:"))
+        XCTAssertNil(mapper.intent(forCommandSelectorName: "moveToBeginningOfLine:"))
+    }
+
     func testMapsPlainNumberKeysToCandidateSelectionIntent() {
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "0", keyCode: 29)), .selectCandidate(0))
         XCTAssertEqual(mapper.intent(for: InputKeyStroke(text: "1", keyCode: 18)), .selectCandidate(1))
