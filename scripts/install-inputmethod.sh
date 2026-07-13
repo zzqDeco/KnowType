@@ -22,9 +22,15 @@ KEEP_BACKUPS="$KNOWTYPE_DEFAULT_BACKUP_RETENTION"
 QUIESCE_DISABLE_STATUS="not-run"
 QUIESCE_DISABLED_COUNT="0"
 QUIESCE_HOST_STOP_STATUS="not-run"
+QUIESCE_PROVIDER_WRITER_STATUS="not-run"
 QUIESCE_MENU_AGENTS_RESTARTED="no"
 QUIESCE_STARTED=0
 STALE_LAUNCHSERVICES_CLEANUP_COUNT="0"
+PROVIDER_MIGRATION_STATUS="not-run"
+PROVIDER_MIGRATION_REVISION=""
+PROVIDER_MIGRATION_ATTEMPTED=0
+SOURCE_PROVIDER_STORAGE_GENERATION=""
+PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE=0
 
 usage() {
   cat <<'EOF'
@@ -157,7 +163,16 @@ if [[ ! "$KEEP_BACKUPS" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
+LOCAL_BUILD_VERSION="${KNOWTYPE_BUNDLE_BUILD_VERSION:-}"
+LOCAL_SHORT_VERSION="${KNOWTYPE_BUNDLE_SHORT_VERSION:-}"
+if [[ "$SOURCE_MODE" == "build" ]]; then
+  LOCAL_BUILD_VERSION="${LOCAL_BUILD_VERSION:-$(date +%Y%m%d%H%M%S)}"
+  LOCAL_SHORT_VERSION="${LOCAL_SHORT_VERSION:-$(knowtype_plist_value "CFBundleShortVersionString" "$ROOT_DIR/Resources/InputMethod/Info.plist")}"
+  if [[ -z "$LOCAL_SHORT_VERSION" ]]; then
+    echo "error: local build short version is missing" >&2
+    exit 1
+  fi
+fi
 TARGET_DIR="$(knowtype_inputmethod_target_dir)"
 TARGET_PATH="$(knowtype_inputmethod_target_path)"
 PREFPANE_TARGET_DIR="$(knowtype_preferencepane_target_dir)"
@@ -199,6 +214,125 @@ cleanup_source_temp() {
   fi
 }
 
+provider_storage_generation_for_bundle() {
+  local bundle_path="$1"
+  knowtype_plist_value \
+    "KnowTypeProviderProfileStorageGeneration" \
+    "$bundle_path/Contents/Info.plist"
+}
+
+prepare_provider_storage_for_source_bundle() {
+  if [[ "$SOURCE_PROVIDER_STORAGE_GENERATION" =~ ^[0-9]+$ ]] &&
+     (( SOURCE_PROVIDER_STORAGE_GENERATION >= 2 )); then
+    return 0
+  fi
+
+  stop_provider_profile_writer_hosts
+  local current_generation=""
+  current_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)"
+  if [[ "$current_generation" =~ ^[0-9]+$ ]] && (( current_generation >= 2 )); then
+    local provider_tool=""
+    local output=""
+    local status=""
+    provider_tool="$(inputsource_tool_path)"
+    if [[ ! -x "$provider_tool" ]]; then
+      echo "error: provider profile helper is unavailable for provider storage downgrade" >&2
+      return 1
+    fi
+    if ! output="$("$provider_tool" downgrade-provider-profiles 2>&1)"; then
+      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+      echo "error: provider storage downgrade failed; refusing to install a pre-v2 input method" >&2
+      return 1
+    fi
+    [[ -n "$output" ]] && printf '%s\n' "$output"
+    status="$(printf '%s\n' "$output" | awk -F= '/^provider\.storage\.downgrade\.status=/{print $2; exit}')"
+    case "$status" in
+      downgraded|already_legacy|unmanaged)
+        PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE=1
+        PROVIDER_MIGRATION_STATUS="skipped-pre-v2-$status"
+        return 0
+        ;;
+      *)
+        echo "error: provider storage downgrade returned an unknown status" >&2
+        return 1
+        ;;
+    esac
+  fi
+
+  if ! knowtype_provider_storage_is_pre_v2_compatible; then
+    echo "error: provider storage is not compatible with the pre-v2 source bundle and no generation-2 installed app can downgrade it" >&2
+    return 1
+  fi
+  PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE=1
+  PROVIDER_MIGRATION_STATUS="skipped-pre-v2-compatible"
+}
+
+rollback_provider_storage_after_failed_install() {
+  local provider_tool=""
+  if (( PROVIDER_MIGRATION_ATTEMPTED != 1 )); then
+    return 0
+  fi
+  provider_tool="$(inputsource_tool_path)"
+  local restored_generation=""
+  restored_generation="$(provider_storage_generation_for_bundle "$BACKUP_DIR/KnowType.app" || true)"
+  if [[ "$restored_generation" =~ ^[0-9]+$ ]] && (( restored_generation >= 2 )); then
+    return 0
+  fi
+  local output=""
+  if [[ "$PROVIDER_MIGRATION_STATUS" == "migrated" ]]; then
+    if [[ ! -x "$provider_tool" ]]; then
+      echo "error: cannot roll back provider migration because the provider helper is unavailable" >&2
+      return 1
+    fi
+    if [[ ! "$PROVIDER_MIGRATION_REVISION" =~ ^[0-9]+$ ]]; then
+      echo "error: provider migration rollback is missing its expected canonical revision" >&2
+      return 1
+    fi
+    if ! output="$("$provider_tool" rollback-provider-profile-migration --expected-revision "$PROVIDER_MIGRATION_REVISION" 2>&1)"; then
+      [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+      echo "error: provider migration rollback failed; keeping the new app instead of restoring an incompatible old binary" >&2
+      return 1
+    fi
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    return 0
+  fi
+
+  if [[ ! -x "$provider_tool" ]]; then
+    echo "error: cannot verify provider storage compatibility because the provider helper is unavailable" >&2
+    return 1
+  fi
+  if ! output="$("$provider_tool" downgrade-provider-profiles 2>&1)"; then
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    echo "error: provider storage compatibility check failed; keeping the new app instead of restoring an incompatible old binary" >&2
+    return 1
+  fi
+  [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+  local status=""
+  status="$(printf '%s\n' "$output" | awk -F= '/^provider\.storage\.downgrade\.status=/{print $2; exit}')"
+  case "$status" in
+    downgraded|already_legacy|unmanaged)
+      return 0
+      ;;
+    *)
+      echo "error: provider storage compatibility check returned an unknown status; keeping the new app" >&2
+      return 1
+      ;;
+  esac
+}
+
+reapply_provider_migration_best_effort() {
+  local bundle_path="$1"
+  local provider_tool=""
+  local generation=""
+  generation="$(provider_storage_generation_for_bundle "$bundle_path" || true)"
+  provider_tool="$(inputsource_tool_path)"
+  if [[ -x "$provider_tool" && "$generation" =~ ^[0-9]+$ ]] && (( generation >= 2 )); then
+    if ! "$provider_tool" migrate-provider-profiles >/dev/null 2>&1; then
+      echo "warning: could not reapply provider migration after artifact rollback was abandoned; rerun the installer" >&2
+    fi
+  fi
+}
+
 restore_existing_input_source_after_failed_quiesce() {
   if (( QUIESCE_STARTED != 1 || INSTALL_SUCCEEDED == 1 || DRY_RUN == 1 )); then
     return 0
@@ -231,6 +365,14 @@ rollback_failed_install() {
   fi
   if [[ -n "$BACKUP_DIR" && ( -d "$BACKUP_DIR/KnowType.app" || -d "$BACKUP_DIR/KnowType.prefPane" ) ]]; then
     echo "Install failed; restoring previous KnowType backup: $BACKUP_ID" >&2
+    if ! knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0; then
+      echo "error: failed-install rollback refused an invalid backup; current artifacts were left in place" >&2
+      return 0
+    fi
+    if ! knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"; then
+      echo "error: failed-install rollback left current artifacts in place to protect the foreign PreferencePane" >&2
+      return 0
+    fi
     local app_stage=""
     local current_stage=""
     local restored_app=0
@@ -240,16 +382,24 @@ rollback_failed_install() {
         rm -rf "$app_stage"
         return 0
       fi
+      if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]] &&
+         ! knowtype_is_safe_local_inputmethod_bundle_path "$TARGET_PATH"; then
+        rm -rf "$app_stage"
+        return 0
+      fi
+      local new_executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
+      if ! rollback_provider_storage_after_failed_install "$new_executable"; then
+        rm -rf "$app_stage"
+        return 0
+      fi
       if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
-        if ! knowtype_is_safe_local_inputmethod_bundle_path "$TARGET_PATH"; then
-          rm -rf "$app_stage"
-          return 0
-        fi
         current_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.current.XXXXXX")" || {
+          reapply_provider_migration_best_effort "$TARGET_PATH"
           rm -rf "$app_stage"
           return 0
         }
         if ! mv "$TARGET_PATH" "$current_stage/KnowType.app"; then
+          reapply_provider_migration_best_effort "$TARGET_PATH"
           rm -rf "$app_stage" "$current_stage"
           return 0
         fi
@@ -258,24 +408,36 @@ rollback_failed_install() {
         if [[ -n "$current_stage" && -d "$current_stage/KnowType.app" && ! -e "$TARGET_PATH" ]]; then
           mv "$current_stage/KnowType.app" "$TARGET_PATH" 2>/dev/null || true
         fi
+        reapply_provider_migration_best_effort "$TARGET_PATH"
         rm -rf "$app_stage" "$current_stage"
         return 0
       fi
       rm -rf "$app_stage" "$current_stage"
       restored_app=1
+      if (( PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE == 1 )); then
+        reapply_provider_migration_best_effort "$TARGET_PATH"
+      fi
     fi
     if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
       mkdir -p "$PREFPANE_TARGET_DIR"
-      rm -rf -- "$PREFPANE_TARGET_PATH"
-      cp -R "$BACKUP_DIR/KnowType.prefPane" "$PREFPANE_TARGET_PATH"
+      if ! knowtype_replace_local_preferencepane_bundle_atomically \
+        "$BACKUP_DIR/KnowType.prefPane" \
+        "$PREFPANE_TARGET_PATH" \
+        1; then
+        echo "error: failed-install rollback could not restore the validated PreferencePane backup" >&2
+        return 0
+      fi
     else
-      rm -rf -- "$PREFPANE_TARGET_PATH"
+      knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0 || return 0
     fi
     if (( restored_app == 1 )); then
       knowtype_register_launchservices_path "$TARGET_PATH" 0
       restore_existing_input_source_after_failed_quiesce
     fi
   else
+    if (( PROVIDER_STORAGE_PREPARED_FOR_PRE_V2_SOURCE == 1 )); then
+      reapply_provider_migration_best_effort "$TARGET_PATH"
+    fi
     restore_existing_input_source_after_failed_quiesce
   fi
 }
@@ -320,6 +482,50 @@ knowtype_input_method_host_is_running() {
         ;;
     esac
   done < <(ps -axo command= 2>/dev/null)
+  return 1
+}
+
+knowtype_settings_host_pids() {
+  local pid command
+  while read -r pid command; do
+    [[ -n "${pid:-}" && -n "${command:-}" ]] || continue
+    case "$command" in
+      KnowTypeSettingsApp|KnowTypeSettingsApp\ *|*/KnowTypeSettingsApp|*/KnowTypeSettingsApp\ *|KnowTypeSettings|KnowTypeSettings\ *|*/KnowTypeSettings|*/KnowTypeSettings\ *)
+        printf '%s\n' "$pid"
+        ;;
+    esac
+  done < <(ps -axo pid=,command= 2>/dev/null)
+}
+
+knowtype_settings_host_is_running() {
+  [[ -n "$(knowtype_settings_host_pids)" ]]
+}
+
+stop_provider_profile_writer_hosts() {
+  local pids=""
+  pids="$(knowtype_settings_host_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  if [[ -n "$pids" ]]; then
+    echo "Requesting KnowType Settings shutdown before provider profile migration: $pids"
+    # shellcheck disable=SC2086
+    kill -TERM $pids 2>/dev/null || true
+  fi
+  knowtype_quit_system_settings_if_running 0
+
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if ! knowtype_settings_host_is_running && ! knowtype_system_settings_is_running; then
+      if [[ -n "$pids" ]]; then
+        QUIESCE_PROVIDER_WRITER_STATUS="stopped"
+      elif [[ "$QUIESCE_PROVIDER_WRITER_STATUS" == "not-run" ]]; then
+        QUIESCE_PROVIDER_WRITER_STATUS="not-running"
+      fi
+      return 0
+    fi
+    sleep 0.2
+  done
+
+  QUIESCE_PROVIDER_WRITER_STATUS="still-running"
+  echo "error: close KnowType Settings and System Settings before installing so provider profiles can migrate safely" >&2
   return 1
 }
 
@@ -422,6 +628,36 @@ quiesce_before_replace() {
   restart_text_input_agents_for_quiesce
   stop_input_method_host_after_quiesce
   require_input_method_host_stopped
+  stop_provider_profile_writer_hosts
+}
+
+migrate_provider_profiles() {
+  local provider_tool=""
+  local output=""
+  local installed_generation=""
+  installed_generation="$(provider_storage_generation_for_bundle "$TARGET_PATH" || true)"
+  if [[ ! "$installed_generation" =~ ^[0-9]+$ ]] || (( installed_generation < 2 )); then
+    if [[ "$PROVIDER_MIGRATION_STATUS" == "not-run" ]]; then
+      PROVIDER_MIGRATION_STATUS="skipped-pre-v2-compatible"
+    fi
+    return 0
+  fi
+  provider_tool="$(inputsource_tool_path)"
+  if [[ ! -x "$provider_tool" ]]; then
+    echo "error: provider profile helper is unavailable for migration" >&2
+    return 1
+  fi
+  stop_provider_profile_writer_hosts
+  PROVIDER_MIGRATION_ATTEMPTED=1
+  if ! output="$("$provider_tool" migrate-provider-profiles 2>&1)"; then
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    echo "error: provider profile migration failed; refusing to register the new input method" >&2
+    return 1
+  fi
+  [[ -n "$output" ]] && printf '%s\n' "$output"
+  PROVIDER_MIGRATION_STATUS="$(printf '%s\n' "$output" | awk -F= '/^provider\.migration\.status=/{print $2; exit}')"
+  PROVIDER_MIGRATION_STATUS="${PROVIDER_MIGRATION_STATUS:-unknown}"
+  PROVIDER_MIGRATION_REVISION="$(printf '%s\n' "$output" | awk -F= '/^provider\.migration\.revision=/{print $2; exit}')"
 }
 
 purge_legacy_best_effort() {
@@ -439,16 +675,6 @@ purge_legacy_best_effort() {
 }
 
 bootstrap_input_source_best_effort() {
-  local executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
-  if [[ -x "$executable" ]]; then
-    if "$executable" --knowtype-register-input-source --knowtype-enable-input-source; then
-      return 0
-    fi
-    echo "warning: installed app input-source registration failed; falling back to helper bootstrap" >&2
-  else
-    echo "warning: installed KnowType executable is unavailable for input-source registration: $executable" >&2
-  fi
-
   local tool
   if ! tool="$(inputsource_tool_path)"; then
     echo "warning: input-source helper is unavailable; continuing without input-source bootstrap" >&2
@@ -615,9 +841,9 @@ prepare_source_artifacts() {
     build)
       SOURCE_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
       SOURCE_GIT_TAG="$(git -C "$ROOT_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
-      SOURCE_BUNDLE_PATH="$(KNOWTYPE_BUNDLE_BUILD_VERSION="$LOCAL_BUILD_VERSION" "$SCRIPTS_DIR/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+      SOURCE_BUNDLE_PATH="$("$SCRIPTS_DIR/build-inputmethod-bundle.sh" --configuration "$CONFIGURATION" --version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION" | tail -n 1)"
       if (( WITH_PREFPANE == 1 )); then
-        SOURCE_PREFPANE_PATH="$("$SCRIPTS_DIR/build-preference-pane.sh" --configuration "$CONFIGURATION" | tail -n 1)"
+        SOURCE_PREFPANE_PATH="$("$SCRIPTS_DIR/build-preference-pane.sh" --configuration "$CONFIGURATION" --version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION" | tail -n 1)"
       fi
       ;;
     bundle)
@@ -689,12 +915,19 @@ prepare_source_artifacts() {
     exit 1
   }
   knowtype_validate_inputmethod_bundle_for_install "$SOURCE_BUNDLE_PATH" "$VERIFY_ENABLED"
+  SOURCE_PROVIDER_STORAGE_GENERATION="$(provider_storage_generation_for_bundle "$SOURCE_BUNDLE_PATH" || true)"
 
   if (( WITH_PREFPANE == 1 )) && [[ -z "$SOURCE_PREFPANE_PATH" ]]; then
     echo "error: --with-prefpane requested but source KnowType.prefPane was not found" >&2
     exit 1
   fi
+  if (( WITH_PREFPANE == 1 )); then
+    knowtype_validate_preferencepane_bundle_for_install "$SOURCE_PREFPANE_PATH" "$VERIFY_ENABLED"
+    knowtype_validate_app_preferencepane_version_consistency "$SOURCE_BUNDLE_PATH" "$SOURCE_PREFPANE_PATH"
+  fi
 }
+
+knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"
 
 if (( DRY_RUN == 1 )); then
   if [[ "$SOURCE_MODE" != "build" ]]; then
@@ -710,7 +943,7 @@ if (( DRY_RUN == 1 )); then
   [[ -n "$SOURCE_GIT_TAG" ]] && echo "Release tag: $SOURCE_GIT_TAG"
   [[ -n "$SOURCE_GIT_COMMIT" ]] && echo "Release commit: $SOURCE_GIT_COMMIT"
   echo "Target bundle: $TARGET_PATH"
-  echo "Quiesce plan: switch away from KnowType, disable old KnowType input-source rows, restart text-input agents, then TERM the host if it is still running."
+  echo "Quiesce plan: switch away from KnowType, disable old KnowType input-source rows, restart text-input agents, TERM the host, and close Settings writers."
   if (( FORCE_STOP_HOST == 1 )); then
     echo "Quiesce plan: --force-stop-host would KILL the host only after TERM fails."
   fi
@@ -777,6 +1010,12 @@ if (( DRY_RUN == 1 )); then
   echo
   echo "Text Input Source preference rows would be repaired and menu agents would be restarted."
   echo "Only the canonical installed app would be registered with LaunchServices: $TARGET_PATH"
+  if [[ "$SOURCE_PROVIDER_STORAGE_GENERATION" =~ ^[0-9]+$ ]] &&
+     (( SOURCE_PROVIDER_STORAGE_GENERATION >= 2 )); then
+    echo "The installed app would migrate provider profiles to providers.v2.json before LaunchServices/TIS registration."
+  else
+    echo "The source app is pre-v2; current provider metadata would be downgraded or verified compatible before replacement, and the old migration CLI would not be invoked."
+  fi
   echo "Menu acceptance would still require the real macOS input menu to show the K icon and 知键 entry."
   exit 0
 fi
@@ -801,6 +1040,8 @@ if (( BACKUP_ENABLED == 1 )); then
   BACKUP_DIR="$KNOWTYPE_CREATED_BACKUP_DIR"
 fi
 
+prepare_provider_storage_for_source_bundle
+
 if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
   knowtype_remove_local_inputmethod_bundle_if_safe "$TARGET_PATH" 0
 fi
@@ -811,13 +1052,15 @@ if [[ "$SOURCE_MODE" == "build" ]]; then
 fi
 
 if (( WITH_PREFPANE == 1 )); then
-  rm -rf "$PREFPANE_TARGET_PATH"
-  cp -R "$SOURCE_PREFPANE_PATH" "$PREFPANE_TARGET_PATH"
+  knowtype_replace_local_preferencepane_bundle_atomically \
+    "$SOURCE_PREFPANE_PATH" \
+    "$PREFPANE_TARGET_PATH" \
+    "$VERIFY_ENABLED"
   if [[ "$SOURCE_MODE" == "build" ]]; then
     rm -rf "$SOURCE_PREFPANE_PATH"
   fi
-elif [[ -d "$PREFPANE_TARGET_PATH" ]]; then
-  rm -rf "$PREFPANE_TARGET_PATH"
+elif [[ -e "$PREFPANE_TARGET_PATH" || -L "$PREFPANE_TARGET_PATH" ]]; then
+  knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0
   REMOVED_STALE_PREFPANE=1
 fi
 
@@ -831,6 +1074,8 @@ if command -v xattr >/dev/null 2>&1; then
     xattr -dr com.apple.quarantine "$TARGET_PATH" 2>/dev/null || true
   fi
 fi
+
+migrate_provider_profiles
 
 launchservices_cleanup_output="$(knowtype_unregister_launchservices_records_except "$TARGET_PATH" 0)"
 if [[ -n "$launchservices_cleanup_output" ]]; then
@@ -903,6 +1148,8 @@ printf '  %-18s %s\n' "Backup:" "${BACKUP_ID:-<none>}"
 printf '  %-18s %s\n' "Postflight:" "$postflight_result"
 printf '  %-18s disable=%s disabledCount=%s hostStop=%s menuAgentsRestarted=%s\n' \
   "Quiesce:" "$QUIESCE_DISABLE_STATUS" "$QUIESCE_DISABLED_COUNT" "$QUIESCE_HOST_STOP_STATUS" "$QUIESCE_MENU_AGENTS_RESTARTED"
+printf '  %-18s writerStop=%s migration=%s\n' \
+  "Provider profiles:" "$QUIESCE_PROVIDER_WRITER_STATUS" "$PROVIDER_MIGRATION_STATUS"
 printf '  %-18s %s\n' "Stale LS cleanup:" "$STALE_LAUNCHSERVICES_CLEANUP_COUNT"
 
 if (( WITH_PREFPANE == 1 )); then
@@ -916,7 +1163,7 @@ else
   fi
 fi
 
-echo "Registered and enabled input source via installed app context: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+echo "Registered and enabled input source via standalone helper: $KNOWTYPE_ACTIVE_INPUT_MODE_ID"
 echo "Postflight uses the JSON install snapshot only; run ./scripts/diagnose-inputmethod.sh --strict for full TIS diagnostics."
 if [[ -n "$BACKUP_ID" ]]; then
   echo "Rollback command: ./scripts/rollback-inputmethod.sh --to $BACKUP_ID"

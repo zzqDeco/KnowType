@@ -12,6 +12,12 @@ private let inputControllerLogger = Logger(
     category: "input-controller"
 )
 
+enum InputControllerRecognizedEventPolicy {
+    static var recognizedEvents: Int {
+        Int(NSEvent.EventTypeMask.keyDown.rawValue)
+    }
+}
+
 enum InputMethodLexicalProfileRuntime {
     static let store = LexicalProfileStore()
     static let refreshGate = LexicalProfileRefreshGate()
@@ -19,6 +25,20 @@ enum InputMethodLexicalProfileRuntime {
     static let acceptedFeedbackStore = AIAcceptedFeedbackStore()
     static let rimeMaintenanceService = RimeMaintenanceService(
         snapshotProvider: RimeUserDBTextSnapshotProvider()
+    )
+}
+
+private enum InputMethodInputModeRuntime {
+    static let shared = ProcessInputModeStateRuntime(
+        initialSymbolWidth: UserDefaultsInputModePreferenceStore.defaultStore()
+            .loadPreferences()
+            .globalSymbolWidth
+    )
+}
+
+private enum InputMethodAIRuntime {
+    static let contextMemory = AIContextMemoryRuntime(
+        providerRegistry: ProviderRuntimeRegistry.shared
     )
 }
 
@@ -62,7 +82,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
             providerAvailability: aiProviderAvailability,
             debounceMilliseconds: 0
         )
-        let aiContextEventRecorder: any AIContextEventRecording = LazyDefaultAIContextMemoryRuntime()
+        let aiContextEventRecorder: any AIContextEventRecording = InputMethodAIRuntime.contextMemory
         let runtimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore()
         let runtimePreferences = runtimePreferenceStore.loadPreferences()
         let inputModePreferenceStore = UserDefaultsInputModePreferenceStore.defaultStore()
@@ -76,6 +96,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         self.coordinator = InputControllerCoordinator(
             provider: nil,
             inputModePreferenceStore: inputModePreferenceStore,
+            inputModeStateRuntime: InputMethodInputModeRuntime.shared,
             runtimePreferenceStore: runtimePreferenceStore,
             initialRuntimePreferences: runtimePreferences,
             initialAppBundleID: initialClient?.bundleIdentifier,
@@ -152,11 +173,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
     }
 
     public override func recognizedEvents(_ sender: Any!) -> Int {
-        Int(
-            NSEvent.EventTypeMask.keyDown.rawValue
-                | NSEvent.EventTypeMask.keyUp.rawValue
-                | NSEvent.EventTypeMask.flagsChanged.rawValue
-        )
+        InputControllerRecognizedEventPolicy.recognizedEvents
     }
 
     public override func menu() -> NSMenu! {

@@ -571,6 +571,92 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         })
     }
 
+    @MainActor
+    func testProviderGenerationStaleResultClearsPendingStateToIdle() async {
+        let provider = RecordingRuntimeAIRecommendationProvider(response: .stale)
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let initial = runtime.schedule(
+            context: context(rawInput: "abc"),
+            currentSnapshot: { snapshot(rawInput: "abc") },
+            onStateChange: { publishedStates.append($0) }
+        )
+
+        XCTAssertNotNil(pendingRequestID(initial))
+        let staleDropped = await waitUntil {
+            diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped
+                    && $0.reason == "provider_generation_changed"
+            }
+        }
+        XCTAssertTrue(staleDropped)
+        XCTAssertEqual(publishedStates, [.idle])
+        XCTAssertFalse(diagnosticSink.events.contains { $0.stage == .stateApplied })
+    }
+
+    @MainActor
+    func testOlderStaleResultDoesNotClearNewerPendingRequest() async {
+        let provider = ControlledRuntimeAIRecommendationProvider()
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let first = runtime.schedule(
+            context: context(rawInput: "abc", rawRevision: 1),
+            currentSnapshot: { snapshot(rawInput: "abcd", rawRevision: 2) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let firstRequestID = pendingRequestID(first)
+        let firstStarted = await waitUntilAsync { await provider.requests.count == 1 }
+        XCTAssertTrue(firstStarted)
+
+        let second = runtime.schedule(
+            context: context(rawInput: "abcd", rawRevision: 2),
+            currentSnapshot: { snapshot(rawInput: "abcd", rawRevision: 2) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotEqual(firstRequestID, pendingRequestID(second))
+        let secondStarted = await waitUntilAsync { await provider.requests.count == 2 }
+        XCTAssertTrue(secondStarted)
+
+        await provider.finish(rawInput: "abc", state: .stale)
+        let oldStaleDropped = await waitUntil {
+            diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped
+                    && $0.requestID == firstRequestID
+                    && $0.reason == "provider_generation_changed"
+            }
+        }
+        XCTAssertTrue(oldStaleDropped)
+        XCTAssertTrue(publishedStates.isEmpty)
+
+        await provider.finish(rawInput: "abcd", state: readyState("新结果"))
+        let newReadyApplied = await waitUntil {
+            publishedStates.contains { state in
+                if case .ready = state {
+                    return true
+                }
+                return false
+            }
+        }
+        XCTAssertTrue(newReadyApplied)
+        XCTAssertFalse(publishedStates.contains(.idle))
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil
@@ -684,6 +770,26 @@ private actor RecordingRuntimeAIRecommendationProvider: AIRecommendationProvidin
             try? await Task.sleep(nanoseconds: delayNanoseconds)
         }
         return response
+    }
+
+    var requests: [AIRecommendationRequest] {
+        recordedRequests
+    }
+}
+
+private actor ControlledRuntimeAIRecommendationProvider: AIRecommendationProviding {
+    private var recordedRequests: [AIRecommendationRequest] = []
+    private var continuations: [String: CheckedContinuation<AIRecommendationState, Never>] = [:]
+
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        recordedRequests.append(request)
+        return await withCheckedContinuation { continuation in
+            continuations[request.rawInput] = continuation
+        }
+    }
+
+    func finish(rawInput: String, state: AIRecommendationState) {
+        continuations.removeValue(forKey: rawInput)?.resume(returning: state)
     }
 
     var requests: [AIRecommendationRequest] {

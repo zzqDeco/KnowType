@@ -37,8 +37,7 @@ Tab commit:       我觉得这个方案还有进一步优化空间
 ```
 
 The AI continuation is only `还有进一步优化空间`. It is not allowed to turn
-the locked prefix into another sentence unless the user explicitly triggers
-polish.
+the locked prefix into another sentence.
 
 ## Features
 
@@ -47,8 +46,7 @@ polish.
 - Local candidate learning: recent prefix choices can boost local ranking across
   input-method restarts without being sent to providers.
 - Prefix-locked AI recommendation: the first candidate stays Rime conversion,
-  the second slot is reserved for AI, and explicit polish is the only rewrite
-  path.
+  the second slot is reserved for AI, and locked prefixes are never rewritten.
 - macOS input method flow: marked text, candidate selection, paging,
   punctuation handling, and a compact native-style AppKit candidate panel that
   stays above Spotlight/search overlays.
@@ -152,6 +150,15 @@ secrets, AI context documents, `~/.knowtype`, or local lexicons. First real
 typing after manually selecting KnowType may initialize Rime as normal product
 use; that is intentionally outside the install step.
 
+New rollback manifests record checksums, bundle IDs, versions/builds, and code
+signing requirements/identities for both artifacts. Rollback verifies all
+metadata plus `codesign --verify --deep --strict` before replacement. Legacy
+schema-v1 backups are rejected unless the explicitly dangerous
+`--allow-unverified-backup` flag is supplied; that flag never bypasses a current
+manifest failure. Installer paths also refuse to remove or replace a same-name
+PreferencePane unless it is the canonical non-symlink
+`com.knowtype.preferencepane` bundle.
+
 KnowType-specific settings follow the native IMK input-method pattern used by
 McBopomofo and OpenVanilla: choose KnowType from the macOS input menu and select
 `KnowType 设置...` (`KnowType Settings...` in the explicit English resource
@@ -201,6 +208,18 @@ List or restore local rollback points:
 ./scripts/rollback-inputmethod.sh --latest
 ```
 
+Rollback preserves profile values and Keychain secrets. If the selected backup
+predates provider storage generation 2, the current app converts the latest
+profile metadata to the compatible numeric schema before the old app is
+published; an unsafe conversion fails closed.
+
+For a trusted legacy backup only, inspect it first and make the override
+explicit:
+
+```bash
+./scripts/rollback-inputmethod.sh --to BACKUP_ID --dry-run --allow-unverified-backup
+```
+
 Local IME behavior must still be verified by typing in real host apps. See
 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md) and
 [MVP Acceptance](doc/mvp-acceptance.plan.md) for the macOS policy, selection,
@@ -211,7 +230,7 @@ For a GitHub Release DMG, verify the downloaded image with the published
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.7-macos-dev-preview.dmg.sha256
 ```
 
 Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
@@ -225,16 +244,30 @@ sidebar entry unless the matching pane is installed.
 The older local MVP zip can still be installed for developer debugging:
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.6-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.7-macos-local-mvp.zip
 ```
 
 ## Configuration
 
 Provider profiles are stored as JSON metadata; API keys are stored separately.
+The profile file uses a revisioned transactional format so concurrent settings
+windows cannot silently overwrite each other. Changed keys use immutable
+Keychain references. Base URLs may contain runtime query parameters, but not
+userinfo or fragments; diagnostics omit userinfo, query, and fragment.
+The running input-method host observes committed profile revisions. The next
+eligible recommendation or context digest uses the new provider without a host
+restart, cancels older in-flight provider work, and never polls provider files
+from the ordinary key path.
 
 ```text
-~/Library/Application Support/KnowType/providers.json
+~/Library/Application Support/KnowType/providers.v2.json
 ```
+
+During upgrade, the installer preserves the original `providers.json` as
+`providers.legacy.json`, rekeys Keychain references, and replaces the legacy
+path with a compatibility tombstone. Do not edit either compatibility file. If
+diagnostics report that an older Settings process wrote the legacy path again,
+close that process and preserve both payloads for conflict resolution.
 
 Local candidate-learning history:
 
@@ -261,11 +294,19 @@ The installer downloads a pinned Apache-2.0 Rime dictionary, verifies SHA256,
 converts it into KnowType TSV, and writes local metadata beside the TSV.
 Third-party bulk dictionary data is not committed to this repository.
 
-When `providers.json` is missing or empty, KnowType seeds a local
+When `providers.v2.json` is missing on a genuinely new install or is empty, KnowType seeds a local
 OpenAI-compatible profile at `http://127.0.0.1:8317/v1` with no embedded API
 key. Remote OpenAI-compatible profiles require an explicit model ID; local
 OpenAI-compatible profiles may leave the model blank for `/v1/models`
 discovery.
+
+New Anthropic and Gemini profiles use `claude-haiku-4-5-20251001` and
+`gemini-3.5-flash`. Saved profiles using the exact retired template IDs are
+updated once only on the matching official API endpoint; custom proxy endpoints
+keep their configured model. Custom HTTP body placeholders are expanded in one
+pass, so placeholder-like text inside user input is preserved. Unknown or
+unclosed `{{...}}` placeholders fail the connection request as an invalid
+template.
 
 AI context files live under `~/.knowtype/`. `ENV.md` stores local context
 memory for the AI recommendation slot, `CORRECTION.md` stores user-editable AI
@@ -337,41 +378,53 @@ placement.
 
 | Shortcut | Behavior |
 |---|---|
-| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, produce a normal space or pass it through in compatibility hosts. |
-| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, produce ordinary digits or pass them through in compatibility hosts. |
+| `Space` | Commit the highlighted/current Rime candidate during composition; with no active composition, produce a normal space, U+3000 in full-width mode, or pass it through in compatibility hosts. |
+| `1...9` | Select Rime current-page candidates during native composition, even if the custom panel is hidden; with no active composition, produce ordinary or full-width digits according to character width. |
 | Arrow keys, `PageUp` / `PageDown`, `-` / `=`, `,` / `.` | Move within the current Rime page, page at candidate-list edges when another page is available, and otherwise let punctuation fall back to the normal commit path. Left/up from the first row lands on the previous page's last row. |
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
 | Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, show symbol candidates, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
 | `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. |
-| `Option + .` | Toggle Chinese/English punctuation for the active input session and show a short mode-status row. |
-| `Option + /` | Toggle Chinese/ASCII text mode for the active input session; in terminal-style compatibility hosts, it switches between Chinese placeholder composition and idle ASCII passthrough. |
-| `Shift + Space` | Toggle half-width/full-width characters for the active input session and show a short mode-status row. |
+| Command/Control host shortcuts | Cancel an open symbol-candidate overlay before passing the shortcut to the focused host, so a later `Space` cannot commit a stale symbol. |
+| `Option + .` | In Chinese text mode, manually toggle Chinese/English punctuation until the next text-mode switch. In ASCII mode it leaves punctuation English and only repeats the mode status. |
+| `Option + /` | Toggle the process-wide Chinese/ASCII text mode. The switch also restores linked Chinese/English punctuation and is shared across apps. |
+| `Shift + Space` | Toggle process-wide half-width/full-width characters without changing text or punctuation mode. Full width maps ASCII `!` through `~` and normal space; controls, Tab, and newline are unchanged. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
-| `Option + R` | Request explicit polish, the default rewrite path. |
 
-Chinese text mode, Chinese punctuation, and full-width symbols are separate
-controls. Chinese punctuation maps sentence punctuation, paired Chinese quotes,
-ellipsis, em dash, brackets, and symbol-candidate entries such as `/` for
-dunhao, while code/path/operator symbols stay half-width unless full-width
-symbols are explicitly enabled. Code-style apps default to Chinese composition
-with English punctuation and half-width symbols. Mode changes briefly show a
-status row such as `中 · 中文标点 · 半角`; the row clears as soon as the next
-real input key starts a composition, symbol candidate session, commit, or
-passthrough.
+Text mode, punctuation language, and symbol width remain separate state
+dimensions, but text and punctuation now follow a predictable global linkage:
+Chinese input starts with Chinese punctuation, ASCII input always uses English
+punctuation, and `Option + /` restores that link. A manual `Option + .`
+override is available only while Chinese input is active and lasts until the
+next text-mode switch. Symbol width remains independent. All apps share the
+current state for the lifetime of the input-method host; a host restart begins
+again in linked Chinese mode with the saved global width. The active native Rime
+session receives the same `ascii_mode`, `ascii_punct`, and `full_shape` values
+after creation and on each process-mode generation change. A period immediately
+after an ASCII digit stays `.` for decimals and numbered lists, even in Chinese
+punctuation or full-width mode; comma and unknown/selected caret contexts keep
+the normal punctuation policy. Chinese quotes use caret context: whitespace or
+opening punctuation opens, while text, digits, or closing punctuation closes;
+unknown context falls back to session alternation. External delete, focus or
+selection movement, and mode changes reset that fallback. Mode changes briefly
+show a status row such as `中 · 中文标点 · 半角`.
 
 Host compatibility is conservative. Standard AppKit-style text fields, browsers,
 editors, IDEs, Electron shells, and unknown clients use inline composition with
 attributed marked text by default, so raw preedit appears in the focused text
-field. Terminal, iTerm, MacVim, and Emacs-style hosts default to idle ASCII
-passthrough, so ordinary letters, digits, spaces, and punctuation stay owned by
-the shell or editor until the session is switched with `Option + /`. In those
-terminal-style hosts, Chinese composition uses a full-width-space attributed
+field. Host identity no longer changes the global text or punctuation mode.
+KnowType registers only key-down events with InputMethodKit, preserving IMK's
+default behavior of committing active composition when the user clicks outside
+its marked range. Shortcut modifiers continue to come from key-down flags.
+Terminal, iTerm, MacVim, and Emacs-style hosts therefore also begin in Chinese
+mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;
 the real raw/preedit string is shown in KnowType's candidate panel above the
-candidates, then committed with `insertText`. A UserDefaults override can force
+candidates, then committed with `insertText`. When the global mode is switched
+to ASCII, idle half-width printable input is passed back to the focused host;
+full-width printable input is transformed and inserted by KnowType. A UserDefaults override can force
 any bundle back to `commitOnlyComposition` when a host proves incompatible with
 inline marked text.
 
@@ -381,7 +434,9 @@ placeholder carrier, and raw input only when no suggestion is available. The
 preedit row has no shortcut, selection, or commit action, and inline hosts do
 not render it because the focused text field already shows preedit. The panel is
 a compact AppKit panel using macOS material, system highlight colors,
-mouse hover/click selection, scroll paging, and row accessibility labels. When a
+mouse hover/click selection, one-page-per-trackpad-gesture scroll paging, and
+VoiceOver press for enabled candidate rows. Disabled status rows remain readable
+but cannot commit. When a
 provider is configured, Rime prefix candidates appear immediately and
 provider-backed AI recommendations update
 asynchronously. Provider failures do not show fixed local fallback text as if it
@@ -470,7 +525,7 @@ Current non-goals:
 - complete real-world pinyin dictionary coverage without licensed local lexicons
 - universal compatibility claims for every macOS host app
 - using local fallback continuation as fake configured-provider output
-- rewriting locked prefixes except through explicit polish
+- rewriting locked prefixes
 
 ## License
 

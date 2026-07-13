@@ -70,12 +70,24 @@ final class ProviderProfilesPresentationTests: XCTestCase {
             "全半角切换快捷键"
         )
         XCTAssertEqual(
+            SettingsLocalization.string("settings.input.defaultWidth", preferredLanguages: ["zh-Hans-CN"]),
+            "默认字符宽度"
+        )
+        XCTAssertTrue(
+            SettingsLocalization.string("settings.input.symbolPolicy.note", preferredLanguages: ["zh-Hans-CN"])
+                .contains("所有 App 中，中文模式跟随中文标点")
+        )
+        XCTAssertEqual(
             SettingsLocalization.string("settings.input.symbol.chinese", localeIdentifier: "en"),
             "Chinese Punctuation"
         )
         XCTAssertEqual(
             SettingsLocalization.string("settings.input.widthShortcut", localeIdentifier: "en"),
             "Width Shortcut"
+        )
+        XCTAssertEqual(
+            SettingsLocalization.string("settings.input.defaultWidth", localeIdentifier: "en"),
+            "Default Character Width"
         )
     }
 

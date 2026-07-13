@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib/inputsource-ids.sh"
+source "$ROOT_DIR/scripts/lib/inputsource-tool.sh"
 DEFAULT_BUNDLE_PATH="$HOME/Library/Input Methods/KnowType.app"
 BUNDLE_PATH="${KNOWTYPE_BUNDLE_PATH:-$DEFAULT_BUNDLE_PATH}"
 RUN_DIAGNOSTIC=1
@@ -65,14 +66,29 @@ if [[ ! -x "$BUNDLE_PATH/Contents/MacOS/KnowTypeInputMethodApp" ]]; then
   exit 1
 fi
 
-if ! SELECT_OUTPUT="$("$BUNDLE_PATH/Contents/MacOS/KnowTypeInputMethodApp" --knowtype-register-input-source --knowtype-select-input-source 2>&1)"; then
+INPUTSOURCE_TOOL="$(knowtype_inputsource_tool "$ROOT_DIR")"
+bootstrap_args=(
+  bootstrap
+  --path "$BUNDLE_PATH"
+  --parent-id "$KNOWTYPE_PARENT_INPUT_SOURCE_ID"
+  --mode-id "$KNOWTYPE_ACTIVE_INPUT_MODE_ID"
+  --select
+)
+for legacy_mode_id in "${KNOWTYPE_LEGACY_INPUT_MODE_IDS[@]}"; do
+  bootstrap_args+=(--legacy-mode-id "$legacy_mode_id")
+done
+if (( REQUIRE_SELECTED == 1 )); then
+  bootstrap_args+=(--require-selected)
+fi
+
+if ! SELECT_OUTPUT="$("$INPUTSOURCE_TOOL" "${bootstrap_args[@]}" 2>&1)"; then
   printf '%s\n' "$SELECT_OUTPUT"
   exit 1
 fi
 printf '%s\n' "$SELECT_OUTPUT"
 
 if (( REQUIRE_SELECTED == 1 )) && ! grep -qx "select.current=$KNOWTYPE_ACTIVE_INPUT_MODE_ID" <<<"$SELECT_OUTPUT"; then
-  echo "error: installed app did not report KnowType as selected in its TIS context" >&2
+  echo "error: input-source helper did not report KnowType as selected in its TIS context" >&2
   exit 1
 fi
 

@@ -3,20 +3,34 @@ import KnowTypeCore
 import KnowTypeProviders
 
 public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
-    private let providerLoader: @Sendable () -> (any LLMProvider)?
+    private let providerRegistry: ProviderRuntimeRegistry?
+    private let providerLoader: (@Sendable () -> (any LLMProvider)?)?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let providerAvailability: AIRecommendationProviderAvailabilityState
     private let debounceMilliseconds: Int
     private var runtime: AIRecommendationRuntime?
+    private var runtimeGeneration: UInt64?
 
     public init(
-        providerLoader: @escaping @Sendable () -> (any LLMProvider)? = {
-            ProviderRuntimeLoader.loadDefaultProvider(createProfileDirectory: false)
-        },
+        providerRegistry: ProviderRuntimeRegistry = .shared,
         diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
         providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
         debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds
     ) {
+        self.providerRegistry = providerRegistry
+        self.providerLoader = nil
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
+    }
+
+    public init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)?,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds
+    ) {
+        self.providerRegistry = nil
         self.providerLoader = providerLoader
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
@@ -24,26 +38,70 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        guard AIRecommendationRuntime.isEligibleForProviderDispatch(request) else {
+            return await makeRuntime(provider: nil).recommendation(for: request)
+        }
+        if let providerRegistry {
+            return await registryRecommendation(for: request, registry: providerRegistry)
+        }
+        return await legacyRecommendation(for: request)
+    }
+
+    private func registryRecommendation(
+        for request: AIRecommendationRequest,
+        registry: ProviderRuntimeRegistry
+    ) async -> AIRecommendationState {
+        let lease = await registry.leaseForEligibleDispatch()
+        guard let provider = lease.provider else {
+            runtime = nil
+            runtimeGeneration = nil
+            providerAvailability.update(.unavailable)
+            return await makeRuntime(provider: nil).recommendation(for: request)
+        }
+        providerAvailability.update(.available)
+        let runtime: AIRecommendationRuntime
+        if let cached = self.runtime, runtimeGeneration == lease.generation {
+            runtime = cached
+        } else {
+            runtime = makeRuntime(provider: provider)
+            self.runtime = runtime
+            runtimeGeneration = lease.generation
+        }
+        do {
+            return try await registry.perform(using: lease) { _ in
+                await runtime.recommendation(for: request)
+            }
+        } catch ProviderRuntimeRegistryError.staleGeneration {
+            self.runtime = nil
+            runtimeGeneration = nil
+            providerAvailability.update(.unknown)
+            return .stale
+        } catch {
+            return .idle
+        }
+    }
+
+    private func legacyRecommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
         if let runtime {
             return await runtime.recommendation(for: request)
         }
-        let provider = providerLoader()
+        let provider = providerLoader?()
         guard provider != nil else {
             providerAvailability.update(.unavailable)
-            return await AIRecommendationRuntime(
-                provider: nil,
-                debounceMilliseconds: debounceMilliseconds,
-                diagnosticSink: diagnosticSink
-            ).recommendation(for: request)
+            return await makeRuntime(provider: nil).recommendation(for: request)
         }
         providerAvailability.update(.available)
-        let runtime = AIRecommendationRuntime(
+        let runtime = makeRuntime(provider: provider)
+        self.runtime = runtime
+        return await runtime.recommendation(for: request)
+    }
+
+    private func makeRuntime(provider: (any LLMProvider)?) -> AIRecommendationRuntime {
+        AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: debounceMilliseconds,
             diagnosticSink: diagnosticSink
         )
-        self.runtime = runtime
-        return await runtime.recommendation(for: request)
     }
 }
 
@@ -101,6 +159,43 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
         let startedAt = Date()
+        var request = request
+        request.candidateHints = []
+        guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              Self.hasUsableRecommendationContext(in: request) else {
+            record(
+                .skippedIneligible,
+                request: request,
+                providerName: provider?.providerName,
+                elapsedSince: startedAt,
+                reason: "empty_raw_or_context"
+            )
+            return .ineligible(reason: "AI 不适用")
+        }
+        if Self.containsSecretLikeRecommendationText(request) {
+            record(
+                .skippedProtectedText,
+                request: request,
+                providerName: provider?.providerName,
+                elapsedSince: startedAt,
+                reason: "secret_like_text"
+            )
+            return .ineligible(reason: "AI 已禁用")
+        }
+        let triggerDecision = AIRecommendationTriggerPolicy.default.decision(
+            rawInput: request.rawInput,
+            lockedPrefix: request.lockedPrefix
+        )
+        guard triggerDecision.isEligible else {
+            record(
+                .skippedPrefixTooShort,
+                request: request,
+                providerName: provider?.providerName,
+                elapsedSince: startedAt,
+                reason: triggerDecision.rejectionReason?.rawValue ?? "prefix_too_short"
+            )
+            return .ineligible(reason: "AI 无推荐")
+        }
         guard let provider else {
             record(
                 .skippedNoProvider,
@@ -119,43 +214,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 reason: reason
             )
             return .unavailable(reason: reason)
-        }
-        var request = request
-        request.candidateHints = []
-        guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              Self.hasUsableRecommendationContext(in: request) else {
-            record(
-                .skippedIneligible,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt,
-                reason: "empty_raw_or_context"
-            )
-            return .ineligible(reason: "AI 不适用")
-        }
-        if Self.containsSecretLikeRecommendationText(request) {
-            record(
-                .skippedProtectedText,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt,
-                reason: "secret_like_text"
-            )
-            return .ineligible(reason: "AI 已禁用")
-        }
-        let triggerDecision = AIRecommendationTriggerPolicy.default.decision(
-            rawInput: request.rawInput,
-            lockedPrefix: request.lockedPrefix
-        )
-        guard triggerDecision.isEligible else {
-            record(
-                .skippedPrefixTooShort,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt,
-                reason: triggerDecision.rejectionReason?.rawValue ?? "prefix_too_short"
-            )
-            return .ineligible(reason: "AI 无推荐")
         }
 
         var waitingForIdle = false
@@ -379,6 +437,18 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: "AI 暂不可用")
         }
+    }
+
+    static func isEligibleForProviderDispatch(_ request: AIRecommendationRequest) -> Bool {
+        guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              hasUsableRecommendationContext(in: request),
+              !containsSecretLikeRecommendationText(request) else {
+            return false
+        }
+        return AIRecommendationTriggerPolicy.default.decision(
+            rawInput: request.rawInput,
+            lockedPrefix: request.lockedPrefix
+        ).isEligible
     }
 
     private static func makeCandidate(

@@ -51,53 +51,42 @@ final class CandidateAnchorPolicyTests: XCTestCase {
         )
     }
 
-    func testInsertionPointFallbackUsesSelectedRangeEnd() {
-        XCTAssertEqual(
-            CandidateAnchorPolicy.insertionPointFallbackRange(
-                selectedRange: NSRange(location: 42, length: 8),
-                markedRange: nil
-            ),
-            NSRange(location: 50, length: 0)
+    func testFirstRectRequestsHaveFixedCeiling() {
+        let requests = CandidateAnchorPolicy.characterRangeRequests(
+            selectedRange: NSRange(location: 42, length: 8),
+            markedRange: NSRange(location: 10, length: 4)
         )
+
+        XCTAssertEqual(CandidateAnchorPolicy.maximumFirstRectProbes, 4)
+        XCTAssertEqual(requests.count, 4)
     }
 
-    func testInsertionPointFallbackSkipsUnknownLocation() {
-        XCTAssertNil(
-            CandidateAnchorPolicy.insertionPointFallbackRange(
-                selectedRange: NSRange(location: NSNotFound, length: NSNotFound),
-                markedRange: nil
-            )
-        )
-    }
-
-    func testLineHeightIndexesUseInlineMarkedTextOffsetsWithoutProbingPastEnd() {
+    func testLineHeightIndexesUseDeduplicatedStrategicInlinePositions() {
         XCTAssertEqual(
             CandidateAnchorPolicy.lineHeightCharacterIndexes(
-                selectedRange: NSRange(location: 5, length: 0),
-                markedRange: NSRange(location: 4, length: 2),
-                maximumBacktrack: 2
+                selectedRange: NSRange(location: 6, length: 0),
+                markedRange: NSRange(location: 4, length: 5)
             ),
-            [1, 0]
+            [4, 2, 0]
         )
     }
 
-    func testLineHeightIndexesClampMarkedEndToLastInlineCharacter() {
+    func testLineHeightIndexesClampEndsWithoutPerCharacterBacktracking() {
         XCTAssertEqual(
             CandidateAnchorPolicy.lineHeightCharacterIndexes(
                 selectedRange: NSRange(location: 9, length: 0),
-                markedRange: NSRange(location: 4, length: 5),
-                maximumBacktrack: 2
+                markedRange: NSRange(location: 4, length: 5)
             ),
-            [4, 3, 2, 0]
+            [4, 0]
         )
+        XCTAssertEqual(CandidateAnchorPolicy.maximumLineHeightProbes, 4)
     }
 
     func testLineHeightIndexesUseCurrentSelectionWhenNoMarkedTextExists() {
         XCTAssertEqual(
             CandidateAnchorPolicy.lineHeightCharacterIndexes(
                 selectedRange: NSRange(location: 120, length: 0),
-                markedRange: nil,
-                maximumBacktrack: 2
+                markedRange: nil
             ),
             [0]
         )

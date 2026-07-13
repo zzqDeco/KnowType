@@ -147,8 +147,6 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
                         originalText: context.rawInput
                     )
                 )
-            case .optionR:
-                return .result(.polishRequested(context.compositionBuffer.commitText))
             case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth, .commitRaw:
                 break
             }
@@ -298,9 +296,6 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
     }
 
     func shouldSkipPrefixLearning(action: InputAction, aiRecommendationState: AIRecommendationState) -> Bool {
-        if action == .optionR {
-            return true
-        }
         if action == .tab,
            aiRecommendationState.isSelectableRecommendation {
             return true

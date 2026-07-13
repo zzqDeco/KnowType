@@ -35,6 +35,8 @@ diagnostics.
 - Diagnostics includes dynamic read-only install status: app version/build,
   install source, Rime runtime files, AI provider summary, user-data file
   timestamps, backup count, latest backup, and rollback command.
+- Provider endpoint diagnostics remove userinfo, query, and fragment while
+  retaining scheme, host, port, and path.
 - Diagnostics must not execute rollback or overwrite the running input-method
   bundle from inside the settings process.
 - The AI page should lead with user-facing continuation controls, current
@@ -70,9 +72,9 @@ diagnostics.
 - User-facing settings copy defaults to Simplified Chinese. Technical terms such
   as API Key, URL, Rime, macOS, and InputMethodKit remain untranslated where that
   is the clearest mixed Chinese copy.
-- Input behavior copy lists the three independent session toggles:
-  `Option + /` for text mode, `Option + .` for punctuation language, and
-  `Shift + Space` for symbol width.
+- Input behavior copy lists process-wide linked `Option + /`, Chinese-only
+  manual punctuation `Option + .`, and independent `Shift + Space` width. The
+  page exposes one global default width instead of normal/code-app mode groups.
 
 ## Tests
 

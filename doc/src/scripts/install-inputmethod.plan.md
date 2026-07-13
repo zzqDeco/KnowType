@@ -20,7 +20,9 @@ Installs the locally built KnowType input method bundle into
   `--from-release-zip`, or a mounted Developer Preview DMG root via
   `--from-dmg-payload`.
 - Developer Preview DMG installs record `source=dmg-dev-preview`, release
-  commit/tag, and manifest digest in install state.
+  commit/tag, and manifest digest in install state. Packaged copies do not
+  require the source-tree `Resources/InputMethod/Info.plist`; source version
+  lookup is limited to local-build mode.
 - Release archive provenance is accepted only when the extracted archive has a
   single unambiguous `release-manifest.json`; older archives may still use one
   sibling manifest beside the zip.
@@ -28,18 +30,46 @@ Installs the locally built KnowType input method bundle into
   `~/Library/Application Support/KnowType/Backups/` unless `--no-backup` is
   passed. Backups contain `KnowType.app`, optional `KnowType.prefPane`, and a
   manifest; they do not contain user data.
+- New backups use manifest schema `2` and record complete app and optional pane
+  checksum, bundle identity, short version/build, and signing
+  requirement/identity metadata. Backup creation fails rather than writing an
+  unverifiable rollback point.
 - Successful installs write
   `~/Library/Application Support/KnowType/install-state.json` with source,
   version/build, commit/tag when known, installed paths, and previous backup id.
-- If replacement fails after a backup is created, the script attempts to restore
-  that backup before exiting.
+- If replacement fails after a backup is created, the script validates that
+  schema `2` backup before attempting recovery. Failed-install recovery also
+  refuses to remove or replace a foreign same-name PreferencePane. App and pane
+  recovery copies are staged and validated before the canonical targets change.
 - The script keeps the newest three backups by default. Use `--keep-backups N`
   to adjust retention.
 - The script switches away from any current KnowType source, disables existing
   KnowType TIS rows, restarts text-input menu agents, asks a remaining
-  `KnowTypeInputMethodApp` to exit with `TERM`, replaces
+  `KnowTypeInputMethodApp` to exit with `TERM`, closes standalone Settings and
+  System Settings so no legacy provider writer remains active, replaces
   `~/Library/Input Methods/KnowType.app`, clears quarantine, and refreshes the
   installed path with `lsregister -f`.
+- Before LaunchServices or TIS registration, the standalone
+  `knowtype-inputsource-tool` runs the explicit `migrate-provider-profiles`
+  command. It migrates
+  numeric `providers.json` metadata to generation-separated `providers.v2.json`,
+  snapshots the legacy bytes, and rekeys available Keychain credentials.
+  Migration output contains only state, revision, and counts. Failure enters the
+  existing validated artifact rollback path.
+- A pre-v2 source bundle never receives the unknown migration command. Before
+  replacement, the standalone helper transactionally
+  downgrades provider metadata; without such an executable, the installer
+  requires already-compatible numeric legacy metadata and no canonical,
+  snapshot, or compare-and-claim file.
+  Otherwise installation fails before publishing the older app.
+- If a later step fails, the installer checks the backup app's declared storage
+  generation before publishing it. For a pre-v2 backup, the still-canonical new
+  app either rolls back the exact migrated revision or transactionally
+  downgrades the latest provider state. The shell never restores provider files
+  from an earlier snapshot, so a late legacy writer cannot be overwritten. If
+  compatibility cannot be proven, the installer keeps the new app rather than
+  pairing a pre-v2 binary with an incompatible tombstone. Revision conflicts or
+  competing legacy writes fail closed and remain intact.
 - `--force-stop-host` is an explicit development escape hatch. The default path
   never sends `KILL`; if `TERM` does not quiesce the host, the install fails
   with instructions instead of risking an unplanned process kill.
@@ -49,8 +79,9 @@ Installs the locally built KnowType input method bundle into
   Registering `dist/KnowType.app` directly is not a supported local install
   state because it can split helper/TIS state from the real menu-bar state.
 - It switches away, disables stale `.Mode` TIS modes, registers/enables the
-  parent anchor and visible `.Hans` mode from the installed app CLI context, and
-  repairs scoped preference rows through `knowtype-inputsource-tool`.
+  parent anchor and visible `.Hans` mode, and repairs scoped preference rows
+  through `knowtype-inputsource-tool`. Installer paths never execute the
+  installed bundle's main IMK executable directly.
   These default install steps return before the app run loop starts and do not
   select KnowType.
 - After the post-registration `cfprefsd` and menu-agent refresh, it runs one
@@ -71,17 +102,21 @@ Installs the locally built KnowType input method bundle into
   not leave the previously working input source disabled.
 - Local installs inject a timestamp `CFBundleVersion` by default so
   LaunchServices and TIS do not keep reusing stale metadata from a previous
-  development build with the same source-controlled version.
+  development build with the same source-controlled version. The installer
+  resolves one short version and one build version and passes both to the app
+  and optional PreferencePane builders.
 - It uses `knowtype-inputsource-tool repair-preferences --add-active` around the
   installed app registration to keep local development caches aligned with the
   current parent-plus-mode model: enabled preferences contain the parent anchor
   and `.Hans`; history repair keeps `.Hans` available without moving it ahead of
   the retained current source. The install path does not pass
   `--include-selected`, so it does not rewrite the user's selected input source.
-- The install step must not initialize Rime user data, AI learning/profile
-  files, provider profiles, `ENV.md`, `CORRECTION.md`, or `~/.knowtype`. Real
-  typing after the user manually selects KnowType may initialize Rime as normal
-  product use.
+- Apart from the explicit provider storage migration/tombstone, the install step
+  must not initialize Rime user data, AI learning/profile files, `ENV.md`,
+  `CORRECTION.md`, or `~/.knowtype`. A genuinely new provider store receives
+  only a legacy-path tombstone; canonical defaults remain lazily persisted by
+  Settings. Real typing after the user manually selects KnowType may initialize
+  Rime as normal product use.
 - Postflight uses `diagnose-inputmethod.sh --json` as a static install snapshot
   check. Full `--strict` diagnostics remain explicit because TIS diagnostics may
   cause macOS to prelaunch the IMK host on some systems. A JSON diagnostic that
@@ -98,6 +133,11 @@ Installs the locally built KnowType input method bundle into
   `KnowType.prefPane` so an old pane cannot drift out of version sync with the
   newly installed input-method app. Use `--with-prefpane` to install a matching
   compatibility pane.
+- Any installed `KnowType.prefPane` must be the canonical non-symlink path and
+  declare `CFBundleIdentifier=com.knowtype.preferencepane`. A same-name foreign
+  bundle blocks install before quiescing or replacement. A new pane is copied
+  and validated in a sibling staging directory before the existing pane is
+  moved aside and the staged bundle is atomically published.
 - The script removes stale System Settings PreferencePane cache files only when
   they contain stable pane identifiers (`com.knowtype.preferencepane` or
   `KnowType.prefPane`) using fixed-string matching, and asks System Settings to

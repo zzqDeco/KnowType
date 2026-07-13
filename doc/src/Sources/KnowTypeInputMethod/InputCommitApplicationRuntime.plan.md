@@ -14,9 +14,8 @@
 - Must not read host state directly. The coordinator supplies schema id, app
   bundle id, selected candidate source, prefix source, client, and composition
   snapshot facts.
-- Must not own commit precedence. Space, Tab, numeric selection, native
-  candidate selection, and polish decisions remain in the coordinator and
-  commit policy.
+- Must not own commit precedence. Space, Tab, numeric selection, and native
+  candidate selection remain in the coordinator and commit policy.
 
 ## Behavior Notes
 

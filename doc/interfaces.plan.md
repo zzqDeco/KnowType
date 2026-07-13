@@ -8,7 +8,7 @@ Internal request shape:
 
 ```text
 LLMRequest {
-  task: correction | continuation | contextDigest | polish
+  task: correction | continuation | contextDigest
   lockedPrefix?: string
   rawInput?: string
   candidateHints: [              // legacy-compatible; realtime continuation sends []
@@ -41,7 +41,7 @@ LLMResponse {
 Provider adapters must not expose native OpenAI, Anthropic, Gemini, Ollama, or custom HTTP response shapes outside `KnowTypeProviders`.
 
 Provider adapters use a shared structured-output contract where the endpoint supports it. Candidate tasks
-(`correction`, `continuation`, and `polish`) use a `candidates` array with `text`, `confidence`, and `reason`.
+(`correction` and `continuation`) use a `candidates` array with `text`, `confidence`, and `reason`.
 `contextDigest` uses a separate `{ markdown: string }` response and is normalized into an `LLMResponse` candidate
 only after strict decoding. OpenAI Chat and Responses prefer `json_schema` with `strict=true`; OpenAI-compatible
 endpoints that reject schema fields fall back once to JSON mode and report `structured_schema_unsupported` in
@@ -49,14 +49,22 @@ endpoints that reject schema fields fall back once to JSON mode and report `stru
 rejects those fields. Ollama and custom HTTP do not claim provider-enforced schema, but their outputs still pass
 through strict local decoding instead of line-based candidate extraction.
 
+Raw OpenAI Responses payloads are accepted only after the adapter confirms a
+completed response, traverses every `message` output and `output_text` content
+item, and rejects any refusal or incomplete message. All collected text is
+decoded as one structured value, so a valid-looking partial item cannot be
+accepted independently. Anthropic Messages requests omit `temperature`,
+`top_p`, and `top_k` by default; ordinary completion and Settings connection
+diagnostics use the same adapter request builder.
+
 Real-time AI recommendation requests use `task: continuation`, `rawInput`, app context, and `contextDocuments["ENV.md"]` / `contextDocuments["CORRECTION.md"]`. `lockedPrefix` is present only for text the user has already confirmed or resolved; unselected Rime candidates are not sent to the provider and must not be promoted into a locked prefix. Background memory updates use `task: contextDigest` with the pending event batch in `rawInput` and the current `ENV.md` as a context document.
 
 Provider prompts are task-specific. Continuation requests distinguish confirmed prefixes from unconfirmed raw input:
 
-- when `lockedPrefix` is present, candidate `text` must be directly appendable after it and must not repeat, paraphrase, translate, rewrite, or polish the locked prefix
+- when `lockedPrefix` is present, candidate `text` must be directly appendable after it and must not repeat, paraphrase, translate, rewrite, or otherwise modify the locked prefix
 - when `lockedPrefix` is absent, candidate `text` is a full commit-ready recommendation inferred from `rawInput` and context documents
 
-When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction, polish, and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
+When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
 ## Input Client Compatibility
 
@@ -73,24 +81,41 @@ InputClientWriteMode =
 Unknown clients, standard text clients, browsers, editors, IDEs, Electron
 shells, and JetBrains-style clients use `inlineComposition` by default, so raw
 preedit appears in the focused text field. Terminal, iTerm, MacVim, and
-Emacs-style profiles use placeholder carrier during Chinese composition, while
-their app-mode default keeps idle printable ASCII in `asciiPassthrough`.
+Emacs-style profiles use placeholder carrier during Chinese composition, but
+they share the same process-wide input mode as every other host.
 Commit-only composition uses a full-width-space
 `NSAttributedString` marked-text placeholder with marked attributes to keep the
 IMK composition and candidate anchor alive. The host text field sees only that
 placeholder; the candidate panel receives the real raw/preedit display text as a
 non-selectable preedit row above candidates, then commits with `insertText`.
-`Option + /` toggles the session text mode; ASCII mode passes idle printable
-input back to the focused app. `Option + .` toggles punctuation language and
-`Shift + Space` toggles half-width/full-width symbols without changing text
-mode. Missing clients use `disabled`; printable idle input is returned as
-unhandled so the host can keep normal typing behavior. All write modes keep
+`Option + /` toggles process-wide text mode and restores linked Chinese/English
+punctuation. `Option + .` is a Chinese-mode-only manual punctuation override
+that expires on the next text-mode switch. `Shift + Space` toggles the
+independent process-wide half-width/full-width state. ASCII mode passes idle
+half-width printable input back to the focused app; in full-width mode KnowType
+transforms only mapped ASCII characters and space, while unchanged Unicode text
+continues through ASCII passthrough. Missing clients use `disabled`; printable
+idle input is returned as unhandled before any full-width fast path so a stale
+host client is never reused. All write modes keep
 replacement ranges as `{NSNotFound, NSNotFound}` unless a future reconversion
 feature introduces an explicit owned range.
 `InputClientCompositionWriter` is the internal boundary that applies this mode
 to inline marked text, placeholder marked text, idle passthrough, and owned
 marked-text cleanup. `InputClientWriteCoordinator` remains the lower-level
 writer for `setMarkedText`, `insertText`, replacement ranges, and debug logs.
+
+The local punctuator receives `InputPunctuatorContext`. Only Chinese
+half-width quote keys ask the IMK adapter for the single UTF-16 unit immediately
+before a collapsed caret; English and full-width quote output does not read
+document context.
+Whitespace and opening punctuation open a quote; text, digits, and closing
+punctuation close it. A preceding Chinese quote and unknown context fall back
+to session alternation so consecutive quote keys still form an opening/closing
+pair. An
+idle `.` uses only a client-bound, expected-caret record of the last KnowType
+insertion, so an ASCII digit produces `.` even in Chinese punctuation or
+full-width mode without reading host document text. Diagnostics record only
+the character classification and context source, never document text.
 
 ## Provider Kinds
 
@@ -125,24 +150,77 @@ ProviderProfile {
   customResponsePath?
   isDefault
 }
+
+ProviderProfilesFile {
+  schemaVersion = 2
+  revision
+  profiles
+}
 ```
 
-Default file-backed profile storage writes `providers.json` under the user's Application Support `KnowType` directory only on explicit save. Runtime cold-start paths use the no-create loader, so a missing provider profile does not create `Application Support/KnowType` merely because the IMK host was launched.
+Default file-backed profile storage writes canonical `providers.v2.json` under
+the user's Application Support `KnowType` directory only on explicit save.
+During upgrade, numeric legacy `providers.json` is copied exactly to
+`providers.legacy.json`, available credentials are rekeyed, and the legacy path
+becomes an incompatible tombstone. Schema-v1 files decode at revision `0`;
+unknown future schemas fail closed. Production mutations hold a sidecar `flock`, compare the ViewModel's
+expected revision, increment once, and atomically replace the file. Successful
+commits emit a privacy-safe cross-process revision signal. Runtime cold-start
+paths use the no-create loader, so a genuinely absent provider profile does not
+create `Application Support/KnowType` merely because the IMK host was launched.
+The process-level runtime registry observes the signal and returns leases with
+`revision`, `generation`, opaque `fingerprint`, and optional `provider`. It uses
+the file revision only as an eligible-dispatch fallback. A generation change
+cancels old lease operations and rejects late results before UI, ENV, or archive
+writes.
+Unmigrated legacy or missing post-migration canonical state fails closed. The
+install migration first publishes a recoverable provisional tombstone and only
+marks canonical metadata expected after the canonical file is durable.
+Install and rollback invoke these explicit migration, rollback, and downgrade
+operations through `knowtype-inputsource-tool`. The input-method app keeps
+compatible command-line aliases, but shell tooling does not execute the
+installed bundle's main IMK executable because macOS may terminate that process
+outside its normal host launch context.
 
-`secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore` stores API keys under the `KnowType` service. Tests and non-UI code can use in-memory or read-only dictionary stores.
+`secretName` resolves through `SecretStore`. On macOS, `KeychainSecretStore`
+stores API keys under the `KnowType` service. New key writes use immutable
+`knowtype.provider.<profileID>.credential.<UUID>` references. The secret is
+written before metadata; failed metadata commits delete the new secret, while
+successful commits clean old unreferenced secrets afterward. Existing legacy
+references remain readable until the next secret change. Tests and non-UI code
+can use in-memory or read-only dictionary stores.
 
-When `providers.json` is missing or empty, settings and runtime loading share seeded defaults. The default profile is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model` blank for discovery, and does not embed an API key.
+When canonical `providers.v2.json` is missing in a genuinely new store or is
+empty, settings and runtime loading share seeded defaults. The default profile
+is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, may leave `model`
+blank for discovery, and does not embed an API key.
+New Anthropic and Gemini templates use `claude-haiku-4-5-20251001` and
+`gemini-3.5-flash`. On profile load, the exact retired IDs
+`claude-3-5-haiku-latest` and `gemini-1.5-flash` migrate once through the
+observed provider-file revision only when the provider kind and official HTTPS
+endpoint also match. Anthropic accepts its root and `/v1` base paths; Gemini
+remains root-only. Custom proxy paths, hosts, queries, userinfo, fragments,
+nonstandard ports, and non-exact model IDs are preserved.
 
 Settings validation rules:
 
 - display name cannot be empty
-- base URL must be HTTP(S) with a host
+- base URL must be HTTP(S) with a host and cannot include userinfo or a fragment;
+  query parameters remain accepted for runtime compatibility
+- provider-specific paths are appended before preserved query items; Gemini
+  replaces only its own `key` item
 - timeout must be positive
 - remote OpenAI-compatible profiles require an explicit model ID
 - local OpenAI-compatible profiles may leave model blank for `/v1/models` discovery
 - cloud profiles require a new key or an existing non-empty secret
 - custom HTTP profiles require body template and response path, but may omit the API key
-- profile saves publish new settings only after profile metadata and required secret mutations succeed
+- custom HTTP placeholders are rendered in one pass over the original template;
+  replacement text is never rescanned, and unknown or unclosed placeholders fail
+  before a request is sent
+- stale ViewModel revisions reject saves and default changes, refresh disk state,
+  and preserve the draft
+- profile saves publish new settings only after a required new secret and the
+  metadata transaction succeed
 
 Settings connection tests:
 
@@ -157,6 +235,10 @@ Settings connection tests:
 - keep transient diagnostic failures out of the persistent save/load error slot
 - preserve existing save/load errors after diagnostic success
 - avoid reusing a saved remote secret when a blank-key draft switches to a local endpoint, another remote endpoint, or another provider protocol
+- compare the provider-file baseline before sending and before publishing the
+  result; stale baselines refresh saved profiles and preserve the draft
+- immutable secret references ensure an E1 snapshot cannot resolve a newer K2
+  reference committed for E2
 
 ## Local Install State
 
@@ -185,11 +267,22 @@ If the host process is already running, install/rollback must fail before
 replacement instead of killing it, since forced shutdown can flush Rime userdb
 files and would count as a user-data mutation.
 
-Install backups live under `Backups/<backup-id>/`. Each backup manifest records
-schema version, backup id, creation time, app version/build, bundle identifier,
-app checksum, whether a prefPane was included, and the restore command. Rollback
-restores only `KnowType.app` and optional `KnowType.prefPane`, then refreshes
-LaunchServices and input-source preferences.
+Install backups live under `Backups/<backup-id>/`. Manifest schema `2` records
+the backup id and creation time plus each included artifact's checksum, bundle
+identifier, short version/build, designated signing requirement, and normalized
+signing identity. PreferencePane fields are explicitly null when no pane is
+included. Rollback validates manifest shape and ID, every recorded field,
+`codesign --verify --deep --strict`, the recorded requirement, and staged-copy
+checksums before replacing the canonical app or pane. Schema `1` backups fail
+closed unless the caller supplies the prominent legacy-only
+`--allow-unverified-backup` override; it never bypasses schema `2` failures.
+Rollback restores only `KnowType.app` and optional `KnowType.prefPane`, then
+refreshes LaunchServices and input-source preferences.
+
+Destructive PreferencePane operations accept only the canonical local
+non-symlink `KnowType.prefPane` with
+`CFBundleIdentifier=com.knowtype.preferencepane`. A same-name foreign bundle
+blocks install, uninstall, explicit rollback, and failed-install recovery.
 
 `scripts/diagnose-inputmethod.sh --json` is the stable machine-readable
 diagnostic surface for local tooling. It emits top-level `install`, `bundle`,
@@ -327,8 +420,10 @@ rendering:
 Ready AI recommendations are selectable through Tab, explicit Option-number, and mouse click, but they do not take
 ordinary numeric shortcuts from Rime candidates. Pending, unavailable, and ineligible AI states are rendered as
 disabled status rows: they preserve the visible slot but have no selection identity, no numeric shortcut, and no
-commit behavior. Mouse hover, click commit, keyboard selection, and accessibility selected children all consume the
-same `CandidatePanelSelection` values so click commits match keyboard commits.
+commit behavior. Mouse hover, click commit, keyboard selection, accessibility
+selected children, and VoiceOver press all consume the same
+`CandidatePanelSelection` values so pointer and accessibility commits match
+keyboard commits. Disabled/status rows have no press action.
 
 ## Rime Hot Path
 
@@ -427,8 +522,11 @@ KnowType owns; native handled/no-commit end states clear that owned marked text 
 inserted text.
 
 The AppKit candidate panel exposes row accessibility elements. Enabled candidates use button semantics with labels
-that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; disabled AI status rows use
-static-text semantics. Selection changes post focused-element and selected-children notifications. Screenshot
+that include the visible shortcut and candidate text; ready AI labels include `AI 推荐`; their press action forwards
+the retained selection through the normal commit handler. Disabled AI status rows use static-text semantics and do
+not press. Selection changes post focused-element and selected-children notifications. Trackpad scroll deltas
+accumulate to at most one page action per began-to-ended gesture and momentum is ignored; phase-less mouse-wheel
+events use a 120 ms paging cooldown. Screenshot
 regression tests render fixed examples to PNG baselines under `Tests/KnowTypeInputMethodTests/__Snapshots__/`.
 
 `CompositionBuffer` keeps `rawInput`, resolved segments, active range, display text, and commit text separate for legacy/session tests. The production IMK path no longer generates local segment candidates; Rime owns composition and candidate commit for Chinese input.
@@ -439,38 +537,78 @@ Candidate panel movement consumes `CandidateAnchorResult`. UI code should not us
 
 Resolver source priority:
 
-1. marked and selected `firstRect` ranges
-2. insertion-point `firstRect`
-3. line-height rectangles
-4. Accessibility focused-range bounds when available
-5. same-composition scoped last usable anchor
+1. at most four deduplicated marked and selected `firstRect` ranges
+2. unexpired last usable anchor scoped by composition, app, and an unambiguous
+   current screen
+3. at most four deduplicated strategic IMK-inline line-height positions
+4. one Accessibility focused-range resolve when available, throttled for 100
+   ms by composition and app from the actual monotonic attempt time
+5. an otherwise valid scoped cache deferred by ambiguous multi-screen topology
 6. safe screen fallback inside the visible frame
 
-The resolver accepts zero-width caret rects with valid height and rejects zero-height, non-finite, offscreen, or stale cross-composition anchors.
+The resolver accepts zero-width caret rects with valid height and rejects
+zero-height, non-finite, offscreen, or stale cross-composition anchors. Anchor
+diagnostics contain only probe count, source, scope metadata, and rejection
+reason; they do not include user text or raw geometry.
 
 ## Shortcut Contract
 
 - `Space` commits the highlighted/current Rime candidate for the current raw input.
-- with no active composition, `Space` inserts a normal space instead of being consumed by the input method.
+- with no active composition, `Space` inserts U+0020 in half-width mode or U+3000 in full-width mode.
 - when Rime is unavailable, `Space` commits raw input instead of blocking to compute hidden local candidates.
 - `1...9` select Rime current-page candidates during native composition, independent of candidate-panel visibility.
-- with no active composition, `0...9` are inserted as ordinary digits and do not open the candidate panel.
+- with no active composition, `0...9` are inserted as half-width or full-width digits according to the process width and do not open the candidate panel.
 - `Return` / `Enter` commits the original raw composition.
 - `Tab` commits the AI recommendation only when the AI slot is ready; pending, unavailable, disabled, or ineligible AI keeps the composition.
 - `Tab` does not trigger AI continuation while the composition is in a legacy partial-segment state.
 - `0` commits raw composition when correction candidates are visible.
 - visible numeric shortcuts commit rows on the current Rime candidate page only; after the AI slot, native alternatives keep their visible row numbers.
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
-- plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, paired Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao, but keeps code/path/operator symbols half-width unless full-width symbols are explicitly enabled.
+- plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, context-selected Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao. Full-width mode transforms printable ASCII `!...~` and U+0020, but never control characters, Tab, or newline.
 - symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
-- `Option + .` toggles Chinese/English punctuation for the active controller session and publishes a transient mode-status row.
-- `Option + /` toggles Chinese/ASCII text mode for the active controller session, also publishing a transient mode-status row; terminal-style placeholder hosts use it to switch between Chinese commit-only composition and idle ASCII passthrough.
-- `Shift + Space` toggles half-width/full-width symbols for the active controller session and publishes the same transient mode-status row; plain `Space` still commits candidates or inserts/passes through a normal space. The transient row is cleared before the next real input key publishes composition, symbol candidates, commit, or passthrough output, so it does not remain mixed into active candidate content.
+- Command/Control key-down is a host-shortcut intent. If a symbol-candidate
+  session is active, KnowType cancels its session and overlay before returning
+  the key to the host; key-up remains ignored and flags-changed remains a
+  separate non-commit intent.
+- `Option + .` toggles a manual Chinese/English punctuation override only while
+  process-wide text mode is Chinese. In ASCII mode it is a state no-op that
+  republishes the current status.
+- `Option + /` toggles process-wide Chinese/ASCII text mode, synchronizes
+  punctuation to Chinese/English, clears the manual override, and publishes a
+  transient mode-status row shared across apps.
+- `Shift + Space` toggles process-wide half-width/full-width characters without
+  changing text or punctuation. Plain `Space` still commits candidates or
+  inserts a width-appropriate space. The transient row is cleared before
+  the next real input key publishes composition, symbol candidates, commit, or
+  passthrough output, so it does not remain mixed into active candidate content.
 - `Option + 1` commits the ready AI recommendation explicitly; when AI is pending, unavailable, disabled, ineligible, or idle, it is consumed without committing legacy continuations.
 - `Option + 2...9` commits legacy continuation rows when they are present.
-- `Option + R` requests polish and may rewrite the prefix.
 
-Input attributes are represented by `InputModeState`: text mode, punctuation language, and symbol width are separate fields, so Chinese punctuation does not imply full-width symbols and half-width punctuation does not imply ASCII text mode. `InputModePreferences` persists normal-app and code-app default states through the shared `com.knowtype.preferences` defaults domain. App policy applies those preferences while preserving the Chinese text pipeline; the built-in code-app default uses English punctuation and half-width symbols unless saved preferences override it, while non-terminal code apps still inherit the normal Chinese text-mode default. The input-method runtime refreshes saved defaults at new composition/direct symbol boundaries, bypasses the normal reload throttle when the focused app bundle changes, and preserves session-local toggles while preferences and app context are unchanged.
+Input attributes are represented by `InputModeState`: text mode, punctuation
+language, and symbol width are separate fields. `InputModeStateMachine` adds
+punctuation source and generation, while `ProcessInputModeStateRuntime` shares
+one state across all controllers in the host process. The initial state is
+linked Chinese input and Chinese punctuation with the saved global width.
+Changing app or window does not reload mode. A host restart creates a fresh
+linked Chinese state. `InputModePreferences` persists only
+`input.global.symbolWidth`; legacy normal/code app fields remain readable but
+do not influence runtime mode.
+
+`RimeConversionEngine` maps every process snapshot to native session options:
+Chinese/ASCII text controls `ascii_mode`, Chinese/English punctuation controls
+`ascii_punct`, and half/full width controls `full_shape`. The desired snapshot
+is cached without creating Rime during cold start, then applied after schema
+selection for every new session and whenever generation changes. The C bridge
+checks `RimeApi.data_size` and null option pointers so older librime builds fail
+closed rather than reading beyond their API struct.
+
+The local quote fallback reads the preceding document character only on quote
+keys. Whitespace and Unicode opening punctuation choose an opening quote;
+text, digits, and closing punctuation choose a closing quote. Unknown context
+uses session alternation. External delete, focus or selection changes, and mode
+generation changes reset alternation. The ASCII-digit-plus-period exception is
+evaluated from the last recorded KnowType insertion before punctuation and width
+conversion and therefore remains `.` without a period-key document read.
 
 Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input scheme, candidate page size, candidate layout mode, cloud continuation enablement, local fallback continuation preference for legacy paths, continuation length, and continuation count. These preferences use the same shared defaults domain and are read by the input method at startup and new composition boundaries. The Rime-only settings UI no longer exposes the legacy input-scheme picker; production conversion uses the bundled Rime full-pinyin schema. Defaults preserve the current production behavior: six adaptive candidates per page, adaptive horizontal panel layout, cloud continuation enabled, medium continuation length, and six continuation candidates. If an older preference stores nine candidates per page, adaptive layout caps the effective page size at six; vertical-list mode uses the saved page size.
 
@@ -493,6 +631,9 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
 - caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
 - rejects stale results at the coordinator boundary
+- rebuilds cache and health state for each provider generation; an internal
+  stale-generation state clears its own normal pending slot to `.idle`, while an
+  older stale request cannot clear a newer request
 - skips cloud requests for too-short context: with a confirmed locked prefix, fewer than two Han characters or fewer than six visible mixed/Latin characters; without a locked prefix, fewer than three visible raw-input characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
@@ -508,12 +649,18 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 `AIContextMemoryRuntime`:
 
 - records only committed text, not marked text
+- requires a usable provider lease before a registry-backed event is appended,
+  so text entered without an available provider is not retained for later upload
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
 - archives processed event files under `~/.knowtype/events/processed/`
 - summarizes after a batch threshold or interval
 - updates only the generated section in `ENV.md`
 - normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically on a best-effort basis; read-only or transient write failures still return the repaired in-memory snapshot
 - sanitizes Level 0 protected content before writing logs
+- is shared across all controllers in the process, so one pending snapshot
+  starts at most one digest request
+- updates ENV and archives a pending prefix only while both its provider lease
+  and snapshot claim remain current; later appended events stay pending
 
 `LexicalProfileStore`:
 
@@ -643,7 +790,7 @@ registration, and cleanup in KnowType scripts:
   changing selected preferences. `--include-history` repairs history to `.Hans`
   without moving it ahead of the retained current source unless selected repair
   is also requested. `--include-selected` is reserved for explicit selection
-  repair after installed app selection is verified and rewrites selected
+  repair after helper-local selection is verified and rewrites selected
   preferences to `.Hans`. `--remove-parent-anchor` is reserved for uninstall
   cleanup after the bundle is gone.
   `--legacy-parent-anchor` is accepted as a deprecated compatibility no-op.
@@ -651,8 +798,8 @@ registration, and cleanup in KnowType scripts:
   refreshes LaunchServices without starting `KnowTypeInputMethodApp`.
 - `bootstrap --path ... [--select]` registers the installed bundle, enables the
   parent anchor and visible `.Hans` input mode through TIS APIs, and optionally
-  requests helper-local selection of `.Hans`. Default install/repair registration
-  uses the installed app CLI context before helper preference repair; explicit
+  requests helper-local selection of `.Hans`. Default install/repair
+  registration and preference repair remain helper-only; explicit
   repair/selection tooling owns user-visible selection.
 - `register --path ... [--select]` remains a lower-level manual register path
   for debug use.
@@ -668,7 +815,7 @@ Script contracts:
   input-method host or selecting KnowType.
 - `scripts/diagnose-inputmethod.sh` is the read-only install status and recent
   log diagnostic path.
-- `scripts/select-inputmethod.sh` requests selection through the installed app,
+- `scripts/select-inputmethod.sh` requests selection through the standalone helper,
   but selection remains scoped to the active macOS input context and is not proof
   of typing behavior.
 - `scripts/accept-inputmethod-local.sh` generates the local acceptance report

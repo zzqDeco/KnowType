@@ -151,6 +151,23 @@ final class InputDebugDiagnosticsTests: XCTestCase {
         XCTAssertFalse(line.contains("committed text"))
         XCTAssertFalse(line.contains("sk-"))
     }
+
+    func testAnchorDiagnosticsExposeProbeMetadataWithoutUserText() {
+        let line = InputDebugDiagnostics.formatLine(
+            category: .anchor,
+            fields: [
+                .init(.stage, "rejected"),
+                .init(.anchorSource, "lineHeightRect"),
+                .init(.probeCount, 7),
+                .init(.reason, "offscreen")
+            ]
+        )
+
+        XCTAssertTrue(line.contains("anchorSource=lineHeightRect"))
+        XCTAssertTrue(line.contains("probeCount=7"))
+        XCTAssertTrue(line.contains("reason=offscreen"))
+        XCTAssertFalse(line.contains("malicious-user-text"))
+    }
 }
 
 private final class DiagnosticOutputBox: @unchecked Sendable {

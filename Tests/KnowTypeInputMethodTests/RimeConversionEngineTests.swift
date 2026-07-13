@@ -54,6 +54,57 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertEqual(engine.activeSchemaID, "custom_schema")
     }
 
+    func testRimeSessionModeOptionsMapProcessStateToNativeOptionNames() {
+        let options = RimeSessionModeOptions(
+            state: InputModeState(
+                textMode: .ascii,
+                punctuationMode: .english,
+                symbolWidth: .fullWidth
+            )
+        )
+
+        XCTAssertEqual(options.asciiMode, true)
+        XCTAssertEqual(options.asciiPunct, true)
+        XCTAssertEqual(options.fullShape, true)
+        XCTAssertEqual(
+            Dictionary(uniqueKeysWithValues: options.namedValues.map { ($0.name, $0.value) }),
+            ["ascii_mode": true, "ascii_punct": true, "full_shape": true]
+        )
+    }
+
+    func testModeSynchronizationRemainsColdStartReadOnlyWithoutNativeSession() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-mode-sync-cold-start")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("missing-rime-data", isDirectory: true),
+            userDataURL: userData,
+            logURL: logs
+        )
+        var engine = RimeConversionEngine(configuration: configuration)
+
+        engine.synchronizeInputMode(
+            InputModeSnapshot(
+                state: InputModeState(
+                    textMode: .ascii,
+                    punctuationMode: .english,
+                    symbolWidth: .fullWidth
+                ),
+                punctuationSource: .linked,
+                generation: 3
+            )
+        )
+
+        XCTAssertFalse(fileManager.fileExists(atPath: userData.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: logs.path))
+        XCTAssertFalse(engine.isNativeActive)
+    }
+
     func testNativeRimeSessionIsNotCreatedDuringEngineInitializationOrReadOnlyAccess() throws {
         let fileManager = FileManager.default
         let root = temporaryDirectory(name: "rime-lazy-cold-start")
@@ -545,6 +596,84 @@ final class RimeConversionEngineTests: XCTestCase {
 
         XCTAssertNotNil(result.commitText)
         XCTAssertFalse(result.commitText?.isEmpty ?? true)
+    }
+
+    func testNativeRimeModeOptionsApplyOnCreationAndGenerationChangeWhenArtifactsAreAvailable() throws {
+        let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
+            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-mode-options-\(UUID().uuidString)", isDirectory: true)
+        configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
+        configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
+        var engine = RimeConversionEngine(configuration: configuration)
+        let fullWidthASCII = InputModeSnapshot(
+            state: InputModeState(
+                textMode: .ascii,
+                punctuationMode: .english,
+                symbolWidth: .fullWidth
+            ),
+            punctuationSource: .linked,
+            generation: 7
+        )
+
+        engine.synchronizeInputMode(fullWidthASCII)
+        _ = engine.process(.text("a"))
+        guard engine.isNativeActive else {
+            throw XCTSkip("librime could not create a native session")
+        }
+
+        XCTAssertEqual(engine.nativeOptionValue("ascii_mode"), true)
+        XCTAssertEqual(engine.nativeOptionValue("ascii_punct"), true)
+        XCTAssertEqual(engine.nativeOptionValue("full_shape"), true)
+
+        engine.synchronizeInputMode(
+            InputModeSnapshot(
+                state: InputModeState(),
+                punctuationSource: .linked,
+                generation: 8
+            )
+        )
+
+        XCTAssertEqual(engine.nativeOptionValue("ascii_mode"), false)
+        XCTAssertEqual(engine.nativeOptionValue("ascii_punct"), false)
+        XCTAssertEqual(engine.nativeOptionValue("full_shape"), false)
+    }
+
+    func testNativeRimeModeGenerationChangeAppliesDuringActiveCompositionWhenArtifactsAreAvailable() throws {
+        let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
+        guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
+            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("knowtype-rime-active-mode-options-\(UUID().uuidString)", isDirectory: true)
+        configuration.userDataURL = sandbox.appendingPathComponent("user", isDirectory: true)
+        configuration.logURL = sandbox.appendingPathComponent("logs", isDirectory: true)
+        var engine = RimeConversionEngine(configuration: configuration)
+
+        XCTAssertTrue(engine.process(.text("n")).handled)
+        guard engine.isNativeActive else {
+            throw XCTSkip("librime could not create a native session")
+        }
+        XCTAssertTrue(engine.snapshot.hasComposition)
+
+        engine.synchronizeInputMode(
+            InputModeSnapshot(
+                state: InputModeState(
+                    textMode: .chinese,
+                    punctuationMode: .english,
+                    symbolWidth: .fullWidth
+                ),
+                punctuationSource: .manual,
+                generation: 1
+            )
+        )
+
+        XCTAssertEqual(engine.nativeOptionValue("ascii_mode"), false)
+        XCTAssertEqual(engine.nativeOptionValue("ascii_punct"), true)
+        XCTAssertEqual(engine.nativeOptionValue("full_shape"), true)
+        XCTAssertTrue(engine.snapshot.hasComposition)
     }
 
     func testNativeRimePageDownChangesCurrentPageSnapshotWhenArtifactsAreAvailable() throws {

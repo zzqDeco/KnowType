@@ -97,7 +97,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "KnowTypeInputMethodApp",
-            dependencies: ["KnowTypeCore", "KnowTypeInputMethod", "KnowTypeInputSourceSupport"],
+            dependencies: ["KnowTypeCore", "KnowTypeInputMethod", "KnowTypeInputSourceSupport", "KnowTypeProviders"],
             path: "Sources/KnowTypeInputMethodApp",
             linkerSettings: [
                 .linkedFramework("AppKit", .when(platforms: [.macOS])),
@@ -111,7 +111,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "KnowTypeInputSourceTool",
-            dependencies: ["KnowTypeInputSourceSupport"],
+            dependencies: ["KnowTypeInputSourceSupport", "KnowTypeProviders"],
             path: "Sources/KnowTypeInputSourceTool",
             linkerSettings: [
                 .linkedFramework("Carbon", .when(platforms: [.macOS]))

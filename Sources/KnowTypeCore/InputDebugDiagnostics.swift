@@ -44,7 +44,12 @@ public enum InputDebugDiagnostics {
         case handled
         case panelGeneration
         case prefixLength
+        case probeCount
         case provider
+        case providerConfigured
+        case providerFingerprint
+        case providerGeneration
+        case providerRevision
         case rawLength
         case rawRevision
         case reason

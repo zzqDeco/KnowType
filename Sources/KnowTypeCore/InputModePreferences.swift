@@ -98,120 +98,15 @@ public struct InputModePreferences: Codable, Sendable, Equatable {
         self.codeAppState = codeAppState
     }
 
+    public var globalSymbolWidth: InputSymbolWidth {
+        get { defaultState.symbolWidth }
+        set {
+            defaultState.symbolWidth = newValue
+            codeAppState.symbolWidth = newValue
+        }
+    }
+
     public static let standard = InputModePreferences()
-}
-
-public struct InputModePreferenceRuntime: Sendable, Equatable {
-    public private(set) var preferences: InputModePreferences
-    public private(set) var appBundleID: String?
-    public private(set) var state: InputModeState
-
-    public init(
-        preferences: InputModePreferences = .standard,
-        appBundleID: String? = nil
-    ) {
-        self.preferences = preferences
-        self.appBundleID = appBundleID
-        self.state = InputModeAppPolicy.defaultState(
-            appBundleID: appBundleID,
-            preferences: preferences
-        )
-    }
-
-    @discardableResult
-    public mutating func reloadIfChanged(
-        preferences: InputModePreferences,
-        appBundleID: String?
-    ) -> Bool {
-        guard preferences != self.preferences || appBundleID != self.appBundleID else {
-            return false
-        }
-        self.preferences = preferences
-        self.appBundleID = appBundleID
-        state = InputModeAppPolicy.defaultState(
-            appBundleID: appBundleID,
-            preferences: preferences
-        )
-        return true
-    }
-
-    public mutating func togglePunctuationMode() {
-        state.togglePunctuationMode()
-    }
-
-    public mutating func toggleTextMode() {
-        state.toggleTextMode()
-    }
-
-    public mutating func toggleSymbolWidth() {
-        state.toggleSymbolWidth()
-    }
-}
-
-public enum InputModeAppPolicy {
-    public static func defaultState(
-        appBundleID: String?,
-        preferences: InputModePreferences = .standard
-    ) -> InputModeState {
-        guard let appBundleID else {
-            return preferences.defaultState
-        }
-        if usesCodeAppState(appBundleID: appBundleID) {
-            var state = preferences.codeAppState
-            if !usesTerminalAsciiDefault(appBundleID: appBundleID) {
-                state.textMode = preferences.defaultState.textMode
-            }
-            return state
-        }
-        return preferences.defaultState
-    }
-
-    public static func usesCodeAppState(appBundleID: String?) -> Bool {
-        guard let appBundleID else {
-            return false
-        }
-        return codeAppBundleIDs.contains(appBundleID)
-            || codeAppBundleIDPrefixes.contains(where: { appBundleID.hasPrefix($0) })
-    }
-
-    public static func usesTerminalAsciiDefault(appBundleID: String?) -> Bool {
-        guard let appBundleID else {
-            return false
-        }
-        return terminalAsciiDefaultBundleIDs.contains(appBundleID)
-            || terminalAsciiDefaultBundleIDPrefixes.contains(where: { appBundleID.hasPrefix($0) })
-    }
-
-    private static let codeAppBundleIDs: Set<String> = [
-        "com.apple.Terminal",
-        "com.apple.dt.Xcode",
-        "com.github.Electron",
-        "com.microsoft.VSCode",
-        "com.openai.codex",
-        "com.visualstudio.code.oss",
-        "org.gnu.Aquamacs",
-        "org.gnu.Emacs",
-        "org.vim.MacVim"
-    ]
-
-    private static let codeAppBundleIDPrefixes = [
-        "com.electron.",
-        "com.googlecode.iterm2",
-        "com.jetbrains.",
-        "com.microsoft.VSCode",
-        "com.todesktop."
-    ]
-
-    private static let terminalAsciiDefaultBundleIDs: Set<String> = [
-        "com.apple.Terminal",
-        "org.gnu.Aquamacs",
-        "org.gnu.Emacs",
-        "org.vim.MacVim"
-    ]
-
-    private static let terminalAsciiDefaultBundleIDPrefixes = [
-        "com.googlecode.iterm2"
-    ]
 }
 
 public protocol InputModePreferenceStore: Sendable {
@@ -223,6 +118,7 @@ public struct UserDefaultsInputModePreferenceStore: InputModePreferenceStore, @u
     public static let defaultSuiteName = "com.knowtype.preferences"
 
     private enum Key {
+        static let globalSymbolWidth = "input.global.symbolWidth"
         static let defaultTextMode = "input.default.textMode"
         static let defaultPunctuationMode = "input.default.punctuationMode"
         static let defaultSymbolWidth = "input.default.symbolWidth"
@@ -245,11 +141,14 @@ public struct UserDefaultsInputModePreferenceStore: InputModePreferenceStore, @u
 
     public func loadPreferences() -> InputModePreferences {
         let standard = InputModePreferences.standard
+        let globalSymbolWidth = symbolWidth(forKey: Key.globalSymbolWidth)
+            ?? symbolWidth(forKey: Key.defaultSymbolWidth)
+            ?? standard.globalSymbolWidth
         return InputModePreferences(
             defaultState: InputModeState(
                 textMode: textMode(forKey: Key.defaultTextMode) ?? standard.defaultState.textMode,
                 punctuationMode: symbolMode(forKey: Key.defaultPunctuationMode) ?? standard.defaultState.punctuationMode,
-                symbolWidth: symbolWidth(forKey: Key.defaultSymbolWidth) ?? standard.defaultState.symbolWidth
+                symbolWidth: globalSymbolWidth
             ),
             codeAppState: InputModeState(
                 textMode: textMode(forKey: Key.codeAppTextMode) ?? standard.codeAppState.textMode,
@@ -260,12 +159,7 @@ public struct UserDefaultsInputModePreferenceStore: InputModePreferenceStore, @u
     }
 
     public func savePreferences(_ preferences: InputModePreferences) throws {
-        defaults.set(preferences.defaultState.textMode.rawValue, forKey: Key.defaultTextMode)
-        defaults.set(preferences.defaultState.punctuationMode.rawValue, forKey: Key.defaultPunctuationMode)
-        defaults.set(preferences.defaultState.symbolWidth.rawValue, forKey: Key.defaultSymbolWidth)
-        defaults.set(preferences.codeAppState.textMode.rawValue, forKey: Key.codeAppTextMode)
-        defaults.set(preferences.codeAppState.punctuationMode.rawValue, forKey: Key.codeAppPunctuationMode)
-        defaults.set(preferences.codeAppState.symbolWidth.rawValue, forKey: Key.codeAppSymbolWidth)
+        defaults.set(preferences.globalSymbolWidth.rawValue, forKey: Key.globalSymbolWidth)
     }
 
     private func textMode(forKey key: String) -> InputTextMode? {

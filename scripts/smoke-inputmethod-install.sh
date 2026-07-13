@@ -143,7 +143,9 @@ done < <(find "$ROOT_DIR/scripts" -type f -name '*.sh' | sort)
 
 install_script_contents="$(cat "$ROOT_DIR/scripts/install-inputmethod.sh")"
 rollback_script_contents="$(cat "$ROOT_DIR/scripts/rollback-inputmethod.sh")"
+uninstall_script_contents="$(cat "$ROOT_DIR/scripts/uninstall-inputmethod.sh")"
 repair_script_contents="$(cat "$ROOT_DIR/scripts/repair-inputmethod-selection.sh")"
+select_script_contents="$(cat "$ROOT_DIR/scripts/select-inputmethod.sh")"
 
 assert_contains "$install_script_contents" "purge_legacy_best_effort" "install script"
 assert_contains "$install_script_contents" "bootstrap_input_source_best_effort" "install script"
@@ -160,6 +162,23 @@ assert_not_contains "$install_script_contents" '"$INSTALLED_EXECUTABLE" --knowty
 assert_not_contains "$install_script_contents" "killall KnowTypeInputMethodApp" "install script"
 assert_not_contains "$install_script_contents" "pgrep -x KnowTypeInputMethodApp" "install script"
 assert_not_contains "$install_script_contents" 'open -g "$TARGET_PATH"' "install script"
+assert_contains "$install_script_contents" '--version "$LOCAL_SHORT_VERSION" --build "$LOCAL_BUILD_VERSION"' "install script"
+assert_contains "$install_script_contents" 'knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0' "install script"
+assert_contains "$install_script_contents" 'knowtype_replace_local_preferencepane_bundle_atomically' "install script"
+assert_contains "$install_script_contents" 'stop_provider_profile_writer_hosts' "install script"
+assert_contains "$install_script_contents" '"$provider_tool" migrate-provider-profiles' "install script"
+assert_contains "$install_script_contents" '"$provider_tool" rollback-provider-profile-migration' "install script"
+assert_contains "$install_script_contents" '"$provider_tool" downgrade-provider-profiles' "install script"
+assert_not_contains "$install_script_contents" 'KnowTypeInputMethodApp" --knowtype-migrate-provider-profiles' "install script"
+assert_contains "$install_script_contents" 'provider_storage_generation_for_bundle' "install script"
+assert_contains "$install_script_contents" 'prepare_provider_storage_for_source_bundle' "install script"
+assert_contains "$install_script_contents" 'SOURCE_PROVIDER_STORAGE_GENERATION' "install script"
+assert_contains "$install_script_contents" 'skipped-pre-v2' "install script"
+assert_not_contains "$install_script_contents" 'restore_provider_storage_snapshot' "install script"
+assert_contains "$install_script_contents" 'rollback_provider_storage_after_failed_install' "install script"
+assert_contains "$install_script_contents" 'migrate_provider_profiles
+
+launchservices_cleanup_output="$(knowtype_unregister_launchservices_records_except' "install script"
 
 assert_contains "$rollback_script_contents" "purge_args=(" "rollback script"
 assert_contains "$rollback_script_contents" "bootstrap_args=(" "rollback script"
@@ -174,14 +193,35 @@ assert_not_contains "$rollback_script_contents" 'KnowTypeInputMethodApp" --knowt
 assert_not_contains "$rollback_script_contents" "killall KnowTypeInputMethodApp" "rollback script"
 assert_not_contains "$rollback_script_contents" "pgrep -x KnowTypeInputMethodApp" "rollback script"
 assert_not_contains "$rollback_script_contents" 'open -g "$target_path"' "rollback script"
+assert_contains "$rollback_script_contents" "--allow-unverified-backup" "rollback script"
+assert_contains "$rollback_script_contents" 'knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP"' "rollback script"
+assert_contains "$rollback_script_contents" 'knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0' "rollback script"
+assert_contains "$rollback_script_contents" '"$provider_tool" downgrade-provider-profiles' "rollback script"
+assert_contains "$rollback_script_contents" '"$provider_tool" migrate-provider-profiles' "rollback script"
+assert_not_contains "$rollback_script_contents" 'KnowTypeInputMethodApp" --knowtype-downgrade-provider-profiles' "rollback script"
+assert_contains "$rollback_script_contents" 'prepare_provider_storage_for_restored_app' "rollback script"
+assert_contains "$rollback_script_contents" 'provider_storage_generation_for_bundle' "rollback script"
+assert_not_contains "$rollback_script_contents" 'rm -rf -- "$prefpane_path"' "rollback script"
+
+assert_contains "$uninstall_script_contents" 'knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"' "uninstall script"
+assert_contains "$uninstall_script_contents" 'knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" "$DRY_RUN"' "uninstall script"
+assert_not_contains "$uninstall_script_contents" 'rm -rf -- "$PREFPANE_TARGET_PATH"' "uninstall script"
 
 assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" purge-legacy' "repair script"
-assert_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-register-input-source --knowtype-enable-input-source' "repair script"
-assert_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-select-input-source' "repair script"
+assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" "${bootstrap_args[@]}"' "repair script"
+assert_contains "$repair_script_contents" '"$INPUTSOURCE_TOOL" select' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-register-input-source' "repair script"
+assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-select-input-source' "repair script"
 assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-install-activate' "repair script"
 assert_not_contains "$repair_script_contents" '"$BUNDLE_EXECUTABLE" --knowtype-purge-legacy' "repair script"
 assert_not_contains "$repair_script_contents" "killall KnowTypeInputMethodApp" "repair script"
 assert_not_contains "$repair_script_contents" 'open -g "$BUNDLE_PATH"' "repair script"
+
+assert_contains "$select_script_contents" 'knowtype_inputsource_tool "$ROOT_DIR"' "select script"
+assert_contains "$select_script_contents" '"$INPUTSOURCE_TOOL" "${bootstrap_args[@]}"' "select script"
+assert_contains "$select_script_contents" 'select.current=$KNOWTYPE_ACTIVE_INPUT_MODE_ID' "select script"
+assert_not_contains "$select_script_contents" 'KnowTypeInputMethodApp" --knowtype-register-input-source' "select script"
+assert_not_contains "$select_script_contents" 'KnowTypeInputMethodApp" --knowtype-select-input-source' "select script"
 
 help_scripts=(
   "$ROOT_DIR/scripts/accept-inputmethod-local.sh"
@@ -212,8 +252,57 @@ declare -F knowtype_find_local_inputmethod_bundle_paths >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load duplicate discovery helpers"
 declare -F knowtype_remove_local_inputmethod_bundle_if_safe >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load safe removal helpers"
+declare -F knowtype_remove_local_preferencepane_bundle_if_safe >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load PreferencePane safe removal helpers"
+declare -F knowtype_validate_install_backup_for_restore >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load backup integrity helpers"
 declare -F knowtype_clean_preferencepane_caches >/dev/null ||
   die "scripts/lib/inputmethod-installation.sh did not load PreferencePane cache cleanup helpers"
+declare -F knowtype_legacy_provider_storage_is_compatible >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load legacy provider validation helpers"
+declare -F knowtype_provider_storage_is_pre_v2_compatible >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load provider storage compatibility helpers"
+declare -F knowtype_migrate_provider_storage_for_bundle >/dev/null ||
+  die "scripts/lib/inputmethod-installation.sh did not load provider storage migration helpers"
+
+legacy_validation_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-legacy-provider-validation.XXXXXX")"
+printf '%s\n' '{"schemaVersion":1,"profiles":[]}' >"$legacy_validation_root/valid.json"
+printf '%s\n' '{"schemaVersion":2,"profiles":[]}' >"$legacy_validation_root/future.json"
+printf '%s\n' '{"schemaVersion":true,"profiles":[]}' >"$legacy_validation_root/bool.json"
+printf '%s\n' '{"schemaVersion":1,"profiles":[{}]}' >"$legacy_validation_root/incomplete.json"
+knowtype_legacy_provider_storage_is_compatible "$legacy_validation_root/valid.json" ||
+  die "legacy provider validation rejected a valid schema-v1 envelope"
+for invalid_legacy_path in \
+  "$legacy_validation_root/future.json" \
+  "$legacy_validation_root/bool.json" \
+  "$legacy_validation_root/incomplete.json"; do
+  if knowtype_legacy_provider_storage_is_compatible "$invalid_legacy_path"; then
+    die "legacy provider validation accepted incompatible metadata: $invalid_legacy_path"
+  fi
+done
+
+pre_v2_storage_root="$legacy_validation_root/storage"
+mkdir -p "$pre_v2_storage_root"
+knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root" ||
+  die "pre-v2 provider compatibility rejected empty storage"
+cp "$legacy_validation_root/valid.json" "$pre_v2_storage_root/providers.json"
+knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root" ||
+  die "pre-v2 provider compatibility rejected a valid legacy envelope"
+printf '{}\n' >"$pre_v2_storage_root/providers.v2.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted canonical metadata"
+fi
+rm -f "$pre_v2_storage_root/providers.v2.json"
+printf '{}\n' >"$pre_v2_storage_root/providers.legacy.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted an interrupted migration snapshot"
+fi
+rm -f "$pre_v2_storage_root/providers.legacy.json"
+printf '{}\n' >"$pre_v2_storage_root/providers.legacy-conflict.interrupted.json"
+if knowtype_provider_storage_is_pre_v2_compatible "$pre_v2_storage_root"; then
+  die "pre-v2 provider compatibility accepted an interrupted migration claim"
+fi
+rm -rf "$legacy_validation_root"
 
 manifest_smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-manifest-smoke.XXXXXX")"
 mkdir -p "$manifest_smoke_root/one" "$manifest_smoke_root/two"
@@ -270,7 +359,9 @@ if grep -Fq 'bundle.load()' "$ROOT_DIR/scripts/diagnose-inputmethod.sh"; then
   die "diagnostics must not execute PreferencePane bundle code while inspecting install state"
 fi
 
-bundle_path="$(bash "$ROOT_DIR/scripts/build-inputmethod-bundle.sh")"
+smoke_short_version="9.8.7"
+smoke_build_version="987"
+bundle_path="$(bash "$ROOT_DIR/scripts/build-inputmethod-bundle.sh" --version "$smoke_short_version" --build "$smoke_build_version")"
 assert_equals "$ROOT_DIR/dist/KnowType.app" "$bundle_path" "bundle path"
 assert_dir "$bundle_path"
 assert_file "$bundle_path/Contents/Info.plist"
@@ -306,6 +397,26 @@ assert_equals "$KNOWTYPE_ACTIVE_INPUT_MODE_ID" \
 assert_equals "KnowTypeInputMethodApp" \
   "$(plist_read ":CFBundleExecutable" "$bundle_path/Contents/Info.plist")" \
   "CFBundleExecutable"
+assert_equals "$smoke_short_version" \
+  "$(plist_read ":CFBundleShortVersionString" "$bundle_path/Contents/Info.plist")" \
+  "input-method short version override"
+assert_equals "$smoke_build_version" \
+  "$(plist_read ":CFBundleVersion" "$bundle_path/Contents/Info.plist")" \
+  "input-method build version override"
+assert_equals "2" \
+  "$(plist_read ":KnowTypeProviderProfileStorageGeneration" "$bundle_path/Contents/Info.plist")" \
+  "provider profile storage generation"
+
+prefpane_path=""
+if (( WITH_PREFPANE == 1 )); then
+  prefpane_path="$(CODESIGN_IDENTITY=- bash "$ROOT_DIR/scripts/build-preference-pane.sh" --version "$smoke_short_version" --build "$smoke_build_version")"
+  assert_equals "$smoke_short_version" \
+    "$(plist_read ":CFBundleShortVersionString" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane short version consistency"
+  assert_equals "$smoke_build_version" \
+    "$(plist_read ":CFBundleVersion" "$prefpane_path/Contents/Info.plist")" \
+    "PreferencePane build version consistency"
+fi
 # Run the Rime runtime check from the repository SwiftPM executable, not the
 # packaged app bundle. macOS may SIGKILL a second IMK app process with the same
 # bundle id while the installed input-method host is already running.
@@ -321,6 +432,52 @@ fake_prefpane_dir="$install_state_tmp/PreferencePanes"
 fake_support_dir="$install_state_tmp/Application Support/KnowType"
 mkdir -p "$fake_input_dir" "$fake_prefpane_dir" "$fake_support_dir"
 cp -R "$bundle_path" "$fake_input_dir/KnowType.app"
+if (( WITH_PREFPANE == 1 )); then
+  cp -R "$prefpane_path" "$fake_prefpane_dir/KnowType.prefPane"
+fi
+
+migration_support_dir="$install_state_tmp/provider-migration"
+mkdir -p "$migration_support_dir"
+provider_tool_path="$(CONFIGURATION=debug knowtype_inputsource_tool "$ROOT_DIR")"
+export KNOWTYPE_INPUTSOURCE_TOOL="$provider_tool_path"
+legacy_provider_fixture='{"schemaVersion":1,"profiles":[]}'
+printf '%s\n' "$legacy_provider_fixture" >"$migration_support_dir/providers.json"
+migration_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    knowtype_migrate_provider_storage_for_bundle "$bundle_path" "$provider_tool_path"
+})"
+assert_contains "$migration_output" "provider.migration.status=migrated" "provider migration CLI output"
+migration_revision="$(printf '%s\n' "$migration_output" | awk -F= '/^provider\.migration\.revision=/{print $2; exit}')"
+[[ "$migration_revision" =~ ^[0-9]+$ ]] || die "provider migration CLI did not report a revision"
+assert_file "$migration_support_dir/providers.v2.json"
+assert_file "$migration_support_dir/providers.legacy.json"
+rollback_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$provider_tool_path" rollback-provider-profile-migration --expected-revision "$migration_revision"
+})"
+assert_contains "$rollback_output" "provider.migration.rollback=ok" "provider migration rollback CLI output"
+[[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider migration rollback left canonical metadata"
+assert_equals "$legacy_provider_fixture" "$(cat "$migration_support_dir/providers.json")" "provider migration rollback legacy metadata"
+second_migration_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$provider_tool_path" migrate-provider-profiles
+})"
+assert_contains "$second_migration_output" "provider.migration.status=migrated" "second provider migration CLI output"
+downgrade_output="$({
+  KNOWTYPE_APP_SUPPORT_DIR="$migration_support_dir" \
+    "$provider_tool_path" downgrade-provider-profiles
+})"
+assert_contains "$downgrade_output" "provider.storage.downgrade.status=downgraded" "provider downgrade CLI output"
+[[ ! -e "$migration_support_dir/providers.v2.json" ]] || die "provider downgrade left canonical metadata"
+"$KNOWTYPE_PYTHON3" - "$migration_support_dir/providers.json" <<'PY'
+import json
+import pathlib
+import sys
+
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if payload.get("schemaVersion") != 1 or "revision" in payload:
+    raise SystemExit("provider downgrade did not produce a pre-v2-compatible payload")
+PY
 
 install_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
@@ -332,6 +489,23 @@ assert_contains "$install_dry_run_output" "Source mode: bundle" "install dry run
 assert_contains "$install_dry_run_output" "Install state: $fake_support_dir/install-state.json" "install dry run output"
 assert_contains "$install_dry_run_output" "Backup root: $fake_support_dir/Backups" "install dry run output"
 assert_contains "$install_dry_run_output" "Would create install backup" "install dry run output"
+assert_contains "$install_dry_run_output" "migrate provider profiles to providers.v2.json" "install dry run output"
+
+pre_v2_bundle_path="$install_state_tmp/KnowType-pre-v2.app"
+cp -R "$bundle_path" "$pre_v2_bundle_path"
+/usr/libexec/PlistBuddy -c "Delete :KnowTypeProviderProfileStorageGeneration" \
+  "$pre_v2_bundle_path/Contents/Info.plist"
+pre_v2_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    "$ROOT_DIR/scripts/install-inputmethod.sh" \
+    --dry-run \
+    --no-verify \
+    --from-bundle "$pre_v2_bundle_path"
+)"
+assert_contains "$pre_v2_dry_run_output" "source app is pre-v2" "pre-v2 install dry run output"
+assert_contains "$pre_v2_dry_run_output" "old migration CLI would not be invoked" "pre-v2 install dry run output"
 
 release_zip_path="$install_state_tmp/KnowType-test-release.zip"
 release_zip_checksum_path="$install_state_tmp/KnowType-test-release.zip.sha256"
@@ -383,6 +557,44 @@ assert_contains "$dmg_payload_dry_run_output" "Source mode: dmg-dev-preview" "DM
 assert_contains "$dmg_payload_dry_run_output" "Source DMG payload: $dmg_payload_root" "DMG payload install dry run output"
 assert_contains "$dmg_payload_dry_run_output" "Release commit: fixture-commit" "DMG payload install dry run output"
 
+packaged_dmg_root="$install_state_tmp/packaged-dmg-root"
+mkdir -p "$packaged_dmg_root/Payload" "$packaged_dmg_root/Resources" "$packaged_dmg_root/Scripts/lib"
+cp -R "$bundle_path" "$packaged_dmg_root/Payload/KnowType.app"
+cp "$release_stage/release-manifest.json" "$packaged_dmg_root/Resources/release-manifest.json"
+cp "$ROOT_DIR/scripts/install-inputmethod.sh" "$packaged_dmg_root/Scripts/"
+cp "$ROOT_DIR/scripts/lib/inputsource-ids.sh" "$packaged_dmg_root/Scripts/lib/"
+cp "$ROOT_DIR/scripts/lib/inputsource-tool.sh" "$packaged_dmg_root/Scripts/lib/"
+cp "$ROOT_DIR/scripts/lib/inputmethod-installation.sh" "$packaged_dmg_root/Scripts/lib/"
+packaged_dmg_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  bash "$packaged_dmg_root/Scripts/install-inputmethod.sh" \
+    --dry-run \
+    --from-dmg-payload "$packaged_dmg_root" \
+    --no-backup
+)"
+assert_contains "$packaged_dmg_dry_run_output" "Source mode: dmg-dev-preview" "packaged DMG install dry run output"
+assert_not_contains "$packaged_dmg_dry_run_output" "local build short version is missing" "packaged DMG install dry run output"
+
+if (( WITH_PREFPANE == 1 )); then
+  staged_failure_source="$install_state_tmp/staged-failure-source/KnowType.prefPane"
+  mkdir -p "$(dirname "$staged_failure_source")"
+  cp -R "$prefpane_path" "$staged_failure_source"
+  "$PLIST_BUDDY" -c "Set :CFBundleShortVersionString 9.9.9-stage-failure" \
+    "$staged_failure_source/Contents/Info.plist"
+  if KNOWTYPE_TEST_CORRUPT_STAGED_PREFPANE=1 \
+    knowtype_replace_local_preferencepane_bundle_atomically \
+      "$staged_failure_source" \
+      "$fake_prefpane_dir/KnowType.prefPane" \
+      0 >/dev/null 2>&1; then
+    die "atomic PreferencePane replacement accepted an invalid staged copy"
+  fi
+  assert_equals "$smoke_short_version" \
+    "$(plist_read ":CFBundleShortVersionString" "$fake_prefpane_dir/KnowType.prefPane/Contents/Info.plist")" \
+    "failed staged PreferencePane replacement preserved current pane"
+fi
+
 assert_equals "0.2.0+build-bad-value" \
   "$(knowtype_sanitize_backup_component "0.2.0+build bad/value")" \
   "backup component sanitization"
@@ -392,11 +604,15 @@ if knowtype_is_valid_backup_id "../../outside"; then
   die "traversal backup ID unexpectedly validated"
 fi
 
+KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
 KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null
 backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
 [[ -n "$backup_id" ]] || die "install backup helper did not record a backup id"
 assert_file "$fake_support_dir/Backups/$backup_id/manifest.json"
+KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
 KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   knowtype_create_install_backup "$fake_input_dir/KnowType.app" "$fake_prefpane_dir/KnowType.prefPane" 0 5 >/dev/null
 second_backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
@@ -419,6 +635,50 @@ with open(os.environ["KNOWTYPE_BACKUP_MANIFEST_PATH"], encoding="utf-8") as hand
 PY
 )"
 assert_equals "$backup_id" "$backup_manifest_id" "backup manifest id"
+backup_manifest_path="$fake_support_dir/Backups/$backup_id/manifest.json"
+assert_equals "2" "$(knowtype_backup_manifest_schema_version "$backup_manifest_path")" "backup manifest schema"
+assert_equals "com.knowtype.inputmethod.KnowType" \
+  "$(knowtype_backup_manifest_field "$backup_manifest_path" "appBundleIdentifier")" \
+  "backup app bundle identifier"
+assert_equals "$smoke_short_version" \
+  "$(knowtype_backup_manifest_field "$backup_manifest_path" "appShortVersion")" \
+  "backup app short version"
+assert_equals "$smoke_build_version" \
+  "$(knowtype_backup_manifest_field "$backup_manifest_path" "appBuildVersion")" \
+  "backup app build version"
+[[ -n "$(knowtype_backup_manifest_field "$backup_manifest_path" "appChecksum")" ]] ||
+  die "backup manifest app checksum is missing"
+[[ -n "$(knowtype_backup_manifest_field "$backup_manifest_path" "appSigningRequirement")" ]] ||
+  die "backup manifest app signing requirement is missing"
+[[ -n "$(knowtype_backup_manifest_field "$backup_manifest_path" "appSigningIdentity")" ]] ||
+  die "backup manifest app signing identity is missing"
+if (( WITH_PREFPANE == 1 )); then
+  assert_equals "true" \
+    "$(knowtype_backup_manifest_field "$backup_manifest_path" "includedPrefPane")" \
+    "backup included PreferencePane"
+  assert_equals "com.knowtype.preferencepane" \
+    "$(knowtype_backup_manifest_field "$backup_manifest_path" "prefPaneBundleIdentifier")" \
+    "backup PreferencePane bundle identifier"
+  assert_equals "$smoke_short_version" \
+    "$(knowtype_backup_manifest_field "$backup_manifest_path" "prefPaneShortVersion")" \
+    "backup PreferencePane short version"
+  assert_equals "$smoke_build_version" \
+    "$(knowtype_backup_manifest_field "$backup_manifest_path" "prefPaneBuildVersion")" \
+    "backup PreferencePane build version"
+  [[ -n "$(knowtype_backup_manifest_field "$backup_manifest_path" "prefPaneChecksum")" ]] ||
+    die "backup manifest PreferencePane checksum is missing"
+  [[ -n "$(knowtype_backup_manifest_field "$backup_manifest_path" "prefPaneSigningRequirement")" ]] ||
+    die "backup manifest PreferencePane signing requirement is missing"
+  [[ -n "$(knowtype_backup_manifest_field "$backup_manifest_path" "prefPaneSigningIdentity")" ]] ||
+    die "backup manifest PreferencePane signing identity is missing"
+else
+  assert_equals "false" \
+    "$(knowtype_backup_manifest_field "$backup_manifest_path" "includedPrefPane")" \
+    "backup excluded PreferencePane"
+  assert_equals "" \
+    "$(knowtype_backup_manifest_field "$backup_manifest_path" "prefPaneChecksum")" \
+    "backup absent PreferencePane checksum"
+fi
 
 rollback_list_output="$(
   KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
@@ -435,6 +695,8 @@ rollback_dry_run_output="$(
 )"
 assert_contains "$rollback_dry_run_output" "KnowType rollback dry run" "rollback dry run output"
 assert_contains "$rollback_dry_run_output" "$backup_id" "rollback dry run output"
+assert_contains "$rollback_dry_run_output" "Backup integrity: verified-schema-2" "rollback dry run output"
+assert_contains "$rollback_dry_run_output" "supports provider storage generation 2" "rollback dry run output"
 rollback_latest_dry_run_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
@@ -442,6 +704,96 @@ rollback_latest_dry_run_output="$(
   bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --latest --dry-run
 )"
 assert_contains "$rollback_latest_dry_run_output" "$second_backup_id" "rollback latest dry run output"
+
+tampered_backup_file="$fake_support_dir/Backups/$backup_id/KnowType.app/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
+printf '\n# tampered backup smoke\n' >>"$tampered_backup_file"
+if tampered_rollback_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$backup_id" --dry-run 2>&1
+)"; then
+  die "rollback accepted a checksum-tampered schema-v2 backup"
+fi
+assert_contains "$tampered_rollback_output" "backup integrity mismatch for app checksum" "tampered backup rollback output"
+if tampered_override_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$backup_id" --dry-run --allow-unverified-backup 2>&1
+)"; then
+  die "legacy override bypassed a schema-v2 checksum mismatch"
+fi
+assert_contains "$tampered_override_output" "backup integrity mismatch for app checksum" "schema-v2 override rejection output"
+
+signature_tampered_backup_id="20260524T020000Z-0000-signature-tampered-1"
+signature_tampered_backup_dir="$fake_support_dir/Backups/$signature_tampered_backup_id"
+cp -R "$fake_support_dir/Backups/$second_backup_id" "$signature_tampered_backup_dir"
+signature_tampered_file="$signature_tampered_backup_dir/KnowType.app/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
+printf '\n# signature tamper with refreshed manifest checksum\n' >>"$signature_tampered_file"
+signature_tampered_checksum="$(knowtype_path_checksum "$signature_tampered_backup_dir/KnowType.app")"
+KNOWTYPE_BACKUP_MANIFEST_PATH="$signature_tampered_backup_dir/manifest.json" \
+KNOWTYPE_BACKUP_ID_VALUE="$signature_tampered_backup_id" \
+KNOWTYPE_BACKUP_CHECKSUM_VALUE="$signature_tampered_checksum" \
+  "$KNOWTYPE_PYTHON3" - <<'PY'
+import json
+import os
+
+path = os.environ["KNOWTYPE_BACKUP_MANIFEST_PATH"]
+with open(path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+manifest["backupID"] = os.environ["KNOWTYPE_BACKUP_ID_VALUE"]
+manifest["appChecksum"] = os.environ["KNOWTYPE_BACKUP_CHECKSUM_VALUE"]
+manifest["restoreCommand"] = f"./scripts/rollback-inputmethod.sh --to {manifest['backupID']}"
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+if signature_tampered_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$signature_tampered_backup_id" --dry-run 2>&1
+)"; then
+  die "rollback accepted a signature-tampered schema-v2 backup"
+fi
+assert_contains "$signature_tampered_output" "codesign --verify --deep --strict failed" "signature-tampered backup rollback output"
+
+legacy_backup_id="20260524T030000Z-0000-legacy-1"
+legacy_backup_dir="$fake_support_dir/Backups/$legacy_backup_id"
+mkdir -p "$legacy_backup_dir"
+cp -R "$fake_support_dir/Backups/$second_backup_id/KnowType.app" "$legacy_backup_dir/KnowType.app"
+cat >"$legacy_backup_dir/manifest.json" <<EOF
+{
+  "schemaVersion": 1,
+  "backupID": "$legacy_backup_id",
+  "createdAt": "2026-05-24T03:00:00Z",
+  "sourceVersion": "$smoke_short_version",
+  "sourceBuild": "$smoke_build_version",
+  "bundleIdentifier": "com.knowtype.inputmethod.KnowType",
+  "appChecksum": "legacy-checksum",
+  "includedPrefPane": false,
+  "restoreCommand": "./scripts/rollback-inputmethod.sh --to $legacy_backup_id"
+}
+EOF
+if legacy_rejected_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$legacy_backup_id" --dry-run 2>&1
+)"; then
+  die "rollback accepted a legacy backup without the explicit override"
+fi
+assert_contains "$legacy_rejected_output" "legacy backup manifest lacks required integrity metadata" "legacy backup rejection output"
+legacy_override_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$legacy_backup_id" --dry-run --allow-unverified-backup 2>&1
+)"
+assert_contains "$legacy_override_output" "WARNING: ALLOWING AN UNVERIFIED LEGACY BACKUP" "legacy override warning"
+assert_contains "$legacy_override_output" "UNVERIFIED LEGACY OVERRIDE: ENABLED" "legacy override dry-run output"
+
 if KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "../../outside" --dry-run >/dev/null 2>&1; then
   die "rollback accepted traversal backup ID"
@@ -458,7 +810,7 @@ cp "$fake_input_dir/KnowType.app/Contents/Info.plist" "$corrupt_backup_dir/KnowT
 printf '{"schemaVersion":1,"backupID":"%s"}\n' "$corrupt_backup_id" >"$corrupt_backup_dir/manifest.json"
 corrupt_rollback_output="$(
   KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
-    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$corrupt_backup_id" --dry-run 2>&1 || true
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$corrupt_backup_id" --dry-run --allow-unverified-backup 2>&1 || true
 )"
 assert_contains "$corrupt_rollback_output" "input-method executable is missing" "rollback corrupt backup output"
 
@@ -482,6 +834,61 @@ uninstall_purge_dry_run_output="$(
 assert_not_contains "$uninstall_purge_dry_run_output" "Would create install backup" "uninstall purge dry run output"
 assert_contains "$uninstall_purge_dry_run_output" "Would delete KnowType install backups" "uninstall purge dry run output"
 
+foreign_root="$install_state_tmp/foreign-prefpane"
+foreign_input_dir="$foreign_root/Input Methods"
+foreign_prefpane_dir="$foreign_root/PreferencePanes"
+mkdir -p "$foreign_input_dir" "$foreign_prefpane_dir/KnowType.prefPane/Contents"
+cp -R "$bundle_path" "$foreign_input_dir/KnowType.app"
+cp "$ROOT_DIR/Resources/PreferencePane/Info.plist" "$foreign_prefpane_dir/KnowType.prefPane/Contents/Info.plist"
+"$PLIST_BUDDY" -c "Set :CFBundleIdentifier com.example.foreign.preferencepane" \
+  "$foreign_prefpane_dir/KnowType.prefPane/Contents/Info.plist"
+
+if foreign_install_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$foreign_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$foreign_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-bundle "$bundle_path" --no-backup 2>&1
+)"; then
+  die "install dry run accepted a foreign same-name PreferencePane"
+fi
+assert_contains "$foreign_install_output" "foreign or unsafe same-name PreferencePane" "foreign PreferencePane install output"
+
+if foreign_uninstall_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$foreign_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$foreign_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/uninstall-inputmethod.sh" --dry-run --no-backup 2>&1
+)"; then
+  die "uninstall dry run accepted a foreign same-name PreferencePane"
+fi
+assert_contains "$foreign_uninstall_output" "foreign or unsafe same-name PreferencePane" "foreign PreferencePane uninstall output"
+
+if foreign_rollback_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$foreign_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$foreign_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$second_backup_id" --dry-run 2>&1
+)"; then
+  die "rollback dry run accepted a foreign same-name PreferencePane"
+fi
+assert_contains "$foreign_rollback_output" "foreign or unsafe same-name PreferencePane" "foreign PreferencePane rollback output"
+assert_equals "com.example.foreign.preferencepane" \
+  "$(plist_read ":CFBundleIdentifier" "$foreign_prefpane_dir/KnowType.prefPane/Contents/Info.plist")" \
+  "foreign PreferencePane remained unchanged"
+
+symlink_prefpane_root="$install_state_tmp/symlink-prefpane-target"
+mkdir -p "$symlink_prefpane_root/actual"
+ln -s "$symlink_prefpane_root/actual" "$symlink_prefpane_root/linked"
+if symlink_target_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$foreign_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$symlink_prefpane_root/linked" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/install-inputmethod.sh" --dry-run --from-bundle "$bundle_path" --no-backup 2>&1
+)"; then
+  die "install dry run accepted a symlinked PreferencePane target directory"
+fi
+assert_contains "$symlink_target_output" "unsafe PreferencePane target path" "symlinked PreferencePane target output"
+
 diagnose_json_output="$(
   KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
   bash "$ROOT_DIR/scripts/diagnose-inputmethod.sh" --json --path "$fake_input_dir/KnowType.app"
@@ -491,7 +898,6 @@ assert_contains "$diagnose_json_output" '"backups"' "diagnostics json output"
 rm -rf "$install_state_tmp"
 
 if (( WITH_PREFPANE == 1 )); then
-  prefpane_path="$(CODESIGN_IDENTITY=- bash "$ROOT_DIR/scripts/build-preference-pane.sh")"
   assert_equals "$ROOT_DIR/dist/KnowType.prefPane" "$prefpane_path" "PreferencePane path"
   assert_dir "$prefpane_path"
   assert_file "$prefpane_path/Contents/Info.plist"

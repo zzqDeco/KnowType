@@ -42,6 +42,10 @@ final class InputHotPathPerformanceTests: XCTestCase {
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputClientWriteCoordinator.swift"),
             encoding: .utf8
         )
+        let inputControllerClientSeams = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputControllerHostClientSeams.swift"),
+            encoding: .utf8
+        )
         let inputRuntimeBoundaries = try String(
             contentsOf: rootURL.appendingPathComponent("Sources/KnowTypeInputMethod/InputRuntimeBoundaries.swift"),
             encoding: .utf8
@@ -110,6 +114,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertFalse(aiRecommendationDiagnostics.contains("fputs("))
         XCTAssertFalse(candidateAnchorResolver.contains("fputs("))
         XCTAssertFalse(candidateAnchorResolver.contains("NSLog("))
+        XCTAssertTrue(candidateAnchorResolver.contains(".init(.probeCount, probeCount)"))
+        XCTAssertTrue(candidateAnchorResolver.contains("reason: \"throttled\""))
         XCTAssertFalse(candidatePanelWindowController.contains("fputs("))
         XCTAssertTrue(candidatePanelPublicationRuntime.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
         XCTAssertTrue(candidatePanelWindowController.contains("guard InputDebugDiagnostics.isEnabled(.panel) else"))
@@ -121,11 +127,40 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("InputDebugDiagnostics.trace(\n                category: .turn"))
         XCTAssertTrue(coordinator.contains("guard isTurnTraceEnabled || latencyTracer.isEnabled else"))
         XCTAssertTrue(coordinator.contains("guard InputDebugDiagnostics.isEnabled(.turn) || !violations.isEmpty else"))
+        XCTAssertTrue(coordinator.contains("guard input == \".\" || input == \"\\\"\" || input == \"'\" else"))
+        XCTAssertTrue(coordinator.contains(#"previous=\(previous.kind.rawValue);source=\(previous.source.rawValue)"#))
+        XCTAssertFalse(coordinator.contains("punctuation_context_text"))
+        XCTAssertTrue(inputControllerClientSeams.contains("NSRange(location: range.location - 1, length: 1)"))
         XCTAssertFalse(inputClientWriteCoordinator.contains("fputs("))
         XCTAssertTrue(inputClientWriteCoordinator.contains("guard InputDebugDiagnostics.isEnabled(.clientWrite) else"))
         XCTAssertFalse(inputRuntimeBoundaries.contains("fputs("))
         XCTAssertFalse(aiRecommendationDiagnostics.contains("candidateCount="))
         XCTAssertFalse(aiRecommendationDiagnostics.contains("acceptedCount="))
+    }
+
+    func testCandidateAnchorProbeBudgetsStayFixed() {
+        XCTAssertEqual(CandidateAnchorPolicy.maximumFirstRectProbes, 4)
+        XCTAssertEqual(CandidateAnchorPolicy.maximumLineHeightProbes, 4)
+        XCTAssertEqual(CandidateAnchorResolver.accessibilityThrottleInterval, 0.1)
+
+        let firstRectRequests = CandidateAnchorPolicy.characterRangeRequests(
+            selectedRange: NSRange(location: 1_000, length: 1),
+            markedRange: NSRange(location: 10, length: 80)
+        )
+        let lineHeightIndexes = CandidateAnchorPolicy.lineHeightCharacterIndexes(
+            selectedRange: NSRange(location: 50, length: 0),
+            markedRange: NSRange(location: 10, length: 80)
+        )
+
+        XCTAssertLessThanOrEqual(
+            firstRectRequests.count,
+            CandidateAnchorPolicy.maximumFirstRectProbes
+        )
+        XCTAssertEqual(lineHeightIndexes, [79, 40, 0])
+        XCTAssertLessThanOrEqual(
+            lineHeightIndexes.count,
+            CandidateAnchorPolicy.maximumLineHeightProbes
+        )
     }
 
     func testStrictRimeOnlyHotPathBudgetsWhenEnabled() throws {

@@ -41,7 +41,6 @@ enum InputTurnEffect: Sendable, Equatable {
     )
     case insertCommittedText(String, clientScope: InputTurnClientScope)
     case schedulePostInsertCaretVerification
-    case requestPolish(String)
     case refreshComposition
     case hideCandidatePanel(CandidatePanelVisibilityReason)
     case clearOwnedMarkedText
@@ -95,15 +94,6 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 effects.append(contentsOf: lifecycleEffects(for: resetPlan))
             }
             return InputTurnEffectSequence(token: token, effects: effects, handled: true)
-        case .requestPolishAndKeepComposition(let text):
-            return InputTurnEffectSequence(
-                token: token,
-                effects: [
-                    .requestPolish(text),
-                    .refreshComposition
-                ],
-                handled: true
-            )
         case .keepComposition:
             return InputTurnEffectSequence(
                 token: token,

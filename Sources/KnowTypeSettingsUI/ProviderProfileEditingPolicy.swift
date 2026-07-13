@@ -3,6 +3,7 @@ import KnowTypeProviders
 
 enum ProviderProfileEditingPolicy {
     typealias SecretResolver = (String) throws -> String?
+    typealias CredentialReferenceGenerator = (String) -> String
 
     static var defaultProviderValidationError: String {
         SettingsLocalization.string("settings.provider.validation.defaultProviderRequired")
@@ -21,10 +22,40 @@ enum ProviderProfileEditingPolicy {
         case none
         case set(value: String, secretName: String, oldSecretName: String?)
         case delete(secretName: String)
+
+        var newSecret: (value: String, name: String)? {
+            guard case .set(let value, let secretName, _) = self else {
+                return nil
+            }
+            return (value, secretName)
+        }
+
+        var retiredSecretName: String? {
+            switch self {
+            case .none:
+                return nil
+            case .set(_, _, let oldSecretName):
+                return oldSecretName
+            case .delete(let secretName):
+                return secretName
+            }
+        }
     }
 
     static func secretName(for profileID: String) -> String {
         "knowtype.provider.\(profileID).apiKey"
+    }
+
+    static func credentialSecretName(for profileID: String, credentialID: UUID = UUID()) -> String {
+        "knowtype.provider.\(profileID).credential.\(credentialID.uuidString)"
+    }
+
+    private static func isCredentialSecretName(_ name: String, for profileID: String) -> Bool {
+        let prefix = "knowtype.provider.\(profileID).credential."
+        guard name.hasPrefix(prefix) else {
+            return false
+        }
+        return UUID(uuidString: String(name.dropFirst(prefix.count))) != nil
     }
 
     static func profileScopedSecrets(_ profiles: [ProviderProfile]) -> [ProviderProfile] {
@@ -95,15 +126,25 @@ enum ProviderProfileEditingPolicy {
         draft: ProviderProfileDraft,
         profiles: [ProviderProfile],
         file: ProviderProfilesFile,
-        secretResolver: SecretResolver
+        secretResolver: SecretResolver,
+        credentialReferenceGenerator: CredentialReferenceGenerator = {
+            credentialSecretName(for: $0)
+        }
     ) throws -> SavePlan {
         var profile = try draft.makeProfile()
         let existingProfile = profiles.first(where: { $0.id == profile.id })
         let mutation = secretMutation(
             for: profile,
             existingProfile: existingProfile,
-            draftAPIKey: draft.apiKey
+            draftAPIKey: draft.apiKey,
+            credentialReferenceGenerator: credentialReferenceGenerator
         )
+        if case .set(_, let secretName, _) = mutation {
+            guard isCredentialSecretName(secretName, for: profile.id),
+                  !profiles.contains(where: { $0.secretName == secretName }) else {
+                throw ProviderProfilesViewModelError.invalidCredentialReference
+            }
+        }
         try validateSecretAvailability(
             for: profile,
             existingProfile: existingProfile,
@@ -194,33 +235,6 @@ enum ProviderProfileEditingPolicy {
         )
     }
 
-    static func applySecretMutation(
-        _ mutation: SecretMutation,
-        updatedProfiles: [ProviderProfile],
-        secretStore: any SecretStore
-    ) throws {
-        switch mutation {
-        case .none:
-            return
-        case .set(let value, let secretName, let oldSecretName):
-            try secretStore.setSecret(value, named: secretName)
-            if let oldSecretName,
-               oldSecretName != secretName,
-               !isSecretReferenced(oldSecretName, in: updatedProfiles) {
-                do {
-                    try secretStore.deleteSecret(named: oldSecretName)
-                } catch {
-                    try? secretStore.deleteSecret(named: secretName)
-                    throw error
-                }
-            }
-        case .delete(let secretName):
-            if !isSecretReferenced(secretName, in: updatedProfiles) {
-                try secretStore.deleteSecret(named: secretName)
-            }
-        }
-    }
-
     static func requiresSecret(_ profile: ProviderProfile) -> Bool {
         switch profile.kind {
         case .openAIChat, .openAIResponses:
@@ -300,7 +314,8 @@ enum ProviderProfileEditingPolicy {
     private static func secretMutation(
         for profile: ProviderProfile,
         existingProfile: ProviderProfile?,
-        draftAPIKey: String
+        draftAPIKey: String,
+        credentialReferenceGenerator: CredentialReferenceGenerator
     ) -> SecretMutation {
         let trimmedAPIKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -317,7 +332,7 @@ enum ProviderProfileEditingPolicy {
                 }
                 return .none
             }
-            let secretName = secretName(for: profile.id)
+            let secretName = credentialReferenceGenerator(profile.id)
             return .set(value: trimmedAPIKey, secretName: secretName, oldSecretName: existingProfile?.secretName)
         }
 
@@ -403,17 +418,11 @@ enum ProviderProfileEditingPolicy {
         }
     }
 
-    private static func isSecretReferenced(_ secretName: String, in profiles: [ProviderProfile]) -> Bool {
+    static func isSecretReferenced(_ secretName: String, in profiles: [ProviderProfile]) -> Bool {
         profiles.contains { $0.secretName == secretName }
     }
 
     private static func validHTTPURL(_ value: String) -> URL? {
-        guard let url = URL(string: value),
-              let scheme = url.scheme,
-              (scheme == "http" || scheme == "https"),
-              url.host?.isEmpty == false else {
-            return nil
-        }
-        return url
+        ProviderEndpointURLPolicy.validatedHTTPURL(value)
     }
 }

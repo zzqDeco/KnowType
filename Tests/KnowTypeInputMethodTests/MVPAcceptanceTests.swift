@@ -168,21 +168,6 @@ final class MVPAcceptanceTests: XCTestCase {
         XCTAssertEqual(result, .commit(path))
     }
 
-    func testPolishIsExplicitOnly() async {
-        let pipeline = SessionSuggestionPipeline()
-        let response = await pipeline.suggestions(
-            for: InputContext(rawInput: "wo jue de zhege fagnan", locale: .zhCN)
-        )
-        let controller = InputCompositionController()
-        let result = controller.handle(
-            action: .optionR,
-            prefixCandidates: response.prefixCandidates,
-            continuationCandidates: response.continuationCandidates,
-            originalText: "我觉得这个接口慢"
-        )
-
-        XCTAssertEqual(result, .polishRequested("我觉得这个接口慢"))
-    }
 }
 
 private actor RecordingMVPProvider: LLMProvider {

@@ -64,8 +64,8 @@ Manual acceptance:
   ASCII.
 - `/` opens symbol candidates; `Space` commits `、`, `2` commits `/`, and
   `Escape` cancels.
-- Codex/VS Code/Xcode keep Chinese composition but default code punctuation and
-  operators to ASCII.
+- Switching among Codex, VS Code, Xcode, Terminal, and ordinary text apps keeps
+  the same process-global text, punctuation, and width state.
 - `Option + .` and `Option + /` show the transient mode-status row and the input
   menu reports the current mode.
 

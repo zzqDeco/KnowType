@@ -24,7 +24,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
-| [release-0.2.6.plan.md](release-0.2.6.plan.md) | Prepare and publish the KnowType v0.2.6 Developer Preview release | Active |
+| [release-0.2.7.plan.md](release-0.2.7.plan.md) | Prepare and publish the KnowType v0.2.7 Developer Preview release | Active |
 | [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and workflow | Active |
 | [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active |
 | [chinese-lexicon-index.plan.md](chinese-lexicon-index.plan.md) | Larger-lexicon indexing path for `TraditionalInputEngine` | Active |
@@ -34,16 +34,19 @@ when converting a shipped plan into a short record.
 | [user-selection-ranking.plan.md](user-selection-ranking.plan.md) | Local ranking boost from recent prefix selections | Active |
 | [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Persist local candidate learning across IMK restarts | Active |
 | [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Candidate-window geometry resolver behavior | Active |
+| [candidate-panel-interaction-accessibility.plan.md](candidate-panel-interaction-accessibility.plan.md) | Harden host-shortcut symbol cleanup, VoiceOver press, and pointer paging | Active |
 | [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | PageDown/PageUp offset-preserving candidate paging | Active |
 | [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive candidate panel layout | Active |
 | [candidate-panel-row-builder-refactor.plan.md](candidate-panel-row-builder-refactor.plan.md) | Share candidate-panel row ordering between state and renderer | Active |
 | [native-candidate-panel-spotlight-ui.plan.md](native-candidate-panel-spotlight-ui.plan.md) | macOS-native compact candidate panel styling and Spotlight window-level fix | Active |
 | [candidate-panel-lifecycle-teardown.plan.md](candidate-panel-lifecycle-teardown.plan.md) | Hide, sequence, and invalidate candidate-panel frames across commit, deactivate, close, and stale async updates | Active |
 | [candidate-panel-search-overlay-placement.plan.md](candidate-panel-search-overlay-placement.plan.md) | Place the candidate panel above Spotlight search overlays while preserving ordinary text-field placement | Active |
-| [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Visible candidate, punctuation, Space commit, and anchoring alignment | Active |
-| [input-symbol-punctuation-policy.plan.md](input-symbol-punctuation-policy.plan.md) | Keep Chinese punctuation, full-width symbols, and code-app ASCII operator defaults separated | Active |
+| [inputmethod-visible-candidates-punctuation.plan.md](inputmethod-visible-candidates-punctuation.plan.md) | Visible candidate, process-global punctuation, Space commit, and anchoring alignment | Active |
+| [input-symbol-punctuation-policy.plan.md](input-symbol-punctuation-policy.plan.md) | Earlier punctuation/width policy, absorbed by process-global mode semantics | Absorbed |
 | [input-mode-feedback-punctuator-candidates.plan.md](input-mode-feedback-punctuator-candidates.plan.md) | Add transient mode feedback, mature punctuator decisions, and panel-backed symbol candidates | Active |
-| [input-mode-shortcuts-width-feedback.plan.md](input-mode-shortcuts-width-feedback.plan.md) | Add Shift+Space symbol-width toggling and keep text, punctuation, and width feedback explicit | Active |
+| [input-mode-shortcuts-width-feedback.plan.md](input-mode-shortcuts-width-feedback.plan.md) | Earlier Shift+Space width-feedback slice, absorbed by process/global native synchronization | Absorbed |
+| [input-mode-punctuation-linkage.plan.md](input-mode-punctuation-linkage.plan.md) | Share one host-lifetime mode across apps, link punctuation to text mode, and keep numeric periods ASCII | Active |
+| [rime-mode-option-sync.plan.md](rime-mode-option-sync.plan.md) | Synchronize process-wide mode options into native Rime and complete character-width/quote semantics | Active |
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
 | [input-method-first-key-performance.plan.md](input-method-first-key-performance.plan.md) | Reduce post-install/process-cold first-key stall and repeated hot-path overhead | Active |
 | [input-method-first-key-review-followup.plan.md](input-method-first-key-review-followup.plan.md) | Resolve PR #150 first-key performance review regressions | Active |
@@ -67,9 +70,11 @@ when converting a shipped plan into a short record.
 | [native-imk-settings-menu.plan.md](native-imk-settings-menu.plan.md) | Native IMK input-menu settings entry and compatibility prefPane fallback | Active |
 | [system-settings-prefpane-cache-cleanup.plan.md](system-settings-prefpane-cache-cleanup.plan.md) | Remove stale System Settings prefPane cache after default local installs | Active |
 | [install-upgrade-rollback-experience.plan.md](install-upgrade-rollback-experience.plan.md) | Traceable local installs, app backups, rollback, and dynamic diagnostics status | Active |
+| [inputmethod-install-integrity.plan.md](inputmethod-install-integrity.plan.md) | Fail-closed rollback integrity, PreferencePane identity guards, and aligned local bundle versions | Active |
 | [install-user-data-isolation.plan.md](install-user-data-isolation.plan.md) | Keep local install, rollback, and repair from launching the host or mutating user data | Active |
 | [inputmethod-install-canonical-registration.plan.md](inputmethod-install-canonical-registration.plan.md) | Quiesce the old IMK host before local installs and register only the canonical installed app path | Active |
 | [imk-host-cold-start-no-userdata-write.plan.md](imk-host-cold-start-no-userdata-write.plan.md) | Keep IMK host prelaunch from initializing Rime, provider, or AI learning user data | Active |
+| [inputmethod-startup-registration.plan.md](inputmethod-startup-registration.plan.md) | Keep normal IMK host startup serve-only while explicit installer and repair commands own registration waits | Active |
 | [input-source-layer-model.plan.md](input-source-layer-model.plan.md) | Earlier parent/mode separation plan, superseded by menu-visible mode registration | Absorbed |
 | [input-source-parent-anchor-registration.plan.md](input-source-parent-anchor-registration.plan.md) | Earlier parent-anchor enablement plan, superseded by menu-visible mode registration | Absorbed |
 | [input-source-single-source-model.plan.md](input-source-single-source-model.plan.md) | Parent-only single-source attempt, absorbed after menu-bar switching failed | Absorbed |
@@ -91,11 +96,15 @@ when converting a shipped plan into a short record.
 | [managed-lexicon-pack-installer.plan.md](managed-lexicon-pack-installer.plan.md) | License-aware recommended lexicon pack install path | Active |
 | [provider-runtime-seeded-defaults.plan.md](provider-runtime-seeded-defaults.plan.md) | Shared seeded provider defaults for settings and runtime | Active |
 | [provider-connection-diagnostics.plan.md](provider-connection-diagnostics.plan.md) | Settings-side provider connection tests without saving draft secrets | Active |
+| [provider-profile-concurrency-redaction.plan.md](provider-profile-concurrency-redaction.plan.md) | Transactional cross-process provider settings, immutable credentials, and privacy-safe endpoint diagnostics | Active |
+| [provider-api-contracts-template-rendering.plan.md](provider-api-contracts-template-rendering.plan.md) | Current provider model/API contracts and deterministic Custom HTTP template rendering | Active |
+| [ai-runtime-config-singleflight.plan.md](ai-runtime-config-singleflight.plan.md) | Reload provider generations without restart and serialize process-wide context digest | Active |
 | [settings-provider-profile-editing-policy-refactor.plan.md](settings-provider-profile-editing-policy-refactor.plan.md) | Extract Settings provider draft validation, save planning, secret mutation, and connection-test configuration from the ViewModel | Active |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Avoid replacing provider failures with local mock continuation text | Active |
 | [ai-timeout-diagnostics.plan.md](ai-timeout-diagnostics.plan.md) | AI recommendation 10-second runtime timeout and privacy-preserving substate diagnostics | Active |
 | [ai-structured-output-contract.plan.md](ai-structured-output-contract.plan.md) | Provider-level structured output contract and diagnosable AI no-recommendation reasons | Active |
 | [ai-continuation-prompt-reliability.plan.md](ai-continuation-prompt-reliability.plan.md) | Task-specific suffix-generation prompt and ENV marker repair for reliable AI continuation | Active |
+| [prefix-repair-punctuation.plan.md](prefix-repair-punctuation.plan.md) | Preserve suffix punctuation while repairing repeated locked prefixes | Active |
 | [ai-candidate-hints-lock-prefix.plan.md](ai-candidate-hints-lock-prefix.plan.md) | Keep unselected Rime candidates as AI hints instead of locked prefixes | Active |
 | [ai-remove-candidate-hints-bias.plan.md](ai-remove-candidate-hints-bias.plan.md) | Remove current-page Rime candidate hints from real-time AI continuation context | Active |
 | [ai-trigger-stability-no-hints.plan.md](ai-trigger-stability-no-hints.plan.md) | Stabilize three-character raw-input AI triggers without reintroducing candidate hints | Active |
@@ -107,8 +116,9 @@ when converting a shipped plan into a short record.
 | [provider-live-smoke-model-alignment.plan.md](provider-live-smoke-model-alignment.plan.md) | Align env-gated continuation live smoke with the explicit product model under test | Active |
 | [ai-secret-only-privacy-gate.plan.md](ai-secret-only-privacy-gate.plan.md) | Restrict real-time AI disabled state to secret-like text and filter secret candidate hints | Active |
 | [imk-owned-marked-range-commit.plan.md](imk-owned-marked-range-commit.plan.md) | Prevent cursor misplacement by ignoring stale host marked ranges on ordinary IMK writes | Active |
-| [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Explicit input-mode state for text mode, punctuation, and width | Active |
-| [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Persisted punctuation and symbol-width preferences | Active |
+| [imk-default-mouse-commit.plan.md](imk-default-mouse-commit.plan.md) | Restore InputMethodKit's default click-outside composition commit | Active |
+| [input-mode-and-punctuation-state.plan.md](input-mode-and-punctuation-state.plan.md) | Earlier explicit mode-state slice, absorbed by the process runtime | Absorbed |
+| [input-mode-preferences.plan.md](input-mode-preferences.plan.md) | Earlier per-app preference slice, absorbed by global-width persistence | Absorbed |
 | [symbol-mode-and-input-behavior.plan.md](symbol-mode-and-input-behavior.plan.md) | Punctuation and commit behavior slice | Active |
 | [settings-debug-selection-guidance.plan.md](settings-debug-selection-guidance.plan.md) | Settings Debug Install guidance for diagnose/select/manual gates | Active |
 | [source-notes-directory-structure.plan.md](source-notes-directory-structure.plan.md) | Mirror repository ownership boundaries inside `doc/src` | Active |
@@ -136,6 +146,8 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [option-r-polish-removal.plan.md](option-r-polish-removal.plan.md) | Remove the Option+R rewrite workflow and make locked-prefix rewriting unsupported | Delivered |
+| [release-0.2.6.plan.md](release-0.2.6.plan.md) | Prepare and publish the KnowType v0.2.6 Developer Preview release | Delivered |
 | [release-0.2.5.plan.md](release-0.2.5.plan.md) | Prepare and publish the KnowType v0.2.5 Developer Preview release | Delivered |
 | [release-0.2.4.plan.md](release-0.2.4.plan.md) | Prepare and publish the KnowType v0.2.4 Developer Preview release | Delivered |
 | [release-0.2.3.plan.md](release-0.2.3.plan.md) | Prepare and publish the KnowType v0.2.3 Developer Preview release | Delivered |

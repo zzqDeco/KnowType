@@ -102,21 +102,80 @@ public struct OpenAIResponsesProvider: LLMProvider {
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)
         let raw = try JSONSerialization.jsonObject(with: data)
+        let outputText = try extractCompletedOutputText(from: raw)
+        return try StructuredResponseNormalizer.normalizeText(
+            outputText,
+            task: request.task,
+            diagnostics: diagnostics
+        )
+    }
 
-        if let outputText = ResponseNormalizer.string(at: ["output_text"], in: raw) {
-            return try StructuredResponseNormalizer.normalizeText(
-                outputText,
-                task: request.task,
-                diagnostics: diagnostics
-            )
+    private func extractCompletedOutputText(from raw: Any) throws -> String {
+        guard let response = raw as? [String: Any] else {
+            throw ProviderError.invalidResponse("response is not an object")
         }
-        if let outputText = ResponseNormalizer.string(at: ["output", "0", "content", "0", "text"], in: raw) {
-            return try StructuredResponseNormalizer.normalizeText(
-                outputText,
-                task: request.task,
-                diagnostics: diagnostics
-            )
+
+        if let status = response["status"] as? String, status != "completed" {
+            if status == "incomplete" {
+                let reason = ResponseNormalizer.string(
+                    at: ["incomplete_details", "reason"],
+                    in: response
+                )
+                let suffix = reason.map { ": \($0)" } ?? ""
+                throw ProviderError.invalidResponse("response incomplete\(suffix)")
+            }
+            throw ProviderError.invalidResponse("response status is \(status)")
         }
-        throw ProviderError.invalidResponse("missing output_text")
+        if let incompleteDetails = response["incomplete_details"],
+           !(incompleteDetails is NSNull) {
+            throw ProviderError.invalidResponse("response incomplete")
+        }
+
+        if let rawOutput = response["output"] {
+            guard let output = rawOutput as? [Any] else {
+                throw ProviderError.invalidResponse("output is not an array")
+            }
+
+            var textParts: [String] = []
+            for rawItem in output {
+                guard let item = rawItem as? [String: Any],
+                      item["type"] as? String == "message" else {
+                    continue
+                }
+                if let status = item["status"] as? String, status != "completed" {
+                    throw ProviderError.invalidResponse("output message status is \(status)")
+                }
+                guard let content = item["content"] as? [Any] else {
+                    throw ProviderError.invalidResponse("message content is not an array")
+                }
+                for rawContentItem in content {
+                    guard let contentItem = rawContentItem as? [String: Any],
+                          let type = contentItem["type"] as? String else {
+                        throw ProviderError.invalidResponse("message content item is invalid")
+                    }
+                    if type == "refusal" {
+                        throw ProviderError.invalidResponse("response contained a refusal")
+                    }
+                    guard type == "output_text" else {
+                        continue
+                    }
+                    guard let text = contentItem["text"] as? String else {
+                        throw ProviderError.invalidResponse("output_text item is missing text")
+                    }
+                    textParts.append(text)
+                }
+            }
+
+            guard !textParts.isEmpty else {
+                throw ProviderError.invalidResponse("missing output message text")
+            }
+            return textParts.joined()
+        }
+
+        // Some compatible proxies expose the SDK convenience field directly.
+        if let outputText = response["output_text"] as? String {
+            return outputText
+        }
+        throw ProviderError.invalidResponse("missing output message text")
     }
 }

@@ -21,7 +21,7 @@
   <key>CFBundleSignature</key>
   <string>????</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.2.6</string>
+  <string>0.2.7</string>
   <key>CFBundleVersion</key>
   <string>2</string>
   <key>InputMethodConnectionName</key>
@@ -46,6 +46,8 @@
   <false/>
   <key>NSSupportsSuddenTermination</key>
   <false/>
+  <key>KnowTypeProviderProfileStorageGeneration</key>
+  <integer>2</integer>
   <key>TISIntendedLanguage</key>
   <string>zh-Hans</string>
   <key>TISInputSourceID</key>

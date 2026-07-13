@@ -14,7 +14,8 @@ Current behavior:
   unless the umbrella perf switch is enabled
 - restricts diagnostic fields to privacy-safe metadata such as ids, lengths,
   revisions, generations, reasons, elapsed times, bundle ids, write modes,
-  anchor sources, and handled state
+  anchor sources, probe counts, provider configured state, opaque provider
+  fingerprint prefixes, and handled state
 
 It must not receive or format raw input, preedit, candidate text, committed
 text, prompt bodies, provider output, context documents, or API keys.

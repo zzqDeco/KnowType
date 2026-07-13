@@ -5,7 +5,6 @@ import KnowTypeCore
 import KnowTypeProviders
 
 final class InputControllerCoordinator: @unchecked Sendable {
-    private var sessionController: InputSessionController
     private let canRequestAIRecommendations: Bool
     private var conversionEngine: any KnowTypeConversionEngine
     private let keyMapper = InputKeyCommandMapper()
@@ -19,13 +18,16 @@ final class InputControllerCoordinator: @unchecked Sendable {
     private let suggestionStateRuntime = InputSuggestionStateRuntime()
     private var locale: KnowTypeLocale = .mixed
     private let inputModePreferenceStore: any InputModePreferenceStore
-    private var inputModeRuntime: InputModePreferenceRuntime
+    private let inputModeStateRuntime: any InputModeStateRuntime
+    private var inputModeSnapshot: InputModeSnapshot
+    private var loadedGlobalSymbolWidth: InputSymbolWidth
     private let runtimePreferenceStore: any InputMethodRuntimePreferenceStore
     private var runtimePreferences: InputMethodRuntimePreferences
     private let nativeCandidateNavigationRuntime = InputNativeCandidateNavigationRuntime()
     private var symbolCandidateSession: InputSymbolCandidateSession?
     private var aiRecommendationStateBeforeSymbolCandidate: AIRecommendationState?
     private var modeStatusText: String?
+    private var punctuationContextResolver = InputPunctuationContextResolver()
     private let lexicalCommitRuntime: InputLexicalCommitRuntime
     private let commitApplicationRuntime = InputCommitApplicationRuntime()
     private let commitDecisionRuntime = InputCommitDecisionRuntime()
@@ -75,9 +77,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         ),
         lexiconRuntime _: InputMethodLexiconRuntime = InputMethodLexiconRuntime(directories: []),
         inputModePreferenceStore: any InputModePreferenceStore,
+        inputModeStateRuntime: (any InputModeStateRuntime)? = nil,
         runtimePreferenceStore: any InputMethodRuntimePreferenceStore = UserDefaultsInputMethodRuntimePreferenceStore.defaultStore(),
         initialRuntimePreferences: InputMethodRuntimePreferences? = nil,
-        initialAppBundleID: String?,
+        initialAppBundleID _: String?,
         userSelectionHistoryPersistence: (any InputControllerUserSelectionHistoryPersisting)?,
         aiRecommendationProvider: (any AIRecommendationProviding)? = nil,
         aiRecommendationProviderAvailability: (any AIRecommendationProviderAvailabilitySnapshotting)? = nil,
@@ -100,6 +103,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
     ) {
         let startupDebugStartedAt = Date()
         let inputModePreferences = inputModePreferenceStore.loadPreferences()
+        let resolvedInputModeStateRuntime = inputModeStateRuntime
+            ?? ProcessInputModeStateRuntime(initialSymbolWidth: inputModePreferences.globalSymbolWidth)
+        _ = resolvedInputModeStateRuntime.synchronizeConfiguredSymbolWidth(
+            inputModePreferences.globalSymbolWidth
+        )
         let runtimePreferences = initialRuntimePreferences ?? runtimePreferenceStore.loadPreferences()
         self.canRequestAIRecommendations = provider != nil || aiRecommendationProvider != nil
         if let conversionEngine {
@@ -109,14 +117,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         } else {
             self.conversionEngine = RimeConversionEngine()
         }
-        self.sessionController = Self.polishOnlySessionController()
         self.inputModePreferenceStore = inputModePreferenceStore
+        self.inputModeStateRuntime = resolvedInputModeStateRuntime
+        self.inputModeSnapshot = resolvedInputModeStateRuntime.currentSnapshot()
+        self.loadedGlobalSymbolWidth = inputModePreferences.globalSymbolWidth
         self.runtimePreferenceStore = runtimePreferenceStore
         self.runtimePreferences = runtimePreferences
-        self.inputModeRuntime = InputModePreferenceRuntime(
-            preferences: inputModePreferences,
-            appBundleID: initialAppBundleID
-        )
         let selectionHistoryRuntime = InputSelectionHistoryRuntime(
             persistence: userSelectionHistoryPersistence,
             maxEntries: Self.maxUserSelectionHistory
@@ -164,17 +170,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         self.anchorResolver = anchorResolver
         self.enablesAsyncSuggestionRefresh = enablesAsyncSuggestionRefresh
         self.asyncSuggestionDelayNanoseconds = asyncSuggestionDelayNanoseconds
-    }
-
-    private static func polishOnlySessionController() -> InputSessionController {
-        InputSessionController { _ in
-            SuggestionResponse(
-                prefixCandidates: [],
-                lockedPrefix: nil,
-                continuationCandidates: [],
-                latencyMs: 0
-            )
-        }
+        self.conversionEngine.synchronizeInputMode(self.inputModeSnapshot)
     }
 
     func handleText(_ string: String?, client: InputControllerClient?) -> Bool {
@@ -200,7 +196,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func currentInputModeState() -> InputModeState {
-        inputModeRuntime.state
+        inputModeStateRuntime.currentSnapshot().state
     }
 
     func candidates() -> [Any] {
@@ -315,6 +311,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     func deactivateServer(client: InputControllerClient?) {
         flushUserSelectionHistory()
         aiAcceptanceRuntime.cancelFeedback(reason: "deactivate")
+        resetPunctuationSessionContext()
         _ = finishCompositionLifecycle(reason: .deactivate, client: client, commitPolicy: .commitRawIfNeeded)
     }
 
@@ -329,6 +326,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiAcceptanceRuntime.cancelFeedback(reason: "input_controller_will_close")
         lexicalCommitRuntime.cancelRefresh()
         taskSupervisor.cancelAll()
+        resetPunctuationSessionContext()
         _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
     }
 
@@ -347,6 +345,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func handle(intent: InputKeyIntent, client: InputControllerClient?) -> Bool {
         let client = client ?? (hasActiveTextComposition() ? host?.currentClient : nil)
+        synchronizeInputModeSnapshot(client: client)
         clearTransientModeStatusBeforeUserInputIfNeeded(intent)
         if symbolCandidateSession != nil,
            let handled = handleActiveSymbolCandidateIntent(intent, client: client) {
@@ -355,9 +354,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
         switch intent {
         case .append(let text):
             if !hasActiveTextComposition() {
-                reloadInputModeDefaultsIfNeeded(client: client)
+                reloadInputModePreferencesIfNeeded()
                 if shouldPassThroughIdleText(text, client: client, reason: "idle_append") {
                     return false
+                }
+                if inputModeSnapshot.state.textMode == .ascii,
+                   let fullWidthText = fullWidthIdleText(for: text) {
+                    return insertDirectPassthroughText(fullWidthText, client: client)
                 }
                 if Self.isDirectPassthroughDigitText(text) {
                     return insertDirectPassthroughText(text, client: client)
@@ -378,17 +381,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 }
             }
             if rawBuffer.isEmpty {
-                reloadInputModeDefaultsIfNeeded(client: client)
+                reloadInputModePreferencesIfNeeded()
                 if shouldPassThroughIdleText(text, client: client, reason: "idle_symbol") {
                     return false
                 }
             }
-            guard let decision = punctuatorRuntime.decision(for: text, state: inputModeRuntime.state) else {
+            let punctuatorContext = inputPunctuatorContext(for: text, client: client)
+            guard let decision = punctuatorRuntime.decision(for: text, context: punctuatorContext) else {
                 return appendComposition(text, client: client)
             }
             return handlePunctuatorDecision(decision, client: client)
         case .deleteBackward:
             guard !rawBuffer.isEmpty else {
+                resetPunctuationSessionContext()
                 _ = aiAcceptanceRuntime.observeDeleteBackward(client: client)
                 aiAcceptanceRuntime.recordExternalDelete(appBundleID: appBundleIdentifier(client: client))
                 return false
@@ -406,31 +411,31 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return true
         case .action(let action):
             if action == .toggleSymbolMode || action == .toggleTextMode || action == .toggleSymbolWidth {
-                reloadInputModeDefaultsIfNeeded(client: client)
+                reloadInputModePreferencesIfNeeded()
             }
             if action == .toggleSymbolMode {
-                inputModeRuntime.togglePunctuationMode()
-                punctuatorRuntime.resetPairingState()
+                applyInputModeTransition(.togglePunctuationMode)
                 showModeStatus(client: client)
                 return true
             }
             if action == .toggleTextMode {
-                inputModeRuntime.toggleTextMode()
-                punctuatorRuntime.resetPairingState()
+                applyInputModeTransition(.toggleTextMode)
                 showModeStatus(client: client)
                 return true
             }
             if action == .toggleSymbolWidth {
-                inputModeRuntime.toggleSymbolWidth()
-                punctuatorRuntime.resetPairingState()
+                applyInputModeTransition(.toggleSymbolWidth)
                 showModeStatus(client: client)
                 return true
             }
             if action == .space,
                !hasActiveTextComposition() {
-                reloadInputModeDefaultsIfNeeded(client: client)
+                reloadInputModePreferencesIfNeeded()
                 if shouldPassThroughIdleText(" ", client: client, reason: "idle_space") {
                     return false
+                }
+                if let fullWidthSpace = fullWidthIdleText(for: " ") {
+                    return insertDirectPassthroughText(fullWidthSpace, client: client)
                 }
             }
             return commit(action: action, client: client)
@@ -443,11 +448,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return true
         case .selectCandidate(let number):
             guard hasActiveTextComposition() else {
-                reloadInputModeDefaultsIfNeeded(client: client)
-                if shouldPassThroughIdleText(String(number), client: client, reason: "idle_digit") {
+                reloadInputModePreferencesIfNeeded()
+                let text = String(number)
+                if shouldPassThroughIdleText(text, client: client, reason: "idle_digit") {
                     return false
                 }
-                return insertDirectPassthroughText(String(number), client: client)
+                if let fullWidthDigit = fullWidthIdleText(for: text) {
+                    return insertDirectPassthroughText(fullWidthDigit, client: client)
+                }
+                return insertDirectPassthroughText(text, client: client)
             }
             if conversionEngine.isNativeActive,
                conversionEngine.snapshot.hasComposition,
@@ -492,10 +501,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
             }
             return appendComposition(String(number), client: client)
         case .moveCandidateSelection(let navigation):
+            if !hasActiveTextComposition() {
+                resetPunctuationSessionContext()
+            }
             return moveCandidateSelection(navigation)
         case .modifierFlagsChanged:
             return false
+        case .hostShortcut:
+            resetPunctuationSessionContext()
+            return false
         case .ignored:
+            resetPunctuationSessionContext()
             return false
         }
     }
@@ -561,6 +577,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             cancelSymbolCandidateSession(client: client)
             return true
         case .modifierFlagsChanged:
+            return false
+        case .hostShortcut:
+            clearSymbolCandidateSessionBeforeFallthrough(client: client)
+            resetPunctuationSessionContext()
             return false
         case .ignored:
             return false
@@ -887,6 +907,46 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client?.bundleIdentifier
     }
 
+    private func inputPunctuatorContext(
+        for input: String,
+        client: InputControllerClient?
+    ) -> InputPunctuatorContext {
+        let hasActiveComposition = hasActiveTextComposition()
+        guard input == "." || input == "\"" || input == "'" else {
+            return InputPunctuatorContext(
+                state: inputModeSnapshot.state,
+                hasActiveComposition: hasActiveComposition
+            )
+        }
+        let readsChineseQuoteContext = (input == "\"" || input == "'")
+            && inputModeSnapshot.state.punctuationMode == .chinese
+            && inputModeSnapshot.state.symbolWidth == .halfWidth
+        let resolution = punctuationContextResolver.resolve(
+            client: client,
+            hasActiveComposition: hasActiveComposition,
+            readsCharacterBeforeCaret: readsChineseQuoteContext
+        )
+        if resolution.didSelectionOrFocusChange {
+            punctuatorRuntime.resetPairingState()
+        }
+        let previous = resolution.previousCharacter
+        if InputDebugDiagnostics.isEnabled(.turn) {
+            InputDebugDiagnostics.emit(
+                category: .turn,
+                fields: [
+                    .init(.stage, "punctuation_context"),
+                    .init(.reason, "previous=\(previous.kind.rawValue);source=\(previous.source.rawValue)")
+                ]
+            )
+        }
+        return InputPunctuatorContext(
+            state: inputModeSnapshot.state,
+            previousCharacterKind: previous.kind,
+            quoteContext: previous.quoteContext,
+            hasActiveComposition: hasActiveComposition
+        )
+    }
+
     private func effectiveClient(_ client: InputControllerClient?) -> InputControllerClient? {
         client ?? host?.currentClient
     }
@@ -895,7 +955,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         InputClientCompositionWriteState(
             compositionID: compositionID,
             rawLength: rawBuffer.count,
-            inputModeState: inputModeRuntime.state,
+            inputModeState: inputModeSnapshot.state,
             hasActiveComposition: hasActiveComposition ?? hasActiveTextComposition()
         )
     }
@@ -938,6 +998,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         reason: String
     ) -> Bool {
+        if inputModeSnapshot.state.symbolWidth == .fullWidth,
+           fullWidthIdleText(for: text) != nil,
+           inputClientCompositionWriter.writeMode(
+               client: client,
+               state: writeState(hasActiveComposition: false)
+           ) != .disabled {
+            return false
+        }
         let shouldPassThrough = inputClientCompositionWriter.shouldPassThroughIdleText(
             text,
             client: client,
@@ -948,6 +1016,14 @@ final class InputControllerCoordinator: @unchecked Sendable {
             hideCandidatePanelIfVisible(reason: .compositionEnded)
         }
         return shouldPassThrough
+    }
+
+    private func fullWidthIdleText(for text: String) -> String? {
+        guard inputModeSnapshot.state.symbolWidth == .fullWidth else {
+            return nil
+        }
+        let transformed = InputSymbolTransformer.textWithWidth(for: text, width: .fullWidth)
+        return transformed == text ? nil : transformed
     }
 
     private func candidatePanelPlacementPreference(
@@ -1420,11 +1496,33 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func insert(_ text: String, client: InputControllerClient?) {
-        inputClientCompositionWriter.insertText(
+        insertTextAndRecordPunctuationContext(
             text,
             client: client,
             state: writeState(),
             reason: "commit"
+        )
+    }
+
+    private func insertTextAndRecordPunctuationContext(
+        _ text: String,
+        client: InputControllerClient?,
+        state: InputClientCompositionWriteState,
+        reason: String,
+        clearsOwnedMarkedText: Bool = true
+    ) {
+        let selectedRangeBeforeInsertion = client?.selectedRange
+        inputClientCompositionWriter.insertText(
+            text,
+            client: client,
+            state: state,
+            reason: reason,
+            clearsOwnedMarkedText: clearsOwnedMarkedText
+        )
+        punctuationContextResolver.recordInsertion(
+            text,
+            client: client,
+            selectedRangeBeforeInsertion: selectedRangeBeforeInsertion
         )
     }
 
@@ -1570,10 +1668,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 host?.schedulePostInsertCaretVerification { [weak self, client] in
                     self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
                 }
-            case .requestPolish(let text):
-                Task { [sessionController] in
-                    await sessionController.requestPolish(rawInput: text)
-                }
             case .refreshComposition:
                 refreshComposition(client: client)
             case .hideCandidatePanel(let reason):
@@ -1605,7 +1699,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 guard let passthroughClient = turnClient(for: .effective, providedClient: client) else {
                     return
                 }
-                inputClientCompositionWriter.insertText(
+                insertTextAndRecordPunctuationContext(
                     text,
                     client: passthroughClient,
                     state: directPassthroughWriteState ?? writeState(hasActiveComposition: false),
@@ -1713,7 +1807,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             aiAcceptanceRuntime.cancelFeedback(reason: feedbackCancellationReason)
         }
         if beginPlan.shouldReloadPreferences {
-            reloadInputModeDefaultsIfNeeded(client: client)
+            reloadInputModePreferencesIfNeeded()
             reloadRuntimePreferencesIfNeeded()
         }
         if beginPlan.shouldReloadRuntimeLexicon {
@@ -1733,21 +1827,54 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
     }
 
-    private func reloadInputModeDefaultsIfNeeded(client: InputControllerClient?) {
+    private func reloadInputModePreferencesIfNeeded() {
         let now = Date()
-        let appBundleID = appBundleIdentifier(client: client)
-        let appBundleChanged = inputModeRuntime.appBundleID != appBundleID
-        guard appBundleChanged || now.timeIntervalSince(lastInputModePreferenceReload) >= Self.preferenceReloadInterval else {
+        guard now.timeIntervalSince(lastInputModePreferenceReload) >= Self.preferenceReloadInterval else {
             return
         }
         lastInputModePreferenceReload = now
-        if inputModeRuntime.reloadIfChanged(
-            preferences: inputModePreferenceStore.loadPreferences(),
-            appBundleID: appBundleID
-        ) {
-            punctuatorRuntime.resetPairingState()
-            clearSymbolCandidateSession()
+        let globalSymbolWidth = inputModePreferenceStore.loadPreferences().globalSymbolWidth
+        guard globalSymbolWidth != loadedGlobalSymbolWidth else {
+            return
         }
+        loadedGlobalSymbolWidth = globalSymbolWidth
+        let transition = inputModeStateRuntime.synchronizeConfiguredSymbolWidth(globalSymbolWidth)
+        inputModeSnapshot = transition.current
+        conversionEngine.synchronizeInputMode(inputModeSnapshot)
+        guard transition.didChange else {
+            return
+        }
+        resetPunctuationSessionContext()
+        clearSymbolCandidateSession()
+    }
+
+    private func synchronizeInputModeSnapshot(client: InputControllerClient?) {
+        let latest = inputModeStateRuntime.currentSnapshot()
+        guard latest.generation != inputModeSnapshot.generation else {
+            return
+        }
+        inputModeSnapshot = latest
+        conversionEngine.synchronizeInputMode(inputModeSnapshot)
+        resetPunctuationSessionContext()
+        if symbolCandidateSession != nil {
+            restoreCompositionPanelAfterSymbolCandidate(client: client)
+        } else {
+            clearSymbolCandidateSession(restoringAIRecommendation: true)
+        }
+    }
+
+    private func applyInputModeTransition(_ event: InputModeTransitionEvent) {
+        let transition = inputModeStateRuntime.transition(event)
+        inputModeSnapshot = transition.current
+        conversionEngine.synchronizeInputMode(inputModeSnapshot)
+        if transition.didChange {
+            resetPunctuationSessionContext()
+        }
+    }
+
+    private func resetPunctuationSessionContext() {
+        punctuatorRuntime.resetPairingState()
+        punctuationContextResolver.invalidate()
     }
 
     @discardableResult
@@ -1763,7 +1890,6 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         runtimePreferences = preferences
         aiAcceptanceRuntime.updateRuntimePreferences(preferences)
-        sessionController = Self.polishOnlySessionController()
         invalidateSuggestion(reason: "runtime_preferences_changed")
         return true
     }
@@ -1824,7 +1950,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     private func showModeStatus(client: InputControllerClient?) {
-        modeStatusText = modeStatusDescription(for: inputModeRuntime.state)
+        modeStatusText = modeStatusDescription(for: inputModeSnapshot.state)
         if hasActiveTextComposition() {
             updateCandidatePanelImmediately(
                 suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
@@ -2218,7 +2344,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 private extension InputKeyIntent {
     var clearsTransientModeStatus: Bool {
         switch self {
-        case .modifierFlagsChanged, .ignored:
+        case .modifierFlagsChanged, .hostShortcut, .ignored:
             return false
         case .action(.toggleSymbolMode), .action(.toggleTextMode), .action(.toggleSymbolWidth):
             return false
@@ -2231,7 +2357,7 @@ private extension InputKeyIntent {
         switch self {
         case .deleteBackward, .cancelComposition, .moveCandidateSelection:
             return true
-        case .action(.space), .action(.tab), .action(.optionNumber), .action(.optionR), .action(.commitRaw):
+        case .action(.space), .action(.tab), .action(.optionNumber), .action(.commitRaw):
             return true
         default:
             return false
@@ -2242,7 +2368,7 @@ private extension InputKeyIntent {
         switch self {
         case .moveCandidateSelection:
             return true
-        case .action(.tab), .action(.optionNumber), .action(.optionR):
+        case .action(.tab), .action(.optionNumber):
             return true
         default:
             return false

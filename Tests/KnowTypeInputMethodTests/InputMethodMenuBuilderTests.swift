@@ -51,6 +51,19 @@ final class InputMethodMenuBuilderTests: XCTestCase {
         XCTAssertEqual(descriptors[1].title, "ASCII 输入 · 英文标点 · 全角")
     }
 
+    func testDescriptorsCanShowManualEnglishPunctuationWhileTextModeIsChinese() {
+        let descriptors = KnowTypeInputMethodMenuBuilder.descriptors(
+            runtimePreferences: InputMethodRuntimePreferences(),
+            inputModeState: InputModeState(
+                textMode: .chinese,
+                punctuationMode: .english,
+                symbolWidth: .halfWidth
+            )
+        )
+
+        XCTAssertEqual(descriptors[1].title, "中文输入 · 英文标点 · 半角")
+    }
+
     func testMenuItemsUseExpectedSelectorsAndNoBareCharacterShortcut() throws {
         let menu = KnowTypeInputMethodMenuBuilder.makeMenu(
             target: NSObject(),

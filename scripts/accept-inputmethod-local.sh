@@ -79,11 +79,11 @@ Xcode
 - Verify: technical tokens and code-like snippets are preserved.
 
 WeChat chat field
-- Type normal chat text and use Space, Tab, Option+1, and Option+R.
+- Type normal chat text and use Space, Tab, and Option+1.
 - Verify: candidate window remains visible and shortcuts do not conflict with the tested field.
 
 Feishu chat field
-- Type normal chat text and use Space, Tab, Option+1, and Option+R.
+- Type normal chat text and use Space, Tab, and Option+1.
 - Verify: candidate window remains visible and shortcuts do not conflict with the tested field.
 
 No-provider fallback
@@ -130,8 +130,8 @@ write_report() {
 | Electron/Codex-style field | \`nishishei\`, \`ni\` | marked text and candidate paging remain usable | pending | |
 | Terminal | \`/Users/zq/project/KnowType\`, \`swift test\` | Level 0 unchanged, no provider dependency | pending | |
 | Xcode | \`API JSON macOS InputMethodKit snake_case camelCase\` | technical tokens preserved | pending | |
-| WeChat chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
-| Feishu chat field | normal chat text plus Space/Tab/Option+1/Option+R | candidate window remains visible and shortcuts do not conflict | pending | |
+| WeChat chat field | normal chat text plus Space/Tab/Option+1 | candidate window remains visible and shortcuts do not conflict | pending | |
+| Feishu chat field | normal chat text plus Space/Tab/Option+1 | candidate window remains visible and shortcuts do not conflict | pending | |
 | No-provider fallback | provider configuration disabled | traditional candidates still usable; local fallback continuation is used when available | pending | |
 | Configured provider failure | invalid endpoint or provider error | traditional candidates still usable; continuation rows may be absent; typing is not blocked | pending | |
 

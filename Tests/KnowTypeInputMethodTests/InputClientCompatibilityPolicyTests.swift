@@ -45,9 +45,9 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testTerminalCompatibilityClientsUseAsciiPassthroughByDefault() {
+    func testTerminalCompatibilityClientUsesAsciiPassthroughWhenGlobalModeIsAscii() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
-        let state = InputModeAppPolicy.defaultState(appBundleID: "com.apple.Terminal")
+        let state = InputModeState(textMode: .ascii, punctuationMode: .english)
 
         XCTAssertEqual(state.textMode, .ascii)
         XCTAssertEqual(
@@ -61,9 +61,9 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testTerminalPlaceholderProfileUsesIdlePassthroughFromInputModeByDefault() {
+    func testTerminalPlaceholderProfileUsesIdlePassthroughFromGlobalInputMode() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
-        let state = InputModeAppPolicy.defaultState(appBundleID: "org.vim.MacVim")
+        let state = InputModeState(textMode: .ascii, punctuationMode: .english)
 
         XCTAssertEqual(state.textMode, .ascii)
         XCTAssertEqual(
@@ -99,9 +99,9 @@ final class InputClientCompatibilityPolicyTests: XCTestCase {
         )
     }
 
-    func testEditorCompatibilityClientsUseInlineByDefault() {
+    func testEditorCompatibilityClientUsesInlineInGlobalChineseMode() {
         let policy = InputClientCompatibilityPolicy(userDefaults: nil)
-        let state = InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij")
+        let state = InputModeState(textMode: .chinese, punctuationMode: .chinese)
 
         XCTAssertEqual(state.textMode, .chinese)
         XCTAssertEqual(

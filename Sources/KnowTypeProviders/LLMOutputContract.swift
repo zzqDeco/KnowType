@@ -11,8 +11,6 @@ enum LLMOutputContract {
             return "knowtype_correction_response"
         case .continuation:
             return "knowtype_continuation_response"
-        case .polish:
-            return "knowtype_polish_response"
         }
     }
 
@@ -24,8 +22,6 @@ enum LLMOutputContract {
             return "KnowType continuation candidates. With a locked prefix, text is suffix-only; without one, text is a full commit-ready recommendation informed by raw input and context."
         case .correction:
             return "KnowType correction candidates."
-        case .polish:
-            return "KnowType explicitly requested polish candidates."
         }
     }
 
@@ -73,7 +69,7 @@ enum LLMOutputContract {
                 ],
                 "required": ["candidates"]
             ]
-        case .correction, .polish:
+        case .correction:
             return [
                 "type": "object",
                 "additionalProperties": false,
@@ -164,6 +160,12 @@ actor StructuredOutputCapabilityCache {
 
     func reset() {
         unsupportedKeys.removeAll()
+    }
+}
+
+public enum ProviderRuntimeCapabilityState {
+    public static func reset() async {
+        await StructuredOutputCapabilityCache.shared.reset()
     }
 }
 

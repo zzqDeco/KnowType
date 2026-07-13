@@ -36,6 +36,28 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("‘"))
     }
 
+    func testQuoteContextOverridesAlternationAndUpdatesUnknownFallback() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: "\"",
+                context: InputPunctuatorContext(state: state, quoteContext: .closing)
+            ),
+            .commit("”")
+        )
+        XCTAssertEqual(runtime.decision(for: "\"", state: state), .commit("“"))
+        XCTAssertEqual(
+            runtime.decision(
+                for: "'",
+                context: InputPunctuatorContext(state: state, quoteContext: .opening)
+            ),
+            .commit("‘")
+        )
+        XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("’"))
+    }
+
     func testChineseHalfWidthEllipsisDashAndAsciiMinus() {
         var runtime = InputPunctuatorRuntime()
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
@@ -80,6 +102,79 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
                     ]
                 )
             )
+        )
+    }
+
+    func testDigitBeforePeriodUsesAsciiPeriodInChineseAndFullWidthModes() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(
+            textMode: .chinese,
+            punctuationMode: .chinese,
+            symbolWidth: .fullWidth
+        )
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit
+                )
+            ),
+            .commit(".")
+        )
+    }
+
+    func testDigitContextDoesNotChangeCommaOrActiveCompositionPeriod() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: ",",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit
+                )
+            ),
+            .commit("，")
+        )
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit,
+                    hasActiveComposition: true
+                )
+            ),
+            .commit("。")
+        )
+    }
+
+    func testSecondPeriodAfterRecordedAsciiPeriodReturnsToChinesePunctuation() {
+        var runtime = InputPunctuatorRuntime()
+        let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
+
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .asciiDigit
+                )
+            ),
+            .commit(".")
+        )
+        XCTAssertEqual(
+            runtime.decision(
+                for: ".",
+                context: InputPunctuatorContext(
+                    state: state,
+                    previousCharacterKind: .text
+                )
+            ),
+            .commit("。")
         )
     }
 }

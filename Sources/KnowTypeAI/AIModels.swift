@@ -28,6 +28,7 @@ public struct AIRecommendationCandidate: Codable, Sendable, Equatable {
 
 public enum AIRecommendationState: Sendable, Equatable {
     case idle
+    case stale
     case pending(requestID: UUID)
     case ready(AIRecommendationCandidate)
     case ineligible(reason: String)
@@ -49,7 +50,7 @@ public enum AIRecommendationState: Sendable, Equatable {
 
     public var displayText: String? {
         switch self {
-        case .idle:
+        case .idle, .stale:
             return nil
         case .pending:
             return "AI 推荐中..."
@@ -210,7 +211,6 @@ public enum AITypingCommitKind: String, Codable, Sendable, Equatable {
     case traditional
     case ai
     case raw
-    case polish
     case symbol
     case externalDelete
 }

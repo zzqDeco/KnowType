@@ -51,6 +51,10 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
 - Provider requests never include real-time Rime candidate hints.
 - Async results apply only when request id, generation, composition id, raw
   revision, and raw input still match the current composition snapshot.
+- Provider-registry `.stale` is consumed as a control result: when the request is
+  still active and owns a normal pending placeholder, it clears the request and
+  publishes `.idle`. A stale older request cannot clear a newer request, and an
+  availability probe does not publish a redundant state callback.
 - Reset and reschedule paths preserve existing `cancel_previous`,
   `stale_result_dropped`, and `state_applied` diagnostic semantics, and add
   `pending_placeholder`, `dispatch_deferred`,

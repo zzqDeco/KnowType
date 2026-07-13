@@ -12,7 +12,7 @@ KnowType is a macOS Chinese/English input method with AI-assisted continuation.
 - Candidate UI: custom AppKit panel
 - Settings app: SwiftUI
 
-The product rule is strict: correction may refine the prefix, but continuation must never rewrite the locked prefix. Rewriting is allowed only through explicit polish actions.
+The product rule is strict: correction may refine the prefix, but continuation must never rewrite the locked prefix. The input method does not provide a locked-prefix rewrite action.
 
 ## Commands
 

@@ -6,7 +6,6 @@ public enum InputAction: Sendable, Equatable {
     case space
     case tab
     case optionNumber(Int)
-    case optionR
     case toggleSymbolMode
     case toggleTextMode
     case toggleSymbolWidth
@@ -15,7 +14,6 @@ public enum InputAction: Sendable, Equatable {
 
 public enum InputCommitResult: Sendable, Equatable {
     case commit(String)
-    case polishRequested(String)
     case noAction
 }
 
@@ -93,8 +91,6 @@ public struct InputCompositionController: Sendable {
                 return .noAction
             }
             return .commit(join(prefix: prefix, continuation: continuationCandidates[index].text))
-        case .optionR:
-            return .polishRequested(originalText)
         case .toggleSymbolMode:
             return .noAction
         case .toggleTextMode:

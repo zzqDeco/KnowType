@@ -31,7 +31,7 @@ The MVP is accepted when these flows pass through package-level tests and then t
 - Mixed technical input: `zhege api latnecy youdian gao -> 这个 API latency 有点高`
 - English correction: `I thikn this approch -> I think this approach`
 - Level 0 path input: `/Users/zq/project/KnowType` is not rewritten
-- Explicit polish only: `Option + R` is the only default path that requests rewriting
+- Locked prefixes are not rewritten by any input action
 - Candidate panel rendering keeps raw input, locked prefix, and continuation as separate semantic rows while presenting a flat native-style list.
 - Candidate panel shortcuts match commit behavior: `⇥` for the first continuation and `⌥2` for the second continuation.
 - Runtime lexicon directory loading can add user-owned JSON/TSV entries without changing Swift source.
@@ -66,10 +66,22 @@ successful script run as proof of target-app typing behavior.
   - Input stays Level 0, does not request cloud suggestions, and commits unchanged.
 - WeChat:
   - Type normal chat text and verify the candidate window remains visible and usable in the chat input field.
-  - `Space`, `Tab`, `Option+1`, and `Option+R` do not conflict with the host app in the tested field.
+  - `Space`, `Tab`, and `Option+1` do not conflict with the host app in the tested field.
 - Feishu:
   - Repeat the WeChat chat-field flow.
   - Candidate window remains visible and usable.
+- Cross-app process mode:
+  - Toggle Chinese/ASCII, punctuation, and width in one app, then switch among
+    TextEdit, Chrome, Xcode, and Terminal. The mode remains unchanged for the
+    input-method host lifetime; no default/code-app mode is reloaded.
+  - With full width enabled, verify ASCII letters, digits, punctuation, and
+    normal space become full-width, while Tab, Return, and controls remain host
+    actions.
+  - During active Rime composition, toggle punctuation or width and verify the
+    resulting native commit matches the displayed mode.
+  - After external delete, caret/selection movement, or app focus change, type a
+    Chinese quote and verify whitespace/open punctuation opens while
+    text/digits/closing punctuation closes.
 
 ## Provider and Privacy Scenarios
 

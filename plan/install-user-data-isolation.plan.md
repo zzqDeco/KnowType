@@ -40,7 +40,8 @@ Non-goals:
 - Treat these as protected user-data surfaces during install validation:
   `~/Library/Application Support/KnowType/AI`,
   `~/Library/Application Support/KnowType/Rime`,
-  `~/Library/Application Support/KnowType/providers.json`, and `~/.knowtype`.
+  `~/Library/Application Support/KnowType/providers.v2.json`, its legacy
+  migration snapshot/tombstone files, and `~/.knowtype`.
 
 ## Test Plan
 

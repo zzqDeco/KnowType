@@ -74,7 +74,6 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.latestSuggestionRawInput, "wo jue de zhege fagnan")
         XCTAssertEqual(state.selectedPrefixIndex, 0)
         XCTAssertNil(state.selectedContinuationIndex)
-        XCTAssertFalse(state.polishRequested)
     }
 
     func testUpdatePassesUserSelectionHistoryToSuggestionLoader() async {
@@ -144,7 +143,7 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.selectedContinuationIndex, 1)
     }
 
-    func testOptionNumberCommitsRequestedContinuationAndOptionRMarksPolishRequested() async {
+    func testOptionNumberCommitsRequestedContinuation() async {
         let controller = InputSessionController { _ in
             Self.makeSuggestion()
         }
@@ -152,18 +151,11 @@ final class InputSessionControllerTests: XCTestCase {
 
         let continuationResult = await controller.handle(action: .optionNumber(1))
         let secondContinuationResult = await controller.handle(action: .optionNumber(2))
-        var state = await controller.state
+        let state = await controller.state
 
         XCTAssertEqual(continuationResult, .commit("我觉得这个方案还有进一步优化空间"))
         XCTAssertEqual(secondContinuationResult, .commit("我觉得这个方案在落地成本上可能偏高"))
         XCTAssertEqual(state.selectedContinuationIndex, 1)
-        XCTAssertFalse(state.polishRequested)
-
-        let polishResult = await controller.handle(action: .optionR)
-        state = await controller.state
-
-        XCTAssertEqual(polishResult, .polishRequested("wo jue de zhege fagnan"))
-        XCTAssertTrue(state.polishRequested)
     }
 
     func testEmptyStateReturnsNoAction() async {
@@ -180,13 +172,11 @@ final class InputSessionControllerTests: XCTestCase {
         let tabResult = await controller.handle(action: .tab)
         let optionNumberResult = await controller.handle(action: .optionNumber(1))
         let optionZeroResult = await controller.handle(action: .optionNumber(0))
-        let optionRResult = await controller.handle(action: .optionR)
 
         XCTAssertEqual(spaceResult, .noAction)
         XCTAssertEqual(tabResult, .noAction)
         XCTAssertEqual(optionNumberResult, .noAction)
         XCTAssertEqual(optionZeroResult, .noAction)
-        XCTAssertEqual(optionRResult, .noAction)
     }
 
     func testCommitPolicyCanAvoidSynchronousFallbackWhileSuggestionIsPending() {
@@ -201,19 +191,6 @@ final class InputSessionControllerTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .noAction)
-    }
-
-    func testExplicitPolishRequestMarksStateWithoutCommitting() async {
-        let controller = InputSessionController { _ in
-            Self.makeSuggestion()
-        }
-
-        let result = await controller.requestPolish(rawInput: "我觉得这个接口慢")
-        let state = await controller.state
-
-        XCTAssertEqual(result, .polishRequested("我觉得这个接口慢"))
-        XCTAssertEqual(state.rawInput, "我觉得这个接口慢")
-        XCTAssertTrue(state.polishRequested)
     }
 
     func testLevelZeroInputUsesNoProviderPath() async {
@@ -395,21 +372,14 @@ final class InputSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.rawInput, "x")
     }
 
-    func testPolishAndResetUpdateExplicitSessionMode() async {
+    func testResetClearsExplicitSessionMode() async {
         let controller = InputSessionController { _ in
             Self.makeSuggestion()
         }
         await controller.update(rawInput: "wo jue de zhege fagnan")
 
-        let polishResult = await controller.handle(action: .optionR)
-        var state = await controller.state
-
-        XCTAssertEqual(polishResult, .polishRequested("wo jue de zhege fagnan"))
-        XCTAssertEqual(state.mode, .polish)
-        XCTAssertTrue(state.polishRequested)
-
         await controller.reset()
-        state = await controller.state
+        let state = await controller.state
 
         XCTAssertEqual(state.mode, .empty)
         XCTAssertEqual(state.rawInput, "")

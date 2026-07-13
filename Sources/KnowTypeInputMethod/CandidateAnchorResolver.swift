@@ -7,7 +7,6 @@ public enum CandidateAnchorSource: String, Sendable, Equatable {
     case firstRectSelectedEnd
     case firstRectMarkedStart
     case firstRectSelectedStart
-    case firstRectInsertionPoint
     case lineHeightRect
     case accessibilityFocusedRange
     case lastUsableScoped
@@ -196,107 +195,163 @@ public enum CandidateAnchorCoordinateConverter {
 }
 
 public final class CandidateAnchorResolver {
+    static let accessibilityThrottleInterval: TimeInterval = 0.1
+
     private struct ScopedAnchor {
         var rect: CGRect
         var compositionID: Int
         var appBundleID: String?
         var screenID: String
-        var source: CandidateAnchorSource
         var timestamp: Date
+    }
+
+    private struct AccessibilityProbeScope: Hashable {
+        var compositionID: Int
+        var appBundleID: String?
     }
 
     private let screenProvider: ScreenGeometryProviding
     private let accessibilityProvider: AccessibilityAnchorProviding
     private let maxLastUsableAge: TimeInterval
     private let traceEnabled: Bool
+    private let monotonicNow: () -> TimeInterval
     private var lastUsable: ScopedAnchor?
+    private var accessibilityProbeTimes: [AccessibilityProbeScope: TimeInterval] = [:]
 
     public init(
         screenProvider: ScreenGeometryProviding,
         accessibilityProvider: AccessibilityAnchorProviding = NoopAccessibilityAnchorProvider(),
         maxLastUsableAge: TimeInterval = 2,
-        traceEnabled: Bool = ProcessInfo.processInfo.environment["KNOWTYPE_ANCHOR_DEBUG"] == "1"
+        traceEnabled: Bool = ProcessInfo.processInfo.environment["KNOWTYPE_ANCHOR_DEBUG"] == "1",
+        monotonicNow: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.screenProvider = screenProvider
         self.accessibilityProvider = accessibilityProvider
         self.maxLastUsableAge = maxLastUsableAge
         self.traceEnabled = traceEnabled
+        self.monotonicNow = monotonicNow
     }
 
     public func reset() {
         lastUsable = nil
+        accessibilityProbeTimes.removeAll(keepingCapacity: true)
     }
 
     public func resolve(
         client: InputClientGeometryProviding?,
         context: CandidateAnchorContext
     ) -> CandidateAnchorResult {
-        if let client {
+        var probeCount = 0
+        let selectedRange = client?.selectedRange
+        let markedRange = client?.markedRange
+
+        if let client, let selectedRange {
             for request in CandidateAnchorPolicy.characterRangeRequests(
-                selectedRange: client.selectedRange,
-                markedRange: client.markedRange
+                selectedRange: selectedRange,
+                markedRange: markedRange
             ) {
+                probeCount += 1
                 if let result = freshResult(
                     rect: client.firstRect(forCharacterRange: request.range),
                     source: request.source,
-                    context: context
+                    context: context,
+                    probeCount: probeCount
                 ) {
                     return result
                 }
             }
+        }
 
-            if let insertionPointRange = CandidateAnchorPolicy.insertionPointFallbackRange(
-                selectedRange: client.selectedRange,
-                markedRange: client.markedRange
-            ) {
-                if let result = freshResult(
-                    rect: client.firstRect(forCharacterRange: insertionPointRange),
-                    source: .firstRectInsertionPoint,
-                    context: context
-                ) {
-                    return result
-                }
-            }
+        let scopedLastUsable = validatedScopedLastUsable(
+            context: context,
+            probeCount: probeCount
+        )
+        if let scopedLastUsable,
+           canPrioritizeScopedAnchor(scopedLastUsable) {
+            return scopedLastUsableResult(
+                scopedLastUsable,
+                context: context,
+                probeCount: probeCount
+            )
+        }
 
+        if let client, let selectedRange {
             for index in CandidateAnchorPolicy.lineHeightCharacterIndexes(
-                selectedRange: client.selectedRange,
-                markedRange: client.markedRange
+                selectedRange: selectedRange,
+                markedRange: markedRange
             ) {
+                probeCount += 1
                 if let result = freshResult(
                     rect: client.lineHeightRect(forCharacterIndex: index),
                     source: .lineHeightRect,
-                    context: context
+                    context: context,
+                    probeCount: probeCount
                 ) {
                     return result
                 }
             }
         }
 
-        if let accessibilityRect = accessibilityProvider.focusedCaretRect(screenProvider: screenProvider),
-           let result = freshResult(
-               rect: accessibilityRect,
-               source: .accessibilityFocusedRange,
-               context: context
-           ) {
+        if shouldProbeAccessibility(context: context) {
+            probeCount += 1
+            if let accessibilityRect = accessibilityProvider.focusedCaretRect(screenProvider: screenProvider) {
+                if let result = freshResult(
+                    rect: accessibilityRect,
+                    source: .accessibilityFocusedRange,
+                    context: context,
+                    probeCount: probeCount
+                ) {
+                    return result
+                }
+            } else {
+                trace(
+                    source: .accessibilityFocusedRange,
+                    rect: .zero,
+                    accepted: false,
+                    reason: "unavailable",
+                    context: context,
+                    probeCount: probeCount
+                )
+            }
+        } else {
+            trace(
+                source: .accessibilityFocusedRange,
+                rect: .zero,
+                accepted: false,
+                reason: "throttled",
+                context: context,
+                probeCount: probeCount
+            )
+        }
+
+        if let scopedLastUsable {
+            return scopedLastUsableResult(
+                scopedLastUsable,
+                context: context,
+                probeCount: probeCount
+            )
+        }
+
+        if let result = safeScreenFallbackResult(context: context, probeCount: probeCount) {
             return result
         }
 
-        if let result = scopedLastUsableResult(context: context) {
-            return result
-        }
-
-        if let result = safeScreenFallbackResult(context: context) {
-            return result
-        }
-
-        trace(source: .none, rect: .zero, accepted: false, reason: "no-anchor", context: context)
+        trace(
+            source: .none,
+            rect: .zero,
+            accepted: false,
+            reason: "no-anchor",
+            context: context,
+            probeCount: probeCount
+        )
         return .none
     }
 
     private func freshResult(
         rect: CGRect,
         source: CandidateAnchorSource,
-        context: CandidateAnchorContext
+        context: CandidateAnchorContext,
+        probeCount: Int
     ) -> CandidateAnchorResult? {
         let normalizedRect = CandidateAnchorValidation.normalized(rect)
         guard CandidateAnchorValidation.isUsable(rect, screenProvider: screenProvider),
@@ -304,7 +359,14 @@ public final class CandidateAnchorResolver {
             let reason = CandidateAnchorValidation
                 .rejectionReason(for: rect, screenProvider: screenProvider)?
                 .rawValue ?? "unknown"
-            trace(source: source, rect: rect, accepted: false, reason: reason, context: context)
+            trace(
+                source: source,
+                rect: rect,
+                accepted: false,
+                reason: reason,
+                context: context,
+                probeCount: probeCount
+            )
             return nil
         }
         lastUsable = ScopedAnchor(
@@ -312,29 +374,117 @@ public final class CandidateAnchorResolver {
             compositionID: context.compositionID,
             appBundleID: context.appBundleID,
             screenID: screen.identifier,
-            source: source,
             timestamp: context.now
         )
-        trace(source: source, rect: normalizedRect, accepted: true, reason: nil, context: context)
+        trace(
+            source: source,
+            rect: normalizedRect,
+            accepted: true,
+            reason: nil,
+            context: context,
+            probeCount: probeCount
+        )
         return CandidateAnchorResult(rect: normalizedRect, source: source, isFresh: true)
     }
 
-    private func scopedLastUsableResult(context: CandidateAnchorContext) -> CandidateAnchorResult? {
-        guard let lastUsable,
-              lastUsable.compositionID == context.compositionID,
-              lastUsable.appBundleID == context.appBundleID,
-              context.now.timeIntervalSince(lastUsable.timestamp) <= maxLastUsableAge,
-              let screen = screenProvider.screen(containing: lastUsable.rect),
-              screen.identifier == lastUsable.screenID,
-              CandidateAnchorValidation.isUsable(lastUsable.rect, screenProvider: screenProvider) else {
+    private func validatedScopedLastUsable(
+        context: CandidateAnchorContext,
+        probeCount: Int
+    ) -> ScopedAnchor? {
+        guard let lastUsable else {
             return nil
         }
-        trace(source: .lastUsableScoped, rect: lastUsable.rect, accepted: true, reason: nil, context: context)
-        return CandidateAnchorResult(rect: lastUsable.rect, source: .lastUsableScoped, isFresh: false)
+        guard lastUsable.compositionID == context.compositionID else {
+            traceScopedAnchorRejection("composition-mismatch", context: context, probeCount: probeCount)
+            return nil
+        }
+        guard lastUsable.appBundleID == context.appBundleID else {
+            traceScopedAnchorRejection("app-mismatch", context: context, probeCount: probeCount)
+            return nil
+        }
+        let age = context.now.timeIntervalSince(lastUsable.timestamp)
+        guard age >= 0, age <= maxLastUsableAge else {
+            traceScopedAnchorRejection("expired", context: context, probeCount: probeCount)
+            return nil
+        }
+        guard let screen = screenProvider.screen(containing: lastUsable.rect),
+              screen.identifier == lastUsable.screenID else {
+            traceScopedAnchorRejection("screen-mismatch", context: context, probeCount: probeCount)
+            return nil
+        }
+        guard CandidateAnchorValidation.isUsable(lastUsable.rect, screenProvider: screenProvider) else {
+            traceScopedAnchorRejection("invalid-cache", context: context, probeCount: probeCount)
+            return nil
+        }
+        return lastUsable
     }
 
-    private func safeScreenFallbackResult(context: CandidateAnchorContext) -> CandidateAnchorResult? {
+    private func canPrioritizeScopedAnchor(_ anchor: ScopedAnchor) -> Bool {
+        let screens = screenProvider.screens
+        return screens.count == 1 && screens[0].identifier == anchor.screenID
+    }
+
+    private func scopedLastUsableResult(
+        _ anchor: ScopedAnchor,
+        context: CandidateAnchorContext,
+        probeCount: Int
+    ) -> CandidateAnchorResult {
+        trace(
+            source: .lastUsableScoped,
+            rect: anchor.rect,
+            accepted: true,
+            reason: nil,
+            context: context,
+            probeCount: probeCount
+        )
+        return CandidateAnchorResult(rect: anchor.rect, source: .lastUsableScoped, isFresh: false)
+    }
+
+    private func shouldProbeAccessibility(context: CandidateAnchorContext) -> Bool {
+        let attemptTime = monotonicNow()
+        accessibilityProbeTimes = accessibilityProbeTimes.filter { _, timestamp in
+            let elapsed = attemptTime - timestamp
+            return elapsed >= 0 && elapsed < Self.accessibilityThrottleInterval
+        }
+        let scope = AccessibilityProbeScope(
+            compositionID: context.compositionID,
+            appBundleID: context.appBundleID
+        )
+        guard accessibilityProbeTimes[scope] == nil else {
+            return false
+        }
+        accessibilityProbeTimes[scope] = attemptTime
+        return true
+    }
+
+    private func traceScopedAnchorRejection(
+        _ reason: String,
+        context: CandidateAnchorContext,
+        probeCount: Int
+    ) {
+        trace(
+            source: .lastUsableScoped,
+            rect: .zero,
+            accepted: false,
+            reason: reason,
+            context: context,
+            probeCount: probeCount
+        )
+    }
+
+    private func safeScreenFallbackResult(
+        context: CandidateAnchorContext,
+        probeCount: Int
+    ) -> CandidateAnchorResult? {
         guard let screen = screenProvider.screens.first else {
+            trace(
+                source: .safeScreenFallback,
+                rect: .zero,
+                accepted: false,
+                reason: "no-screen",
+                context: context,
+                probeCount: probeCount
+            )
             return nil
         }
         let visibleFrame = screen.visibleFrame
@@ -342,6 +492,14 @@ public final class CandidateAnchorResolver {
               visibleFrame.height.isFinite,
               visibleFrame.width > 0,
               visibleFrame.height > CandidateAnchorValidation.minimumCaretHeight else {
+            trace(
+                source: .safeScreenFallback,
+                rect: visibleFrame,
+                accepted: false,
+                reason: "invalid-visible-frame",
+                context: context,
+                probeCount: probeCount
+            )
             return nil
         }
 
@@ -357,12 +515,20 @@ public final class CandidateAnchorResolver {
                 rect: rect,
                 accepted: false,
                 reason: CandidateAnchorValidation.rejectionReason(for: rect, screenProvider: screenProvider)?.rawValue,
-                context: context
+                context: context,
+                probeCount: probeCount
             )
             return nil
         }
 
-        trace(source: .safeScreenFallback, rect: rect, accepted: true, reason: nil, context: context)
+        trace(
+            source: .safeScreenFallback,
+            rect: rect,
+            accepted: true,
+            reason: nil,
+            context: context,
+            probeCount: probeCount
+        )
         return CandidateAnchorResult(rect: rect, source: .safeScreenFallback, isFresh: false)
     }
 
@@ -371,7 +537,8 @@ public final class CandidateAnchorResolver {
         rect: CGRect,
         accepted: Bool,
         reason: String?,
-        context: CandidateAnchorContext
+        context: CandidateAnchorContext,
+        probeCount: Int
     ) {
         _ = rect
         guard traceEnabled
@@ -383,6 +550,7 @@ public final class CandidateAnchorResolver {
             fields: [
                 .init(.stage, accepted ? "accepted" : "rejected"),
                 .init(.anchorSource, source.rawValue),
+                .init(.probeCount, probeCount),
                 .init(.compositionID, context.compositionID),
                 .init(.bundleID, context.appBundleID ?? "unknown"),
                 .init(.handled, accepted),

@@ -81,18 +81,6 @@ final class InputCompositionControllerTests: XCTestCase {
         XCTAssertEqual(result, .noAction)
     }
 
-    func testOptionRRequestsPolish() {
-        let controller = InputCompositionController()
-        let result = controller.handle(
-            action: .optionR,
-            prefixCandidates: prefix,
-            continuationCandidates: continuations,
-            originalText: "我觉得这个接口慢"
-        )
-
-        XCTAssertEqual(result, .polishRequested("我觉得这个接口慢"))
-    }
-
     func testToggleSymbolModeDoesNotCommitComposition() {
         let controller = InputCompositionController()
         let result = controller.handle(

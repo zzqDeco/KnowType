@@ -86,70 +86,27 @@ final class InputSymbolModeTests: XCTestCase {
         XCTAssertEqual(transformer.text(for: "@", state: state), "＠")
     }
 
-    func testAppPolicyDefaultsTerminalsToAsciiAndEditorsToChineseText() {
+    func testFullWidthCharacterTransformCoversPrintableASCIIAndSpace() {
         XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.apple.Terminal"),
-            InputModeState(
-                textMode: .ascii,
-                punctuationMode: .english,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.googlecode.iterm2"),
-            InputModeState(
-                textMode: .ascii,
-                punctuationMode: .english,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "org.vim.MacVim"),
-            InputModeState(
-                textMode: .ascii,
-                punctuationMode: .english,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.apple.dt.Xcode"),
-            InputModeState(
-                textMode: .chinese,
-                punctuationMode: .english,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex"),
-            InputModeState(
-                textMode: .chinese,
-                punctuationMode: .english,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij"),
-            InputModeState(
-                textMode: .chinese,
-                punctuationMode: .english,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.todesktop.app.example"),
-            InputModeState(
-                textMode: .chinese,
-                punctuationMode: .english,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.apple.TextEdit"),
-            InputModeState()
+            InputSymbolTransformer.textWithWidth(for: " !09AZaz~", width: .fullWidth),
+            "　！０９ＡＺａｚ～"
         )
     }
 
-    func testAppPolicyUsesStoredPreferencesForDefaultAndCodeContexts() {
+    func testFullWidthCharacterTransformPreservesControlAndNonASCIIText() {
+        let input = "\t\n\r\u{7F}中文"
+
+        XCTAssertEqual(
+            InputSymbolTransformer.textWithWidth(for: input, width: .fullWidth),
+            input
+        )
+        XCTAssertEqual(
+            InputSymbolTransformer.textWithWidth(for: "A 1", width: .halfWidth),
+            "A 1"
+        )
+    }
+
+    func testLegacyAppPreferencesDoNotDefineTheRuntimeInitialState() {
         let preferences = InputModePreferences(
             defaultState: InputModeState(
                 textMode: .chinese,
@@ -162,29 +119,14 @@ final class InputSymbolModeTests: XCTestCase {
                 symbolWidth: .halfWidth
             )
         )
+        let machine = InputModeStateMachine(symbolWidth: preferences.globalSymbolWidth)
 
         XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.apple.TextEdit", preferences: preferences),
-            preferences.defaultState
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.apple.Terminal", preferences: preferences),
-            preferences.codeAppState
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.openai.codex", preferences: preferences),
+            machine.snapshot.state,
             InputModeState(
                 textMode: .chinese,
                 punctuationMode: .chinese,
-                symbolWidth: .halfWidth
-            )
-        )
-        XCTAssertEqual(
-            InputModeAppPolicy.defaultState(appBundleID: "com.jetbrains.intellij", preferences: preferences),
-            InputModeState(
-                textMode: .chinese,
-                punctuationMode: .chinese,
-                symbolWidth: .halfWidth
+                symbolWidth: .fullWidth
             )
         )
     }

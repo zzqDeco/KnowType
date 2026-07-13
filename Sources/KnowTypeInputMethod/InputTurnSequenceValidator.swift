@@ -174,8 +174,6 @@ extension InputTurnEffect {
             return "insertCommittedText"
         case .schedulePostInsertCaretVerification:
             return "schedulePostInsertCaretVerification"
-        case .requestPolish:
-            return "requestPolish"
         case .refreshComposition:
             return "refreshComposition"
         case .hideCandidatePanel:

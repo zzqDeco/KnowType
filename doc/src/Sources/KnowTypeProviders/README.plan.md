@@ -30,7 +30,12 @@ Runtime provider loading is profile-based:
 
 Profile JSON must not store API key values represented by `secretName`. Custom headers are written to JSON as configured and should not contain secrets in the MVP.
 
-When `providers.json` is empty or missing, runtime loading uses the same seeded templates as settings. The seeded default is a local OpenAI-compatible profile at `http://127.0.0.1:8317/v1` with a blank model for `/v1/models` discovery and no embedded API key.
+When canonical `providers.v2.json` is empty or genuinely absent, runtime loading
+uses the same seeded templates as settings. Legacy `providers.json` is only a
+migration source/tombstone and is never a runtime authority after cutover. The
+seeded default is a local OpenAI-compatible profile at
+`http://127.0.0.1:8317/v1` with a blank model for `/v1/models` discovery and no
+embedded API key.
 
 `ProviderConnectionDiagnostic` treats empty candidate lists, blank candidate
 text, and candidates rejected by prefix-locked continuation sanitization as

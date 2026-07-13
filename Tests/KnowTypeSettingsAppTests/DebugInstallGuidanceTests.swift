@@ -48,6 +48,17 @@ final class DebugInstallGuidanceTests: XCTestCase {
         })
     }
 
+    func testGuidanceUsesVersionPlaceholdersInsteadOfStaleReleaseNumbers() {
+        XCTAssertTrue(DebugInstallGuidance.commands.contains(
+            "./scripts/package-dmg.sh --version X.Y.Z --build N"
+        ))
+        XCTAssertTrue(DebugInstallGuidance.commands.contains(
+            "./scripts/install-inputmethod.sh --from-release-zip dist/release/KnowType-vX.Y.Z-macos-local-mvp.zip"
+        ))
+        XCTAssertFalse(DebugInstallGuidance.commands.contains { $0.contains("v0.2.1") })
+        XCTAssertFalse(DebugInstallGuidance.commands.contains { $0.contains("--version 0.2.1") })
+    }
+
     func testGuidanceDefaultsToChineseForEnglishPreferredLanguages() {
         let steps = DebugInstallGuidance.steps(preferredLanguages: ["en-US"])
 

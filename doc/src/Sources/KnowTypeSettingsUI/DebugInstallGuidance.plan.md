@@ -13,6 +13,8 @@ log command guidance shown in settings.
 ## Behavior Notes
 
 - Guidance should match the current script names and safe defaults.
+- Release examples use `X.Y.Z` and `N` placeholders instead of embedding an old
+  product version that can drift from the current bundle.
 - The default install command installs the input-method app only; `--with-prefpane`
   is documented as the compatibility PreferencePane path.
 - Settings should direct users to the localized input-method menu settings

@@ -2,35 +2,32 @@
 
 ## Responsibility
 
-`InputModePreferences` defines persisted input-mode defaults shared by settings
-and the input-method runtime.
+`InputModePreferences` persists the global default symbol width used when a new
+input-method host process creates its input-mode state machine.
 
 ## Boundaries
 
-- It stores preference data and policy defaults only; IMK key handling stays in
+- Runtime text mode and punctuation mode belong to `InputModeStateMachine` and
+  are not persisted across host restarts.
+- Host carrier compatibility and bundle matching stay in
   `KnowTypeInputMethod`.
-- It does not decide candidate rows, provider eligibility, or Level 0
-  protection.
+- This model does not decide punctuation output or inspect document text.
 
 ## Behavior Notes
 
-- Normal-app and code-app defaults are stored in the shared
-  `com.knowtype.preferences` defaults domain.
-- Text mode, punctuation language, and symbol width are separate fields.
-- Code-style app defaults include terminal, editor, Codex, Electron, and
-  JetBrains-style bundle identifiers for punctuation and symbol-width defaults.
-  This is independent from host marked-text carrier selection.
-- Terminal-style apps, including Terminal, iTerm, MacVim, and Emacs-style
-  bundles, keep the code-app ASCII text default. Editor, Codex, Electron, and
-  JetBrains-style apps inherit the normal text-mode default so Chinese
-  composition can start immediately while still using code-app punctuation and
-  symbol-width defaults. The built-in code-app punctuation default is English
-  and symbol width remains half-width unless saved preferences override it.
-- The ASCII text pipeline remains available when the active session switches
-  through the session-local text-mode toggle.
+- `input.global.symbolWidth` is the active preference key.
+- First read migrates by precedence: the new key, then legacy
+  `input.default.symbolWidth`, then half-width.
+- `defaultState`, `codeAppState`, and their old UserDefaults keys remain
+  readable for source and data compatibility, but the production input runtime
+  ignores their text and punctuation values.
+- Saving writes only the global width key and does not delete or rewrite legacy
+  user data.
+- Changing the global width updates both legacy state shapes in memory so older
+  callers continue to observe a coherent width.
 
 ## Tests
 
 - `InputModePreferencesTests`
 - `InputModePreferencesViewModelTests`
-- `InputSymbolModeTests`
+- `InputModeStateMachineTests`

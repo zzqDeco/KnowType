@@ -3,7 +3,6 @@ import KnowTypeAI
 
 enum InputCommitApplicationPlan: Sendable, Equatable {
     case insertAndReset(String)
-    case requestPolishAndKeepComposition(String)
     case keepComposition
     case noAction(consume: Bool)
 }
@@ -18,8 +17,6 @@ final class InputCommitApplicationRuntime: @unchecked Sendable {
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
             return .insertAndReset(text)
-        case .requestPolishAndKeepComposition(let text):
-            return .requestPolishAndKeepComposition(text)
         case .keepComposition:
             return .keepComposition
         case .noAction:

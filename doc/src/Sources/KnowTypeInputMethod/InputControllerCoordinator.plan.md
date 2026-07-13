@@ -9,14 +9,20 @@ event publication side effects in the required order.
 Current behavior:
 
 - maps `InputKeyStroke` values through `InputKeyCommandMapper`
+- cancels an active symbol-candidate overlay before returning `false` for a
+  Command/Control host shortcut, preventing the next Space from committing a
+  stale symbol while preserving host handling
 - delegates raw input, `CompositionBuffer`, composition id, raw revision, and
   delete-count state to `InputCompositionStateRuntime`
 - delegates composition begin and finish lifecycle planning to
   `InputCompositionLifecycleRuntime`, including first-begin trace-once state,
   lifecycle reason to panel reason mapping, finished composition id capture,
   lifecycle commit text carrying, and owned marked-text clear intent
-- owns input-mode runtime, Rime snapshots, and native candidate navigation
-  orchestration
+- reads process-wide input-mode snapshots, compares their generation on every
+  turn, synchronizes native Rime options, and resets coordinator-local quote
+  fallback and symbol-candidate state
+  when another session changed the mode; stale symbol overlays are restored to
+  composition UI or hidden before the current key continues
 - selects a host compatibility write mode before writing or passing through
   printable input through `InputClientCompositionWriter`
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
@@ -31,6 +37,9 @@ Current behavior:
 - commits through `InputControllerClient.insertText` with a centralized write
   stack; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
+- checks idle passthrough/disabled mode before full-width letter, digit, space,
+  or symbol fast paths; missing callback clients never fall back to a stale host
+  client, and unchanged Unicode remains passthrough in ASCII mode
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
 - tracks KnowType-owned marked text by client and clears only that owned mark;
   `InputClientCompositionWriter` owns the tracked client id and clear-before-
@@ -57,11 +66,13 @@ Current behavior:
 - passes idle printable ASCII back to compatibility hosts when no composition is
   active; native candidate-only snapshots still count as active composition for
   number selection
-- maps Option+/ to a session-local Chinese/ASCII text-mode toggle so
-  terminal-style compatibility hosts can switch between Chinese placeholder
-  composition and idle ASCII passthrough
-- bypasses the input-mode preference reload throttle when the focused app bundle
-  changes, so quick host switches do not reuse the previous host's text mode
+- maps Option+/ to the shared Chinese/ASCII transition, which also restores
+  linked Chinese/English punctuation; app bundle changes do not reload mode
+- maps Option+. to a Chinese-mode-only manual punctuation override; ASCII mode
+  keeps English punctuation and only republishes status
+- keeps Shift+Space width changes independent, transforms idle printable ASCII
+  and space when required, and propagates saved global-width changes through the
+  shared runtime generation
 - keeps AI recommendation explicit: Tab, Option-number, and mouse click can commit a ready AI row, but ordinary digits are reserved for Rime candidates
 - when native Rime is active, hover and arrow selection go through
   `InputNativeCandidateNavigationRuntime` so Rime's current-page highlight stays
@@ -74,6 +85,14 @@ Current behavior:
 - if native highlight is unavailable, arrow navigation falls back to local panel selection and Space explicitly selects that Rime current-page index before generic native Space
 - handles Rime's default paging punctuation (`-`/`=`, `,`/`.`) before symbol commit fallback, but falls back to punctuation when the native snapshot does not change so page-boundary punctuation is not swallowed
 - offers composing ASCII symbols to Rime before punctuation fallback so schema keys such as apostrophe, semicolon, and slash stay available to the engine
+- requests the character before a collapsed caret only for Chinese half-width
+  quote keys; English and full-width quote output skips document context;
+  the recorded prior insertion keeps ASCII-origin digits followed by `.`
+  half-width without a period-key document read, while quote context maps
+  whitespace/open punctuation to opening and text/digits/closing punctuation to
+  closing
+- records only the previous-character classification and context source in
+  diagnostics, never surrounding or committed text
 - highlight-only updates refresh marked text and the panel without restarting AI recommendation requests
 - preserves an explicitly selected non-Rime row from the IMK/custom candidate window before falling back to native Rime Space
 - native final Space, numeric, and mouse/panel candidate commits record local selection history before composition reset; partial native commits do not

@@ -6,7 +6,6 @@ public enum InputSessionMode: Sendable, Equatable {
     case composing
     case candidate
     case aiPending
-    case polish
     case ascii
 }
 
@@ -17,7 +16,6 @@ public struct InputSessionState: Sendable, Equatable {
     public var latestSuggestionRawInput: String?
     public var selectedPrefixIndex: Int
     public var selectedContinuationIndex: Int?
-    public var polishRequested: Bool
 
     public init(
         mode: InputSessionMode = .empty,
@@ -25,8 +23,7 @@ public struct InputSessionState: Sendable, Equatable {
         latestSuggestion: SuggestionResponse? = nil,
         latestSuggestionRawInput: String? = nil,
         selectedPrefixIndex: Int = 0,
-        selectedContinuationIndex: Int? = nil,
-        polishRequested: Bool = false
+        selectedContinuationIndex: Int? = nil
     ) {
         self.mode = mode
         self.rawInput = rawInput
@@ -34,7 +31,6 @@ public struct InputSessionState: Sendable, Equatable {
         self.latestSuggestionRawInput = latestSuggestionRawInput
         self.selectedPrefixIndex = selectedPrefixIndex
         self.selectedContinuationIndex = selectedContinuationIndex
-        self.polishRequested = polishRequested
     }
 }
 
@@ -159,8 +155,6 @@ public enum InputSessionCommitPolicy {
                 continuationCandidates: suggestion.continuationCandidates,
                 originalText: rawInput
             )
-        case .optionR:
-            return .polishRequested(rawInput)
         case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth, .commitRaw:
             return .noAction
         }
@@ -177,8 +171,6 @@ public enum InputSessionCommitPolicy {
             switch action {
             case .space, .tab, .commitRaw:
                 return .commit(rawInput)
-            case .optionR:
-                return .polishRequested(rawInput)
             case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
                 return .noAction
             }
@@ -190,8 +182,6 @@ public enum InputSessionCommitPolicy {
                 switch action {
                 case .space, .tab, .optionNumber:
                     return .commit(suggestion.prefixCandidates[index].text)
-                case .optionR:
-                    return .polishRequested(rawInput)
                 case .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
                     return .noAction
                 case .commitRaw:
@@ -219,8 +209,6 @@ public enum InputSessionCommitPolicy {
                     continuationCandidates: suggestion.continuationCandidates,
                     originalText: rawInput
                 )
-            case .optionR:
-                return .polishRequested(rawInput)
             case .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
                 return .noAction
             case .commitRaw:
@@ -302,7 +290,6 @@ public actor InputSessionController {
         state.latestSuggestionRawInput = nil
         state.selectedPrefixIndex = 0
         state.selectedContinuationIndex = nil
-        state.polishRequested = false
         let loadedSuggestion = await loader(context)
         // The actor is reentrant while awaiting provider-backed suggestions; older completions must not publish stale state.
         guard generation == updateGeneration else {
@@ -319,7 +306,6 @@ public actor InputSessionController {
         state.latestSuggestionRawInput = rawInput
         state.selectedPrefixIndex = 0
         state.selectedContinuationIndex = nil
-        state.polishRequested = false
         state.mode = mode(
             rawInput: rawInput,
             suggestion: suggestion,
@@ -364,7 +350,7 @@ public actor InputSessionController {
 
         let result: InputCommitResult
         switch action {
-        case .space, .tab, .optionR, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
+        case .space, .tab, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
             result = compositionController.handle(
                 action: action,
                 prefixCandidates: [prefix],
@@ -393,23 +379,7 @@ public actor InputSessionController {
             result = state.rawInput.isEmpty ? .noAction : .commit(state.rawInput)
         }
 
-        if case .polishRequested = result {
-            state.polishRequested = true
-            state.mode = .polish
-        }
-
         return result
-    }
-
-    @discardableResult
-    public func requestPolish(rawInput: String) -> InputCommitResult {
-        guard !rawInput.isEmpty else {
-            return .noAction
-        }
-        state.rawInput = rawInput
-        state.polishRequested = true
-        state.mode = .polish
-        return .polishRequested(rawInput)
     }
 
     public func reset() {

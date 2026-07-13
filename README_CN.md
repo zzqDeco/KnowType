@@ -34,8 +34,8 @@ KnowType 把“把我打错的内容变准确”和“顺着我确认的内容�
 Tab 上屏：       我觉得这个方案还有进一步优化空间
 ```
 
-这里 AI 延续只负责 `还有进一步优化空间`。它不能把已经锁定的前缀改写成
-另一句话，除非用户显式触发 polish。
+这里 AI 延续只负责 `还有进一步优化空间`，不能把已经锁定的前缀改写成
+另一句话。
 
 ## 功能
 
@@ -44,7 +44,7 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
 - 本地候选学习：最近选择过的前缀会在输入法重启后继续影响本地排序，
   不发送给 provider。
 - 前缀锁定的 AI 推荐：第一候选固定为 Rime 转换，第二候选固定为 AI 推荐；
-  显式 polish 才是改写路径。
+  已锁定前缀永不改写。
 - macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及紧凑、
   原生风格并能覆盖 Spotlight/search 浮层的 AppKit 候选窗。
 - 多 provider 兼容：OpenAI-compatible chat、OpenAI Responses、
@@ -128,6 +128,13 @@ raw 输入可用并报告 degraded conversion state，而不是回退到已经�
 Keychain secret、AI 上下文文档、`~/.knowtype` 或本地词库。用户手动选择 KnowType 并开始真实输入后，
 Rime 初始化属于正常使用行为，不属于安装阶段副作用。
 
+新版回滚 manifest 会记录两个安装产物各自的 checksum、bundle ID、版本/build 和签名
+requirement/identity。回滚会在替换前核对全部字段，并执行
+`codesign --verify --deep --strict`。旧 schema-v1 备份默认拒绝恢复；只有在独立确认备份可信后，
+才能显式使用高风险参数 `--allow-unverified-backup`，而且该参数不能绕过新版 manifest
+校验失败。安装、卸载和回滚也只允许删除 canonical、非 symlink 且 bundle ID 为
+`com.knowtype.preferencepane` 的 `KnowType.prefPane`，同名外部 bundle 会被保留并阻断操作。
+
 KnowType 的专属设置入口对齐 McBopomofo、OpenVanilla 这类原生 IMK 输入法：先在
 macOS 输入法菜单中选中 KnowType，然后点击 `KnowType 设置...`（显式英文资源路径下为
 `KnowType Settings...`）。它会打开 macOS 原生 sidebar 和 grouped settings 页面；
@@ -169,6 +176,16 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 ./scripts/rollback-inputmethod.sh --latest
 ```
 
+回滚会保留 profile 内容和 Keychain secret。若目标备份早于 provider storage
+generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版可读的数字 schema，
+再发布旧 app；无法证明转换安全时会直接拒绝回滚。
+
+只对已独立确认可信的旧备份，先执行 dry-run 并显式开启兼容覆盖：
+
+```bash
+./scripts/rollback-inputmethod.sh --to BACKUP_ID --dry-run --allow-unverified-backup
+```
+
 本地 IME 行为仍需要在真实 host app 中打字验证。macOS policy、输入源选择和
 手动验收流程见 [Local Input Method Testing](doc/local-inputmethod-testing.plan.md)
 和 [MVP Acceptance](doc/mvp-acceptance.plan.md)。
@@ -177,7 +194,7 @@ Text Input Source 缓存。这个边界与成熟 IMK 输入法一致：安装流
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.7-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -189,16 +206,28 @@ shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.6-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.7-macos-local-mvp.zip
 ```
 
 ## 配置
 
 Provider profile 以 JSON 元数据保存，API key 单独保存。
+Profile 文件使用带 revision 的事务格式，多个设置窗口不会静默覆盖彼此的
+修改。变更后的 Keychain 凭据使用不可变引用。Base URL 可以保留运行时兼容
+所需的 query，但不能包含 userinfo 或 fragment；诊断输出会移除 userinfo、
+query 和 fragment。
+运行中的输入法 host 会观察已提交的 profile revision。下一次满足条件的推荐或
+context digest 会直接使用新 provider，无需重启 host；旧的 in-flight provider
+请求会被取消，普通按键热路径不会轮询 provider 文件。
 
 ```text
-~/Library/Application Support/KnowType/providers.json
+~/Library/Application Support/KnowType/providers.v2.json
 ```
+
+升级时安装器会把旧 `providers.json` 的原始内容保存在
+`providers.legacy.json`，重新绑定 Keychain 引用，再把旧路径写成兼容
+tombstone。请不要手工编辑这两个兼容文件；诊断发现旧版 Settings 回写后，
+先关闭旧进程并保留两份 payload 进行冲突处理，安装器不会静默丢弃旧版回写。
 
 本地候选学习历史：
 
@@ -224,10 +253,16 @@ scripts/install-lexicon-pack.sh rime-pinyin-simp
 安装器会下载固定版本的 Apache-2.0 Rime 词库，校验 SHA256，转换成
 KnowType TSV，并在 TSV 旁写入本地 metadata。第三方大词库数据不会提交到本仓库。
 
-当 `providers.json` 不存在或为空时，KnowType 会使用本地 OpenAI-compatible
+当全新安装的 `providers.v2.json` 不存在或为空时，KnowType 会使用本地 OpenAI-compatible
 默认 profile：`http://127.0.0.1:8317/v1`，不内置 API key。远程
 OpenAI-compatible profile 必须显式填写 model ID；本地 OpenAI-compatible
 profile 可以留空 model，并通过 `/v1/models` 发现。
+
+新建 Anthropic 和 Gemini profile 分别使用 `claude-haiku-4-5-20251001` 与
+`gemini-3.5-flash`。已有 profile 只有在 model 精确等于退役模板 ID、且 endpoint
+仍是对应官方 API 时才会按 revision 一次性更新；自定义代理 endpoint 保留原 model。
+Custom HTTP body placeholder 只对原始模板扫描一次，因此用户输入中的 placeholder
+字面量不会被二次替换；未知或未闭合的 `{{...}}` 会在发请求前报模板无效。
 
 AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的本地上下文
 记忆，`CORRECTION.md` 保存用户可编辑的 AI 纠错说明，`LEXICAL_PROFILE.md`
@@ -291,43 +326,51 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 
 | 快捷键 | 行为 |
 |---|---|
-| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时插入普通空格，或在兼容宿主中直通给宿主。 |
-| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时输入普通数字，或在兼容宿主中直通给宿主。 |
+| `Space` | composition 活跃时提交 Rime 当前高亮候选；没有 active composition 时输入普通空格，全角模式下输入 U+3000。 |
+| `1...9` | 原生 Rime composition 活跃时选择当前页候选，即使自绘候选窗暂时隐藏；没有 active composition 时按字符宽度输入半角或全角数字。 |
 | 方向键、`PageUp` / `PageDown`、`-` / `=`、`,` / `.` | 在当前 Rime 页内移动选择；到候选列表边界且还有上一页或下一页时翻页；不能翻页时回退到普通标点提交路径。第一页首项按左/上会到上一页最后一项。 |
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点、显示符号候选、直接插入标点，或在兼容宿主中直通给宿主。 |
 | `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。 |
-| `Option + .` | 切换当前输入会话的中文/英文标点，并显示短暂模式状态行。 |
-| `Option + /` | 切换当前输入会话的中文/ASCII 文本模式；在终端类兼容宿主中用于在中文 placeholder composition 和空闲 ASCII 直通之间切换。 |
-| `Shift + Space` | 切换当前输入会话的半角/全角字符，并显示短暂模式状态行。 |
+| Command/Control 宿主快捷键 | 先取消已打开的符号候选 overlay，再把快捷键交给当前宿主，避免后续 `Space` 提交旧符号。 |
+| `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
+| `Option + /` | 切换进程级中文/ASCII 输入模式，同时恢复中文/英文标点联动；所有 App 共享。 |
+| `Shift + Space` | 切换进程级半角/全角字符，不改变中英输入或标点模式。全角会转换 ASCII `!` 到 `~` 及普通空格，不转换控制字符、Tab 或换行。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
-| `Option + R` | 请求显式 polish，也是默认交互中的改写路径。 |
 
-中文输入、中文标点和全角字符是三个独立控制。中文标点会转换句读、成对中文
-引号、省略号、破折号、中文括号，并通过 `/` 等多义符号显示符号候选；代码、
-路径和运算类符号在半角宽度下保持 ASCII，只有显式开启全角字符时才会变为
-全角。代码类 app 默认使用中文组合输入、英文标点和半角符号。模式切换后会
-短暂显示类似 `中 · 中文标点 · 半角` 的状态行；下一次真实输入开始
-composition、符号候选、提交或直通时会立即清掉该状态行。
+中英输入、标点语言和字符宽度仍是三层状态，但中英输入与标点采用可预测的全局
+联动：中文输入默认中文标点，ASCII 输入始终英文标点，`Option + /` 每次切换都会
+恢复联动。中文阶段可用 `Option + .` 临时改成英文标点，该手动覆盖到下一次中英
+切换时失效；全半角始终独立。当前输入法 host 运行期间所有 App 共享状态，host
+重启后重新从“中文 + 中文标点 + 已保存全局宽度”开始。原生 Rime session 创建及
+进程模式 generation 变化时会同步 `ascii_mode`、`ascii_punct` 和 `full_shape`。紧邻 ASCII 数字后的 `.`
+固定输出半角点，适配小数和编号，即使当前为中文标点或全角；逗号、选区和未知
+光标上下文仍走普通标点规则。中文引号会读取光标前字符：空白或开标点输出开引号，
+文本、数字或闭标点输出闭引号；上下文未知时才使用 session 内交替。外部删除、
+焦点或选区变化、模式 generation 变化都会重置该 fallback。模式切换后会短暂显示
+类似 `中 · 中文标点 · 半角` 的状态行。
 
 宿主兼容策略优先保证不吞普通输入。标准 AppKit 风格文本框、浏览器、编辑器、
 IDE、Electron shell 和未知客户端默认都使用 inline attributed marked text，
-因此 raw preedit 会显示在当前宿主输入框内。Terminal、iTerm、MacVim 和 Emacs
-风格宿主默认空闲 ASCII 直通，普通字母、数字、空格和标点先交还给 shell 或编辑器，
-按 `Option + /` 后再进入中文输入。这些终端类宿主的中文 composition 使用带
-marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
+因此 raw preedit 会显示在当前宿主输入框内。宿主身份不再改变全局中英或标点
+状态。KnowType 只向 InputMethodKit 注册 key-down 事件，以保留 IMK 的默认行为：
+用户点击 marked range 外部时提交 active composition。快捷键修饰键仍从 key-down
+flags 读取。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
-上方，确认时再通过 `insertText` 上屏。仍可用 UserDefaults override 将任意
+上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲半角 printable 输入会直通
+当前宿主；全角 printable 输入由 KnowType 转换后插入。仍可用 UserDefaults override 将任意
 bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline marked text 的宿主。
 
 候选窗显示 Rime 前缀候选、符号候选、固定 AI 推荐状态行、模式状态行、
 终端/override commit-only placeholder 宿主中的真实 preedit，以及没有建议时的 raw input。preedit 行没有
 快捷键、不可选、不能提交；inline 宿主不会额外显示这一行，避免和宿主输入框里的
 preedit 重复。它是紧凑的 AppKit 自绘 panel，使用 macOS 材质、系统高亮色、鼠标
-hover/click 选择、滚轮翻页和候选行 Accessibility label。配置 provider 后，
+hover/click 选择、一次 trackpad 手势最多翻一页，并支持 VoiceOver press 提交启用的
+候选行；禁用状态行只读、不能提交。配置 provider 后，
 KnowType 会先发布 Rime 前缀候选，再异步更新 provider-backed AI 推荐。Provider
 失败时，不会把固定本地 fallback 文本伪装成 AI 输出。
 
@@ -407,7 +450,7 @@ Resources/                      macOS bundle 资源
 - 不依赖授权本地词库就宣称完整真实世界拼音覆盖
 - 对所有 macOS host app 做通用兼容性承诺
 - 把本地 fallback 延续伪装成配置 provider 的输出
-- 除显式 polish 外改写锁定前缀
+- 改写锁定前缀
 
 ## License
 
