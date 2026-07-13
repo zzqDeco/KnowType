@@ -37,12 +37,10 @@ enum InputTurnEffect: Sendable, Equatable {
     case recordCommitSideEffects(
         text: String,
         acceptedAIRecommendation: AIRecommendationCandidate?,
-        commitKindOverride: AITypingCommitKind?,
         clientScope: InputTurnClientScope
     )
     case insertCommittedText(String, clientScope: InputTurnClientScope)
     case schedulePostInsertCaretVerification
-    case requestPolish(String)
     case refreshComposition
     case hideCandidatePanel(CandidatePanelVisibilityReason)
     case clearOwnedMarkedText
@@ -76,7 +74,6 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
         token: InputTurnToken,
         applicationPlan: InputCommitApplicationPlan,
         acceptedAIRecommendation: AIRecommendationCandidate?,
-        commitKindOverride: AITypingCommitKind? = nil,
         resetPlan: InputCompositionLifecycleFinishPlan?
     ) -> InputTurnEffectSequence {
         switch applicationPlan {
@@ -86,7 +83,6 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 .recordCommitSideEffects(
                     text: text,
                     acceptedAIRecommendation: acceptedAIRecommendation,
-                    commitKindOverride: commitKindOverride,
                     clientScope: .provided
                 ),
                 .insertCommittedText(text, clientScope: .provided)
@@ -98,15 +94,6 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 effects.append(contentsOf: lifecycleEffects(for: resetPlan))
             }
             return InputTurnEffectSequence(token: token, effects: effects, handled: true)
-        case .requestPolishAndKeepComposition(let text):
-            return InputTurnEffectSequence(
-                token: token,
-                effects: [
-                    .requestPolish(text),
-                    .refreshComposition
-                ],
-                handled: true
-            )
         case .keepComposition:
             return InputTurnEffectSequence(
                 token: token,
@@ -129,7 +116,6 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 .recordCommitSideEffects(
                     text: text,
                     acceptedAIRecommendation: nil,
-                    commitKindOverride: nil,
                     clientScope: .provided
                 ),
                 .insertCommittedText(text, clientScope: .provided),
@@ -191,7 +177,6 @@ final class InputTurnSequencingRuntime: @unchecked Sendable {
                 .recordCommitSideEffects(
                     text: commitText,
                     acceptedAIRecommendation: nil,
-                    commitKindOverride: nil,
                     clientScope: .effective
                 )
             )

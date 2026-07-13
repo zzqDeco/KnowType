@@ -4,7 +4,6 @@ public enum LLMTask: String, Codable, Sendable, Equatable {
     case correction
     case continuation
     case contextDigest
-    case polish
 }
 
 public enum KnowTypeLocale: String, Codable, Sendable, Equatable {

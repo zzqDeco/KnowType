@@ -211,7 +211,6 @@ public enum AITypingCommitKind: String, Codable, Sendable, Equatable {
     case traditional
     case ai
     case raw
-    case polish
     case symbol
     case externalDelete
 }

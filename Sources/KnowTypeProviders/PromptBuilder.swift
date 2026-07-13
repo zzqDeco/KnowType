@@ -10,8 +10,6 @@ enum PromptBuilder {
             return contextDigestPrompt
         case .correction:
             return correctionPrompt
-        case .polish:
-            return polishPrompt
         }
     }
 
@@ -21,7 +19,7 @@ enum PromptBuilder {
     The user message is a JSON object. Read lockedPrefix, rawInput, locale, appContext, maxCandidates, lengthLevel, and contextDocuments.
     lockedPrefix is text the user has already confirmed. Unconfirmed input-method candidates are not user intent.
     Rules:
-    - If lockedPrefix is present, text must be only the suffix after lockedPrefix. Do not include, paraphrase, translate, rewrite, or polish lockedPrefix.
+    - If lockedPrefix is present, text must be only the suffix after lockedPrefix. Do not include, paraphrase, translate, rewrite, or otherwise modify lockedPrefix.
     - If lockedPrefix is absent, rawInput may be pinyin, English, or a technical token; text must be a complete commit-ready recommendation inferred from rawInput, contextDocuments, appContext, and locale.
     - Do not assume the input method's first conversion candidate or current highlighted candidate is user intent.
     - Prefer one concise, immediately useful recommendation in the same language and intent implied by lockedPrefix, rawInput, contextDocuments, and locale.
@@ -46,13 +44,6 @@ enum PromptBuilder {
     Return JSON only with this shape: {"markdown":"..."}.
     Summarize typing events into a concise ENV.md generated section.
     Preserve user notes and do not invent private facts.
-    """
-
-    private static let polishPrompt = """
-    You are KnowType, a macOS Chinese/English AI input method.
-    Return JSON only with this shape: {"candidates":[{"text":"...","confidence":0.0,"reason":"..."}]}.
-    For polish, rewriting is allowed because the user explicitly requested it.
-    Preserve technical tokens such as API, JSON, FastAPI, iOS, macOS, InputMethodKit, snake_case, camelCase, and userID.
     """
 
     static func userPayload(for request: LLMRequest) throws -> String {

@@ -13,7 +13,6 @@ struct InputAIAcceptanceCommitContext {
     var prefixCandidateSource: String?
     var deleteCountBeforeCommit: Int
     var client: InputControllerClient?
-    var commitKindOverride: AITypingCommitKind? = nil
 }
 
 struct InputAIAcceptanceFeedbackContext {
@@ -109,7 +108,7 @@ final class InputAIAcceptanceRuntime: @unchecked Sendable {
                     candidateSource: candidateSource
                 )
             }
-        } else if commitKind != .polish {
+        } else {
             feedbackTracker.observeVerifiedReplacementCommit(context.text, client: context.client)
         }
         guard !TextProtection.requiresNoCorrection(context.text, appBundleID: context.appBundleID),
@@ -123,7 +122,7 @@ final class InputAIAcceptanceRuntime: @unchecked Sendable {
             commitKind: commitKind,
             candidateSource: candidateSource
         )
-        return InputAIAcceptanceCommitEffects(shouldRecordLexicalCommit: commitKind != .polish)
+        return InputAIAcceptanceCommitEffects(shouldRecordLexicalCommit: true)
     }
 
     func recordExternalDelete(appBundleID: String?) {
@@ -196,7 +195,6 @@ final class InputAIAcceptanceRuntime: @unchecked Sendable {
         guard let contextEventRecorder,
               canRequestAIRecommendations,
               runtimePreferences.cloudContinuationEnabled,
-              commitKind != .polish,
               !context.text.isEmpty else {
             return
         }
@@ -215,9 +213,6 @@ final class InputAIAcceptanceRuntime: @unchecked Sendable {
     }
 
     private func commitKind(for context: InputAIAcceptanceCommitContext) -> AITypingCommitKind {
-        if let commitKindOverride = context.commitKindOverride {
-            return commitKindOverride
-        }
         if context.acceptedAIRecommendation != nil {
             return .ai
         }
@@ -231,9 +226,6 @@ final class InputAIAcceptanceRuntime: @unchecked Sendable {
     }
 
     private func candidateSource(for context: InputAIAcceptanceCommitContext) -> String {
-        if context.commitKindOverride == .polish {
-            return "ai-polish"
-        }
         if let candidate = context.acceptedAIRecommendation {
             return "ai:\(candidate.provider)"
         }

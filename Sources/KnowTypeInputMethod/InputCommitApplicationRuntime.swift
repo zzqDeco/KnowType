@@ -3,7 +3,6 @@ import KnowTypeAI
 
 enum InputCommitApplicationPlan: Sendable, Equatable {
     case insertAndReset(String)
-    case requestPolishAndKeepComposition(String)
     case keepComposition
     case noAction(consume: Bool)
 }
@@ -18,8 +17,6 @@ final class InputCommitApplicationRuntime: @unchecked Sendable {
         switch InputCommitResultPolicy.directive(for: result) {
         case .insertAndReset(let text):
             return .insertAndReset(text)
-        case .requestPolishAndKeepComposition(let text):
-            return .requestPolishAndKeepComposition(text)
         case .keepComposition:
             return .keepComposition
         case .noAction:
@@ -51,7 +48,6 @@ final class InputCommitApplicationRuntime: @unchecked Sendable {
         acceptID: UUID?,
         selectedNativeCandidateSource: String?,
         prefixCandidateSource: String?,
-        commitKindOverride: AITypingCommitKind? = nil,
         compositionSnapshot: InputCompositionStateSnapshot,
         client: InputControllerClient?
     ) -> InputCommitApplicationSideEffectContexts {
@@ -66,8 +62,7 @@ final class InputCommitApplicationRuntime: @unchecked Sendable {
                 selectedNativeCandidateSource: selectedNativeCandidateSource,
                 prefixCandidateSource: prefixCandidateSource,
                 deleteCountBeforeCommit: compositionSnapshot.deleteCountBeforeCommit,
-                client: client,
-                commitKindOverride: commitKindOverride
+                client: client
             ),
             lexicalCommit: InputLexicalCommitContext(
                 text: text,

@@ -85,7 +85,6 @@ public struct CandidatePanelState: Sendable, Equatable {
         placementPreference: CandidatePanelPlacementPreference = .automatic,
         preeditDisplayText: String? = nil,
         aiRecommendation: AIRecommendationState = .idle,
-        aiPolish: InputAIPolishState = .idle,
         modeStatusText: String? = nil,
         symbolCandidates: [InputSymbolCandidate] = [],
         preferredSelection: CandidatePanelSelection? = nil
@@ -102,7 +101,6 @@ public struct CandidatePanelState: Sendable, Equatable {
             prefixCandidates: prefixCandidates,
             continuationCandidates: continuationCandidates,
             aiRecommendation: aiRecommendation,
-            aiPolish: aiPolish,
             symbolCandidates: symbolCandidates
         )
         let hasRows = !CandidatePanelRowBuilder().buildRows(in: viewModel).isEmpty
@@ -247,7 +245,7 @@ public struct CandidatePanelState: Sendable, Equatable {
         switch selection {
         case .prefixCandidate, .fullCandidate, .segmentCandidate:
             return true
-        case .aiRecommendation, .polishCandidate, .continuationCandidate, .rawInput, .symbolCandidate:
+        case .aiRecommendation, .continuationCandidate, .rawInput, .symbolCandidate:
             return false
         }
     }
@@ -295,12 +293,6 @@ public struct CandidatePanelState: Sendable, Equatable {
         case .aiRecommendation:
             return windowState.viewModel.aiRecommendation == viewModel.aiRecommendation
                 && viewModel.aiRecommendation.isSelectableRecommendation
-        case .polishCandidate(let index):
-            guard windowState.viewModel.aiPolish.candidates.indices.contains(index),
-                  viewModel.aiPolish.candidates.indices.contains(index) else {
-                return false
-            }
-            return windowState.viewModel.aiPolish.candidates[index] == viewModel.aiPolish.candidates[index]
         case .symbolCandidate(let index):
             guard windowState.viewModel.symbolCandidates.indices.contains(index),
                   viewModel.symbolCandidates.indices.contains(index) else {

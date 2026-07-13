@@ -21,8 +21,7 @@ Boundaries:
   order-sensitive side effects: Rime `process`, segment mutation, host insert,
   lifecycle reset, panel publication, AI acceptance, and lexical recording.
 - `InputCommitApplicationRuntime` still owns mapping a chosen
-  `InputCommitResult` to insert/polish/no-action application and side-effect
-  contexts.
+  `InputCommitResult` to insert/no-action application and side-effect contexts.
 
 Tests:
 

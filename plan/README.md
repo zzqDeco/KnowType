@@ -35,7 +35,6 @@ when converting a shipped plan into a short record.
 | [persistent-user-selection-history.plan.md](persistent-user-selection-history.plan.md) | Persist local candidate learning across IMK restarts | Active |
 | [candidate-anchor-resolver-fix.plan.md](candidate-anchor-resolver-fix.plan.md) | Candidate-window geometry resolver behavior | Active |
 | [candidate-panel-interaction-accessibility.plan.md](candidate-panel-interaction-accessibility.plan.md) | Harden host-shortcut symbol cleanup, VoiceOver press, and pointer paging | Active |
-| [inputmethod-ai-polish-runtime.plan.md](inputmethod-ai-polish-runtime.plan.md) | Connect explicit Option+R polish requests, overlay interaction, stale guards, and acceptance | Active |
 | [candidate-page-navigation.plan.md](candidate-page-navigation.plan.md) | PageDown/PageUp offset-preserving candidate paging | Active |
 | [candidate-panel-adaptive-layout.plan.md](candidate-panel-adaptive-layout.plan.md) | Measurement-first adaptive candidate panel layout | Active |
 | [candidate-panel-row-builder-refactor.plan.md](candidate-panel-row-builder-refactor.plan.md) | Share candidate-panel row ordering between state and renderer | Active |
@@ -147,6 +146,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [option-r-polish-removal.plan.md](option-r-polish-removal.plan.md) | Remove the Option+R rewrite workflow and make locked-prefix rewriting unsupported | Delivered |
 | [release-0.2.5.plan.md](release-0.2.5.plan.md) | Prepare and publish the KnowType v0.2.5 Developer Preview release | Delivered |
 | [release-0.2.4.plan.md](release-0.2.4.plan.md) | Prepare and publish the KnowType v0.2.4 Developer Preview release | Delivered |
 | [release-0.2.3.plan.md](release-0.2.3.plan.md) | Prepare and publish the KnowType v0.2.3 Developer Preview release | Delivered |

@@ -51,7 +51,7 @@ enum StructuredResponseNormalizer {
                 candidates: [LLMCandidate(text: markdown)],
                 diagnostics: diagnostics
             )
-        case .correction, .continuation, .polish:
+        case .correction, .continuation:
             guard object.keys.allSatisfy({ $0 == "candidates" }) else {
                 throw structuredDecodeError("unexpected candidate response fields")
             }

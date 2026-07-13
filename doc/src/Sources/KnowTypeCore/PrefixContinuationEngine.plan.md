@@ -8,8 +8,7 @@ locked.
 ## Boundaries
 
 - It may sanitize provider output, but it must not rewrite the locked prefix.
-- Explicit polish is the only default path that may request rewriting existing
-  text.
+- No input action may request rewriting existing locked-prefix text.
 - Provider protocol details stay in `KnowTypeProviders`.
 
 ## Behavior Notes

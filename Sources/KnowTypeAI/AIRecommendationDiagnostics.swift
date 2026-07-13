@@ -52,12 +52,6 @@ public enum AIRecommendationDiagnosticStage: String, Sendable, Equatable {
     case acceptedFeedbackRecorded = "accepted_feedback_recorded"
     case acceptedFeedbackSkippedSecret = "accepted_feedback_skipped_secret"
     case acceptedFeedbackTrackingCancelled = "accepted_feedback_tracking_cancelled"
-    case polishRequested = "polish_requested"
-    case polishReady = "polish_ready"
-    case polishUnavailable = "polish_unavailable"
-    case polishCancelled = "polish_cancelled"
-    case polishAccepted = "polish_accepted"
-    case polishStaleDropped = "polish_stale_dropped"
 }
 
 public struct AIRecommendationDiagnosticEvent: Sendable, Equatable {

@@ -37,8 +37,7 @@ Tab commit:       我觉得这个方案还有进一步优化空间
 ```
 
 The AI continuation is only `还有进一步优化空间`. It is not allowed to turn
-the locked prefix into another sentence unless the user explicitly triggers
-polish.
+the locked prefix into another sentence.
 
 ## Features
 
@@ -47,14 +46,7 @@ polish.
 - Local candidate learning: recent prefix choices can boost local ranking across
   input-method restarts without being sent to providers.
 - Prefix-locked AI recommendation: the first candidate stays Rime conversion,
-  the second slot is reserved for AI, and explicit polish is the only rewrite
-  path. `Option + R` opens a separate polish overlay for the current marked
-  composition; only choosing a ready polish result commits rewritten text.
-  Explicit polish follows the cloud AI toggle and rejects protected or
-  secret-like raw composition before dispatch, even when a different Rime
-  candidate is displayed.
-  Polish acceptance does not enter context-memory or continuation-learning
-  history, and its diagnostics contain metadata only.
+  the second slot is reserved for AI, and locked prefixes are never rewritten.
 - macOS input method flow: marked text, candidate selection, paging,
   punctuation handling, and a compact native-style AppKit candidate panel that
   stays above Spotlight/search overlays.
@@ -400,7 +392,6 @@ placement.
 | `Shift + Space` | Toggle process-wide half-width/full-width characters without changing text or punctuation mode. Full width maps ASCII `!` through `~` and normal space; controls, Tab, and newline are unchanged. |
 | `Option + 1` | Commit the ready AI recommendation explicitly. |
 | `Option + 2...9` | Commit legacy continuation rows when they are present. |
-| `Option + R` | Request explicit polish for the active marked composition. Pending/error rows cannot commit; arrows move, `Space`/number accepts a ready result, and `Escape` cancels. |
 
 Text mode, punctuation language, and symbol width remain separate state
 dimensions, but text and punctuation now follow a predictable global linkage:
@@ -534,7 +525,7 @@ Current non-goals:
 - complete real-world pinyin dictionary coverage without licensed local lexicons
 - universal compatibility claims for every macOS host app
 - using local fallback continuation as fake configured-provider output
-- rewriting locked prefixes except through explicit polish
+- rewriting locked prefixes
 
 ## License
 

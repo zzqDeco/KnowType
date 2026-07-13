@@ -156,15 +156,6 @@ final class InputCommitDecisionRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.resultPlan(context: readyContext), .result(.commit("AI 续写")))
     }
 
-    func testOptionRPolishesFullyResolvedComposition() {
-        var buffer = CompositionBuffer()
-        buffer.updateRawInput("ni")
-        buffer.apply(candidate("你", rawRange: KnowTypeCore.TextRange(start: 0, length: 2)))
-        let context = makeContext(action: .optionR, rawInput: "ni", compositionBuffer: buffer)
-
-        XCTAssertEqual(runtime.resultPlan(context: context), .result(.polishRequested("你")))
-    }
-
     func testNumberSelectionPlansRawAIAndNativeRows() {
         let raw = InputCandidateSelection(text: "ni", kind: .rawInput)
         let ai = InputCandidateSelection(text: "AI 续写", kind: .aiRecommendation)

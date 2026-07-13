@@ -6,7 +6,6 @@ public enum InputAction: Sendable, Equatable {
     case space
     case tab
     case optionNumber(Int)
-    case optionR
     case toggleSymbolMode
     case toggleTextMode
     case toggleSymbolWidth
@@ -15,7 +14,6 @@ public enum InputAction: Sendable, Equatable {
 
 public enum InputCommitResult: Sendable, Equatable {
     case commit(String)
-    case polishRequested(String)
     case noAction
 }
 
@@ -27,7 +25,6 @@ public struct CandidatePanelViewModel: Sendable, Equatable {
     public var prefixCandidates: [CorrectionCandidate]
     public var continuationCandidates: [ContinuationCandidate]
     public var aiRecommendation: AIRecommendationState
-    public var aiPolish: InputAIPolishState
     public var symbolCandidates: [InputSymbolCandidate]
 
     public init(
@@ -38,7 +35,6 @@ public struct CandidatePanelViewModel: Sendable, Equatable {
         prefixCandidates: [CorrectionCandidate],
         continuationCandidates: [ContinuationCandidate],
         aiRecommendation: AIRecommendationState = .idle,
-        aiPolish: InputAIPolishState = .idle,
         symbolCandidates: [InputSymbolCandidate] = []
     ) {
         self.title = title
@@ -48,7 +44,6 @@ public struct CandidatePanelViewModel: Sendable, Equatable {
         self.prefixCandidates = prefixCandidates
         self.continuationCandidates = continuationCandidates
         self.aiRecommendation = aiRecommendation
-        self.aiPolish = aiPolish
         self.symbolCandidates = symbolCandidates
     }
 
@@ -96,8 +91,6 @@ public struct InputCompositionController: Sendable {
                 return .noAction
             }
             return .commit(join(prefix: prefix, continuation: continuationCandidates[index].text))
-        case .optionR:
-            return .polishRequested(originalText)
         case .toggleSymbolMode:
             return .noAction
         case .toggleTextMode:

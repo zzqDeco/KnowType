@@ -31,9 +31,6 @@ insertion.
   delayed post-insert caret check.
 - External Delete events are recorded only when AI context recording is
   available, AI recommendations are possible, and cloud continuation is enabled.
-- Explicit polish commits use the coordinator-supplied `.polish` override and
-  do not create typing-context events, accepted-AI learning,
-  feedback-replacement learning, or lexical-commit learning effects.
 
 ## Tests
 

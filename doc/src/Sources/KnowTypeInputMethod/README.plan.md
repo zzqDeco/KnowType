@@ -4,7 +4,7 @@
 
 Current package-level implementation covers:
 
-- explicit IME session mode modeling for empty, composing, candidate, AI-pending, polish, and protected ASCII/no-correction input
+- explicit IME session mode modeling for empty, composing, candidate, AI-pending, and protected ASCII/no-correction input
 - candidate panel view model
 - session commit policy for raw/prefix numeric shortcuts and native candidate selections
 - legacy segmented composition buffering for package/session tests; production Chinese conversion is Rime-only
@@ -116,9 +116,7 @@ through to generic native Rime space handling, or commits raw input when Rime is
 degraded; `Return` commits raw composition, `Tab` commits ready AI, and numeric
 shortcuts call Rime current-page selection. Punctuation commits the current
 Rime candidate/composition plus mapped punctuation; an idle period after an
-ASCII digit stays `.`. `Option+/` changes the process-wide linked text mode and
-`Option+R` starts `InputAIPolishRuntime` for the current marked composition;
-only explicit selection of a current ready rewrite commits it.
+ASCII digit stays `.`. `Option+/` changes the process-wide linked text mode.
 `InputNativeCandidateNavigationRuntime`
 owns Rime navigation decisions; the coordinator still applies commit results,
 learning, marked text, insertion, and panel publication. Idle printable input

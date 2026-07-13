@@ -3,7 +3,6 @@ import KnowTypeAI
 
 public enum InputCommitDirective: Sendable, Equatable {
     case insertAndReset(String)
-    case requestPolishAndKeepComposition(String)
     case keepComposition
     case noAction
 }
@@ -37,8 +36,6 @@ public enum InputCommitResultPolicy {
         switch result {
         case .commit(let text):
             return .insertAndReset(text)
-        case .polishRequested(let text):
-            return .requestPolishAndKeepComposition(text)
         case .noAction:
             return .noAction
         }

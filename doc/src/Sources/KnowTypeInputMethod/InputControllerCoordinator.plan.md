@@ -74,17 +74,6 @@ Current behavior:
   and space when required, and propagates saved global-width changes through the
   shared runtime generation
 - keeps AI recommendation explicit: Tab, Option-number, and mouse click can commit a ready AI row, but ordinary digits are reserved for Rime candidates
-- routes `Option+R` into `InputAIPolishRuntime`, publishes its dedicated overlay,
-  sends the highlighted native Rime candidate when available, and never commits
-  a rewrite until a current ready `polishCandidate` is explicitly accepted
-- while polish is active, arrows move only polish selection, Space and visible
-  digit labels accept their corresponding ready rows, Escape cancels, and
-  printable/delete input cancels before continuing through normal handling;
-  unavailable rows also cancel and fall through to the next ordinary command,
-  including Command/Control shortcuts passed through to the host
-- synchronizes the shared input-mode generation before keyboard, mouse, or
-  accessibility polish acceptance, so an overlay published before a mode
-  transition cannot commit stale rewritten text
 - when native Rime is active, hover and arrow selection go through
   `InputNativeCandidateNavigationRuntime` so Rime's current-page highlight stays
   authoritative instead of making the custom panel selection authoritative on
@@ -132,9 +121,6 @@ Current behavior:
   `publish_local_suggestion`; `KNOWTYPE_PERF_DEBUG=1` emits all traced stages,
   while `KNOWTYPE_INPUT_LATENCY_DEBUG=1` respects the configured latency budget
 - explicit AI commits through Tab or Option+1 are excluded from prefix-learning history so provider continuations do not pollute local candidate selection signals
-- accepted polish bypasses context-memory, prefix-selection, and
-  accepted-continuation learning, while commit routing still receives the
-  explicit `.polish` classification
 - delegates explicit AI accepted-learning records, typing-context events, and
   accepted-feedback span orchestration to `InputAIAcceptanceRuntime`; the
   coordinator still supplies commit context and performs host insertion
@@ -157,9 +143,6 @@ Current behavior:
   panel render work is supervised by `InputCandidatePanelPublicationRuntime`,
   and real-time AI request tasks are owned by
   `InputAIRecommendationRuntime`
-- resets explicit polish on new input, composition finish, provider revision,
-  shared mode-generation change, reset, deactivate, palette hide, and
-  controller close
 - constructs AI recommendation input context and applies returned AI slot states
   to the candidate panel, while request lifecycle, active request ids,
   generation checks, task cancellation, and stale-result diagnostics live in

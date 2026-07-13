@@ -21,13 +21,6 @@ final class InputCommitResultPolicyTests: XCTestCase {
         )
     }
 
-    func testPolishRequestsKeepComposition() {
-        XCTAssertEqual(
-            InputCommitResultPolicy.directive(for: .polishRequested("我觉得这个接口慢")),
-            .requestPolishAndKeepComposition("我觉得这个接口慢")
-        )
-    }
-
     func testNoActionDoesNotCommitRawText() {
         XCTAssertEqual(
             InputCommitResultPolicy.directive(for: .noAction),

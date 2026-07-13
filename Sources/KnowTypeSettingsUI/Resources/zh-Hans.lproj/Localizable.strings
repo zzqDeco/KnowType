@@ -54,7 +54,7 @@
 "settings.input.textModeShortcut" = "中英模式切换快捷键";
 "settings.input.widthShortcut" = "全半角切换快捷键";
 "settings.input.section.prefixLock" = "前缀锁定";
-"settings.input.prefixLock.note" = "续写候选只会追加在已锁定前缀之后。改写前缀只允许通过显式润色操作触发。";
+"settings.input.prefixLock.note" = "续写候选只会追加在已锁定前缀之后，不支持改写已锁定前缀。";
 "settings.input.section.behavior" = "工作方式";
 "settings.input.disclosure.workflow" = "查看输入与提交规则";
 
@@ -81,7 +81,6 @@
 "settings.candidates.shortcut.number.value" = "选择当前页 Rime 候选";
 "settings.candidates.shortcut.tab.value" = "提交第一条 AI 续写";
 "settings.candidates.shortcut.optionNumber.value" = "提交对应 AI 续写";
-"settings.candidates.shortcut.optionR.value" = "显式润色";
 
 "settings.lexicon.loadedEntries" = "已载入词条";
 "settings.lexicon.lastRefresh" = "上次刷新";

@@ -53,7 +53,7 @@ struct KnowTypeDemo {
                 options.locale = locale
             case "--action":
                 guard let value = iterator.next(), let action = parseAction(value) else {
-                    throw DemoError.invalidArgument("--action expects space, tab, optionN, or polish")
+                    throw DemoError.invalidArgument("--action expects space, tab, or optionN")
                 }
                 options.action = action
             case "--help", "-h":
@@ -74,8 +74,6 @@ struct KnowTypeDemo {
             return .space
         case "tab":
             return .tab
-        case "polish", "optionr", "option-r":
-            return .optionR
         default:
             if value.lowercased().hasPrefix("option"),
                let number = Int(value.dropFirst("option".count)) {
@@ -100,8 +98,6 @@ struct KnowTypeDemo {
             return "Tab"
         case .optionNumber(let number):
             return "Option+\(number)"
-        case .optionR:
-            return "Option+R"
         case .toggleSymbolMode:
             return "Option+."
         case .toggleTextMode:
@@ -117,8 +113,6 @@ struct KnowTypeDemo {
         switch result {
         case .commit(let text):
             return "commit \"\(text)\""
-        case .polishRequested(let text):
-            return "polish requested for \"\(text)\""
         case .noAction:
             return "no action"
         }
@@ -127,7 +121,7 @@ struct KnowTypeDemo {
     private static func printUsage() {
         print("""
         Usage:
-          knowtype-demo [--locale zh-CN|en-US|mixed] [--action space|tab|optionN|polish] <raw input>
+          knowtype-demo [--locale zh-CN|en-US|mixed] [--action space|tab|optionN] <raw input>
 
         Examples:
           swift run knowtype-demo --locale zh-CN --action tab wo jue de zhege fagnan

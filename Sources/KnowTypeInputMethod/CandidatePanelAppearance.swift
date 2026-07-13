@@ -55,7 +55,7 @@ struct CandidatePanelAppearance {
 
     func font(for role: CandidatePanelVisualRole) -> NSFont {
         switch role {
-        case .lockedPrefix, .aiRecommendation, .aiPolish, .continuation, .symbolCandidate:
+        case .lockedPrefix, .aiRecommendation, .continuation, .symbolCandidate:
             return .systemFont(ofSize: textFontSize, weight: .regular)
         case .rawInput, .status:
             return .monospacedSystemFont(ofSize: rawFontSize, weight: .regular)
@@ -107,7 +107,7 @@ struct CandidatePanelAppearance {
                 snapshot: NSColor(calibratedWhite: 0.08, alpha: 1),
                 darkSnapshot: NSColor(calibratedWhite: 0.92, alpha: 1)
             )
-        case .aiRecommendation, .aiPolish, .continuation:
+        case .aiRecommendation, .continuation:
             return color(
                 .secondaryLabelColor,
                 snapshot: NSColor(calibratedWhite: 0.32, alpha: 1),
@@ -140,7 +140,7 @@ struct CandidatePanelAppearance {
                 snapshot: NSColor(calibratedWhite: 0.32, alpha: 1),
                 darkSnapshot: NSColor(calibratedWhite: 0.74, alpha: 1)
             )
-        case .aiRecommendation, .aiPolish, .continuation, .rawInput, .status:
+        case .aiRecommendation, .continuation, .rawInput, .status:
             return color(
                 .tertiaryLabelColor,
                 snapshot: NSColor(calibratedWhite: 0.45, alpha: 1),

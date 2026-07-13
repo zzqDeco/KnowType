@@ -27,10 +27,6 @@ candidate panel.
   do not participate in prefix learning or AI continuation.
 - Disabled AI status rows are visible rows but have no selection identity, no
   numeric shortcut, and are skipped by keyboard and mouse selection.
-- Active polish state replaces ordinary pageable rows. Pending and unavailable
-  polish rows are disabled; ready `polishCandidate` rows are selectable,
-  number-shortcut eligible, and preserve selection only while candidate identity
-  remains unchanged.
 - `selectVisibleRow` is the shared path for hover/click selection and only
   accepts enabled rows on the current page.
 - PageDown and PageUp preserve the selected row's visible offset on the target

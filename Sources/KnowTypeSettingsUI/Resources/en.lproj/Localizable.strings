@@ -54,7 +54,7 @@
 "settings.input.textModeShortcut" = "Text Mode Shortcut";
 "settings.input.widthShortcut" = "Width Shortcut";
 "settings.input.section.prefixLock" = "Prefix Lock";
-"settings.input.prefixLock.note" = "Continuation candidates only append after the locked prefix. Prefix rewriting is available only through explicit polish actions.";
+"settings.input.prefixLock.note" = "Continuation candidates only append after the locked prefix. Rewriting the locked prefix is not supported.";
 "settings.input.section.behavior" = "How It Works";
 "settings.input.disclosure.workflow" = "Show input and commit rules";
 
@@ -81,7 +81,6 @@
 "settings.candidates.shortcut.number.value" = "Selects the current-page Rime candidate";
 "settings.candidates.shortcut.tab.value" = "Commits the first AI continuation";
 "settings.candidates.shortcut.optionNumber.value" = "Commits the matching AI continuation";
-"settings.candidates.shortcut.optionR.value" = "Explicit polish";
 
 "settings.lexicon.loadedEntries" = "Loaded Entries";
 "settings.lexicon.lastRefresh" = "Last Refresh";
