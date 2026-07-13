@@ -24,7 +24,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
-| [release-0.2.7.plan.md](release-0.2.7.plan.md) | Prepare and publish the KnowType v0.2.7 Developer Preview release | Active |
+| [release-0.2.8.plan.md](release-0.2.8.plan.md) | Prepare and publish the KnowType v0.2.8 Developer Preview release | Active |
 | [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and workflow | Active |
 | [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active |
 | [chinese-lexicon-index.plan.md](chinese-lexicon-index.plan.md) | Larger-lexicon indexing path for `TraditionalInputEngine` | Active |
@@ -46,6 +46,7 @@ when converting a shipped plan into a short record.
 | [input-mode-feedback-punctuator-candidates.plan.md](input-mode-feedback-punctuator-candidates.plan.md) | Add transient mode feedback, mature punctuator decisions, and panel-backed symbol candidates | Active |
 | [input-mode-shortcuts-width-feedback.plan.md](input-mode-shortcuts-width-feedback.plan.md) | Earlier Shift+Space width-feedback slice, absorbed by process/global native synchronization | Absorbed |
 | [input-mode-punctuation-linkage.plan.md](input-mode-punctuation-linkage.plan.md) | Share one host-lifetime mode across apps, link punctuation to text mode, and keep numeric periods ASCII | Active |
+| [punctuation-candidate-arrow-consumption.plan.md](punctuation-candidate-arrow-consumption.plan.md) | Consume responder-chain navigation while punctuation candidates are active | Active |
 | [rime-mode-option-sync.plan.md](rime-mode-option-sync.plan.md) | Synchronize process-wide mode options into native Rime and complete character-width/quote semantics | Active |
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
 | [input-method-first-key-performance.plan.md](input-method-first-key-performance.plan.md) | Reduce post-install/process-cold first-key stall and repeated hot-path overhead | Active |
@@ -99,6 +100,7 @@ when converting a shipped plan into a short record.
 | [provider-profile-concurrency-redaction.plan.md](provider-profile-concurrency-redaction.plan.md) | Transactional cross-process provider settings, immutable credentials, and privacy-safe endpoint diagnostics | Active |
 | [provider-api-contracts-template-rendering.plan.md](provider-api-contracts-template-rendering.plan.md) | Current provider model/API contracts and deterministic Custom HTTP template rendering | Active |
 | [ai-runtime-config-singleflight.plan.md](ai-runtime-config-singleflight.plan.md) | Reload provider generations without restart and serialize process-wide context digest | Active |
+| [context-digest-backlog-performance.plan.md](context-digest-backlog-performance.plan.md) | Bound pending Context Digest work, requests, and processed archive retention | Active |
 | [settings-provider-profile-editing-policy-refactor.plan.md](settings-provider-profile-editing-policy-refactor.plan.md) | Extract Settings provider draft validation, save planning, secret mutation, and connection-test configuration from the ViewModel | Active |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Avoid replacing provider failures with local mock continuation text | Active |
 | [ai-timeout-diagnostics.plan.md](ai-timeout-diagnostics.plan.md) | AI recommendation 10-second runtime timeout and privacy-preserving substate diagnostics | Active |
@@ -147,6 +149,7 @@ when converting a shipped plan into a short record.
 | Document | Purpose | Status |
 |---|---|---|
 | [option-r-polish-removal.plan.md](option-r-polish-removal.plan.md) | Remove the Option+R rewrite workflow and make locked-prefix rewriting unsupported | Delivered |
+| [release-0.2.7.plan.md](release-0.2.7.plan.md) | Prepare and publish the KnowType v0.2.7 Developer Preview release | Delivered |
 | [release-0.2.6.plan.md](release-0.2.6.plan.md) | Prepare and publish the KnowType v0.2.6 Developer Preview release | Delivered |
 | [release-0.2.5.plan.md](release-0.2.5.plan.md) | Prepare and publish the KnowType v0.2.5 Developer Preview release | Delivered |
 | [release-0.2.4.plan.md](release-0.2.4.plan.md) | Prepare and publish the KnowType v0.2.4 Developer Preview release | Delivered |

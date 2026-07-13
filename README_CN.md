@@ -194,7 +194,7 @@ generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.7-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.8-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -206,7 +206,7 @@ shasum -a 256 -c KnowType-v0.2.7-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.7-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.8-macos-local-mvp.zip
 ```
 
 ## 配置
@@ -277,6 +277,13 @@ Application Support 中，不会直接注入 provider 请求。Canonical JSON �
 删除 accepted-learning/feedback history/summary/mirror，并从 lexical profile
 中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或
 CORRECTION 数据。
+已提交的 Context Digest 事件会先以 JSONL 保存在本机
+`~/.knowtype/events/`。文本字段最多保留 2,048 个 Unicode scalar；pending
+最多保留 500 条或 1 MiB，溢出后丢弃最旧的派生事件。每次 provider digest
+最多发送最旧的 50 条或 256 KiB。成功 claim 会移入 `events/processed/`，该目录
+最多保留 7 天、100 个文件和 10 MiB；清理只在 digest 成功后执行，启动和安装
+不会改写历史数据。Context 诊断仅包含计数、字节数和冷却时长，不包含输入原文、
+provider 输出或 Key。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
 输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给
@@ -333,7 +340,7 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点、显示符号候选、直接插入标点，或在兼容宿主中直通给宿主。 |
-| `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。 |
+| `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。候选活动期间方向键和翻页命令均由输入法消费，包括首尾边界；关闭后恢复宿主正常导航。 |
 | Command/Control 宿主快捷键 | 先取消已打开的符号候选 overlay，再把快捷键交给当前宿主，避免后续 `Space` 提交旧符号。 |
 | `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
 | `Option + /` | 切换进程级中文/ASCII 输入模式，同时恢复中文/英文标点联动；所有 App 共享。 |
@@ -358,7 +365,8 @@ IDE、Electron shell 和未知客户端默认都使用 inline attributed marked 
 因此 raw preedit 会显示在当前宿主输入框内。宿主身份不再改变全局中英或标点
 状态。KnowType 只向 InputMethodKit 注册 key-down 事件，以保留 IMK 的默认行为：
 用户点击 marked range 外部时提交 active composition。快捷键修饰键仍从 key-down
-flags 读取。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+flags 读取。InputMethodKit responder 导航命令只在符号候选活动时单独处理，避免
+同一次方向键继续移动宿主光标或选区。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
 它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
 上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲半角 printable 输入会直通

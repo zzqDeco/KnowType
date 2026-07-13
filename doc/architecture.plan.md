@@ -134,7 +134,14 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   serialized so later appends remain pending and stale provider generations
   cannot persist results. Registry-backed recording requires a usable provider
   lease before appending, so events entered while no provider is available are
-  not retained for a later provider.
+  not retained for a later provider. A path-shared inventory makes ordinary
+  append and scheduling decisions constant-cost after the first scan. Pending
+  data is capped at 500 events/1 MiB, digest claims at 50 events/256 KiB, and a
+  same-generation failure cooldown returns before reading pending JSONL.
+- Context Digest success archives only its claimed prefix and then best-effort
+  retains processed history for at most 7 days, 100 files, and 10 MiB. Existing
+  history is not pruned during startup or installation. Protected-only eligible
+  data archives locally without reading provider configuration.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, preserving the user's notes outside the generated section and repairing duplicate generated-section markers.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
@@ -232,6 +239,10 @@ LevelDB state.
   InputMethodKit's default click-outside `commitComposition(_:)` behavior.
   Shortcut modifiers are derived from each key-down event's flags, so separate
   `keyUp` and `flagsChanged` registration is not required.
+- `KnowTypeInputController.didCommand(by:client:)` forwards standard responder
+  navigation selectors to the coordinator. The selector path and raw key-event
+  path share one candidate-navigation intent and handled contract; unknown
+  selectors remain available to the focused host.
 - Command/Control key-down maps to a host-shortcut intent. An active symbol
   overlay is cancelled before the event returns to the host, while key-up and
   flags-changed remain outside the production event registration.
@@ -257,6 +268,9 @@ LevelDB state.
 - `InputNativeCandidateNavigationRuntime` owns displayed native selection
   state, panel selection mapping, Rime highlight, current-page select, paging,
   and boundary paging decisions.
+- While a symbol-candidate session is active, arrow and paging navigation is
+  consumed even when its clamped selection cannot move. Ending the session
+  restores ordinary host navigation without a host text or selection write.
 - `InputCompositionStateRuntime` owns raw input, `CompositionBuffer`,
   composition id/revision, and delete-count state. The coordinator still owns
   Rime calls, host insertion, marked text, panel publication, and lifecycle

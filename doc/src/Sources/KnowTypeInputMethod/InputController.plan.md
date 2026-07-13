@@ -19,6 +19,9 @@ Current behavior:
   InputMethodKit to retain its default click-outside composition commit;
   modifier-dependent shortcuts read flags from key-down events and do not
   require separate `keyUp` or `flagsChanged` registration
+- overrides `didCommand(by:client:)` so responder-chain directional and paging
+  selectors use the coordinator's candidate-navigation path; it returns the
+  coordinator result unchanged and logs only selector name plus handled state
 - forwards IMK text, key event, candidate, commit, palette, deactivate, and close callbacks into `InputControllerCoordinator`
 - keeps AppKit/InputMethodKit imports guarded by `canImport(InputMethodKit)`
 - owns the production `CandidatePanelWindowController` and exposes it through the host seam

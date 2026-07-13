@@ -149,6 +149,21 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         coordinator.handleText(string, client: Self.inputControllerClient(from: sender))
     }
 
+    public override func didCommand(by aSelector: Selector!, client sender: Any!) -> Bool {
+        guard let aSelector else {
+            return false
+        }
+        let selectorName = NSStringFromSelector(aSelector)
+        let handled = coordinator.handle(
+            commandSelectorName: selectorName,
+            client: Self.inputControllerClient(from: sender)
+        )
+        inputControllerLogger.debug(
+            "didCommand selector=\(selectorName, privacy: .public) handled=\(handled, privacy: .public)"
+        )
+        return handled
+    }
+
     public override func composedString(_ sender: Any!) -> Any! {
         coordinator.composedString()
     }
