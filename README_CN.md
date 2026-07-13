@@ -277,6 +277,13 @@ Application Support 中，不会直接注入 provider 请求。Canonical JSON �
 删除 accepted-learning/feedback history/summary/mirror，并从 lexical profile
 中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或
 CORRECTION 数据。
+已提交的 Context Digest 事件会先以 JSONL 保存在本机
+`~/.knowtype/events/`。文本字段最多保留 2,048 个 Unicode scalar；pending
+最多保留 500 条或 1 MiB，溢出后丢弃最旧的派生事件。每次 provider digest
+最多发送最旧的 50 条或 256 KiB。成功 claim 会移入 `events/processed/`，该目录
+最多保留 7 天、100 个文件和 10 MiB；清理只在 digest 成功后执行，启动和安装
+不会改写历史数据。Context 诊断仅包含计数、字节数和冷却时长，不包含输入原文、
+provider 输出或 Key。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
 输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给

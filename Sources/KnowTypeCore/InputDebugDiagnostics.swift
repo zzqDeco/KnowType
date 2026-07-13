@@ -38,9 +38,14 @@ public enum InputDebugDiagnostics {
 
     public enum FieldKey: String, Sendable, CaseIterable {
         case anchorSource
+        case byteCount
         case budgetMs
         case bundleID
+        case cooldownRemainingSeconds
+        case deletedFileCount
+        case droppedCount
         case elapsedMs
+        case eventCount
         case handled
         case panelGeneration
         case prefixLength
@@ -55,6 +60,7 @@ public enum InputDebugDiagnostics {
         case reason
         case requestID
         case stage
+        case truncatedScalarCount
         case turnID
         case compositionID
         case writeMode

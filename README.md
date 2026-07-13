@@ -325,6 +325,14 @@ on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
 data. Clear removes accepted-learning/feedback history, summary, and mirror
 files and scrubs accepted-AI context from the lexical profile without deleting
 Rime, provider, Keychain, ENV, or CORRECTION data.
+Committed Context Digest events are queued locally as JSONL under
+`~/.knowtype/events/`. Text fields are limited to 2,048 Unicode scalars, and
+pending data keeps at most 500 events or 1 MiB by dropping the oldest derived
+events after overflow. Each provider digest sends at most the oldest 50 events
+or 256 KiB. Successful claims move to `events/processed/`, which is retained
+for at most 7 days, 100 files, and 10 MiB; cleanup runs only after a successful
+digest, never during startup or install. Context diagnostics contain counts,
+bytes, and cooldown durations only, not typed text, provider output, or keys.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS
