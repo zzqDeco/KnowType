@@ -652,7 +652,13 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - requires a usable provider lease before a registry-backed event is appended,
   so text entered without an available provider is not retained for later upload
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
-- archives processed event files under `~/.knowtype/events/processed/`
+- limits `rawInput` and `committedText` to 2,048 Unicode scalars before writing
+- caps pending data at 500 events or 1 MiB; overflow atomically keeps the newest
+  data within a 450-event/768 KiB compaction target
+- claims no more than the oldest 50 events or 256 KiB for one provider digest,
+  while always allowing one event to make progress
+- archives processed event files under `~/.knowtype/events/processed/` and,
+  after successful digests only, keeps at most 7 days, 100 files, and 10 MiB
 - summarizes after a batch threshold or interval
 - updates only the generated section in `ENV.md`
 - normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically on a best-effort basis; read-only or transient write failures still return the repaired in-memory snapshot
@@ -661,6 +667,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   starts at most one digest request
 - updates ENV and archives a pending prefix only while both its provider lease
   and snapshot claim remain current; later appended events stay pending
+- uses a path-shared process inventory for count/byte/protection gates, so
+  below-threshold and unchanged-generation cooldown paths do not decode JSONL
+- emits count-only `context_event_truncated`, `context_backlog_trimmed`,
+  `context_digest_deferred`, and `context_archive_pruned` diagnostics
 
 `LexicalProfileStore`:
 

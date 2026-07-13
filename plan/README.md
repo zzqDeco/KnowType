@@ -99,6 +99,7 @@ when converting a shipped plan into a short record.
 | [provider-profile-concurrency-redaction.plan.md](provider-profile-concurrency-redaction.plan.md) | Transactional cross-process provider settings, immutable credentials, and privacy-safe endpoint diagnostics | Active |
 | [provider-api-contracts-template-rendering.plan.md](provider-api-contracts-template-rendering.plan.md) | Current provider model/API contracts and deterministic Custom HTTP template rendering | Active |
 | [ai-runtime-config-singleflight.plan.md](ai-runtime-config-singleflight.plan.md) | Reload provider generations without restart and serialize process-wide context digest | Active |
+| [context-digest-backlog-performance.plan.md](context-digest-backlog-performance.plan.md) | Bound pending Context Digest work, requests, and processed archive retention | Active |
 | [settings-provider-profile-editing-policy-refactor.plan.md](settings-provider-profile-editing-policy-refactor.plan.md) | Extract Settings provider draft validation, save planning, secret mutation, and connection-test configuration from the ViewModel | Active |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Avoid replacing provider failures with local mock continuation text | Active |
 | [ai-timeout-diagnostics.plan.md](ai-timeout-diagnostics.plan.md) | AI recommendation 10-second runtime timeout and privacy-preserving substate diagnostics | Active |

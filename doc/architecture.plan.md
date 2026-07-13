@@ -134,7 +134,14 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   serialized so later appends remain pending and stale provider generations
   cannot persist results. Registry-backed recording requires a usable provider
   lease before appending, so events entered while no provider is available are
-  not retained for a later provider.
+  not retained for a later provider. A path-shared inventory makes ordinary
+  append and scheduling decisions constant-cost after the first scan. Pending
+  data is capped at 500 events/1 MiB, digest claims at 50 events/256 KiB, and a
+  same-generation failure cooldown returns before reading pending JSONL.
+- Context Digest success archives only its claimed prefix and then best-effort
+  retains processed history for at most 7 days, 100 files, and 10 MiB. Existing
+  history is not pruned during startup or installation. Protected-only eligible
+  data archives locally without reading provider configuration.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, preserving the user's notes outside the generated section and repairing duplicate generated-section markers.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
