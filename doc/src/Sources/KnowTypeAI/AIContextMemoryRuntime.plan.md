@@ -41,9 +41,11 @@
   bounded prefix in a mixed backlog is also archived without a provider call.
 - Event string fields are limited to 2,048 Unicode scalars. Pending JSONL keeps at
   most 500 events or 1 MiB and compacts to the newest 450 events/768 KiB after
-  overflow. A provider request contains at most 50 oldest events or 256 KiB;
-  one oversized legacy record is claimed and archived locally instead of being
-  sent.
+  overflow. Existing oversized files are compacted through a bounded suffix read
+  before inventory decoding. A provider request contains at most 50 oldest
+  events or 256 KiB; blank, malformed, and oversized legacy prefixes are
+  recovered locally instead of being sent, and corrupt-prefix cleanup does not
+  start the provider failure cooldown.
 - A successful digest prunes `processed/` best-effort to 7 days, 100 files, and
   10 MiB. Startup, install, protected-only archive, and failed digests do not
   trigger historical cleanup.

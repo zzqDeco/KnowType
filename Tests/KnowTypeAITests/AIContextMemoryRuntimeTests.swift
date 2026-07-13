@@ -1000,11 +1000,119 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         await runtime.processIfNeeded()
 
         let requests = await provider.requests
-        XCTAssertGreaterThan(snapshot.rawData.count, 262_144)
+        XCTAssertEqual(snapshot.rawData.count, 262_144)
         XCTAssertTrue(snapshot.events.isEmpty)
         XCTAssertLessThanOrEqual(snapshot.requestData.count, 262_144)
         XCTAssertTrue(requests.isEmpty)
         XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testBlankDigestPrefixIsArchivedWithoutStartingFailureCooldown() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var pendingData = Data(repeating: 0x0A, count: 50)
+        var validLine = try encoder.encode(
+            makeContextEvent(rawInput: "valid", committedText: "有效")
+        )
+        validLine.append(0x0A)
+        pendingData.append(validLine)
+        try pendingData.write(to: eventsDirectory.appendingPathComponent("typing-events.jsonl"))
+        TypingEventStore.resetInventoryCacheForTesting(eventsDirectoryURL: eventsDirectory)
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- Recovered.")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.processIfNeeded()
+
+        let requestsAfterRecovery = await provider.requests
+        XCTAssertTrue(requestsAfterRecovery.isEmpty)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
+
+        await runtime.processIfNeeded()
+
+        let requestsAfterDigest = await provider.requests
+        XCTAssertEqual(requestsAfterDigest.count, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testOversizedNewlineLessRecordUsesBoundedDigestClaim() throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let policy = TypingEventRetentionPolicy.default
+        try Data(repeating: 0x78, count: 400_000).write(
+            to: eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        )
+        TypingEventStore.resetInventoryCacheForTesting(eventsDirectoryURL: eventsDirectory)
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            testProbe: probe
+        )
+
+        let snapshot = try eventStore.pendingDigestSnapshot()
+
+        XCTAssertEqual(snapshot.rawData.count, policy.maximumDigestByteCount)
+        XCTAssertEqual(snapshot.claimedEventCount, 1)
+        XCTAssertTrue(snapshot.events.isEmpty)
+        XCTAssertLessThanOrEqual(
+            probe.maximumBufferedReadByteCount,
+            policy.maximumDigestByteCount
+        )
+    }
+
+    func testFirstAppendCompactsOversizedLegacyBacklogWithBoundedRead() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var legacyData = Data()
+        for index in 0..<700 {
+            var line = try encoder.encode(
+                makeContextEvent(
+                    rawInput: "legacy-\(index)-" + String(repeating: "x", count: 4_096),
+                    committedText: "text-\(index)"
+                )
+            )
+            line.append(0x0A)
+            legacyData.append(line)
+        }
+        XCTAssertGreaterThan(legacyData.count, TypingEventRetentionPolicy.default.maximumPendingByteCount)
+        try legacyData.write(to: eventsDirectory.appendingPathComponent("typing-events.jsonl"))
+        TypingEventStore.resetInventoryCacheForTesting(eventsDirectoryURL: eventsDirectory)
+        let policy = TypingEventRetentionPolicy.default
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            testProbe: probe
+        )
+
+        let result = try eventStore.appendBounded(
+            makeContextEvent(rawInput: "newest", committedText: "最新")
+        )
+        let events = try await eventStore.pendingEvents()
+
+        XCTAssertLessThanOrEqual(result.inventory.eventCount, policy.compactedPendingEventCount + 1)
+        XCTAssertLessThanOrEqual(result.inventory.byteCount, policy.maximumPendingByteCount)
+        XCTAssertEqual(events.last?.rawInput, "newest")
+        XCTAssertEqual(probe.inventoryScanCount, 1)
+        XCTAssertEqual(probe.atomicRewriteCount, 1)
+        XCTAssertLessThanOrEqual(
+            probe.maximumBufferedReadByteCount,
+            policy.compactedPendingByteCount
+        )
     }
 
     func testInventoryRescansAfterSameSizeAtomicFileReplacement() async throws {

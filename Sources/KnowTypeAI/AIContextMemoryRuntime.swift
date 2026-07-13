@@ -204,13 +204,12 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         } catch {
             return
         }
-        guard snapshot.claimedEventCount > 0 else {
+        guard !snapshot.rawData.isEmpty else {
             return
         }
-        guard !snapshot.events.isEmpty else {
+        guard snapshot.claimedEventCount > 0, !snapshot.events.isEmpty else {
             do {
                 try eventStore.archivePendingEvents(matching: snapshot)
-                lastDigestAt = now
             } catch {
                 return
             }

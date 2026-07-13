@@ -75,6 +75,7 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     private var inventoryScans = 0
     private var digestSnapshotDecodes = 0
     private var atomicRewrites = 0
+    private var maximumBufferedReadBytes = 0
     private var failedArchiveDeletionsRemaining = 0
 
     var inventoryScanCount: Int {
@@ -93,6 +94,12 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return atomicRewrites
+    }
+
+    var maximumBufferedReadByteCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return maximumBufferedReadBytes
     }
 
     func failNextArchiveDeletions(_ count: Int) {
@@ -116,6 +123,12 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     fileprivate func recordAtomicRewrite() {
         lock.lock()
         atomicRewrites += 1
+        lock.unlock()
+    }
+
+    fileprivate func recordBufferedRead(byteCount: Int) {
+        lock.lock()
+        maximumBufferedReadBytes = max(maximumBufferedReadBytes, byteCount)
         lock.unlock()
     }
 
@@ -220,7 +233,9 @@ public final class TypingEventStore: @unchecked Sendable {
                 at: eventsFileURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            let existingInventory = try inventorySynchronously()
+            let existingInventory = try inventorySynchronously(
+                preservingClaimedPrefix: claimedPrefix
+            )
             var line = try encoder.encode(boundedEvent)
             line.append(0x0A)
             if fileManager.fileExists(atPath: eventsFileURL.path) {
@@ -247,7 +262,8 @@ public final class TypingEventStore: @unchecked Sendable {
             if inventory.eventCount > retentionPolicy.maximumPendingEventCount
                 || inventory.byteCount > retentionPolicy.maximumPendingByteCount {
                 let compaction = try compactPendingSynchronously(
-                    preservingClaimedPrefix: claimedPrefix
+                    preservingClaimedPrefix: claimedPrefix,
+                    originalEventCount: inventory.eventCount
                 )
                 inventory = compaction.inventory
                 droppedEventCount = compaction.droppedEventCount
@@ -395,19 +411,42 @@ public final class TypingEventStore: @unchecked Sendable {
         return (result.text ?? "", result.removedScalarCount)
     }
 
-    private func inventorySynchronously() throws -> TypingEventInventory {
+    private func inventorySynchronously(
+        preservingClaimedPrefix claimedPrefix: Data? = nil
+    ) throws -> TypingEventInventory {
         let key = Self.normalizedPath(for: eventsFileURL)
         let metadata = fileMetadata()
         if let cached = typingEventInventoryCache[key], cached.metadata == metadata {
             return cached.inventory
         }
+        if let metadata,
+           metadata.byteCount > retentionPolicy.maximumPendingByteCount {
+            let compaction = try compactPendingSynchronously(
+                preservingClaimedPrefix: claimedPrefix,
+                originalEventCount: nil
+            )
+            testProbe?.recordInventoryScan()
+            return compaction.inventory
+        }
         let data: Data
         if fileManager.fileExists(atPath: eventsFileURL.path) {
             data = try Data(contentsOf: eventsFileURL)
+            testProbe?.recordBufferedRead(byteCount: data.count)
         } else {
             data = Data()
         }
-        let inventory = inventory(for: data)
+        let lines = Self.lines(in: data)
+        let inventory = inventory(for: lines, byteCount: data.count)
+        if inventory.eventCount > retentionPolicy.maximumPendingEventCount
+            || inventory.byteCount > retentionPolicy.maximumPendingByteCount
+            || lines.contains(where: { $0.count > retentionPolicy.maximumDigestByteCount }) {
+            let compaction = try compactPendingSynchronously(
+                preservingClaimedPrefix: claimedPrefix,
+                originalEventCount: inventory.eventCount
+            )
+            testProbe?.recordInventoryScan()
+            return compaction.inventory
+        }
         typingEventInventoryCache[key] = TypingEventInventoryCacheEntry(
             metadata: metadata,
             inventory: inventory
@@ -424,25 +463,31 @@ public final class TypingEventStore: @unchecked Sendable {
     }
 
     private func compactPendingSynchronously(
-        preservingClaimedPrefix claimedPrefix: Data?
+        preservingClaimedPrefix claimedPrefix: Data?,
+        originalEventCount: Int?
     ) throws -> (
         inventory: TypingEventInventory,
         droppedEventCount: Int,
         droppedByteCount: Int
     ) {
-        let currentData = try Data(contentsOf: eventsFileURL)
-        let lines = Self.lines(in: currentData)
+        let originalByteCount = fileMetadata()?.byteCount ?? 0
+        let handle = try FileHandle(forReadingFrom: eventsFileURL)
+        defer { try? handle.close() }
         let retainedPrefix: Data
         if let claimedPrefix,
            !claimedPrefix.isEmpty,
-           currentData.starts(with: claimedPrefix) {
+           claimedPrefix.count <= retentionPolicy.compactedPendingByteCount,
+           claimedPrefix.count <= originalByteCount,
+           try readBounded(
+               from: handle,
+               offset: 0,
+               byteCount: claimedPrefix.count
+           ) == claimedPrefix {
             retainedPrefix = claimedPrefix
         } else {
             retainedPrefix = Data()
         }
         let retainedPrefixEventCount = Self.lines(in: retainedPrefix).count
-        let tailData = Data(currentData.dropFirst(retainedPrefix.count))
-        let tailLines = Self.lines(in: tailData)
         let availableEventCount = max(
             0,
             retentionPolicy.compactedPendingEventCount - retainedPrefixEventCount
@@ -451,11 +496,36 @@ public final class TypingEventStore: @unchecked Sendable {
             0,
             retentionPolicy.compactedPendingByteCount - retainedPrefix.count
         )
+        let tailStart = retainedPrefix.count
+        let suffixStart = max(tailStart, originalByteCount - availableByteCount)
+        var tailData = try readBounded(
+            from: handle,
+            offset: suffixStart,
+            byteCount: max(0, originalByteCount - suffixStart)
+        )
+        if suffixStart > tailStart {
+            let precedingByte = try readBounded(
+                from: handle,
+                offset: suffixStart - 1,
+                byteCount: 1
+            ).first
+            if precedingByte != 0x0A {
+                if let newline = tailData.firstIndex(of: 0x0A) {
+                    tailData = Data(tailData[tailData.index(after: newline)...])
+                } else {
+                    tailData = Data()
+                }
+            }
+        }
+        let tailLines = Self.lines(in: tailData)
         var retainedReversed: [Data] = []
         var retainedByteCount = 0
         for line in tailLines.reversed() {
             guard retainedReversed.count < availableEventCount else {
                 break
+            }
+            guard line.count <= retentionPolicy.maximumDigestByteCount else {
+                continue
             }
             guard retainedByteCount + line.count <= availableByteCount else {
                 continue
@@ -473,9 +543,33 @@ public final class TypingEventStore: @unchecked Sendable {
         cacheInventory(retainedInventory)
         return (
             retainedInventory,
-            max(0, lines.count - retainedInventory.eventCount),
-            max(0, currentData.count - retainedData.count)
+            originalEventCount.map { max(0, $0 - retainedInventory.eventCount) }
+                ?? (originalByteCount > retainedData.count ? 1 : 0),
+            max(0, originalByteCount - retainedData.count)
         )
+    }
+
+    private func readBounded(
+        from handle: FileHandle,
+        offset: Int,
+        byteCount: Int
+    ) throws -> Data {
+        guard byteCount > 0 else {
+            return Data()
+        }
+        try handle.seek(toOffset: UInt64(offset))
+        var data = Data()
+        data.reserveCapacity(byteCount)
+        while data.count < byteCount {
+            let remaining = byteCount - data.count
+            let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)) ?? Data()
+            guard !chunk.isEmpty else {
+                break
+            }
+            data.append(chunk)
+        }
+        testProbe?.recordBufferedRead(byteCount: data.count)
+        return data
     }
 
     private func fullSnapshotSynchronously() throws -> TypingEventSnapshot {
@@ -496,9 +590,16 @@ public final class TypingEventStore: @unchecked Sendable {
         var buffer = Data()
         let chunkSize = 64 * 1_024
         while true {
-            let chunk = try handle.read(upToCount: chunkSize) ?? Data()
+            let remainingByteBudget = max(
+                1,
+                retentionPolicy.maximumDigestByteCount - buffer.count
+            )
+            let chunk = try handle.read(
+                upToCount: min(chunkSize, remainingByteBudget)
+            ) ?? Data()
             let reachedEnd = chunk.isEmpty
             buffer.append(chunk)
+            testProbe?.recordBufferedRead(byteCount: buffer.count)
             let prefix = digestPrefixLength(in: buffer, reachedEnd: reachedEnd)
             if prefix.shouldStop {
                 return Data(buffer.prefix(prefix.byteCount))
@@ -531,15 +632,24 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         if reachedEnd, lineStart < data.endIndex {
             let trailingByteCount = data.distance(from: lineStart, to: data.endIndex)
-            if claimedCount == 0
-                || (claimedCount < retentionPolicy.maximumDigestEventCount
-                    && claimedByteCount + trailingByteCount <= retentionPolicy.maximumDigestByteCount) {
+            if claimedCount == 0 {
+                claimedByteCount += min(
+                    trailingByteCount,
+                    retentionPolicy.maximumDigestByteCount
+                )
+            } else if claimedCount < retentionPolicy.maximumDigestEventCount
+                && claimedByteCount + trailingByteCount <= retentionPolicy.maximumDigestByteCount {
                 claimedByteCount += trailingByteCount
             }
             return (claimedByteCount, true)
         }
-        if data.count >= retentionPolicy.maximumDigestByteCount, claimedByteCount > 0 {
-            return (claimedByteCount, true)
+        if data.count >= retentionPolicy.maximumDigestByteCount {
+            return (
+                claimedByteCount > 0
+                    ? claimedByteCount
+                    : retentionPolicy.maximumDigestByteCount,
+                true
+            )
         }
         return (claimedByteCount, false)
     }
@@ -576,6 +686,13 @@ public final class TypingEventStore: @unchecked Sendable {
 
     private func inventory(for data: Data) -> TypingEventInventory {
         let lines = Self.lines(in: data)
+        return inventory(for: lines, byteCount: data.count)
+    }
+
+    private func inventory(
+        for lines: [Data],
+        byteCount: Int
+    ) -> TypingEventInventory {
         var protectedCount = 0
         var unprotectedCount = 0
         for line in lines {
@@ -590,7 +707,7 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         return TypingEventInventory(
             eventCount: lines.count,
-            byteCount: data.count,
+            byteCount: byteCount,
             protectedEventCount: protectedCount,
             unprotectedEventCount: unprotectedCount
         )

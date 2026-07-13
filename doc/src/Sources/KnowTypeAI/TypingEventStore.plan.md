@@ -21,7 +21,10 @@
 ## Behavior Notes
 
 - Inventory entries are shared by normalized file path and are rescanned only
-  when file metadata no longer matches the cached snapshot.
+  when file metadata no longer matches the cached snapshot. If an existing file
+  already exceeds 1 MiB, recovery first reads only a bounded suffix and rewrites
+  the retained tail before inventory decoding; oversized legacy records are
+  discarded rather than loaded as one unbounded value.
 - Inventory counts undecodable lines toward backlog size and prefix claims but
   excludes them from protected/unprotected event classification and provider
   request content. A protected-only backlog therefore remains local even when a
@@ -32,9 +35,9 @@
 - Pending data is compacted atomically to the newest 450 events and at most
   768 KiB after crossing 500 events or 1 MiB. While a digest is in flight, its
   claimed prefix is retained ahead of the newest bounded tail.
-- Digest claims contain the oldest 50 lines. Provider request content remains
-  at most 256 KiB; an oversized legacy first record is claimed for progress but
-  excluded from the request and archived locally.
+- Digest claims contain the oldest 50 lines and at most 256 KiB, including a
+  malformed record without a newline. Blank or undecodable claimed prefixes are
+  archived locally and never included in provider request content.
 - Successful prefix archive uses exact raw-byte matching so events appended
   during a digest remain pending.
 
