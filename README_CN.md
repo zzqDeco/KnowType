@@ -340,7 +340,7 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
 | 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点、显示符号候选、直接插入标点，或在兼容宿主中直通给宿主。 |
-| `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。 |
+| `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。候选活动期间方向键和翻页命令均由输入法消费，包括首尾边界；关闭后恢复宿主正常导航。 |
 | Command/Control 宿主快捷键 | 先取消已打开的符号候选 overlay，再把快捷键交给当前宿主，避免后续 `Space` 提交旧符号。 |
 | `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
 | `Option + /` | 切换进程级中文/ASCII 输入模式，同时恢复中文/英文标点联动；所有 App 共享。 |
@@ -365,7 +365,8 @@ IDE、Electron shell 和未知客户端默认都使用 inline attributed marked 
 因此 raw preedit 会显示在当前宿主输入框内。宿主身份不再改变全局中英或标点
 状态。KnowType 只向 InputMethodKit 注册 key-down 事件，以保留 IMK 的默认行为：
 用户点击 marked range 外部时提交 active composition。快捷键修饰键仍从 key-down
-flags 读取。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+flags 读取。InputMethodKit responder 导航命令只在符号候选活动时单独处理，避免
+同一次方向键继续移动宿主光标或选区。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
 它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
 上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲半角 printable 输入会直通

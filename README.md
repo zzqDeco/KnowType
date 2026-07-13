@@ -393,7 +393,7 @@ placement.
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
 | Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, show symbol candidates, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
-| `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. |
+| `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. Arrow and paging commands are consumed while the row set is active, including at list boundaries, and return to normal host navigation after it closes. |
 | Command/Control host shortcuts | Cancel an open symbol-candidate overlay before passing the shortcut to the focused host, so a later `Space` cannot commit a stale symbol. |
 | `Option + .` | In Chinese text mode, manually toggle Chinese/English punctuation until the next text-mode switch. In ASCII mode it leaves punctuation English and only repeats the mode status. |
 | `Option + /` | Toggle the process-wide Chinese/ASCII text mode. The switch also restores linked Chinese/English punctuation and is shared across apps. |
@@ -426,6 +426,9 @@ field. Host identity no longer changes the global text or punctuation mode.
 KnowType registers only key-down events with InputMethodKit, preserving IMK's
 default behavior of committing active composition when the user clicks outside
 its marked range. Shortcut modifiers continue to come from key-down flags.
+InputMethodKit responder navigation commands are handled separately only while
+symbol candidates are active, preventing the same arrow from moving the host
+caret or selection.
 Terminal, iTerm, MacVim, and Emacs-style hosts therefore also begin in Chinese
 mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;

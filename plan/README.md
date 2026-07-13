@@ -46,6 +46,7 @@ when converting a shipped plan into a short record.
 | [input-mode-feedback-punctuator-candidates.plan.md](input-mode-feedback-punctuator-candidates.plan.md) | Add transient mode feedback, mature punctuator decisions, and panel-backed symbol candidates | Active |
 | [input-mode-shortcuts-width-feedback.plan.md](input-mode-shortcuts-width-feedback.plan.md) | Earlier Shift+Space width-feedback slice, absorbed by process/global native synchronization | Absorbed |
 | [input-mode-punctuation-linkage.plan.md](input-mode-punctuation-linkage.plan.md) | Share one host-lifetime mode across apps, link punctuation to text mode, and keep numeric periods ASCII | Active |
+| [punctuation-candidate-arrow-consumption.plan.md](punctuation-candidate-arrow-consumption.plan.md) | Consume responder-chain navigation while punctuation candidates are active | Active |
 | [rime-mode-option-sync.plan.md](rime-mode-option-sync.plan.md) | Synchronize process-wide mode options into native Rime and complete character-width/quote semantics | Active |
 | [inputmethod-main-thread-performance.plan.md](inputmethod-main-thread-performance.plan.md) | Keep IMK key handling responsive under larger lexicon and async provider work | Active |
 | [input-method-first-key-performance.plan.md](input-method-first-key-performance.plan.md) | Reduce post-install/process-cold first-key stall and repeated hot-path overhead | Active |
