@@ -194,7 +194,7 @@ generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.7-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -206,7 +206,7 @@ shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.6-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.7-macos-local-mvp.zip
 ```
 
 ## 配置

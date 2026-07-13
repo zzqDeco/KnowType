@@ -230,7 +230,7 @@ For a GitHub Release DMG, verify the downloaded image with the published
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.6-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.7-macos-dev-preview.dmg.sha256
 ```
 
 Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
@@ -244,7 +244,7 @@ sidebar entry unless the matching pane is installed.
 The older local MVP zip can still be installed for developer debugging:
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.6-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.7-macos-local-mvp.zip
 ```
 
 ## Configuration
