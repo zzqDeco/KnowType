@@ -8,15 +8,17 @@ struct TypingEventInventory: Sendable, Equatable {
     var eventCount: Int
     var byteCount: Int
     var protectedEventCount: Int
+    var unprotectedEventCount: Int
 
-    static let empty = TypingEventInventory(eventCount: 0, byteCount: 0, protectedEventCount: 0)
-
-    var unprotectedEventCount: Int {
-        max(0, eventCount - protectedEventCount)
-    }
+    static let empty = TypingEventInventory(
+        eventCount: 0,
+        byteCount: 0,
+        protectedEventCount: 0,
+        unprotectedEventCount: 0
+    )
 
     var isProtectedOnly: Bool {
-        eventCount > 0 && protectedEventCount == eventCount
+        protectedEventCount > 0 && unprotectedEventCount == 0
     }
 }
 
@@ -202,8 +204,14 @@ public final class TypingEventStore: @unchecked Sendable {
             var boundedEvent = event
             let rawResult = boundedText(event.rawInput)
             let committedResult = boundedText(event.committedText)
+            let appBundleIDResult = boundedText(event.appBundleID)
+            let appNameResult = boundedText(event.appName)
+            let candidateSourceResult = boundedText(event.candidateSource)
             boundedEvent.rawInput = rawResult.text
             boundedEvent.committedText = committedResult.text
+            boundedEvent.appBundleID = appBundleIDResult.text
+            boundedEvent.appName = appNameResult.text
+            boundedEvent.candidateSource = candidateSourceResult.text
 
             try fileManager.createDirectory(
                 at: eventsFileURL.deletingLastPathComponent(),
@@ -226,6 +234,8 @@ public final class TypingEventStore: @unchecked Sendable {
             inventory.byteCount += line.count
             if Self.isProtectedOnlyEvent(boundedEvent) {
                 inventory.protectedEventCount += 1
+            } else {
+                inventory.unprotectedEventCount += 1
             }
             cacheInventory(inventory)
 
@@ -241,7 +251,11 @@ public final class TypingEventStore: @unchecked Sendable {
 
             return TypingEventAppendResult(
                 inventory: inventory,
-                truncatedScalarCount: rawResult.removedScalarCount + committedResult.removedScalarCount,
+                truncatedScalarCount: rawResult.removedScalarCount
+                    + committedResult.removedScalarCount
+                    + appBundleIDResult.removedScalarCount
+                    + appNameResult.removedScalarCount
+                    + candidateSourceResult.removedScalarCount,
                 droppedEventCount: droppedEventCount,
                 droppedByteCount: droppedByteCount
             )
@@ -366,6 +380,11 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         let prefix = String(String.UnicodeScalarView(scalars.prefix(retentionPolicy.maximumTextScalarCount)))
         return (prefix, scalars.count - retentionPolicy.maximumTextScalarCount)
+    }
+
+    private func boundedText(_ text: String) -> (text: String, removedScalarCount: Int) {
+        let result = boundedText(Optional(text))
+        return (result.text ?? "", result.removedScalarCount)
     }
 
     private func inventorySynchronously() throws -> TypingEventInventory {
@@ -521,15 +540,22 @@ public final class TypingEventStore: @unchecked Sendable {
     private func inventory(for data: Data) -> TypingEventInventory {
         let lines = Self.lines(in: data)
         var protectedCount = 0
+        var unprotectedCount = 0
         for line in lines {
-            if let event = decodeEvent(line), Self.isProtectedOnlyEvent(event) {
+            guard let event = decodeEvent(line) else {
+                continue
+            }
+            if Self.isProtectedOnlyEvent(event) {
                 protectedCount += 1
+            } else {
+                unprotectedCount += 1
             }
         }
         return TypingEventInventory(
             eventCount: lines.count,
             byteCount: data.count,
-            protectedEventCount: protectedCount
+            protectedEventCount: protectedCount,
+            unprotectedEventCount: unprotectedCount
         )
     }
 

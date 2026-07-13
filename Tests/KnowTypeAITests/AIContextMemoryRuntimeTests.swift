@@ -799,6 +799,36 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(events.map(\.timestamp), events.map(\.timestamp).sorted())
     }
 
+    func testOversizedMetadataIsTruncatedBeforePendingRetention() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: .default
+        )
+        let oversized = String(repeating: "界", count: 300_000)
+
+        let result = try eventStore.appendBounded(
+            AITypingEvent(
+                appBundleID: oversized,
+                appName: oversized,
+                rawInput: "raw",
+                committedText: "text",
+                commitKind: .traditional,
+                candidateSource: oversized
+            )
+        )
+        let pendingEvents = try await eventStore.pendingEvents()
+        let event = try XCTUnwrap(pendingEvents.first)
+        let snapshot = try eventStore.pendingDigestSnapshot()
+
+        XCTAssertEqual(event.appBundleID?.unicodeScalars.count, 2_048)
+        XCTAssertEqual(event.appName?.unicodeScalars.count, 2_048)
+        XCTAssertEqual(event.candidateSource.unicodeScalars.count, 2_048)
+        XCTAssertEqual(result.truncatedScalarCount, 893_856)
+        XCTAssertLessThanOrEqual(result.inventory.byteCount, 786_432)
+        XCTAssertLessThanOrEqual(snapshot.requestData.count, 262_144)
+    }
+
     func testDigestClaimsAtMostFiftyEventsAndLeavesBacklogTailPending() async throws {
         let directory = makeTemporaryDirectory()
         let probe = TypingEventStoreTestProbe()
@@ -910,6 +940,49 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 candidateSource: "protected"
             )
         )
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: NamedLLMProvider(name: "provider-a", responseText: "unused")
+        )
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source),
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.processIfNeeded()
+
+        XCTAssertEqual(source.revisionReadCount, 0)
+        XCTAssertEqual(probe.digestSnapshotDecodeCount, 0)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testProtectedOnlyInventoryIgnoresCorruptLineWithoutProviderRead() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: .default,
+            testProbe: probe
+        )
+        try await eventStore.append(
+            AITypingEvent(
+                rawInput: "protected:redacted",
+                committedText: "protected:redacted",
+                commitKind: .raw,
+                candidateSource: "protected"
+            )
+        )
+        let eventsFile = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        let handle = try FileHandle(forWritingTo: eventsFile)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{\"incomplete\":\n".utf8))
+        try handle.close()
+        TypingEventStore.resetInventoryCacheForTesting(eventsDirectoryURL: eventsDirectory)
         let source = ProviderRuntimeTestSource(
             revision: 1,
             fingerprint: String(repeating: "a", count: 64),
