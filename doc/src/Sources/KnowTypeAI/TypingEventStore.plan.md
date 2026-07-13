@@ -30,8 +30,11 @@
   encoded record below the 256 KiB digest-request limit while diagnostics expose
   only removed scalar counts.
 - Pending data is compacted atomically to the newest 450 events and at most
-  768 KiB after crossing 500 events or 1 MiB. Digest claims contain the oldest
-  50 lines and at most 256 KiB.
+  768 KiB after crossing 500 events or 1 MiB. While a digest is in flight, its
+  claimed prefix is retained ahead of the newest bounded tail.
+- Digest claims contain the oldest 50 lines. Provider request content remains
+  at most 256 KiB; an oversized legacy first record is claimed for progress but
+  excluded from the request and archived locally.
 - Successful prefix archive uses exact raw-byte matching so events appended
   during a digest remain pending.
 

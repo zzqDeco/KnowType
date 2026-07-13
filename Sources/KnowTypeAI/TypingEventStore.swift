@@ -199,7 +199,10 @@ public final class TypingEventStore: @unchecked Sendable {
         _ = try appendBounded(event)
     }
 
-    func appendBounded(_ event: AITypingEvent) throws -> TypingEventAppendResult {
+    func appendBounded(
+        _ event: AITypingEvent,
+        preservingClaimedPrefix claimedPrefix: Data? = nil
+    ) throws -> TypingEventAppendResult {
         try withTypingEventFileLock {
             var boundedEvent = event
             let rawResult = boundedText(event.rawInput)
@@ -243,7 +246,9 @@ public final class TypingEventStore: @unchecked Sendable {
             var droppedByteCount = 0
             if inventory.eventCount > retentionPolicy.maximumPendingEventCount
                 || inventory.byteCount > retentionPolicy.maximumPendingByteCount {
-                let compaction = try compactPendingSynchronously()
+                let compaction = try compactPendingSynchronously(
+                    preservingClaimedPrefix: claimedPrefix
+                )
                 inventory = compaction.inventory
                 droppedEventCount = compaction.droppedEventCount
                 droppedByteCount = compaction.droppedByteCount
@@ -299,7 +304,10 @@ public final class TypingEventStore: @unchecked Sendable {
                 )
             }
             let rawData = try readDigestPrefixSynchronously()
-            return decodeSnapshot(rawData)
+            return decodeSnapshot(
+                rawData,
+                requestByteLimit: retentionPolicy.maximumDigestByteCount
+            )
         }
     }
 
@@ -415,28 +423,49 @@ public final class TypingEventStore: @unchecked Sendable {
         )
     }
 
-    private func compactPendingSynchronously() throws -> (
+    private func compactPendingSynchronously(
+        preservingClaimedPrefix claimedPrefix: Data?
+    ) throws -> (
         inventory: TypingEventInventory,
         droppedEventCount: Int,
         droppedByteCount: Int
     ) {
         let currentData = try Data(contentsOf: eventsFileURL)
         let lines = Self.lines(in: currentData)
+        let retainedPrefix: Data
+        if let claimedPrefix,
+           !claimedPrefix.isEmpty,
+           currentData.starts(with: claimedPrefix) {
+            retainedPrefix = claimedPrefix
+        } else {
+            retainedPrefix = Data()
+        }
+        let retainedPrefixEventCount = Self.lines(in: retainedPrefix).count
+        let tailData = Data(currentData.dropFirst(retainedPrefix.count))
+        let tailLines = Self.lines(in: tailData)
+        let availableEventCount = max(
+            0,
+            retentionPolicy.compactedPendingEventCount - retainedPrefixEventCount
+        )
+        let availableByteCount = max(
+            0,
+            retentionPolicy.compactedPendingByteCount - retainedPrefix.count
+        )
         var retainedReversed: [Data] = []
         var retainedByteCount = 0
-        for line in lines.reversed() {
-            guard retainedReversed.count < retentionPolicy.compactedPendingEventCount else {
+        for line in tailLines.reversed() {
+            guard retainedReversed.count < availableEventCount else {
                 break
             }
-            if !retainedReversed.isEmpty,
-               retainedByteCount + line.count > retentionPolicy.compactedPendingByteCount {
-                break
+            guard retainedByteCount + line.count <= availableByteCount else {
+                continue
             }
             retainedReversed.append(line)
             retainedByteCount += line.count
         }
         let retainedLines = retainedReversed.reversed()
-        var retainedData = Data(capacity: retainedByteCount)
+        var retainedData = Data(capacity: retainedPrefix.count + retainedByteCount)
+        retainedData.append(retainedPrefix)
         retainedLines.forEach { retainedData.append($0) }
         try retainedData.write(to: eventsFileURL, options: .atomic)
         testProbe?.recordAtomicRewrite()
@@ -515,7 +544,10 @@ public final class TypingEventStore: @unchecked Sendable {
         return (claimedByteCount, false)
     }
 
-    private func decodeSnapshot(_ rawData: Data) -> TypingEventSnapshot {
+    private func decodeSnapshot(
+        _ rawData: Data,
+        requestByteLimit: Int? = nil
+    ) -> TypingEventSnapshot {
         let lines = Self.lines(in: rawData)
         var events: [AITypingEvent] = []
         var requestData = Data()
@@ -523,11 +555,16 @@ public final class TypingEventStore: @unchecked Sendable {
             guard let event = decodeEvent(line) else {
                 continue
             }
-            events.append(event)
-            requestData.append(line)
-            if requestData.last != 0x0A {
-                requestData.append(0x0A)
+            var requestLine = line
+            if requestLine.last != 0x0A {
+                requestLine.append(0x0A)
             }
+            if let requestByteLimit,
+               requestData.count + requestLine.count > requestByteLimit {
+                continue
+            }
+            events.append(event)
+            requestData.append(requestLine)
         }
         return TypingEventSnapshot(
             rawData: rawData,

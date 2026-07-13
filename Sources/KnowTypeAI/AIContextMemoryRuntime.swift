@@ -45,6 +45,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var lastDigestFailureAt: Date?
     private var deferredDiagnosticFailureAt: Date?
     private var digestInFlight = false
+    private var activeDigestClaimRawData: Data?
     private var providerGeneration: UInt64?
 
     public init(
@@ -113,7 +114,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             dispatchLease = nil
         }
         do {
-            let appendResult = try eventStore.appendBounded(sanitized(event))
+            let appendResult = try eventStore.appendBounded(
+                sanitized(event),
+                preservingClaimedPrefix: activeDigestClaimRawData
+            )
             emitAppendDiagnostics(appendResult)
             await processIfNeeded(now: Date(), dispatchLease: dispatchLease)
         } catch {
@@ -134,7 +138,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         }
         digestInFlight = true
-        defer { digestInFlight = false }
+        defer {
+            activeDigestClaimRawData = nil
+            digestInFlight = false
+        }
 
         let inventory: TypingEventInventory
         do {
@@ -209,6 +216,15 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             }
             return
         }
+        if snapshot.events.allSatisfy(TypingEventStore.isProtectedOnlyEvent) {
+            do {
+                try eventStore.archivePendingEvents(matching: snapshot)
+                lastDigestAt = now
+            } catch {
+                return
+            }
+            return
+        }
         let rawEvents = snapshot.requestContent
         guard !rawEvents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             lastDigestAt = now
@@ -227,6 +243,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                     "ENV.md": currentEnvironment.content
                 ]
             )
+            activeDigestClaimRawData = snapshot.rawData
             let response: LLMResponse
             if let providerRegistry, let lease {
                 response = try await providerRegistry.perform(using: lease) { provider in

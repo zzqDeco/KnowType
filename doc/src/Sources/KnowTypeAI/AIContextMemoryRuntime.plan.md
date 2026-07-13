@@ -32,13 +32,18 @@
   state before failure cooldown is applied. Stale responses cannot write
   `ENV.md` or archive events.
 - Final persistence holds both the provider-generation guard and the pending
-  snapshot file claim. Events appended after the claimed prefix remain pending.
+  snapshot file claim. While transport is in flight, backlog compaction retains
+  that exact claim plus the newest bounded tail. Events appended after the
+  claimed prefix remain pending.
 - Failed and empty digests retain the minimum retry interval while still
   checking for a changed provider revision. Protected-only pending batches
-  archive locally without provider or provider-profile reads.
-- Event text fields are limited to 2,048 Unicode scalars. Pending JSONL keeps at
+  archive locally without provider or provider-profile reads; a protected-only
+  bounded prefix in a mixed backlog is also archived without a provider call.
+- Event string fields are limited to 2,048 Unicode scalars. Pending JSONL keeps at
   most 500 events or 1 MiB and compacts to the newest 450 events/768 KiB after
-  overflow. A provider request claims at most 50 oldest events or 256 KiB.
+  overflow. A provider request contains at most 50 oldest events or 256 KiB;
+  one oversized legacy record is claimed and archived locally instead of being
+  sent.
 - A successful digest prunes `processed/` best-effort to 7 days, 100 files, and
   10 MiB. Startup, install, protected-only archive, and failed digests do not
   trigger historical cleanup.

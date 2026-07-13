@@ -249,6 +249,46 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(pendingEvents.map(\.rawInput), ["zaijian"])
     }
 
+    func testInFlightDigestCompactionPreservesClaimedPrefixUntilCommit() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        var policy = TypingEventRetentionPolicy.default
+        policy.maximumPendingEventCount = 5
+        policy.compactedPendingEventCount = 4
+        policy.maximumDigestEventCount = 2
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy
+        )
+        for index in 0..<5 {
+            try await eventStore.append(
+                makeContextEvent(rawInput: "raw-\(index)", committedText: "text-\(index)")
+            )
+        }
+        let provider = SuspendedDigestLLMProvider()
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        let digest = Task {
+            await runtime.processIfNeeded()
+        }
+        try await waitUntilProviderReceivesRequest(provider)
+        await runtime.record(makeContextEvent(rawInput: "raw-5", committedText: "text-5"))
+        await provider.finish(generatedMarkdown: "## Global Style\n- Preserved claim.")
+        await digest.value
+
+        let environment = try String(contentsOf: environmentURL, encoding: .utf8)
+        let pendingEvents = try await eventStore.pendingEvents()
+        XCTAssertTrue(environment.contains("Preserved claim"))
+        XCTAssertEqual(pendingEvents.map(\.rawInput), ["raw-4", "raw-5"])
+    }
+
     func testProtectedOnlyBatchIsArchivedWithoutProviderDigest() async throws {
         let directory = makeTemporaryDirectory()
         let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
@@ -276,6 +316,44 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
 
         XCTAssertTrue(requests.isEmpty)
         XCTAssertTrue(pendingEvents.isEmpty)
+    }
+
+    func testProtectedOnlyDigestPrefixStaysLocalWhenBacklogTailIsUnprotected() async throws {
+        let directory = makeTemporaryDirectory()
+        var policy = TypingEventRetentionPolicy.default
+        policy.maximumDigestEventCount = 2
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: policy
+        )
+        for index in 0..<2 {
+            try await eventStore.append(
+                AITypingEvent(
+                    rawInput: "protected:item-\(index)",
+                    committedText: "protected:item-\(index)",
+                    commitKind: .raw,
+                    candidateSource: "protected"
+                )
+            )
+        }
+        try await eventStore.append(
+            makeContextEvent(rawInput: "normal", committedText: "normal")
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- Must not run.")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 3,
+            minimumInterval: 600
+        )
+
+        await runtime.processIfNeeded()
+
+        let requests = await provider.requests
+        let pendingEvents = try await eventStore.pendingEvents()
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(pendingEvents.map(\.rawInput), ["normal"])
     }
 
     func testProtectedExternalDeleteIsArchivedWithoutProviderDigest() async throws {
@@ -891,6 +969,42 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(snapshot.claimedEventCount, 3)
         XCTAssertEqual(snapshot.events.count, 2)
         XCTAssertFalse(snapshot.requestContent.contains("incomplete"))
+    }
+
+    func testOversizedLegacyRecordIsArchivedLocallyInsteadOfSentToProvider() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var legacyLine = try encoder.encode(
+            makeContextEvent(
+                rawInput: String(repeating: "x", count: 300_000),
+                committedText: "legacy"
+            )
+        )
+        legacyLine.append(0x0A)
+        try legacyLine.write(to: eventsDirectory.appendingPathComponent("typing-events.jsonl"))
+        TypingEventStore.resetInventoryCacheForTesting(eventsDirectoryURL: eventsDirectory)
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let snapshot = try eventStore.pendingDigestSnapshot()
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- Must not run.")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.processIfNeeded()
+
+        let requests = await provider.requests
+        XCTAssertGreaterThan(snapshot.rawData.count, 262_144)
+        XCTAssertTrue(snapshot.events.isEmpty)
+        XCTAssertLessThanOrEqual(snapshot.requestData.count, 262_144)
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
     }
 
     func testInventoryRescansAfterSameSizeAtomicFileReplacement() async throws {
