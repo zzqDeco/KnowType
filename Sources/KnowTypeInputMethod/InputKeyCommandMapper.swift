@@ -81,9 +81,6 @@ public struct InputKeyCommandMapper: Sendable {
             if let digit = optionDigit(for: stroke.keyCode) {
                 return .action(.optionNumber(digit))
             }
-            if stroke.keyCode == Self.rKeyCode {
-                return .action(.optionR)
-            }
             return .ignored
         }
 
@@ -147,7 +144,6 @@ public struct InputKeyCommandMapper: Sendable {
     private static let deleteText = "\u{7F}"
     private static let escapeKeyCode = 53
     private static let escapeText = "\u{1B}"
-    private static let rKeyCode = 15
     private static let periodKeyCode = 47
     private static let slashKeyCode = 44
     private static let appKitFunctionKeyScalarRange: ClosedRange<UInt32> = 0xF700...0xF8FF

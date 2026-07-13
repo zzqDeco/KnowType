@@ -34,8 +34,8 @@ KnowType 把“把我打错的内容变准确”和“顺着我确认的内容�
 Tab 上屏：       我觉得这个方案还有进一步优化空间
 ```
 
-这里 AI 延续只负责 `还有进一步优化空间`。它不能把已经锁定的前缀改写成
-另一句话，除非用户显式触发 polish。
+这里 AI 延续只负责 `还有进一步优化空间`，不能把已经锁定的前缀改写成
+另一句话。
 
 ## 功能
 
@@ -44,11 +44,7 @@ Tab 上屏：       我觉得这个方案还有进一步优化空间
 - 本地候选学习：最近选择过的前缀会在输入法重启后继续影响本地排序，
   不发送给 provider。
 - 前缀锁定的 AI 推荐：第一候选固定为 Rime 转换，第二候选固定为 AI 推荐；
-  显式 polish 才是改写路径。`Option + R` 会为当前 marked composition 打开
-  独立润色候选层，只有显式选择 ready 结果才会上屏改写文本。
-  显式润色服从云端 AI 开关；即使当前展示的是不同的 Rime 候选，受保护或疑似
-  密钥的原始 composition 也不会发给 provider。润色接受不会写入
-  context-memory 或 continuation-learning 历史，相关诊断只包含元数据。
+  已锁定前缀永不改写。
 - macOS 输入法流程：marked text、候选选择、翻页、标点处理，以及紧凑、
   原生风格并能覆盖 Spotlight/search 浮层的 AppKit 候选窗。
 - 多 provider 兼容：OpenAI-compatible chat、OpenAI Responses、
@@ -344,7 +340,6 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `Shift + Space` | 切换进程级半角/全角字符，不改变中英输入或标点模式。全角会转换 ASCII `!` 到 `~` 及普通空格，不转换控制字符、Tab 或换行。 |
 | `Option + 1` | 显式提交 ready AI 推荐。 |
 | `Option + 2...9` | legacy continuation 行存在时提交对应延续。 |
-| `Option + R` | 对当前 marked composition 请求显式 polish。pending/error 行不可提交；方向键移动，`Space`/数字接受 ready 结果，`Escape` 取消。 |
 
 中英输入、标点语言和字符宽度仍是三层状态，但中英输入与标点采用可预测的全局
 联动：中文输入默认中文标点，ASCII 输入始终英文标点，`Option + /` 每次切换都会
@@ -455,7 +450,7 @@ Resources/                      macOS bundle 资源
 - 不依赖授权本地词库就宣称完整真实世界拼音覆盖
 - 对所有 macOS host app 做通用兼容性承诺
 - 把本地 fallback 延续伪装成配置 provider 的输出
-- 除显式 polish 外改写锁定前缀
+- 改写锁定前缀
 
 ## License
 

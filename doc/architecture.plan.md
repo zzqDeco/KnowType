@@ -9,7 +9,7 @@ KnowType is split into focused package layers:
 - `KnowTypeSettingsUI`: reusable SwiftUI settings for provider profiles, runtime preferences, privacy, local install guidance, and local lexicon status.
 - `KnowTypeSettingsApp` / `KnowTypePreferencePane`: hosts for the shared settings UI.
 
-The product boundary is strict: correction may refine the prefix, but continuation may only append text after the locked prefix. Explicit polish is the only rewrite path.
+The product boundary is strict: correction may refine the prefix, but continuation may only append text after the locked prefix. The input method does not expose a locked-prefix rewrite path.
 
 ## Input Pipeline
 
@@ -140,7 +140,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
-- Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction, context digest, and polish keep separate instructions.
+- Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction and context digest keep separate instructions.
 
 The input-method keydown path never awaits this layer. It publishes raw marked text and current-page Rime candidates first, then receives AI slot updates asynchronously. `InputAIRecommendationRuntime` owns request ids, generations, task cancellation, stale-result diagnostics, and `AIRecommendationPatch` validation for the IMK side of the real-time recommendation flow. Matching AI results update only the coordinator's fixed AI slot after request id, generation, composition id, raw revision, and raw input all still match. They cannot change Rime selection, marked text, base candidates, or panel visibility. `InputAIAcceptanceRuntime` owns post-commit AI acceptance side effects: accepted-learning records, typing-context events, accepted-feedback tracking orchestration, and protected/secret gates. It does not write host text or refresh candidate UI. `InputLexicalCommitRuntime` owns local lexical commit/selection side effects: bounded recent commits, protected selection-history recording, lexical profile refresh scheduling, and commit/selection event payload construction. `InputCompositionLifecycleRuntime` owns composition begin/finish lifecycle plans and first-begin trace-once state. `InputCommitDecisionRuntime` owns Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions as value plans. `InputCommitApplicationRuntime` owns commit-result plan and context construction only; the coordinator still performs Rime processing, segment mutation, host insertion, marked-text cleanup, Rime reset, candidate-panel hide, anchor reset, AI/lexical runtime calls, and lifecycle event publication in order. Rime userdb sync is a maintenance action and is not part of commit. Commit/selection profile refresh is executed by `LexicalProfileRuntime` and reads only an already exported userdb snapshot; explicit `sync_user_data` is owned by `RimeMaintenanceService` for manual or idle maintenance paths. Keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime debounces for 350 ms by default and has a 10-second hard timeout; continuing to type still cancels older requests immediately.
 Provider-generation stale results clear their own normal pending slot to idle;
@@ -274,12 +274,6 @@ LevelDB state.
   AI/lexical side-effect context construction, accepted-feedback context
   construction. It returns values only; the coordinator remains the
   order-sensitive side-effect owner.
-- `InputAIPolishRuntime` owns the explicit rewrite lifecycle independently of
-  real-time continuation. It leases `ProviderRuntimeRegistry.shared`, sends
-  `task: polish` with no locked-prefix sanitizer, binds non-idle state to the
-  request, composition, raw revision, and provider generation, and revalidates
-  the provider lease before acceptance. Accepted polish bypasses context-memory
-  and continuation-learning pipelines; polish diagnostics contain metadata only.
 - `CandidatePanelPresenter` consumes `CandidatePanelFrame` values with
   composition id, raw revision, anchor source, panel model, and explicit
   visibility reason before touching the host's AppKit panel adapter.
@@ -314,10 +308,6 @@ order and `CandidatePanelState` and `CandidatePanelRenderer` both consume it:
 - remaining Rime prefix candidates appear after the AI slot
 - legacy continuation candidates may still be represented by core/session tests, but the production IMK panel uses the AI slot for provider-backed continuation
 - raw input appears only when no suggestion is available
-- an active polish overlay temporarily replaces ordinary pageable rows with a
-  disabled spinner/error row or selectable polish candidates; it does not
-  mutate Rime selection or marked text, and mode shortcuts cancel the overlay
-  before their normal action runs
 - adaptive layout pages up to 6 visible rows; vertical-list mode can show up to 9 visible rows
 
 Candidate-window layout keeps those row semantics but derives horizontal versus vertical presentation from measured
@@ -337,9 +327,6 @@ same-raw-input, same-composition active panel.
 
 Mouse hover selects enabled visible rows, click and VoiceOver press commit the
 same target as keyboard selection, and disabled/status rows cannot commit.
-Polish rows use that same generation-guarded selection callback. Only explicit
-acceptance inserts a ready rewrite for the current marked composition; new
-input, lifecycle teardown, or stale provider/composition identity drops it.
 Trackpad deltas accumulate to at most one page per began-to-ended gesture,
 momentum is ignored, and phase-less wheel paging has a 120 ms cooldown.
 `InputNativeCandidateNavigationRuntime` maps visible

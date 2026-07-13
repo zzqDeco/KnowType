@@ -115,9 +115,6 @@ public struct CandidatePanelRowBuilder: Sendable {
     }
 
     private func pageableRows(in viewModel: CandidatePanelViewModel) -> [CandidatePanelRowItem] {
-        if viewModel.aiPolish.isActive {
-            return polishRows(viewModel.aiPolish)
-        }
         var rows: [CandidatePanelRowItem] = []
         let hasSuggestions = !viewModel.prefixCandidates.isEmpty
             || !viewModel.continuationCandidates.isEmpty
@@ -181,46 +178,6 @@ public struct CandidatePanelRowBuilder: Sendable {
         }
 
         return rows
-    }
-
-    private func polishRows(_ state: InputAIPolishState) -> [CandidatePanelRowItem] {
-        switch state {
-        case .idle:
-            return []
-        case .pending:
-            return [
-                CandidatePanelRowItem(
-                    selection: nil,
-                    kind: .aiPolish,
-                    text: "",
-                    visualRole: .aiPolish,
-                    accessibilityLabel: "AI 润色状态，正在润色",
-                    isEnabled: false,
-                    accessory: .spinner
-                )
-            ]
-        case .ready(_, let candidates):
-            return candidates.enumerated().map { index, candidate in
-                CandidatePanelRowItem(
-                    selection: .polishCandidate(index),
-                    kind: .aiPolish,
-                    text: candidate.text,
-                    visualRole: .aiPolish,
-                    isNumberShortcutEligible: true
-                )
-            }
-        case .unavailable(_, let reason):
-            return [
-                CandidatePanelRowItem(
-                    selection: nil,
-                    kind: .aiPolish,
-                    text: reason,
-                    visualRole: .aiPolish,
-                    accessibilityLabel: "AI 润色状态，\(reason)",
-                    isEnabled: false
-                )
-            ]
-        }
     }
 
     private func aiRecommendationRow(_ state: AIRecommendationState) -> CandidatePanelRowItem? {

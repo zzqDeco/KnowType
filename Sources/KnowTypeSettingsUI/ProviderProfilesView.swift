@@ -228,7 +228,6 @@ private struct CandidateSettingsView: View {
                     LabeledContent(settingsString("settings.candidates.shortcut.number.label"), value: settingsString("settings.candidates.shortcut.number.value"))
                     LabeledContent("Tab", value: settingsString("settings.candidates.shortcut.tab.value"))
                     LabeledContent("Option + 1...9", value: settingsString("settings.candidates.shortcut.optionNumber.value"))
-                    LabeledContent("Option + R", value: settingsString("settings.candidates.shortcut.optionR.value"))
                 }
             }
         }

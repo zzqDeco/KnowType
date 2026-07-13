@@ -7,7 +7,6 @@ The renderer does not draw UI and does not assign colors. It emits semantic role
 
 - `lockedPrefix` for correction/prefix candidates
 - `aiRecommendation` for the fixed AI slot
-- `aiPolish` for explicit rewrite status and candidate rows
 - `continuation` for continuation candidates
 - `rawInput` for the original input row
 - `preedit` for commit-only host preedit that cannot be exposed inline
@@ -44,8 +43,5 @@ accessibility label. Ready AI labels include `AI 推荐`; disabled AI status lab
 use `AI 状态`; symbol rows use `符号`; mode-status rows use `输入模式`. Pending AI
 render rows keep empty visible text and a spinner accessory, with
 `AI 状态，AI 推荐中` supplied explicitly for accessibility.
-Ready polish rows use visible numeric shortcuts and `AI 润色` accessibility
-labels. They flow through the same pointer and VoiceOver callback as every
-other enabled selection, including the AppKit render-generation guard.
 
 Candidate selection is preserved across same-raw-input updates only when the candidate text at the selected index is unchanged. If provider-backed suggestions reorder or replace the row at that index, selection resets to the default first candidate so the highlighted row and commit target never drift apart.

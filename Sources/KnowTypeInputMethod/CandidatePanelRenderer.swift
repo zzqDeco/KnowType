@@ -8,7 +8,6 @@ public enum CandidatePanelRowKind: Sendable, Equatable {
     case rawInput
     case prefixCandidate
     case aiRecommendation
-    case aiPolish
     case continuationCandidate
     case symbolCandidate
 }
@@ -16,7 +15,6 @@ public enum CandidatePanelRowKind: Sendable, Equatable {
 public enum CandidatePanelVisualRole: Sendable, Equatable, Hashable {
     case lockedPrefix
     case aiRecommendation
-    case aiPolish
     case continuation
     case rawInput
     case symbolCandidate
@@ -33,7 +31,6 @@ public enum CandidatePanelSelection: Sendable, Equatable {
     case fullCandidate(Int)
     case segmentCandidate(Int)
     case aiRecommendation
-    case polishCandidate(Int)
     case continuationCandidate(Int)
     case symbolCandidate(Int)
 }
@@ -86,8 +83,6 @@ public struct CandidatePanelRenderRow: Sendable, Equatable {
         switch visualRole {
         case .aiRecommendation:
             rolePrefix = isEnabled ? "AI 推荐" : "AI 状态"
-        case .aiPolish:
-            rolePrefix = isEnabled ? "AI 润色" : "AI 润色状态"
         case .continuation:
             rolePrefix = "续写"
         case .symbolCandidate:
@@ -153,13 +148,6 @@ public struct CandidatePanelRenderer: Sendable {
             case .some(.aiRecommendation):
                 if viewModel.aiRecommendation.isSelectableRecommendation {
                     shortcutLabel = "⇥"
-                } else {
-                    shortcutLabel = nil
-                }
-            case .some(.polishCandidate):
-                if item.isNumberShortcutEligible {
-                    shortcutLabel = "\(nextNumberShortcut)"
-                    nextNumberShortcut += 1
                 } else {
                     shortcutLabel = nil
                 }

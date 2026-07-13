@@ -87,7 +87,6 @@ final class ProviderAdapterTests: XCTestCase {
         let continuation = PromptBuilder.systemPrompt(for: .continuation)
         let correction = PromptBuilder.systemPrompt(for: .correction)
         let contextDigest = PromptBuilder.systemPrompt(for: .contextDigest)
-        let polish = PromptBuilder.systemPrompt(for: .polish)
 
         XCTAssertTrue(continuation.contains("suffix generator"))
         XCTAssertTrue(continuation.contains("lockedPrefix"))
@@ -105,7 +104,6 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertFalse(continuation.contains("Chinese continuation"))
         XCTAssertFalse(correction.contains("suffix generator"))
         XCTAssertFalse(contextDigest.contains("suffix only"))
-        XCTAssertFalse(polish.contains("suffix generator"))
     }
 
     func testOpenAIChatMapsRequestAndParsesCandidates() async throws {

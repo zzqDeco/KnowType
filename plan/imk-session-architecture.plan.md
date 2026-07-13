@@ -4,11 +4,11 @@ Goal: make the InputMethodKit frontend a thin bridge over explicit KnowType inpu
 
 Scope:
 
-- model session modes as `empty`, `composing`, `candidate`, `aiPending`, `polish`, and `ascii`
+- model session modes as `empty`, `composing`, `candidate`, `aiPending`, and `ascii`
 - keep `InputController` focused on IMK lifecycle, client lookup, marked text, commit insertion, palette visibility, and candidate window anchoring
 - route product commit decisions through session-level policy so native candidate selection, stale fallback, and shortcuts stay consistent
 - model key-down, key-up, and flag-change input intents without AppKit dependencies in unit tests
-- preserve MVP rules: `Space` commits best prefix, `Tab` commits prefix plus first continuation, `Option+number` commits continuation, `Option+R` requests polish only, and Level 0 never calls providers
+- preserve MVP rules: `Space` commits best prefix, `Tab` commits prefix plus first continuation, `Option+number` commits continuation, and Level 0 never calls providers
 
 Validation:
 

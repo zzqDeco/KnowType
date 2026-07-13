@@ -10,10 +10,6 @@ final class InputCommitApplicationRuntimeTests: XCTestCase {
         let runtime = InputCommitApplicationRuntime()
 
         XCTAssertEqual(runtime.plan(for: .commit("你"), hasComposition: true), .insertAndReset("你"))
-        XCTAssertEqual(
-            runtime.plan(for: .polishRequested("ni"), hasComposition: true),
-            .requestPolishAndKeepComposition("ni")
-        )
         XCTAssertEqual(runtime.plan(for: .noAction, hasComposition: true), .noAction(consume: true))
         XCTAssertEqual(runtime.plan(for: .noAction, hasComposition: false), .noAction(consume: false))
     }

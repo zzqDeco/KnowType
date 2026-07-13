@@ -27,10 +27,10 @@ final class InputKeyCommandMapperTests: XCTestCase {
         )
     }
 
-    func testMapsOptionRToPolish() {
+    func testUnrecognizedOptionLetterIsIgnored() {
         XCTAssertEqual(
             mapper.intent(for: InputKeyStroke(text: "", keyCode: 15, modifiers: [.option])),
-            .action(.optionR)
+            .ignored
         )
     }
 

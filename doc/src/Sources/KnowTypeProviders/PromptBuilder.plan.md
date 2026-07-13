@@ -21,8 +21,7 @@ adapters.
   commit-ready recommendation from raw input and context.
   The prompt asks for language and intent aligned with the request context; it
   must not force Chinese output for English or mixed-locale input.
-- Correction and polish prompts must keep the distinction between prefix
-  refinement and explicit rewrite.
+- Correction prompts refine prefixes without introducing continuation examples.
 - Context digest prompts use the separate `{ "markdown": "..." }` shape and
   must not receive continuation-oriented suffix examples.
 - Providers may ignore prompts, so response sanitization remains required.

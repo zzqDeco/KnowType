@@ -10,7 +10,7 @@ Implement the first usable KnowType core around multi-protocol provider compatib
 - Local Level 0/1 correction rules and examples for Chinese pinyin, English, and mixed input.
 - Provider adapters for OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini native, Ollama native, and custom HTTP.
 - Settings-app provider profiles with JSON metadata persistence, profile-scoped secrets, remote OpenAI model validation, and local/no-secret provider cleanup.
-- Input action contract for Space, Tab, Option-number, and Option-R.
+- Input action contract for Space, Tab, and Option-number.
 - Unit tests for product invariants and adapter mapping.
 
 ## Non-Goals

@@ -360,8 +360,6 @@ public enum InputSymbolCommitPolicy {
         switch baseCommitResult {
         case .commit(let text):
             return .commit(text + symbol)
-        case .polishRequested:
-            return rawInput.isEmpty ? .commit(symbol) : .commit(rawInput + symbol)
         case .noAction:
             return rawInput.isEmpty ? .commit(symbol) : .commit(rawInput + symbol)
         }

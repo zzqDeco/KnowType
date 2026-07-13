@@ -20,7 +20,7 @@ Status: Delivered
 
 ## Implementation
 
-- Runtime maps `InputCommitResult` into insert, polish, keep, or no-action
+- Runtime maps `InputCommitResult` into insert, keep, or no-action
   plans using the existing commit-result policy.
 - Runtime constructs accepted-feedback, AI acceptance, and lexical commit
   contexts from a captured composition snapshot plus coordinator-supplied

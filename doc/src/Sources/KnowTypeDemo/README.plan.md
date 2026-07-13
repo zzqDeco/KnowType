@@ -11,6 +11,6 @@ It wires:
 Supported options:
 
 - `--locale zh-CN|en-US|mixed`
-- `--action space|tab|optionN|polish`
+- `--action space|tab|optionN`
 
 The executable is intentionally local-only and uses the fallback provider path. Cloud provider configuration remains in `KnowTypeProviders`.

@@ -13,7 +13,7 @@ Scope:
 - support mouse hover, click commit, scroll paging, and row accessibility elements
 - add PNG snapshot regression tests for light horizontal, dark vertical, and AI status layouts
 - defer local fallback continuation rows while a provider-backed result is pending, so configured AI does not look like fixed mock text
-- preserve `Space`, `Tab`, `Option+number`, and `Option+R` behavior
+- preserve `Space`, `Tab`, and `Option+number` behavior
 - show up to six local prefix/continuation candidates before paging or provider results
 
 Validation:

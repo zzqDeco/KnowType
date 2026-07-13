@@ -19,7 +19,6 @@ struct InputCandidatePanelPublicationRequest: Sendable, Equatable {
     var placementPreference: CandidatePanelPlacementPreference
     var preeditDisplayText: String?
     var aiRecommendation: AIRecommendationState
-    var aiPolish: InputAIPolishState = .idle
     var modeStatusText: String? = nil
     var symbolCandidates: [InputSymbolCandidate] = []
     var savedPageSize: Int
@@ -229,7 +228,6 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             placementPreference: request.placementPreference,
             preeditDisplayText: request.preeditDisplayText,
             aiRecommendation: .idle,
-            aiPolish: .idle,
             modeStatusText: request.modeStatusText,
             symbolCandidates: request.symbolCandidates,
             preferredSelection: request.preferredSelection
@@ -385,7 +383,6 @@ final class InputCandidatePanelPublicationRuntime: @unchecked Sendable {
             placementPreference: request.placementPreference,
             preeditDisplayText: request.preeditDisplayText,
             aiRecommendation: request.aiRecommendation,
-            aiPolish: request.aiPolish,
             modeStatusText: request.modeStatusText,
             symbolCandidates: request.symbolCandidates,
             preferredSelection: request.preferredSelection
