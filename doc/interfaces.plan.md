@@ -564,8 +564,42 @@ reason; they do not include user text or raw geometry.
 - `0` commits raw composition when correction candidates are visible.
 - visible numeric shortcuts commit rows on the current Rime candidate page only; after the AI slot, native alternatives keep their visible row numbers.
 - unmatched digit keys in native composition are consumed instead of appending raw digits; outside native composition, unmatched digits continue composing as literal digits.
-- plain punctuation is offered to Rime first while composing; if Rime declines, `InputPunctuatorRuntime` commits the current composition display plus punctuation, opens a symbol-candidate session, or inserts punctuation directly with no composition. Chinese punctuation mode maps sentence punctuation, context-selected Chinese quotes, ellipsis, em dash, bracket pairs, and symbol-candidate entries such as `/` for dunhao. Full-width mode transforms printable ASCII `!...~` and U+0020, but never control characters, Tab, or newline.
-- symbol-candidate sessions are panel-only input state. `Space` or `1` commits the first visible symbol, number keys commit their visible symbol, arrows and paging commands move selection, `Escape` cancels, and other printable input cancels the session before normal handling. Raw key events and AppKit responder commands share the same navigation path. Navigation is consumed at clamped boundaries without changing host text, caret, or selection; after the session closes, the same responder commands return to the host. Symbol candidates do not trigger AI requests, Rime composition mutation, or selection-learning events.
+- plain punctuation is offered to Rime first while composing; if Rime declines,
+  `InputPunctuatorRuntime` returns only `InputSymbolRule.direct(finalText)` or
+  `.candidates(trigger:outputs:)`. Chinese punctuation mode maps sentence
+  punctuation, context-selected Chinese quotes, ellipsis, em dash, bracket
+  pairs, and ambiguous entries such as `/` for dunhao. Full-width mode
+  transforms printable ASCII `!...~` and U+0020, but never control characters,
+  Tab, or newline. Deprecated public `InputPunctuatorDecision` adapters remain
+  source-compatible, but production code does not use `passThrough`. With no
+  active text session, missing-client and ASCII-passthrough compatibility
+  checks run before punctuation context reads and rule evaluation, so returned
+  keys neither query host text nor mutate quote pairing, and candidate rules do
+  not create a hidden session when the original key belongs to the host.
+- `InputActiveSessionRuntime` owns one `none`, `text`, or `symbol` session.
+  Starting candidates from text uses a full composition commit, not Space, so
+  native partial-segment commits cannot leave text active; a symbol session is
+  created only after the text lifecycle reaches idle. Symbol state owns
+  immutable candidates and selection, while `CandidatePanelState` is only a
+  render projection. External runtime-preference refreshes republish that
+  projection while the symbol session remains active, using the session's
+  captured page size for panel paging and numeric selection.
+- `Space`, Return, valid visible numbers, and mouse selection commit the current
+  symbol. Escape and Backspace cancel without deleting existing host text.
+  Repeating the same trigger advances to the next candidate. Other printable
+  input commits the selected symbol, clears the session, and replays the
+  original intent once from idle. Invalid number shortcuts follow the same
+  commit-and-replay rule.
+- Raw key events and AppKit responder commands share symbol navigation.
+  Navigation is consumed at clamped boundaries without changing host text,
+  caret, or selection. Command/Control shortcuts cancel and return unhandled.
+  Explicit commit commits directly. Click-outside and deactivate commit only
+  after synchronizing the shared input-mode generation and only when the
+  current host identity, selected range, marked range, and bundle match the
+  context captured when the symbol session began; a generation change, changed
+  host context, or missing host context cancels. Reset and close also cancel.
+  Symbol sessions do not trigger AI requests, Rime symbol mutation, prefix
+  learning, or marked-text preview in this slice.
 - Command/Control key-down is a host-shortcut intent. If a symbol-candidate
   session is active, KnowType cancels its session and overlay before returning
   the key to the host; key-up remains ignored and flags-changed remains a

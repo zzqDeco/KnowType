@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-`InputSymbolMode.swift` owns local punctuator decisions and full-width character
+`InputSymbolMode.swift` owns local symbol rules and full-width character
 conversion for one key event.
 
 ## Boundaries
@@ -15,8 +15,12 @@ conversion for one key event.
 
 ## Behavior Notes
 
-- `InputPunctuatorRuntime` returns direct commit, symbol candidates, or
-  pass-through without changing global mode state.
+- The production contract is only `InputSymbolRule.direct` or
+  `InputSymbolRule.candidates`. It computes final output before returning and
+  never represents host passthrough as a symbol product mode.
+- Deprecated public `InputPunctuatorDecision` and
+  `InputSymbolCandidateSession` adapters remain for SwiftPM source
+  compatibility; the coordinator does not use them.
 - Chinese punctuation supports sentence punctuation, paired Chinese quotes,
   ellipsis, em dash, bracket pairs, and panel-backed ambiguous symbols.
 - ASCII mode uses English punctuation. Chinese mode may temporarily use English
@@ -31,6 +35,8 @@ conversion for one key event.
   use coordinator-local alternation only when context is unknown. Fallback
   state resets after external delete, focus/selection changes, and newer global
   mode generations.
+- Candidate mappings and ordering are stable; session ownership and selection
+  belong to `InputActiveSessionRuntime`.
 
 ## Tests
 

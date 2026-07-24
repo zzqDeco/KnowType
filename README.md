@@ -392,8 +392,8 @@ placement.
 | `Return` / `Enter` | Commit the original raw composition. |
 | `Tab` | Commit the AI recommendation when the second slot is ready; pending or unavailable AI keeps the composition active. |
 | `0` | Commit the raw composition when correction candidates are visible; with no active composition, produce `0` or pass it through in compatibility hosts. |
-| Plain punctuation | Let Rime handle composing schema keys first, then commit composition plus punctuation, show symbol candidates, insert punctuation directly, or pass it through in compatibility hosts when no composition is active. |
-| `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol-candidate row set; `Space`/`1` commits the first symbol, numbers commit the visible symbol, and `Escape` cancels. Arrow and paging commands are consumed while the row set is active, including at list boundaries, and return to normal host navigation after it closes. |
+| Plain punctuation | Let Rime handle composing schema keys first, then resolve one final direct output or an ordered symbol-candidate list. Host compatibility decides whether idle half-width ASCII is inserted by KnowType or passed through; passthrough never opens a symbol session. |
+| `/` and other ambiguous symbols | In Chinese punctuation mode, show a symbol session. `Space`, Return, valid visible numbers, or mouse selection commit; `Escape` and Backspace cancel; pressing the same trigger advances selection. Arrow and paging commands are consumed, including at list boundaries. Other printable input commits the selected symbol and is then processed once normally. |
 | Command/Control host shortcuts | Cancel an open symbol-candidate overlay before passing the shortcut to the focused host, so a later `Space` cannot commit a stale symbol. |
 | `Option + .` | In Chinese text mode, manually toggle Chinese/English punctuation until the next text-mode switch. In ASCII mode it leaves punctuation English and only repeats the mode status. |
 | `Option + /` | Toggle the process-wide Chinese/ASCII text mode. The switch also restores linked Chinese/English punctuation and is shared across apps. |
@@ -428,7 +428,18 @@ default behavior of committing active composition when the user clicks outside
 its marked range. Shortcut modifiers continue to come from key-down flags.
 InputMethodKit responder navigation commands are handled separately only while
 symbol candidates are active, preventing the same arrow from moving the host
-caret or selection.
+caret or selection. Text composition is fully committed before a symbol session
+opens; cancelling the symbol does not restore or delete that committed text.
+Explicit composition commit confirms the selected symbol. Click-outside and
+deactivate confirm it only when focus and cursor ranges still match the host
+context captured when the symbol session opened; changed or missing host
+context cancels without writing. Reset, close, host shortcuts, and input-mode
+changes also cancel it. Symbol sessions do not start AI or Rime learning and do
+not use marked-text preview yet. An open symbol session keeps its captured page
+size across preference refreshes so panel paging and numeric selection agree.
+Focus lifecycle synchronizes shared input mode first, so a mode change cancels
+instead of committing an old symbol. Compatibility-passthrough punctuation is
+returned before document-context reads or quote-state changes.
 Terminal, iTerm, MacVim, and Emacs-style hosts therefore also begin in Chinese
 mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;

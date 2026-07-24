@@ -12,24 +12,37 @@ Current behavior:
 - maps IMK responder command-selector names through the same mapper, latency
   trace, and intent handler as raw key events; unknown commands return to the
   host
-- consumes arrow and paging navigation for active symbol-candidate sessions at
+- consumes arrow and paging navigation for active symbol sessions at
   every list position, including clamped boundaries, without marked-text,
   insert-text, caret, or selection writes; the same commands pass through after
   commit or cancellation
-- cancels an active symbol-candidate overlay before returning `false` for a
+- cancels an active symbol session before returning `false` for a
   Command/Control host shortcut, preventing the next Space from committing a
   stale symbol while preserving host handling
-- delegates raw input, `CompositionBuffer`, composition id, raw revision, and
-  delete-count state to `InputCompositionStateRuntime`
+- delegates mutually exclusive text/symbol ownership, monotonic ids, symbol
+  selection, and value-only symbol transitions to
+  `InputActiveSessionRuntime`; text storage remains in
+  `InputCompositionStateRuntime`
+- executes symbol transition plans in a fixed order: finish any required text
+  composition through the full commit path, update or clear session state,
+  perform host insertion, publish or hide the panel, then replay at most one
+  original intent
+- commits active symbols for explicit commit, mouse selection, click-outside,
+  and deactivate only when the current host snapshot matches the session's
+  captured host identity and cursor ranges; focus lifecycle synchronizes the
+  shared mode generation before this decision, while reset, close, missing or
+  changed host context, host shortcut, and mode-generation transitions cancel
+- preserves the active symbol projection across external runtime-preference
+  refreshes instead of replacing it with a normal suggestion frame, and keeps
+  the panel on the page size captured when the symbol session began
 - delegates composition begin and finish lifecycle planning to
   `InputCompositionLifecycleRuntime`, including first-begin trace-once state,
   lifecycle reason to panel reason mapping, finished composition id capture,
   lifecycle commit text carrying, and owned marked-text clear intent
 - reads process-wide input-mode snapshots, compares their generation on every
   turn, synchronizes native Rime options, and resets coordinator-local quote
-  fallback and symbol-candidate state
-  when another session changed the mode; stale symbol overlays are restored to
-  composition UI or hidden before the current key continues
+  fallback and symbol state when another session changed the mode; stale symbol
+  sessions are cancelled before the current key continues
 - selects a host compatibility write mode before writing or passing through
   printable input through `InputClientCompositionWriter`
 - writes marked text through `InputControllerClient.setMarkedText`; inline hosts
@@ -45,8 +58,10 @@ Current behavior:
   stack; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
 - checks idle passthrough/disabled mode before full-width letter, digit, space,
-  or symbol fast paths; missing callback clients never fall back to a stale host
-  client, and unchanged Unicode remains passthrough in ASCII mode
+  or punctuation context/rule evaluation; passthrough punctuation therefore
+  cannot read host text, advance quote pairing, or start a hidden candidate
+  session, missing callback clients never fall back to a stale host client, and
+  unchanged Unicode remains passthrough in ASCII mode
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
 - tracks KnowType-owned marked text by client and clears only that owned mark;
   `InputClientCompositionWriter` owns the tracked client id and clear-before-
@@ -54,7 +69,7 @@ Current behavior:
   stale host marked ranges
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
-- reads composition snapshots from `InputCompositionStateRuntime` when building
+- reads text composition snapshots from `InputActiveSessionRuntime` when building
   write state, AI request context, candidate-panel publication snapshots, and
   commit/selection learning context
 - delegates current suggestion storage, raw-input freshness checks, commit
@@ -203,8 +218,8 @@ Current behavior:
   staging, stale-write gates, and userdb parse diagnostics live outside the
   coordinator
 - does not initialize or rebuild runtime lexicon engines in the IMK product path; Rime is the only production conversion source
-- clears composition state for cancel and commit through
-  `InputCompositionStateRuntime` and lifecycle plans from
+- clears text composition state for cancel and commit through
+  `InputActiveSessionRuntime` and lifecycle plans from
   `InputCompositionLifecycleRuntime` while the coordinator keeps candidate-panel
   hide, Rime reset, marked-text cleanup, and runtime-event publication in order
 - has post-refactor regression coverage for the cross-runtime paths that must
