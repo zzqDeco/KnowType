@@ -70,6 +70,11 @@ Current behavior:
   that exact mark; `InputClientCompositionWriter` owns clear-before-insert
   ordering and stale ownership release, while idle Return/Enter returns to the
   host without clearing stale host marked ranges
+- clears a text composition's final owned mark before advancing the anchor
+  composition id after Backspace
+- retains the short-lived IMK client adapter through the 50 ms symbol reanchor
+  callback, then revalidates composition id, revision, and host snapshot before
+  publishing
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
 - reads text composition snapshots from `InputActiveSessionRuntime` when building

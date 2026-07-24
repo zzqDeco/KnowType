@@ -514,6 +514,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 _ = conversionEngine.process(.deleteBackward)
                 if deleteResult.becameEmpty {
                     conversionEngine.reset()
+                    inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
+                        client: client,
+                        state: writeState()
+                    )
                     resetAnchorState()
                 }
             }
@@ -2622,9 +2626,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     hasActiveComposition: current.revision == composition.revision
                 )
             },
-            publish: { [weak self, weak client] in
+            publish: { [weak self, client] in
                 guard let self,
-                      let client,
                       let current = self.activeSessionRuntime.currentSymbolComposition,
                       current.compositionID == composition.compositionID,
                       current.revision == composition.revision,

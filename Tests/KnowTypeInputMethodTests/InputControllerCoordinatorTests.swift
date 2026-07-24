@@ -3233,6 +3233,25 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(events.last?.deleteCountBeforeCommit, 0)
     }
 
+    func testBackspaceClearingFinalTextCharacterClearsMarkBeforeCompositionIDChanges() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n"])
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 51),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n", ""])
+        XCTAssertNil(client.markedRangeValue)
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
     @MainActor
     func testNoProviderDoesNotRecordContextMemoryEvents() async {
         let client = FakeInputControllerClient()
@@ -4609,6 +4628,23 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(client.markedTextWrites.map(\.text), ["、"])
         XCTAssertEqual(host.panelStates.last?.windowState.anchorRect.minX, 220)
+    }
+
+    func testDelayedSymbolReanchorRetainsEphemeralClientAdapterUntilCallbackRuns() {
+        var client: FakeInputControllerClient? = FakeInputControllerClient()
+        weak let retainedClient = client
+        let (coordinator, host, _) = makeCoordinator(client: client!)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        let panelStateCount = host.panelStates.count
+        host.currentClientValue = nil
+        client = nil
+
+        XCTAssertNotNil(retainedClient)
+        host.runScheduledOperations()
+
+        XCTAssertEqual(host.panelStates.count, panelStateCount + 1)
+        XCTAssertNil(retainedClient)
     }
 
     func testSymbolCandidateHoverAndMouseCommitUseSessionSelection() {
