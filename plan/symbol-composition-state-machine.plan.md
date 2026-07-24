@@ -25,6 +25,9 @@
 
 - Direct punctuation resolves its final Chinese, ASCII, full-width, decimal, or
   contextual-quote text before returning from the punctuator.
+- Idle host passthrough is checked before both direct and candidate rules, so a
+  missing client or ASCII-passthrough compatibility override cannot leave an
+  invisible symbol session behind.
 - Text and symbol sessions use one monotonically increasing composition id
   domain. A symbol session captures immutable candidates, its trigger, host
   identity and cursor ranges, plus explicit lifecycle policies.
@@ -42,6 +45,8 @@
   also cancel.
 - External runtime-preference refreshes reproject an active symbol session
   instead of replacing its overlay with an unrelated local-suggestion frame.
+  The projection keeps the page size captured when the session began so
+  navigation, visible numbering, and panel paging remain synchronized.
 - Other printable input produces one commit-and-replay plan. The coordinator
   commits the symbol, clears the panel, then handles the original intent once
   from idle without recursion.

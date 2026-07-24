@@ -1911,6 +1911,45 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testMissingClientCandidateSymbolPassesThroughWithoutStartingSession() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+        host.currentClientValue = nil
+
+        XCTAssertFalse(coordinator.handleText("/", client: nil))
+
+        host.currentClientValue = client
+        XCTAssertFalse(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertFalse(host.candidatePanelFrames.last?.isVisible ?? false)
+    }
+
+    func testIdleCandidateSymbolPassesThroughForCompatibilityOverride() {
+        let suiteName = "InputControllerCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.example.AsciiPassthrough"
+        defaults.set(
+            InputClientWriteMode.asciiPassthrough.rawValue,
+            forKey: "input.client.\(client.bundleIdentifier!).writeMode"
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            clientCompatibilityPolicy: InputClientCompatibilityPolicy(userDefaults: defaults)
+        )
+
+        XCTAssertFalse(coordinator.handleText("/", client: client))
+
+        XCTAssertFalse(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertFalse(host.candidatePanelFrames.last?.isVisible ?? false)
+    }
+
     func testFullWidthSymbolsPassThroughWhenClientIsMissing() {
         let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
         var preferences = InputModePreferences.standard
@@ -2945,6 +2984,46 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, true)
+    }
+
+    func testExternalRuntimePreferenceReloadKeepsSymbolSessionPageSize() {
+        let client = FakeInputControllerClient()
+        let runtimeStore = MutableInputMethodRuntimePreferenceStore(
+            preferences: InputMethodRuntimePreferences(
+                candidatePageSize: 2,
+                candidateLayoutMode: .verticalPreferred
+            )
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            runtimePreferences: runtimeStore.preferences,
+            runtimePreferenceStore: runtimeStore
+        )
+
+        XCTAssertTrue(coordinator.handleText("[", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 121),
+                client: client
+            )
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.paging.currentPage, 1)
+
+        runtimeStore.preferences = InputMethodRuntimePreferences(
+            candidatePageSize: 5,
+            candidateLayoutMode: .verticalPreferred
+        )
+        coordinator.reloadRuntimePreferencesForExternalChange()
+
+        XCTAssertEqual(host.panelStates.last?.windowState.paging.pageSize, 2)
+        XCTAssertEqual(host.panelStates.last?.windowState.paging.currentPage, 1)
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "1", keyCode: keyCode(forNumber: 1)),
+                client: client
+            )
+        )
+        XCTAssertEqual(client.insertTextWrites.last?.text, "〖")
     }
 
     @MainActor
@@ -5027,6 +5106,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         runtimePreferenceStore: (any InputMethodRuntimePreferenceStore)? = nil,
         conversionEngine: (any KnowTypeConversionEngine)? = nil,
         conversionEngineFactory: (@Sendable (TraditionalInputEngine?) -> any KnowTypeConversionEngine)? = nil,
+        clientCompatibilityPolicy: InputClientCompatibilityPolicy = InputClientCompatibilityPolicy(),
         screenProvider: any ScreenGeometryProviding = FixedInputControllerScreenProvider(),
         asyncSuggestionDelayNanoseconds: UInt64 = 0
     ) -> (
@@ -5061,6 +5141,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             rimeUserDBTextProvider: rimeUserDBTextProvider,
             conversionEngine: effectiveConversionEngine,
             conversionEngineFactory: conversionEngineFactory,
+            clientCompatibilityPolicy: clientCompatibilityPolicy,
             host: host,
             anchorResolver: CandidateAnchorResolver(
                 screenProvider: screenProvider,

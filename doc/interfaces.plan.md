@@ -571,14 +571,18 @@ reason; they do not include user text or raw geometry.
   pairs, and ambiguous entries such as `/` for dunhao. Full-width mode
   transforms printable ASCII `!...~` and U+0020, but never control characters,
   Tab, or newline. Deprecated public `InputPunctuatorDecision` adapters remain
-  source-compatible, but production code does not use `passThrough`.
+  source-compatible, but production code does not use `passThrough`. With no
+  active text session, missing-client and ASCII-passthrough compatibility
+  checks run before either rule kind, so candidate rules do not create a
+  hidden session when the original key belongs to the host.
 - `InputActiveSessionRuntime` owns one `none`, `text`, or `symbol` session.
   Starting candidates from text uses a full composition commit, not Space, so
   native partial-segment commits cannot leave text active; a symbol session is
   created only after the text lifecycle reaches idle. Symbol state owns
   immutable candidates and selection, while `CandidatePanelState` is only a
   render projection. External runtime-preference refreshes republish that
-  projection while the symbol session remains active.
+  projection while the symbol session remains active, using the session's
+  captured page size for panel paging and numeric selection.
 - `Space`, Return, valid visible numbers, and mouse selection commit the current
   symbol. Escape and Backspace cancel without deleting existing host text.
   Repeating the same trigger advances to the next candidate. Other printable

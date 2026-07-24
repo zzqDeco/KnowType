@@ -614,12 +614,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         originalInput: String,
         client: InputControllerClient?
     ) -> Bool {
+        if !hasActiveTextComposition(),
+           shouldPassThroughIdleText(originalInput, client: client, reason: "idle_symbol") {
+            return false
+        }
         switch rule {
         case .direct(let text):
-            if !hasActiveTextComposition(),
-               shouldPassThroughIdleText(originalInput, client: client, reason: "idle_symbol") {
-                return false
-            }
             return commitSymbol(text, client: client)
         case .candidates(let trigger, let outputs):
             return beginSymbolCandidateComposition(
@@ -733,6 +733,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             modeStatusText: modeStatusText,
             symbolCandidates: composition.candidates,
             preferredSelection: .symbolCandidate(composition.selectedIndex),
+            pageSize: composition.pageSize,
             client: client
         )
     }
@@ -2035,6 +2036,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         modeStatusText: String?,
         symbolCandidates: [InputSymbolCandidate],
         preferredSelection: CandidatePanelSelection?,
+        pageSize: Int? = nil,
         client: InputControllerClient?
     ) {
         let result = candidatePanelPublicationRuntime.publishOverlay(
@@ -2047,7 +2049,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 preeditDisplayText: rawBuffer.isEmpty ? nil : candidatePanelPreeditDisplayText(client: client),
                 modeStatusText: modeStatusText,
                 symbolCandidates: symbolCandidates,
-                pageSize: runtimePreferences.effectiveCandidatePageSize,
+                pageSize: pageSize ?? runtimePreferences.effectiveCandidatePageSize,
                 layoutMode: runtimePreferences.candidateLayoutMode,
                 preferredSelection: preferredSelection
             ),

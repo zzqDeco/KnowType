@@ -339,7 +339,7 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
-| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时只生成最终 direct 输出或有序符号候选。空闲半角 ASCII 由宿主兼容 writer 决定由 KnowType 插入还是交还宿主。 |
+| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时只生成最终 direct 输出或有序符号候选。空闲半角 ASCII 由宿主兼容 writer 决定由 KnowType 插入还是交还宿主；直通时不会打开符号 session。 |
 | `/` 等多义符号 | 中文标点模式下打开符号 session。`Space`、Return、当前页有效数字或鼠标选择提交；`Escape`、Backspace 取消；再次按相同 trigger 会移动到下一候选。候选活动期间方向键和翻页命令均被消费，包括首尾边界；其他 printable 输入会先提交当前符号，再正常处理一次原按键。 |
 | Command/Control 宿主快捷键 | 先取消已打开的符号候选 overlay，再把快捷键交给当前宿主，避免后续 `Space` 提交旧符号。 |
 | `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
@@ -371,7 +371,8 @@ flags 读取。InputMethodKit responder 导航命令只在符号候选活动时�
 点击外部或 deactivate 只有在焦点、宿主身份和光标范围仍与 session 创建时一致时
 才确认，宿主上下文变化或缺失时会取消且不写入。reset、close、宿主快捷键和输入
 模式变化也会取消。符号 session 不启动 AI 或 Rime 学习，本阶段也不使用
-marked-text 预览。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+marked-text 预览。已打开的符号 session 在偏好刷新后仍沿用创建时的分页大小，保证
+候选窗分页与数字选择一致。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
 它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
 上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲半角 printable 输入会直通

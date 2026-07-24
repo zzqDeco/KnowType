@@ -251,7 +251,8 @@ LevelDB state.
 - `InputMethodLexiconRuntime` remains available for legacy demos/tests and settings visibility, but local lexicon rebuilds are not part of the IMK key path.
 - Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
 - External runtime-preference refreshes reproject an active symbol session
-  instead of publishing a normal suggestion frame over its candidate overlay.
+  instead of publishing a normal suggestion frame over its candidate overlay;
+  the panel uses the page size captured by that session.
 - Text-to-symbol transitions use the native full-composition commit path and
   open symbol candidates only after text reaches idle. Focus and click-outside
   lifecycle commits require the current host identity and cursor ranges to
@@ -277,7 +278,8 @@ LevelDB state.
   and boundary paging decisions.
 - `InputPunctuatorRuntime` resolves every production symbol rule to either final
   direct output or an immutable ordered candidate list. ASCII passthrough is a
-  host-writer decision rather than a third symbol rule.
+  host-writer decision rather than a third symbol rule, and the coordinator
+  applies that decision before either rule can write or create a session.
 - `InputActiveSessionRuntime` is the only active input-state owner. Its
   `ActiveInputSession` is mutually exclusive `none`, `text`, or `symbol`, and
   text and symbol sessions share one monotonic composition-id domain.

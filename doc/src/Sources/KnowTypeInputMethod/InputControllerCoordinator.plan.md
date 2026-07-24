@@ -32,7 +32,8 @@ Current behavior:
   captured host identity and cursor ranges; reset, close, missing or changed
   host context, host shortcut, and mode-generation transitions cancel
 - preserves the active symbol projection across external runtime-preference
-  refreshes instead of replacing it with a normal suggestion frame
+  refreshes instead of replacing it with a normal suggestion frame, and keeps
+  the panel on the page size captured when the symbol session began
 - delegates composition begin and finish lifecycle planning to
   `InputCompositionLifecycleRuntime`, including first-begin trace-once state,
   lifecycle reason to panel reason mapping, finished composition id capture,
@@ -56,8 +57,10 @@ Current behavior:
   stack; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
 - checks idle passthrough/disabled mode before full-width letter, digit, space,
-  or symbol fast paths; missing callback clients never fall back to a stale host
-  client, and unchanged Unicode remains passthrough in ASCII mode
+  or either symbol-rule path; candidate rules therefore cannot start a hidden
+  session for missing or ASCII-passthrough clients, missing callback clients
+  never fall back to a stale host client, and unchanged Unicode remains
+  passthrough in ASCII mode
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
 - tracks KnowType-owned marked text by client and clears only that owned mark;
   `InputClientCompositionWriter` owns the tracked client id and clear-before-
