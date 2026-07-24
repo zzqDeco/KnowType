@@ -583,7 +583,10 @@ reason; they do not include user text or raw geometry.
   immutable candidates and selection, while `CandidatePanelState` is only a
   render projection. External runtime-preference refreshes republish that
   projection while the symbol session remains active, using the session's
-  captured page size for panel paging and numeric selection.
+  captured page size for panel paging and numeric selection. A symbol
+  presentation acknowledgement records the current revision, inline or
+  placeholder carrier, and post-write host snapshot only when composition id,
+  revision, and host identity still match.
 - `Space`, Return, valid visible numbers, and mouse selection commit the current
   symbol. Escape and Backspace cancel without deleting existing host text.
   Repeating the same trigger advances to the next candidate. Other printable
@@ -591,15 +594,28 @@ reason; they do not include user text or raw geometry.
   original intent once from idle. Invalid number shortcuts follow the same
   commit-and-replay rule.
 - Raw key events and AppKit responder commands share symbol navigation.
-  Navigation is consumed at clamped boundaries without changing host text,
-  caret, or selection. Command/Control shortcuts cancel and return unhandled.
+  Navigation is consumed at clamped boundaries without changing the host caret
+  or selection; an unchanged symbol revision does not rewrite marked text.
+  Command/Control shortcuts clear the matching symbol mark, cancel, and return
+  unhandled.
   Explicit commit commits directly. Click-outside and deactivate commit only
   after synchronizing the shared input-mode generation and only when the
   current host identity, selected range, marked range, and bundle match the
-  context captured when the symbol session began; a generation change, changed
-  host context, or missing host context cancels. Reset and close also cancel.
+  latest successful symbol presentation snapshot, or the creation snapshot
+  before the first write. A generation change, changed host context, or missing
+  host context cancels. Reset and close also cancel.
   Symbol sessions do not trigger AI requests, Rime symbol mutation, prefix
-  learning, or marked-text preview in this slice.
+  learning, or Provider context.
+- Inline symbol sessions write the selected candidate as attributed marked
+  text. Commit-only symbol sessions retain the U+3000 placeholder and expose
+  the selected candidate through the panel preedit row. `composedString()`
+  returns the selected symbol, `originalString()` is empty, and parameterless
+  IMK cancellation clears only an active symbol session before falling back to
+  the default text-composition behavior.
+- Owned marked text is keyed by client identity and composition id. Commit
+  clears the matching mark and inserts one symbol; cancellation clears without
+  insertion. A stale transition or changed client cannot clear a newer or
+  different host composition.
 - Command/Control key-down is a host-shortcut intent. If a symbol-candidate
   session is active, KnowType cancels its session and overlay before returning
   the key to the host; key-up remains ignored and flags-changed remains a

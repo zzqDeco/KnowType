@@ -19,7 +19,8 @@ candidate panel.
   not reimplemented in state.
 - Commit-only preedit is stored in the view model and can make the panel
   visible, but it has no `CandidatePanelSelection`, no numeric shortcut, and no
-  raw-input fallback selection.
+  raw-input fallback selection. This includes the current symbol preview while
+  a commit-only `SymbolComposition` owns the placeholder marked range.
 - Mode-status rows are fixed disabled rows. They may make the panel visible
   while no composition is active, but they never become selection targets.
 - Symbol-candidate rows are a render projection of `SymbolComposition`.

@@ -285,8 +285,9 @@ LevelDB state.
   `ActiveInputSession` is mutually exclusive `none`, `text`, or `symbol`, and
   text and symbol sessions share one monotonic composition-id domain.
 - `SymbolComposition` owns trigger, immutable candidates, selected index,
-  revision, paging, captured host identity/ranges, and lifecycle policies.
-  `CandidatePanelState` is only its render projection.
+  revision, paging, captured host identity/ranges, lifecycle policies, and the
+  latest successful presentation revision, carrier, and post-write host
+  snapshot. `CandidatePanelState` is only its render projection.
 - While a symbol session is active, arrow and paging navigation is consumed
   even when its clamped selection cannot move. The same trigger advances
   selection; printable fallthrough commits the current symbol and replays the
@@ -296,9 +297,12 @@ LevelDB state.
   `InputActiveSessionRuntime`. The coordinator still owns Rime calls, host
   insertion, marked text, panel publication, AI cancellation, and lifecycle
   side effects.
-- This slice does not represent a symbol through `composedString()` or
-  `setMarkedText`; symbol marked-text preview and the full IMK lifecycle remain
-  Issue #208.
+- Symbol sessions expose the selected candidate through `composedString()` and
+  an empty `originalString()`. Inline hosts receive the selected symbol as
+  marked text; commit-only hosts receive the existing U+3000 placeholder while
+  the panel preedit row shows the selected symbol. Selection changes update the
+  same owned mark, while clamped navigation does not rewrite an unchanged
+  revision.
 - `InputCompositionLifecycleRuntime` owns composition begin/finish lifecycle
   plans, first-begin trace-once state, finish reason mapping, finished
   composition id capture, and owned marked-text clear intent.
@@ -321,9 +325,11 @@ LevelDB state.
   presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
   frame cannot fit the natural height.
 
-The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Inline hosts receive Rime preedit as an attributed marked-text payload, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Terminal-style or override commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real preedit row above candidate rows for those hosts. Commit planning is value-only, then the coordinator clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Inline hosts receive Rime preedit or the selected symbol as an attributed marked-text payload, including partial-commit text states where confirmed Chinese text and remaining raw input coexist. Terminal-style or override commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real text or symbol preedit row above candidate rows for those hosts. Commit planning is value-only, then the coordinator clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, an explicitly selected AI recommendation, or exactly one selected symbol depending on the active session.
 `InputClientCompositionWriter` owns the host carrier write state, idle
 half-width ASCII passthrough decisions, and KnowType-owned marked-text cleanup.
+Owned marks are identified by both client and composition id so a stale symbol
+transition cannot clear a newer composition.
 The lower-level
 `InputClientWriteCoordinator` still owns the actual `setMarkedText`/`insertText`
 calls, `NSNotFound` replacement ranges, and privacy-safe diagnostics.

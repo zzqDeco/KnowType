@@ -38,6 +38,17 @@ struct SymbolCompositionPolicies: Sendable, Equatable {
     var fallthroughPolicy: SymbolCompositionFallthroughPolicy = .commitThenReplay
 }
 
+enum SymbolCompositionPresentationCarrier: Sendable, Equatable {
+    case inline
+    case placeholder
+}
+
+struct SymbolCompositionPresentation: Sendable, Equatable {
+    let revision: Int
+    let carrier: SymbolCompositionPresentationCarrier
+    let hostCursorSnapshot: InputHostCursorSnapshot
+}
+
 struct SymbolComposition: Sendable, Equatable {
     let trigger: String
     let candidates: [InputSymbolCandidate]
@@ -47,6 +58,7 @@ struct SymbolComposition: Sendable, Equatable {
     let pageSize: Int
     let hostCursorSnapshot: InputHostCursorSnapshot
     let policies: SymbolCompositionPolicies
+    var presentation: SymbolCompositionPresentation?
 
     var selectedCandidate: InputSymbolCandidate? {
         candidates.indices.contains(selectedIndex) ? candidates[selectedIndex] : nil
@@ -59,6 +71,10 @@ struct SymbolComposition: Sendable, Equatable {
     var visibleRange: Range<Int> {
         let start = currentPage * max(1, pageSize)
         return start..<min(start + max(1, pageSize), candidates.count)
+    }
+
+    var focusValidationSnapshot: InputHostCursorSnapshot {
+        presentation?.hostCursorSnapshot ?? hostCursorSnapshot
     }
 }
 
@@ -239,7 +255,31 @@ final class InputActiveSessionRuntime: @unchecked Sendable {
             revision: 0,
             pageSize: max(1, pageSize),
             hostCursorSnapshot: hostCursorSnapshot,
-            policies: policies
+            policies: policies,
+            presentation: nil
+        )
+        symbolComposition = composition
+        return composition
+    }
+
+    @discardableResult
+    func recordSymbolPresentation(
+        compositionID: Int,
+        revision: Int,
+        carrier: SymbolCompositionPresentationCarrier,
+        hostCursorSnapshot: InputHostCursorSnapshot
+    ) -> SymbolComposition? {
+        guard var composition = symbolComposition,
+              composition.compositionID == compositionID,
+              composition.revision == revision,
+              composition.hostCursorSnapshot.hostIdentity == hostCursorSnapshot.hostIdentity,
+              composition.hostCursorSnapshot.bundleIdentifier == hostCursorSnapshot.bundleIdentifier else {
+            return nil
+        }
+        composition.presentation = SymbolCompositionPresentation(
+            revision: revision,
+            carrier: carrier,
+            hostCursorSnapshot: hostCursorSnapshot
         )
         symbolComposition = composition
         return composition
@@ -434,7 +474,7 @@ final class InputActiveSessionRuntime: @unchecked Sendable {
                     reason: .missingClientCancel
                 )
             }
-            guard currentHostSnapshot == composition.hostCursorSnapshot else {
+            guard currentHostSnapshot == composition.focusValidationSnapshot else {
                 return cancelSymbolComposition(
                     composition,
                     reason: .hostContextChanged
