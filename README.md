@@ -437,6 +437,9 @@ context cancels without writing. Reset, close, host shortcuts, and input-mode
 changes also cancel it. Symbol sessions do not start AI or Rime learning and do
 not use marked-text preview yet. An open symbol session keeps its captured page
 size across preference refreshes so panel paging and numeric selection agree.
+Focus lifecycle synchronizes shared input mode first, so a mode change cancels
+instead of committing an old symbol. Compatibility-passthrough punctuation is
+returned before document-context reads or quote-state changes.
 Terminal, iTerm, MacVim, and Emacs-style hosts therefore also begin in Chinese
 mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;

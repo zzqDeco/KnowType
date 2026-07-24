@@ -352,6 +352,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func hidePalettes() {
         let client = host?.currentClient
+        synchronizeInputModeSnapshot(client: client)
         if let plan = activeSessionRuntime.transition(
             for: .clickOutside(
                 currentHostSnapshot: client.map { hostCursorSnapshot(client: $0) }
@@ -368,6 +369,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         aiAcceptanceRuntime.cancelFeedback(reason: "deactivate")
         resetPunctuationSessionContext()
         let effectiveClient = effectiveClient(client)
+        synchronizeInputModeSnapshot(client: effectiveClient)
         if let plan = activeSessionRuntime.transition(
             for: .deactivate(
                 currentHostSnapshot: effectiveClient.map { hostCursorSnapshot(client: $0) }
@@ -469,11 +471,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             if rawBuffer.isEmpty {
                 reloadInputModePreferencesIfNeeded()
             }
+            if !hasActiveTextComposition(),
+               shouldPassThroughIdleText(text, client: client, reason: "idle_symbol") {
+                return false
+            }
             let punctuatorContext = inputPunctuatorContext(for: text, client: client)
             guard let rule = punctuatorRuntime.rule(for: text, context: punctuatorContext) else {
                 return appendComposition(text, client: client)
             }
-            return handlePunctuatorRule(rule, originalInput: text, client: client)
+            return handlePunctuatorRule(rule, client: client)
         case .deleteBackward:
             guard !rawBuffer.isEmpty else {
                 resetPunctuationSessionContext()
@@ -611,13 +617,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     private func handlePunctuatorRule(
         _ rule: InputSymbolRule,
-        originalInput: String,
         client: InputControllerClient?
     ) -> Bool {
-        if !hasActiveTextComposition(),
-           shouldPassThroughIdleText(originalInput, client: client, reason: "idle_symbol") {
-            return false
-        }
         switch rule {
         case .direct(let text):
             return commitSymbol(text, client: client)

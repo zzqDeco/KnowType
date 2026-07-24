@@ -25,9 +25,10 @@
 
 - Direct punctuation resolves its final Chinese, ASCII, full-width, decimal, or
   contextual-quote text before returning from the punctuator.
-- Idle host passthrough is checked before both direct and candidate rules, so a
-  missing client or ASCII-passthrough compatibility override cannot leave an
-  invisible symbol session behind.
+- Idle host passthrough is checked before punctuation context reads or rule
+  evaluation, so a missing client or ASCII-passthrough compatibility override
+  cannot query host text, advance quote pairing, or leave an invisible symbol
+  session behind.
 - Text and symbol sessions use one monotonically increasing composition id
   domain. A symbol session captures immutable candidates, its trigger, host
   identity and cursor ranges, plus explicit lifecycle policies.
@@ -42,7 +43,8 @@
   current host identity and cursor ranges still match the context captured at
   session creation; changed or missing host context cancels. Escape, Backspace,
   reset, controller close, host shortcuts, and input mode generation changes
-  also cancel.
+  also cancel. Click-outside and deactivate synchronize the shared mode
+  generation before applying their focus transition.
 - External runtime-preference refreshes reproject an active symbol session
   instead of replacing its overlay with an unrelated local-suggestion frame.
   The projection keeps the page size captured when the session began so

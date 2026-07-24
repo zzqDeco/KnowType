@@ -1950,6 +1950,30 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(host.candidatePanelFrames.last?.isVisible ?? false)
     }
 
+    func testIdleQuotePassthroughDoesNotReadDocumentOrAdvancePairingState() {
+        let suiteName = "InputControllerCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.example.QuotePassthrough"
+        let overrideKey = "input.client.\(client.bundleIdentifier!).writeMode"
+        defaults.set(InputClientWriteMode.asciiPassthrough.rawValue, forKey: overrideKey)
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            clientCompatibilityPolicy: InputClientCompatibilityPolicy(userDefaults: defaults)
+        )
+
+        XCTAssertFalse(coordinator.handleText("\"", client: client))
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 0)
+
+        defaults.removeObject(forKey: overrideKey)
+        XCTAssertTrue(coordinator.handleText("\"", client: client))
+        XCTAssertEqual(client.characterBeforeCaretReadCount, 1)
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["“"])
+    }
+
     func testFullWidthSymbolsPassThroughWhenClientIsMissing() {
         let runtime = ProcessInputModeStateRuntime(initialSymbolWidth: .fullWidth)
         var preferences = InputModePreferences.standard
@@ -4751,6 +4775,60 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(originatingClient.insertTextWrites.isEmpty)
         XCTAssertTrue(currentClient.insertTextWrites.isEmpty)
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testHidePalettesCancelsSymbolAfterExternalModeGenerationChange() {
+        let runtime = ProcessInputModeStateRuntime()
+        let modeClient = FakeInputControllerClient()
+        let symbolClient = FakeInputControllerClient()
+        let (modeCoordinator, _, _) = makeCoordinator(
+            client: modeClient,
+            inputModeStateRuntime: runtime
+        )
+        let (symbolCoordinator, symbolHost, _) = makeCoordinator(
+            client: symbolClient,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertTrue(symbolCoordinator.handleText("/", client: symbolClient))
+        XCTAssertTrue(
+            modeCoordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: modeClient
+            )
+        )
+
+        symbolCoordinator.hidePalettes()
+
+        XCTAssertTrue(symbolClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(symbolHost.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testDeactivateCancelsSymbolAfterExternalModeGenerationChange() {
+        let runtime = ProcessInputModeStateRuntime()
+        let modeClient = FakeInputControllerClient()
+        let symbolClient = FakeInputControllerClient()
+        let (modeCoordinator, _, _) = makeCoordinator(
+            client: modeClient,
+            inputModeStateRuntime: runtime
+        )
+        let (symbolCoordinator, symbolHost, _) = makeCoordinator(
+            client: symbolClient,
+            inputModeStateRuntime: runtime
+        )
+
+        XCTAssertTrue(symbolCoordinator.handleText("/", client: symbolClient))
+        XCTAssertTrue(
+            modeCoordinator.handle(
+                stroke: InputKeyStroke(text: "/", keyCode: 44, modifiers: [.option]),
+                client: modeClient
+            )
+        )
+
+        symbolCoordinator.deactivateServer(client: symbolClient)
+
+        XCTAssertTrue(symbolClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(symbolHost.candidatePanelFrames.last?.isVisible, false)
     }
 
     func testHostShortcutCancelsIdleSymbolSessionBeforeFollowingSpace() {

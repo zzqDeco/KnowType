@@ -255,9 +255,10 @@ LevelDB state.
   the panel uses the page size captured by that session.
 - Text-to-symbol transitions use the native full-composition commit path and
   open symbol candidates only after text reaches idle. Focus and click-outside
-  lifecycle commits require the current host identity and cursor ranges to
-  match the symbol session's captured host snapshot; otherwise the symbol is
-  cancelled without a host write.
+  lifecycle first synchronizes the shared input-mode generation, then commits
+  only when the current host identity and cursor ranges match the symbol
+  session's captured host snapshot; generation or host-context changes cancel
+  the symbol without a host write.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
 - The IMK controller publishes Rime preedit marked text and immediate current-page Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
 - Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.
@@ -279,7 +280,7 @@ LevelDB state.
 - `InputPunctuatorRuntime` resolves every production symbol rule to either final
   direct output or an immutable ordered candidate list. ASCII passthrough is a
   host-writer decision rather than a third symbol rule, and the coordinator
-  applies that decision before either rule can write or create a session.
+  applies that decision before punctuation context reads or rule evaluation.
 - `InputActiveSessionRuntime` is the only active input-state owner. Its
   `ActiveInputSession` is mutually exclusive `none`, `text`, or `symbol`, and
   text and symbol sessions share one monotonic composition-id domain.
