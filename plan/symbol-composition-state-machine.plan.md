@@ -28,14 +28,20 @@
 - Text and symbol sessions use one monotonically increasing composition id
   domain. A symbol session captures immutable candidates, its trigger, host
   identity and cursor ranges, plus explicit lifecycle policies.
-- Text-to-symbol transitions commit the text session first and create the
-  symbol session only after text state reaches idle with a usable client.
+- Text-to-symbol transitions use the full composition-commit path rather than
+  Space, so a native engine cannot leave a partially committed segment active.
+  The symbol session is created only after text state reaches idle with a
+  usable client.
 - Navigation and paging update symbol selection and revision with clamped
   boundaries. Repeating the trigger advances selection.
-- Space, Return, visible numbers, mouse selection, explicit commit, valid focus
-  loss, and click-outside commit the selected symbol. Escape, Backspace, reset,
-  controller close, missing-client lifecycle events, host shortcuts, and input
-  mode generation changes cancel it.
+- Space, Return, visible numbers, mouse selection, and explicit commit commit
+  the selected symbol. Focus loss and click-outside commit only when the
+  current host identity and cursor ranges still match the context captured at
+  session creation; changed or missing host context cancels. Escape, Backspace,
+  reset, controller close, host shortcuts, and input mode generation changes
+  also cancel.
+- External runtime-preference refreshes reproject an active symbol session
+  instead of replacing its overlay with an unrelated local-suggestion frame.
 - Other printable input produces one commit-and-replay plan. The coordinator
   commits the symbol, clears the panel, then handles the original intent once
   from idle without recursion.
@@ -66,4 +72,3 @@
   symbol rule.
 - Issue #208 will add symbol marked-text preview and the remaining full IMK
   lifecycle without changing this session ownership model.
-

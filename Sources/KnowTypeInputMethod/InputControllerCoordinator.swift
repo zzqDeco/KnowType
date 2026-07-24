@@ -353,7 +353,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
     func hidePalettes() {
         let client = host?.currentClient
         if let plan = activeSessionRuntime.transition(
-            for: .clickOutside(hasUsableClient: client != nil)
+            for: .clickOutside(
+                currentHostSnapshot: client.map { hostCursorSnapshot(client: $0) }
+            )
         ) {
             _ = executeActiveSymbolTransitionPlan(plan, client: client, hideReason: .escape)
             return
@@ -367,7 +369,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
         resetPunctuationSessionContext()
         let effectiveClient = effectiveClient(client)
         if let plan = activeSessionRuntime.transition(
-            for: .deactivate(hasUsableClient: effectiveClient != nil)
+            for: .deactivate(
+                currentHostSnapshot: effectiveClient.map { hostCursorSnapshot(client: $0) }
+            )
         ) {
             _ = executeActiveSymbolTransitionPlan(
                 plan,
@@ -406,6 +410,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
         let client = host?.currentClient
+        if activeSessionRuntime.currentSymbolComposition != nil {
+            publishCurrentSymbolComposition(client: client)
+            return
+        }
         publishLocalSuggestionSynchronously(client: client)
         updateCandidatePanelImmediately(
             suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
@@ -694,7 +702,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             guard let client else {
                 return true
             }
-            _ = commit(action: .space, client: client)
+            commitComposition(client: client)
             guard !hasActiveTextComposition() else {
                 return true
             }

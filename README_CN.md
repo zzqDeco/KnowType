@@ -367,10 +367,11 @@ IDE、Electron shell 和未知客户端默认都使用 inline attributed marked 
 用户点击 marked range 外部时提交 active composition。快捷键修饰键仍从 key-down
 flags 读取。InputMethodKit responder 导航命令只在符号候选活动时单独处理，避免
 同一次方向键继续移动宿主光标或选区。文字 composition 会在符号 session 打开前先
-提交；取消符号不会恢复或删除已经提交的文字。点击外部、显式 commit 和带有效
-client 的 deactivate 会提交当前符号；reset、close、缺少 client、宿主快捷键和输入
-模式变化会取消。符号 session 不启动 AI 或 Rime 学习，本阶段也不使用 marked-text
-预览。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+完整提交；取消符号不会恢复或删除已经提交的文字。显式 commit 会确认当前符号；
+点击外部或 deactivate 只有在焦点、宿主身份和光标范围仍与 session 创建时一致时
+才确认，宿主上下文变化或缺失时会取消且不写入。reset、close、宿主快捷键和输入
+模式变化也会取消。符号 session 不启动 AI 或 Rime 学习，本阶段也不使用
+marked-text 预览。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
 它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
 上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲半角 printable 输入会直通

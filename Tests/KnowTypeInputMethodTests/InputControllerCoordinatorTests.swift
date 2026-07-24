@@ -2923,6 +2923,30 @@ final class InputControllerCoordinatorTests: XCTestCase {
         })
     }
 
+    func testExternalRuntimePreferenceReloadPreservesActiveSymbolProjection() {
+        let client = FakeInputControllerClient()
+        let runtimeStore = MutableInputMethodRuntimePreferenceStore(
+            preferences: InputMethodRuntimePreferences(cloudContinuationEnabled: true)
+        )
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            runtimePreferences: runtimeStore.preferences,
+            runtimePreferenceStore: runtimeStore
+        )
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        runtimeStore.preferences = InputMethodRuntimePreferences(cloudContinuationEnabled: false)
+        coordinator.reloadRuntimePreferencesForExternalChange()
+
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, true)
+    }
+
     @MainActor
     func testFullyResolvedSegmentSelectionHonorsDisabledLocalContinuationsWithoutProvider() async throws {
         let client = FakeInputControllerClient()
@@ -4277,6 +4301,26 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testAmbiguousSymbolFullyCommitsPartialNativeCompositionBeforeOpeningSession() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(
+            client: client,
+            conversionEngine: PartialCommitNativeConversionEngine()
+        )
+
+        for character in "woxiangceshi" {
+            XCTAssertTrue(coordinator.handleText(String(character), client: client))
+        }
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["我想测试"])
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(
+            host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
+            ["、", "/", "／", "÷"]
+        )
+    }
+
     func testNativeSymbolKeyIsOfferedToRimeBeforeChinesePunctuationFallback() {
         let client = FakeInputControllerClient()
         let recorder = ConversionReplayRecorder()
@@ -4610,6 +4654,23 @@ final class InputControllerCoordinatorTests: XCTestCase {
         coordinator.hidePalettes()
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["、"])
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testHidePalettesCancelsSymbolWhenCurrentClientChanged() {
+        let originatingClient = FakeInputControllerClient()
+        originatingClient.selectedRangeValue = NSRange(location: 4, length: 0)
+        let currentClient = FakeInputControllerClient()
+        currentClient.selectedRangeValue = NSRange(location: 20, length: 0)
+        let (coordinator, host, _) = makeCoordinator(client: originatingClient)
+
+        XCTAssertTrue(coordinator.handleText("/", client: originatingClient))
+        host.currentClientValue = currentClient
+
+        coordinator.hidePalettes()
+
+        XCTAssertTrue(originatingClient.insertTextWrites.isEmpty)
+        XCTAssertTrue(currentClient.insertTextWrites.isEmpty)
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -5924,6 +5985,9 @@ private struct PartialCommitNativeConversionEngine: KnowTypeConversionEngine {
     mutating func process(_ key: ConversionEngineKey) -> ConversionEngineResult {
         switch key {
         case .text(let text):
+            if InputSymbolTransformer.isSymbolInput(text) {
+                return ConversionEngineResult(handled: false, snapshot: snapshot)
+            }
             rawInput += text
             return ConversionEngineResult(handled: true, snapshot: snapshot)
         case .space:

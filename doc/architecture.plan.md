@@ -250,6 +250,13 @@ LevelDB state.
 - `CompositionBuffer` remains available for legacy/session tests, but native Rime preedit is the production marked-text source during active Chinese composition.
 - `InputMethodLexiconRuntime` remains available for legacy demos/tests and settings visibility, but local lexicon rebuilds are not part of the IMK key path.
 - Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
+- External runtime-preference refreshes reproject an active symbol session
+  instead of publishing a normal suggestion frame over its candidate overlay.
+- Text-to-symbol transitions use the native full-composition commit path and
+  open symbol candidates only after text reaches idle. Focus and click-outside
+  lifecycle commits require the current host identity and cursor ranges to
+  match the symbol session's captured host snapshot; otherwise the symbol is
+  cancelled without a host write.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
 - The IMK controller publishes Rime preedit marked text and immediate current-page Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
 - Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.

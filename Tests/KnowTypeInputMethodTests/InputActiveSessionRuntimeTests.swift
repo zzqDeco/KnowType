@@ -191,15 +191,25 @@ final class InputActiveSessionRuntimeTests: XCTestCase {
     func testFocusAndLifecycleTransitionsFollowClientAvailability() {
         let focusRuntime = makeSymbolRuntime()
         guard case .commit(_, let candidate, nil, .focusCommit) =
-            focusRuntime.transition(for: .deactivate(hasUsableClient: true)) else {
+            focusRuntime.transition(for: .deactivate(currentHostSnapshot: hostSnapshot)) else {
             return XCTFail("Expected focus commit")
         }
         XCTAssertEqual(candidate.text, "、")
 
         let missingClientRuntime = makeSymbolRuntime()
         guard case .cancel(_, nil, true, .missingClientCancel) =
-            missingClientRuntime.transition(for: .clickOutside(hasUsableClient: false)) else {
+            missingClientRuntime.transition(for: .clickOutside(currentHostSnapshot: nil)) else {
             return XCTFail("Expected missing-client cancellation")
+        }
+
+        let changedHostRuntime = makeSymbolRuntime()
+        var changedHostSnapshot = hostSnapshot
+        changedHostSnapshot.selectedRange.location += 1
+        guard case .cancel(_, nil, true, .hostContextChanged) =
+            changedHostRuntime.transition(
+                for: .clickOutside(currentHostSnapshot: changedHostSnapshot)
+            ) else {
+            return XCTFail("Expected changed-host cancellation")
         }
 
         let resetRuntime = makeSymbolRuntime()

@@ -81,6 +81,7 @@ enum SymbolCompositionTransitionReason: String, Sendable, Equatable {
     case hostCommand
     case focusCommit
     case missingClientCancel
+    case hostContextChanged
     case lifecycleCommit
     case lifecycleCancel
     case generationChange
@@ -88,8 +89,8 @@ enum SymbolCompositionTransitionReason: String, Sendable, Equatable {
 
 enum SymbolCompositionLifecycleEvent: Sendable, Equatable {
     case commitComposition
-    case clickOutside(hasUsableClient: Bool)
-    case deactivate(hasUsableClient: Bool)
+    case clickOutside(currentHostSnapshot: InputHostCursorSnapshot?)
+    case deactivate(currentHostSnapshot: InputHostCursorSnapshot?)
     case reset
     case controllerClose
     case inputModeGenerationChanged
@@ -425,15 +426,21 @@ final class InputActiveSessionRuntime: @unchecked Sendable {
                 replayIntent: nil,
                 reason: .lifecycleCommit
             )
-        case .clickOutside(let hasUsableClient),
-             .deactivate(let hasUsableClient):
-            if hasUsableClient {
-                return commitSymbolCompositionForFocus(composition)
+        case .clickOutside(let currentHostSnapshot),
+             .deactivate(let currentHostSnapshot):
+            guard let currentHostSnapshot else {
+                return cancelSymbolComposition(
+                    composition,
+                    reason: .missingClientCancel
+                )
             }
-            return cancelSymbolComposition(
-                composition,
-                reason: .missingClientCancel
-            )
+            guard currentHostSnapshot == composition.hostCursorSnapshot else {
+                return cancelSymbolComposition(
+                    composition,
+                    reason: .hostContextChanged
+                )
+            }
+            return commitSymbolCompositionForFocus(composition)
         case .reset, .controllerClose:
             return cancelSymbolComposition(
                 composition,

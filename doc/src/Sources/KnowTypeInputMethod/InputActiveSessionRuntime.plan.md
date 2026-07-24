@@ -25,12 +25,13 @@ plans for the coordinator.
   and request one replay.
 - Host shortcuts cancel and remain unhandled. Escape and Backspace cancel and
   are handled.
-- Valid click/focus/commit lifecycle events commit. Missing-client focus,
-  reset, close, and input-mode generation changes cancel.
+- Explicit commit lifecycle events commit. Click/focus lifecycle events commit
+  only when the current host snapshot exactly matches the identity, bundle,
+  selected range, and marked range captured at session creation. Changed or
+  missing host context, reset, close, and input-mode generation changes cancel.
 - No transition plan contains host text, Provider data, or AI output.
 
 ## Tests
 
 - `InputActiveSessionRuntimeTests`
 - `InputControllerCoordinatorTests`
-

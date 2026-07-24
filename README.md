@@ -428,12 +428,14 @@ default behavior of committing active composition when the user clicks outside
 its marked range. Shortcut modifiers continue to come from key-down flags.
 InputMethodKit responder navigation commands are handled separately only while
 symbol candidates are active, preventing the same arrow from moving the host
-caret or selection. Text composition is committed before a symbol session
+caret or selection. Text composition is fully committed before a symbol session
 opens; cancelling the symbol does not restore or delete that committed text.
-Click-outside, explicit composition commit, and deactivate with a valid client
-commit the selected symbol, while reset, close, missing-client lifecycle, host
-shortcuts, and input-mode changes cancel it. Symbol sessions do not start AI or
-Rime learning and do not use marked-text preview yet.
+Explicit composition commit confirms the selected symbol. Click-outside and
+deactivate confirm it only when focus and cursor ranges still match the host
+context captured when the symbol session opened; changed or missing host
+context cancels without writing. Reset, close, host shortcuts, and input-mode
+changes also cancel it. Symbol sessions do not start AI or Rime learning and do
+not use marked-text preview yet.
 Terminal, iTerm, MacVim, and Emacs-style hosts therefore also begin in Chinese
 mode, but use a full-width-space attributed
 marked-text placeholder to keep the host composition and candidate anchor alive;

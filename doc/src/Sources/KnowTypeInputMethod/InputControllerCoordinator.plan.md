@@ -24,11 +24,15 @@ Current behavior:
   `InputActiveSessionRuntime`; text storage remains in
   `InputCompositionStateRuntime`
 - executes symbol transition plans in a fixed order: finish any required text
-  commit, update or clear session state, perform host insertion, publish or hide
-  the panel, then replay at most one original intent
+  composition through the full commit path, update or clear session state,
+  perform host insertion, publish or hide the panel, then replay at most one
+  original intent
 - commits active symbols for explicit commit, mouse selection, click-outside,
-  and deactivate with a usable client; reset, close, missing-client lifecycle,
-  host shortcut, and mode-generation transitions cancel
+  and deactivate only when the current host snapshot matches the session's
+  captured host identity and cursor ranges; reset, close, missing or changed
+  host context, host shortcut, and mode-generation transitions cancel
+- preserves the active symbol projection across external runtime-preference
+  refreshes instead of replacing it with a normal suggestion frame
 - delegates composition begin and finish lifecycle planning to
   `InputCompositionLifecycleRuntime`, including first-begin trace-once state,
   lifecycle reason to panel reason mapping, finished composition id capture,

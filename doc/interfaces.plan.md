@@ -573,10 +573,12 @@ reason; they do not include user text or raw geometry.
   Tab, or newline. Deprecated public `InputPunctuatorDecision` adapters remain
   source-compatible, but production code does not use `passThrough`.
 - `InputActiveSessionRuntime` owns one `none`, `text`, or `symbol` session.
-  Starting candidates from text first commits the highlighted/visible Rime
-  text and clears text lifecycle state; a symbol session is created only after
-  that succeeds. Symbol state owns immutable candidates and selection, while
-  `CandidatePanelState` is only a render projection.
+  Starting candidates from text uses a full composition commit, not Space, so
+  native partial-segment commits cannot leave text active; a symbol session is
+  created only after the text lifecycle reaches idle. Symbol state owns
+  immutable candidates and selection, while `CandidatePanelState` is only a
+  render projection. External runtime-preference refreshes republish that
+  projection while the symbol session remains active.
 - `Space`, Return, valid visible numbers, and mouse selection commit the current
   symbol. Escape and Backspace cancel without deleting existing host text.
   Repeating the same trigger advances to the next candidate. Other printable
@@ -586,8 +588,10 @@ reason; they do not include user text or raw geometry.
 - Raw key events and AppKit responder commands share symbol navigation.
   Navigation is consumed at clamped boundaries without changing host text,
   caret, or selection. Command/Control shortcuts cancel and return unhandled.
-  Click-outside, explicit commit, and deactivate with a valid client commit;
-  reset, close, missing-client lifecycle, and input-mode generation changes
+  Explicit commit commits directly. Click-outside and deactivate commit only
+  when the current host identity, selected range, marked range, and bundle
+  match the context captured when the symbol session began; changed or missing
+  host context cancels. Reset, close, and input-mode generation changes also
   cancel. Symbol sessions do not trigger AI requests, Rime symbol mutation,
   prefix learning, or marked-text preview in this slice.
 - Command/Control key-down is a host-shortcut intent. If a symbol-candidate
