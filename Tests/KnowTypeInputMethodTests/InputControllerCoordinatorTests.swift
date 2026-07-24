@@ -4410,6 +4410,44 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
+    func testRepeatedSlashAdvancesSymbolSelectionWithoutCommitting() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(1))
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+    }
+
+    func testSymbolCandidateHoverAndMouseCommitUseSessionSelection() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        coordinator.hoverCandidatePanelSelection(.symbolCandidate(2))
+
+        XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(2))
+
+        coordinator.commitCandidatePanelSelection(.symbolCandidate(2), client: client)
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["／"])
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testSymbolCandidatePrintableFallthroughCommitsAndReplaysOnce() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handleText("a", client: client))
+
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["、"])
+        XCTAssertEqual(coordinator.composedString() as? String, "a")
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.symbolCandidates, [])
+    }
+
     func testSymbolCandidateResponderArrowsAreConsumedWithoutChangingHostSelection() {
         let client = FakeInputControllerClient()
         client.selectedRangeValue = NSRange(location: 42, length: 3)
@@ -4549,30 +4587,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "9")
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["、", "9"])
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
-    func testSymbolCandidatePrintableFallbackHidesIdlePanelBeforeNormalHandling() {
+    func testSymbolCandidateSymbolFallbackCommitsAndReplaysOnce() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("/", client: client))
         XCTAssertTrue(coordinator.handleText(".", client: client))
 
-        XCTAssertEqual(client.insertTextWrites.last?.text, "。")
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["、", "。"])
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
-    func testHidePalettesClearsHiddenIdleSymbolSession() {
+    func testHidePalettesCommitsActiveSymbolWhenHostClientIsAvailable() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
 
         XCTAssertTrue(coordinator.handleText("/", client: client))
         coordinator.hidePalettes()
-        _ = coordinator.handleText(" ", client: client)
 
-        XCTAssertFalse(client.insertTextWrites.contains { $0.text == "、" })
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["、"])
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -4594,7 +4631,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(client.insertTextWrites.contains { $0.text == "、" })
     }
 
-    func testActiveSymbolCandidateFallthroughRestoresCompositionPanel() {
+    func testTextToSymbolCommitsTextBeforeOpeningIndependentSymbolSession() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)
 
@@ -4605,20 +4642,35 @@ final class InputControllerCoordinatorTests: XCTestCase {
             host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
             ["、", "/", "／", "÷"]
         )
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(client.insertTextWrites.count, 1)
 
         _ = coordinator.handle(
             stroke: InputKeyStroke(text: "9", keyCode: keyCode(forNumber: 9)),
             client: client
         )
 
-        let viewModel = host.panelStates.last?.windowState.viewModel
-        XCTAssertEqual(viewModel?.rawInput, "ni")
-        XCTAssertEqual(viewModel?.symbolCandidates, [])
-        XCTAssertFalse(viewModel?.prefixCandidates.isEmpty ?? true)
-        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+        XCTAssertEqual(Array(client.insertTextWrites.map(\.text).suffix(2)), ["、", "9"])
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
-    func testActiveSymbolCandidateOverlayPreservesCommitOnlyPreedit() {
+    func testTextToSymbolDoesNotOpenSymbolSessionWhenCommitClientIsUnavailable() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertTrue(coordinator.handleText("i", client: client))
+        host.currentClientValue = nil
+
+        XCTAssertTrue(coordinator.handleText("/", client: nil))
+
+        XCTAssertEqual(coordinator.composedString() as? String, "ni")
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.symbolCandidates, [])
+    }
+
+    func testTextToSymbolClearsCommitOnlyPreeditWithoutMarkingSymbol() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -4628,13 +4680,14 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("/", client: client))
 
         let viewModel = host.panelStates.last?.windowState.viewModel
-        XCTAssertEqual(viewModel?.preeditDisplayText, "ni")
+        XCTAssertNil(viewModel?.preeditDisplayText)
         XCTAssertEqual(viewModel?.symbolCandidates.map(\.text), ["、", "/", "／", "÷"])
-        XCTAssertEqual(Set(client.markedTextWrites.map(\.text)), ["\u{3000}"])
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["\u{3000}", "\u{3000}", ""])
+        XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
     @MainActor
-    func testActiveSymbolCandidateCancelRestoresReadyAIRecommendation() async {
+    func testTextToSymbolDoesNotRestorePriorAIRecommendationAfterCancel() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let aiProvider = RecordingAIRecommendationProvider()
@@ -4652,6 +4705,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             host.panelStates.last?.windowState.viewModel.aiRecommendation.displayText == "继续推进"
         }
         XCTAssertTrue(hasAIRecommendation)
+        let requestCountBeforeSymbol = await aiProvider.requests.count
 
         XCTAssertTrue(coordinator.handleText("/", client: client))
         XCTAssertEqual(
@@ -4662,10 +4716,42 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
 
-        let viewModel = host.panelStates.last?.windowState.viewModel
-        XCTAssertEqual(viewModel?.rawInput, "api")
-        XCTAssertEqual(viewModel?.symbolCandidates, [])
-        XCTAssertEqual(viewModel?.aiRecommendation.displayText, "继续推进")
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        let requestCountAfterCancel = await aiProvider.requests.count
+        XCTAssertEqual(requestCountAfterCancel, requestCountBeforeSymbol)
+    }
+
+    @MainActor
+    func testSymbolSessionDoesNotReachRimeAIOrPrefixLearning() async {
+        let client = FakeInputControllerClient()
+        let conversionRecorder = ConversionReplayRecorder()
+        let aiProvider = RecordingAIRecommendationProvider()
+        let persistence = FakeUserSelectionHistoryPersistence()
+        let (coordinator, _, _) = makeCoordinator(
+            client: client,
+            persistence: persistence,
+            provider: RecordingContinuationProvider(),
+            aiRecommendationProvider: aiProvider,
+            enablesAsyncSuggestionRefresh: true,
+            conversionEngine: SymbolRecordingNativeConversionEngine(recorder: conversionRecorder)
+        )
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{F703}", keyCode: 124),
+                client: client
+            )
+        )
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let aiRequests = await aiProvider.requests
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["/"])
+        XCTAssertTrue(conversionRecorder.processedTexts.isEmpty)
+        XCTAssertTrue(aiRequests.isEmpty)
+        XCTAssertTrue(persistence.recordedSelections.isEmpty)
     }
 
     func testSymbolCandidateEscapeCancelsWithoutCommitting() {

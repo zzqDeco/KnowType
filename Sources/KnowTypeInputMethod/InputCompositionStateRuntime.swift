@@ -49,12 +49,12 @@ final class InputCompositionStateRuntime: @unchecked Sendable {
     }
 
     @discardableResult
-    func beginCompositionIfNeeded() -> InputCompositionBeginResult {
+    func beginCompositionIfNeeded(compositionID requestedCompositionID: Int? = nil) -> InputCompositionBeginResult {
         guard rawInput.isEmpty else {
             return InputCompositionBeginResult(didBegin: false, snapshot: currentSnapshot())
         }
         compositionBuffer = CompositionBuffer()
-        compositionID += 1
+        compositionID = requestedCompositionID ?? compositionID + 1
         return InputCompositionBeginResult(didBegin: true, snapshot: currentSnapshot())
     }
 
@@ -124,6 +124,12 @@ final class InputCompositionStateRuntime: @unchecked Sendable {
     @discardableResult
     func incrementCompositionIDForAnchorReset() -> InputCompositionStateSnapshot {
         compositionID += 1
+        return currentSnapshot()
+    }
+
+    @discardableResult
+    func replaceCompositionID(_ compositionID: Int) -> InputCompositionStateSnapshot {
+        self.compositionID = compositionID
         return currentSnapshot()
     }
 

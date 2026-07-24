@@ -85,6 +85,7 @@ required for every test file.
 - [InputAIAcceptanceRuntime](Sources/KnowTypeInputMethod/InputAIAcceptanceRuntime.plan.md)
 - [InputAIRecommendationRuntime](Sources/KnowTypeInputMethod/InputAIRecommendationRuntime.plan.md)
 - [InputAIRecommendationSchedulePolicy](Sources/KnowTypeInputMethod/InputAIRecommendationSchedulePolicy.plan.md)
+- [InputActiveSessionRuntime](Sources/KnowTypeInputMethod/InputActiveSessionRuntime.plan.md)
 - [InputActions](Sources/KnowTypeInputMethod/InputActions.plan.md)
 - [InputCandidatePanelPublicationRuntime](Sources/KnowTypeInputMethod/InputCandidatePanelPublicationRuntime.plan.md)
 - [InputCandidateListBuilder](Sources/KnowTypeInputMethod/InputCandidateListBuilder.plan.md)

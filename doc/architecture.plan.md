@@ -244,7 +244,7 @@ LevelDB state.
   path share one candidate-navigation intent and handled contract; unknown
   selectors remain available to the focused host.
 - Command/Control key-down maps to a host-shortcut intent. An active symbol
-  overlay is cancelled before the event returns to the host, while key-up and
+  session is cancelled before the event returns to the host, while key-up and
   flags-changed remain outside the production event registration.
 - `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses Rime prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
 - `CompositionBuffer` remains available for legacy/session tests, but native Rime preedit is the production marked-text source during active Chinese composition.
@@ -268,13 +268,27 @@ LevelDB state.
 - `InputNativeCandidateNavigationRuntime` owns displayed native selection
   state, panel selection mapping, Rime highlight, current-page select, paging,
   and boundary paging decisions.
-- While a symbol-candidate session is active, arrow and paging navigation is
-  consumed even when its clamped selection cannot move. Ending the session
-  restores ordinary host navigation without a host text or selection write.
-- `InputCompositionStateRuntime` owns raw input, `CompositionBuffer`,
-  composition id/revision, and delete-count state. The coordinator still owns
-  Rime calls, host insertion, marked text, panel publication, and lifecycle
+- `InputPunctuatorRuntime` resolves every production symbol rule to either final
+  direct output or an immutable ordered candidate list. ASCII passthrough is a
+  host-writer decision rather than a third symbol rule.
+- `InputActiveSessionRuntime` is the only active input-state owner. Its
+  `ActiveInputSession` is mutually exclusive `none`, `text`, or `symbol`, and
+  text and symbol sessions share one monotonic composition-id domain.
+- `SymbolComposition` owns trigger, immutable candidates, selected index,
+  revision, paging, captured host identity/ranges, and lifecycle policies.
+  `CandidatePanelState` is only its render projection.
+- While a symbol session is active, arrow and paging navigation is consumed
+  even when its clamped selection cannot move. The same trigger advances
+  selection; printable fallthrough commits the current symbol and replays the
+  original intent once. Ending the session restores ordinary host navigation.
+- `InputCompositionStateRuntime` stores the text-session raw input,
+  `CompositionBuffer`, revision, and delete-count state behind
+  `InputActiveSessionRuntime`. The coordinator still owns Rime calls, host
+  insertion, marked text, panel publication, AI cancellation, and lifecycle
   side effects.
+- This slice does not represent a symbol through `composedString()` or
+  `setMarkedText`; symbol marked-text preview and the full IMK lifecycle remain
+  Issue #208.
 - `InputCompositionLifecycleRuntime` owns composition begin/finish lifecycle
   plans, first-begin trace-once state, finish reason mapping, finished
   composition id capture, and owned marked-text clear intent.

@@ -11,6 +11,12 @@ public struct InputSymbolCandidate: Sendable, Equatable {
     }
 }
 
+enum InputSymbolRule: Sendable, Equatable {
+    case direct(String)
+    case candidates(trigger: String, outputs: [InputSymbolCandidate])
+}
+
+@available(*, deprecated, message: "Use InputSymbolRule inside KnowTypeInputMethod.")
 public struct InputSymbolCandidateSession: Sendable, Equatable {
     public var trigger: String
     public var candidates: [InputSymbolCandidate]
@@ -21,6 +27,7 @@ public struct InputSymbolCandidateSession: Sendable, Equatable {
     }
 }
 
+@available(*, deprecated, message: "Use InputSymbolRule inside KnowTypeInputMethod.")
 public enum InputPunctuatorDecision: Sendable, Equatable {
     case commit(String)
     case showCandidates(InputSymbolCandidateSession)
@@ -73,6 +80,7 @@ public struct InputPunctuatorRuntime: Sendable {
         nextSingleQuoteIsOpening = true
     }
 
+    @available(*, deprecated, message: "Use InputSymbolRule inside KnowTypeInputMethod.")
     public mutating func decision(
         for input: String,
         state: InputModeState,
@@ -85,29 +93,64 @@ public struct InputPunctuatorRuntime: Sendable {
         )
     }
 
+    mutating func rule(
+        for input: String,
+        state: InputModeState,
+        allowsCandidates: Bool = true
+    ) -> InputSymbolRule? {
+        rule(
+            for: input,
+            context: InputPunctuatorContext(state: state),
+            allowsCandidates: allowsCandidates
+        )
+    }
+
+    @available(*, deprecated, message: "Use InputSymbolRule inside KnowTypeInputMethod.")
     public mutating func decision(
         for input: String,
         context: InputPunctuatorContext,
         prefersCandidateList: Bool = true
     ) -> InputPunctuatorDecision? {
+        guard let rule = rule(
+            for: input,
+            context: context,
+            allowsCandidates: prefersCandidateList
+        ) else {
+            return nil
+        }
+        switch rule {
+        case .direct(let text):
+            return .commit(text)
+        case .candidates(let trigger, let outputs):
+            return .showCandidates(
+                InputSymbolCandidateSession(trigger: trigger, candidates: outputs)
+            )
+        }
+    }
+
+    mutating func rule(
+        for input: String,
+        context: InputPunctuatorContext,
+        allowsCandidates: Bool = true
+    ) -> InputSymbolRule? {
         guard InputSymbolTransformer.isSymbolInput(input) else {
             return nil
         }
         if input == ".",
            !context.hasActiveComposition,
            context.previousCharacterKind == .asciiDigit {
-            return .commit(".")
+            return .direct(".")
         }
         let state = context.state
         guard state.punctuationMode == .chinese else {
-            return .commit(InputSymbolTransformer.symbolWithWidth(for: input, width: state.symbolWidth))
+            return .direct(InputSymbolTransformer.symbolWithWidth(for: input, width: state.symbolWidth))
         }
         if state.symbolWidth == .fullWidth,
            let mapped = InputSymbolTransformer.fullWidthSymbol(for: input) {
-            return .commit(mapped)
+            return .direct(mapped)
         }
         if let direct = directChinesePunctuation(for: input) {
-            return .commit(direct)
+            return .direct(direct)
         }
         if input == "\"" {
             let isOpening = resolvedQuoteIsOpening(
@@ -116,7 +159,7 @@ public struct InputPunctuatorRuntime: Sendable {
             )
             let text = isOpening ? "“" : "”"
             nextDoubleQuoteIsOpening = !isOpening
-            return .commit(text)
+            return .direct(text)
         }
         if input == "'" {
             let isOpening = resolvedQuoteIsOpening(
@@ -125,13 +168,13 @@ public struct InputPunctuatorRuntime: Sendable {
             )
             let text = isOpening ? "‘" : "’"
             nextSingleQuoteIsOpening = !isOpening
-            return .commit(text)
+            return .direct(text)
         }
-        if prefersCandidateList,
+        if allowsCandidates,
            let candidates = Self.symbolCandidates[input] {
-            return .showCandidates(InputSymbolCandidateSession(trigger: input, candidates: candidates))
+            return .candidates(trigger: input, outputs: candidates)
         }
-        return .commit(input)
+        return .direct(input)
     }
 
     private func resolvedQuoteIsOpening(_ context: InputQuoteContext, fallback: Bool) -> Bool {

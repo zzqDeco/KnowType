@@ -11,29 +11,29 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
             symbolWidth: .halfWidth
         )
 
-        XCTAssertEqual(runtime.decision(for: ",", state: state), .commit("，"))
-        XCTAssertEqual(runtime.decision(for: ".", state: state), .commit("。"))
-        XCTAssertEqual(runtime.decision(for: "?", state: state), .commit("？"))
-        XCTAssertEqual(runtime.decision(for: "!", state: state), .commit("！"))
-        XCTAssertEqual(runtime.decision(for: ":", state: state), .commit("："))
-        XCTAssertEqual(runtime.decision(for: ";", state: state), .commit("；"))
-        XCTAssertEqual(runtime.decision(for: "(", state: state), .commit("（"))
-        XCTAssertEqual(runtime.decision(for: ")", state: state), .commit("）"))
+        XCTAssertEqual(runtime.rule(for: ",", state: state), .direct("，"))
+        XCTAssertEqual(runtime.rule(for: ".", state: state), .direct("。"))
+        XCTAssertEqual(runtime.rule(for: "?", state: state), .direct("？"))
+        XCTAssertEqual(runtime.rule(for: "!", state: state), .direct("！"))
+        XCTAssertEqual(runtime.rule(for: ":", state: state), .direct("："))
+        XCTAssertEqual(runtime.rule(for: ";", state: state), .direct("；"))
+        XCTAssertEqual(runtime.rule(for: "(", state: state), .direct("（"))
+        XCTAssertEqual(runtime.rule(for: ")", state: state), .direct("）"))
     }
 
     func testChineseHalfWidthPairsQuotesAndResetsPredictably() {
         var runtime = InputPunctuatorRuntime()
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
 
-        XCTAssertEqual(runtime.decision(for: "\"", state: state), .commit("“"))
-        XCTAssertEqual(runtime.decision(for: "\"", state: state), .commit("”"))
-        XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("‘"))
-        XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("’"))
+        XCTAssertEqual(runtime.rule(for: "\"", state: state), .direct("“"))
+        XCTAssertEqual(runtime.rule(for: "\"", state: state), .direct("”"))
+        XCTAssertEqual(runtime.rule(for: "'", state: state), .direct("‘"))
+        XCTAssertEqual(runtime.rule(for: "'", state: state), .direct("’"))
 
         runtime.resetPairingState()
 
-        XCTAssertEqual(runtime.decision(for: "\"", state: state), .commit("“"))
-        XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("‘"))
+        XCTAssertEqual(runtime.rule(for: "\"", state: state), .direct("“"))
+        XCTAssertEqual(runtime.rule(for: "'", state: state), .direct("‘"))
     }
 
     func testQuoteContextOverridesAlternationAndUpdatesUnknownFallback() {
@@ -41,30 +41,30 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
 
         XCTAssertEqual(
-            runtime.decision(
+            runtime.rule(
                 for: "\"",
                 context: InputPunctuatorContext(state: state, quoteContext: .closing)
             ),
-            .commit("”")
+            .direct("”")
         )
-        XCTAssertEqual(runtime.decision(for: "\"", state: state), .commit("“"))
+        XCTAssertEqual(runtime.rule(for: "\"", state: state), .direct("“"))
         XCTAssertEqual(
-            runtime.decision(
+            runtime.rule(
                 for: "'",
                 context: InputPunctuatorContext(state: state, quoteContext: .opening)
             ),
-            .commit("‘")
+            .direct("‘")
         )
-        XCTAssertEqual(runtime.decision(for: "'", state: state), .commit("’"))
+        XCTAssertEqual(runtime.rule(for: "'", state: state), .direct("’"))
     }
 
     func testChineseHalfWidthEllipsisDashAndAsciiMinus() {
         var runtime = InputPunctuatorRuntime()
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
 
-        XCTAssertEqual(runtime.decision(for: "^", state: state), .commit("……"))
-        XCTAssertEqual(runtime.decision(for: "_", state: state), .commit("——"))
-        XCTAssertEqual(runtime.decision(for: "-", state: state), .commit("-"))
+        XCTAssertEqual(runtime.rule(for: "^", state: state), .direct("……"))
+        XCTAssertEqual(runtime.rule(for: "_", state: state), .direct("——"))
+        XCTAssertEqual(runtime.rule(for: "-", state: state), .direct("-"))
     }
 
     func testEnglishHalfWidthKeepsAsciiSymbols() {
@@ -72,7 +72,7 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         let state = InputModeState(punctuationMode: .english, symbolWidth: .halfWidth)
 
         for symbol in [",", ".", "/", "\\", "\"", "'", "^", "_", "-", "{", "}"] {
-            XCTAssertEqual(runtime.decision(for: symbol, state: state), .commit(symbol))
+            XCTAssertEqual(runtime.rule(for: symbol, state: state), .direct(symbol))
         }
     }
 
@@ -80,9 +80,9 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         var runtime = InputPunctuatorRuntime()
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .fullWidth)
 
-        XCTAssertEqual(runtime.decision(for: "-", state: state), .commit("－"))
-        XCTAssertEqual(runtime.decision(for: "@", state: state), .commit("＠"))
-        XCTAssertEqual(runtime.decision(for: ".", state: state), .commit("．"))
+        XCTAssertEqual(runtime.rule(for: "-", state: state), .direct("－"))
+        XCTAssertEqual(runtime.rule(for: "@", state: state), .direct("＠"))
+        XCTAssertEqual(runtime.rule(for: ".", state: state), .direct("．"))
     }
 
     func testChineseCandidateListSymbols() {
@@ -90,17 +90,15 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
 
         XCTAssertEqual(
-            runtime.decision(for: "/", state: state),
-            .showCandidates(
-                InputSymbolCandidateSession(
-                    trigger: "/",
-                    candidates: [
-                        InputSymbolCandidate(text: "、"),
-                        InputSymbolCandidate(text: "/"),
-                        InputSymbolCandidate(text: "／"),
-                        InputSymbolCandidate(text: "÷")
-                    ]
-                )
+            runtime.rule(for: "/", state: state),
+            .candidates(
+                trigger: "/",
+                outputs: [
+                    InputSymbolCandidate(text: "、"),
+                    InputSymbolCandidate(text: "/"),
+                    InputSymbolCandidate(text: "／"),
+                    InputSymbolCandidate(text: "÷")
+                ]
             )
         )
     }
@@ -114,14 +112,14 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            runtime.decision(
+            runtime.rule(
                 for: ".",
                 context: InputPunctuatorContext(
                     state: state,
                     previousCharacterKind: .asciiDigit
                 )
             ),
-            .commit(".")
+            .direct(".")
         )
     }
 
@@ -130,17 +128,17 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
 
         XCTAssertEqual(
-            runtime.decision(
+            runtime.rule(
                 for: ",",
                 context: InputPunctuatorContext(
                     state: state,
                     previousCharacterKind: .asciiDigit
                 )
             ),
-            .commit("，")
+            .direct("，")
         )
         XCTAssertEqual(
-            runtime.decision(
+            runtime.rule(
                 for: ".",
                 context: InputPunctuatorContext(
                     state: state,
@@ -148,7 +146,7 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
                     hasActiveComposition: true
                 )
             ),
-            .commit("。")
+            .direct("。")
         )
     }
 
@@ -157,24 +155,24 @@ final class InputPunctuatorRuntimeTests: XCTestCase {
         let state = InputModeState(punctuationMode: .chinese, symbolWidth: .halfWidth)
 
         XCTAssertEqual(
-            runtime.decision(
+            runtime.rule(
                 for: ".",
                 context: InputPunctuatorContext(
                     state: state,
                     previousCharacterKind: .asciiDigit
                 )
             ),
-            .commit(".")
+            .direct(".")
         )
         XCTAssertEqual(
-            runtime.decision(
+            runtime.rule(
                 for: ".",
                 context: InputPunctuatorContext(
                     state: state,
                     previousCharacterKind: .text
                 )
             ),
-            .commit("。")
+            .direct("。")
         )
     }
 }
