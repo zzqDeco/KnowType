@@ -58,6 +58,7 @@ final class InputActiveSessionRuntimeTests: XCTestCase {
         XCTAssertEqual(composition?.revision, 0)
         XCTAssertEqual(composition?.pageSize, 1)
         XCTAssertEqual(composition?.hostCursorSnapshot, hostSnapshot)
+        XCTAssertNil(composition?.presentation)
         XCTAssertEqual(composition?.policies.commit, .selectedCandidate)
         XCTAssertEqual(composition?.policies.cancel, .discardSymbolOnly)
         XCTAssertEqual(composition?.policies.focus, .commitSelected)
@@ -99,6 +100,90 @@ final class InputActiveSessionRuntimeTests: XCTestCase {
         }
         XCTAssertEqual(fourth.selectedIndex, 3)
         XCTAssertEqual(fourth.revision, 2)
+    }
+
+    func testPresentationAcknowledgementRequiresCurrentSessionRevisionAndHost() {
+        let runtime = makeSymbolRuntime()
+        let composition = try! XCTUnwrap(runtime.currentSymbolComposition)
+        var presentedSnapshot = hostSnapshot
+        presentedSnapshot.markedRange = NSRange(location: 7, length: 1)
+
+        let presented = runtime.recordSymbolPresentation(
+            compositionID: composition.compositionID,
+            revision: composition.revision,
+            carrier: .inline,
+            hostCursorSnapshot: presentedSnapshot
+        )
+
+        XCTAssertEqual(presented?.revision, 0)
+        XCTAssertEqual(presented?.presentation?.revision, 0)
+        XCTAssertEqual(presented?.presentation?.carrier, .inline)
+        XCTAssertEqual(presented?.focusValidationSnapshot, presentedSnapshot)
+
+        XCTAssertNil(
+            runtime.recordSymbolPresentation(
+                compositionID: composition.compositionID,
+                revision: composition.revision + 1,
+                carrier: .placeholder,
+                hostCursorSnapshot: presentedSnapshot
+            )
+        )
+
+        var changedHost = presentedSnapshot
+        changedHost.bundleIdentifier = "com.example.changed"
+        XCTAssertNil(
+            runtime.recordSymbolPresentation(
+                compositionID: composition.compositionID,
+                revision: composition.revision,
+                carrier: .placeholder,
+                hostCursorSnapshot: changedHost
+            )
+        )
+        XCTAssertEqual(runtime.currentSymbolComposition?.presentation?.carrier, .inline)
+    }
+
+    func testFocusLifecycleUsesLatestSuccessfulPresentationSnapshot() {
+        let runtime = makeSymbolRuntime()
+        let composition = try! XCTUnwrap(runtime.currentSymbolComposition)
+        var presentedSnapshot = hostSnapshot
+        presentedSnapshot.markedRange = NSRange(location: 7, length: 1)
+        XCTAssertNotNil(
+            runtime.recordSymbolPresentation(
+                compositionID: composition.compositionID,
+                revision: composition.revision,
+                carrier: .inline,
+                hostCursorSnapshot: presentedSnapshot
+            )
+        )
+
+        guard case .commit(_, let candidate, nil, .focusCommit) =
+            runtime.transition(for: .clickOutside(currentHostSnapshot: presentedSnapshot)) else {
+            return XCTFail("Expected focus commit from the presented host snapshot")
+        }
+
+        XCTAssertEqual(candidate.text, "、")
+    }
+
+    func testClampedNavigationPreservesCurrentPresentation() {
+        let runtime = makeSymbolRuntime()
+        let composition = try! XCTUnwrap(runtime.currentSymbolComposition)
+        XCTAssertNotNil(
+            runtime.recordSymbolPresentation(
+                compositionID: composition.compositionID,
+                revision: composition.revision,
+                carrier: .inline,
+                hostCursorSnapshot: hostSnapshot
+            )
+        )
+
+        guard case .update(let clamped, .navigation) = runtime.transition(
+            for: .moveCandidateSelection(.left)
+        ) else {
+            return XCTFail("Expected clamped navigation")
+        }
+
+        XCTAssertEqual(clamped.revision, 0)
+        XCTAssertEqual(clamped.presentation?.revision, 0)
     }
 
     func testRepeatedTriggerCyclesSelectionAndRevision() {

@@ -22,6 +22,9 @@ Current behavior:
 - overrides `didCommand(by:client:)` so responder-chain directional and paging
   selectors use the coordinator's candidate-navigation path; it returns the
   coordinator result unchanged and logs only selector name plus handled state
+- overrides parameterless `cancelComposition()` only to let the coordinator
+  clear an active symbol session and its owned mark; non-symbol cancellation
+  remains the superclass behavior
 - forwards IMK text, key event, candidate, commit, palette, deactivate, and close callbacks into `InputControllerCoordinator`
 - keeps AppKit/InputMethodKit imports guarded by `canImport(InputMethodKit)`
 - owns the production `CandidatePanelWindowController` and exposes it through the host seam
@@ -52,7 +55,9 @@ Current behavior:
   localized AI continuation, current shared input-mode status,
   log/support/Rime folders, settings, and About items
 - toggles localized AI continuation by writing `InputMethodRuntimePreferences` and forcing the coordinator to reload runtime preferences and refresh the visible candidate UI for the external menu change
-- preserves superclass calls for `hidePalettes`, `deactivateServer`, `inputControllerWillClose`, and fallback composition updates
+- preserves superclass calls for `hidePalettes`, `deactivateServer`,
+  `inputControllerWillClose`, non-symbol `cancelComposition`, and fallback
+  composition updates
 
 The controller should stay small. Product input behavior, marked text writes, commit replacement ranges, lifecycle flushing, and delayed re-anchor gating belong in `InputControllerCoordinator` so they can be covered by unit tests without installing a real Text Input Source.
 

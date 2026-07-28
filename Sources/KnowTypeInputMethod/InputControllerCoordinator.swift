@@ -195,11 +195,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func composedString() -> Any {
-        nativeMarkedText() ?? compositionBuffer.displayText
+        if let symbol = activeSessionRuntime.currentSymbolComposition?.selectedCandidate {
+            return symbol.text
+        }
+        return nativeMarkedText() ?? compositionBuffer.displayText
     }
 
     func originalString() -> NSAttributedString {
-        NSAttributedString(string: rawBuffer)
+        if activeSessionRuntime.currentSymbolComposition != nil {
+            return NSAttributedString()
+        }
+        return NSAttributedString(string: rawBuffer)
     }
 
     func currentInputModeState() -> InputModeState {
@@ -350,6 +356,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
         _ = applyCommitResult(.commit(text), client: client)
     }
 
+    @discardableResult
+    func cancelComposition(client: InputControllerClient?) -> Bool {
+        guard let plan = activeSessionRuntime.transition(for: .reset) else {
+            return false
+        }
+        _ = executeActiveSymbolTransitionPlan(
+            plan,
+            client: effectiveClient(client),
+            hideReason: .escape
+        )
+        return true
+    }
+
     func hidePalettes() {
         let client = host?.currentClient
         synchronizeInputModeSnapshot(client: client)
@@ -413,7 +432,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let client = host?.currentClient
         if activeSessionRuntime.currentSymbolComposition != nil {
-            publishCurrentSymbolComposition(client: client)
+            guard presentCurrentSymbolComposition(client: client) else {
+                cancelCurrentSymbolCompositionAfterPresentationFailure(client: client)
+                return
+            }
             return
         }
         publishLocalSuggestionSynchronously(client: client)
@@ -492,6 +514,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 _ = conversionEngine.process(.deleteBackward)
                 if deleteResult.becameEmpty {
                     conversionEngine.reset()
+                    inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
+                        client: client,
+                        state: writeState()
+                    )
                     resetAnchorState()
                 }
             }
@@ -664,7 +690,13 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 composition: composition,
                 handled: true
             )
-            publishCurrentSymbolComposition(client: client)
+            guard presentCurrentSymbolComposition(client: client) else {
+                cancelCurrentSymbolCompositionAfterPresentationFailure(
+                    composition: composition,
+                    client: client
+                )
+                return .handled(true)
+            }
             return .handled(true)
         case .commit(let composition, let candidate, let replayIntent, let reason):
             traceSymbolSessionTransition(
@@ -672,7 +704,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 composition: composition,
                 handled: true
             )
-            _ = commitSymbol(candidate.text, client: client)
+            commitSymbolCandidate(
+                candidate,
+                composition: composition,
+                client: client
+            )
             hideCandidatePanelIfVisible(reason: hideReason)
             return replayIntent == nil ? .handled(true) : .replay
         case .cancel(let composition, let replayIntent, let handled, let reason):
@@ -680,6 +716,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 reason.rawValue,
                 composition: composition,
                 handled: handled
+            )
+            clearSymbolCompositionPresentation(
+                composition,
+                client: client
             )
             hideCandidatePanel(reason: hideReason)
             if reason == .hostShortcut {
@@ -713,30 +753,162 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawLength: rawBuffer.count,
             reason: "symbol_candidate"
         )
-        guard activeSessionRuntime.beginSymbolComposition(
+        guard let composition = activeSessionRuntime.beginSymbolComposition(
             trigger: trigger,
             candidates: candidates,
             pageSize: runtimePreferences.effectiveCandidatePageSize,
             hostCursorSnapshot: hostCursorSnapshot(client: client)
-        ) != nil else {
+        ) else {
             return false
         }
         traceSymbolSessionTransition("begin")
-        publishCurrentSymbolComposition(client: client)
+        guard presentCurrentSymbolComposition(client: client) else {
+            cancelCurrentSymbolCompositionAfterPresentationFailure(
+                composition: composition,
+                client: client
+            )
+            return false
+        }
         return true
     }
 
-    private func publishCurrentSymbolComposition(client: InputControllerClient?) {
-        guard let composition = activeSessionRuntime.currentSymbolComposition else {
-            return
+    @discardableResult
+    private func presentCurrentSymbolComposition(client: InputControllerClient?) -> Bool {
+        guard let composition = activeSessionRuntime.currentSymbolComposition,
+              let candidate = composition.selectedCandidate,
+              let client else {
+            return false
         }
+        let state = symbolWriteState(for: composition)
+        guard let carrier = inputClientCompositionWriter.symbolPresentationCarrier(
+            client: client,
+            state: state
+        ) else {
+            return false
+        }
+
+        let currentHostSnapshot = hostCursorSnapshot(client: client)
+        if let presentation = composition.presentation {
+            guard currentHostSnapshot == presentation.hostCursorSnapshot else {
+                return false
+            }
+            if presentation.revision == composition.revision,
+               presentation.carrier == carrier {
+                publishSymbolPanel(
+                    composition: composition,
+                    client: client
+                )
+                return true
+            }
+        } else if currentHostSnapshot != composition.hostCursorSnapshot {
+            return false
+        }
+
+        let result = inputClientCompositionWriter.presentSymbolComposition(
+            client: client,
+            state: state,
+            markedDisplayText: candidate.text
+        )
+        guard result.didWrite,
+              result.carrier == carrier else {
+            return false
+        }
+
+        let presentedHostSnapshot = hostCursorSnapshot(client: client)
+        guard let presentedComposition = activeSessionRuntime.recordSymbolPresentation(
+            compositionID: composition.compositionID,
+            revision: composition.revision,
+            carrier: carrier,
+            hostCursorSnapshot: presentedHostSnapshot
+        ) else {
+            clearSymbolCompositionPresentation(composition, client: client)
+            return false
+        }
+
+        publishSymbolPanel(
+            composition: presentedComposition,
+            client: client
+        )
+        if result.shouldReanchor {
+            scheduleDelayedSymbolCandidateReanchor(
+                composition: presentedComposition,
+                client: client
+            )
+        }
+        return true
+    }
+
+    private func publishSymbolPanel(
+        composition: SymbolComposition,
+        client: InputControllerClient
+    ) {
+        let state = symbolWriteState(for: composition)
+        let preeditDisplayText = inputClientCompositionWriter.candidatePanelPreeditDisplayText(
+            client: client,
+            state: state,
+            markedDisplayText: composition.selectedCandidate?.text
+        )
         publishPanelOverlay(
             modeStatusText: modeStatusText,
             symbolCandidates: composition.candidates,
             preferredSelection: .symbolCandidate(composition.selectedIndex),
             pageSize: composition.pageSize,
+            preeditDisplayText: preeditDisplayText,
             client: client
         )
+    }
+
+    private func commitSymbolCandidate(
+        _ candidate: InputSymbolCandidate,
+        composition: SymbolComposition,
+        client: InputControllerClient?
+    ) {
+        guard let client else {
+            _ = inputClientCompositionWriter.releaseOwnedMarkedText(
+                compositionID: composition.compositionID
+            )
+            return
+        }
+        guard hostCursorSnapshot(client: client) == composition.focusValidationSnapshot else {
+            clearSymbolCompositionPresentation(composition, client: client)
+            return
+        }
+        insertTextAndRecordPunctuationContext(
+            candidate.text,
+            client: client,
+            state: symbolWriteState(for: composition),
+            reason: "symbol_commit"
+        )
+    }
+
+    private func clearSymbolCompositionPresentation(
+        _ composition: SymbolComposition,
+        client: InputControllerClient?
+    ) {
+        _ = inputClientCompositionWriter.clearOwnedMarkedTextIfNeeded(
+            client: client,
+            state: symbolWriteState(for: composition)
+        )
+        _ = inputClientCompositionWriter.releaseOwnedMarkedText(
+            compositionID: composition.compositionID
+        )
+    }
+
+    private func cancelCurrentSymbolCompositionAfterPresentationFailure(
+        composition: SymbolComposition? = nil,
+        client: InputControllerClient?
+    ) {
+        let composition = composition ?? activeSessionRuntime.currentSymbolComposition
+        _ = activeSessionRuntime.cancelSymbolComposition()
+        if let composition {
+            clearSymbolCompositionPresentation(composition, client: client)
+            traceSymbolSessionTransition(
+                "presentation_failed",
+                composition: composition,
+                handled: true
+            )
+        }
+        hideCandidatePanel(reason: .compositionEnded)
     }
 
     private func hostCursorSnapshot(client: InputControllerClient?) -> InputHostCursorSnapshot {
@@ -1052,6 +1224,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawLength: rawBuffer.count,
             inputModeState: inputModeSnapshot.state,
             hasActiveComposition: hasActiveComposition ?? hasActiveTextComposition()
+        )
+    }
+
+    private func symbolWriteState(
+        for composition: SymbolComposition
+    ) -> InputClientCompositionWriteState {
+        InputClientCompositionWriteState(
+            compositionID: composition.compositionID,
+            rawLength: composition.trigger.count,
+            inputModeState: inputModeSnapshot.state,
+            hasActiveComposition: true
         )
     }
 
@@ -2038,6 +2221,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         symbolCandidates: [InputSymbolCandidate],
         preferredSelection: CandidatePanelSelection?,
         pageSize: Int? = nil,
+        preeditDisplayText: String? = nil,
         client: InputControllerClient?
     ) {
         let result = candidatePanelPublicationRuntime.publishOverlay(
@@ -2047,7 +2231,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 rawRevision: rawRevision,
                 anchorResult: candidateAnchorResult(client: client),
                 placementPreference: candidatePanelPlacementPreference(client: client),
-                preeditDisplayText: rawBuffer.isEmpty ? nil : candidatePanelPreeditDisplayText(client: client),
+                preeditDisplayText: preeditDisplayText
+                    ?? (rawBuffer.isEmpty ? nil : candidatePanelPreeditDisplayText(client: client)),
                 modeStatusText: modeStatusText,
                 symbolCandidates: symbolCandidates,
                 pageSize: pageSize ?? runtimePreferences.effectiveCandidatePageSize,
@@ -2094,7 +2279,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     client: effectiveClient
                 )
             } else if self.activeSessionRuntime.currentSymbolComposition != nil {
-                self.publishCurrentSymbolComposition(client: effectiveClient)
+                guard self.presentCurrentSymbolComposition(client: effectiveClient) else {
+                    self.cancelCurrentSymbolCompositionAfterPresentationFailure(
+                        client: effectiveClient
+                    )
+                    return
+                }
             } else {
                 self.hideCandidatePanel(reason: .compositionEnded)
             }
@@ -2409,6 +2599,43 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 }
                 self.updateCandidatePanelImmediately(
                     suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
+                    client: client
+                )
+            }
+        )
+    }
+
+    private func scheduleDelayedSymbolCandidateReanchor(
+        composition: SymbolComposition,
+        client: InputControllerClient
+    ) {
+        candidatePanelPublicationRuntime.scheduleDelayedReanchor(
+            rawInput: composition.trigger,
+            compositionID: composition.compositionID,
+            currentSnapshot: { [weak self] in
+                guard let current = self?.activeSessionRuntime.currentSymbolComposition else {
+                    return InputCandidatePanelReanchorSnapshot(
+                        rawInput: "",
+                        compositionID: composition.compositionID,
+                        hasActiveComposition: false
+                    )
+                }
+                return InputCandidatePanelReanchorSnapshot(
+                    rawInput: current.trigger,
+                    compositionID: current.compositionID,
+                    hasActiveComposition: current.revision == composition.revision
+                )
+            },
+            publish: { [weak self, client] in
+                guard let self,
+                      let current = self.activeSessionRuntime.currentSymbolComposition,
+                      current.compositionID == composition.compositionID,
+                      current.revision == composition.revision,
+                      self.hostCursorSnapshot(client: client) == current.presentation?.hostCursorSnapshot else {
+                    return
+                }
+                self.publishSymbolPanel(
+                    composition: current,
                     client: client
                 )
             }

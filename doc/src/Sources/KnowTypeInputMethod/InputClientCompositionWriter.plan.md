@@ -14,8 +14,8 @@ between `InputControllerCoordinator` and the low-level
   a usable client is present; missing clients remain unhandled in every width.
 - It writes inline attributed preedit or commit-only attributed placeholder
   marked text.
-- It tracks the KnowType-owned marked-text client id and clears only owned
-  marked text before commit or lifecycle cleanup.
+- It tracks KnowType-owned marked text by client id and composition id, and
+  clears only that exact ownership before commit or lifecycle cleanup.
 - It exposes commit-only preedit display text for the candidate panel.
 - It does not own key handling, Rime snapshots, candidate ordering, AI
   recommendation state, panel anchoring, or lifecycle timing.
@@ -28,10 +28,16 @@ between `InputControllerCoordinator` and the low-level
 - Inline hosts receive attributed composition text through `setMarkedText`.
 - Commit-only hosts receive a U+3000 attributed placeholder through
   `setMarkedText`; the real preedit is returned for candidate-panel display.
+- Symbol presentation returns a structured inline/placeholder result to the
+  coordinator. It uses the same carrier path as text composition without
+  storing the selected symbol.
 - All replacement ranges still come from `InputClientWriteCoordinator` and use
   `{NSNotFound, NSNotFound}`.
 - Direct insert clears KnowType-owned marked text first unless the caller marks
   the write as an idle passthrough insertion.
+- Missing or changed clients can release stale local ownership without sending
+  a marked-text write to another host. An older composition id cannot clear a
+  newer mark on the same client.
 
 ## Tests
 

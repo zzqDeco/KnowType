@@ -3233,6 +3233,25 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(events.last?.deleteCountBeforeCommit, 0)
     }
 
+    func testBackspaceClearingFinalTextCharacterClearsMarkBeforeCompositionIDChanges() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n"])
+
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "", keyCode: 51),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["n", ""])
+        XCTAssertNil(client.markedRangeValue)
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
     @MainActor
     func testNoProviderDoesNotRecordContextMemoryEvents() async {
         let client = FakeInputControllerClient()
@@ -4417,7 +4436,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("/", client: client))
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["我想测试"])
-        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(coordinator.composedString() as? String, "、")
         XCTAssertEqual(
             host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
             ["、", "/", "／", "÷"]
@@ -4548,12 +4567,35 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         let viewModel = host.panelStates.last?.windowState.viewModel
         XCTAssertEqual(viewModel?.symbolCandidates.map(\.text), ["、", "/", "／", "÷"])
+        XCTAssertNil(viewModel?.preeditDisplayText)
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
         XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、"])
+        XCTAssertEqual(coordinator.composedString() as? String, "、")
+        XCTAssertEqual(coordinator.originalString().string, "")
 
         XCTAssertTrue(coordinator.handleText(" ", client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, "、")
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testSymbolCandidateReturnClearsMarkedTextAndCommitsOnce() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\r", keyCode: 36),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "/", ""])
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["/"])
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -4566,6 +4608,43 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(1))
         XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "/"])
+        XCTAssertEqual(coordinator.composedString() as? String, "/")
+    }
+
+    func testDelayedSymbolReanchorDoesNotRewriteCurrentMarkedText() {
+        let client = FakeInputControllerClient()
+        client.firstRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
+        client.lineHeightRectValue = client.firstRectValue
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、"])
+        XCTAssertEqual(host.panelStates.last?.windowState.anchorRect.minX, 40)
+
+        client.firstRectValue = CGRect(x: 220, y: 500, width: 0, height: 18)
+        client.lineHeightRectValue = client.firstRectValue
+        host.runScheduledOperations()
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、"])
+        XCTAssertEqual(host.panelStates.last?.windowState.anchorRect.minX, 220)
+    }
+
+    func testDelayedSymbolReanchorRetainsEphemeralClientAdapterUntilCallbackRuns() {
+        var client: FakeInputControllerClient? = FakeInputControllerClient()
+        weak let retainedClient = client
+        let (coordinator, host, _) = makeCoordinator(client: client!)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        let panelStateCount = host.panelStates.count
+        host.currentClientValue = nil
+        client = nil
+
+        XCTAssertNotNil(retainedClient)
+        host.runScheduledOperations()
+
+        XCTAssertEqual(host.panelStates.count, panelStateCount + 1)
+        XCTAssertNil(retainedClient)
     }
 
     func testSymbolCandidateHoverAndMouseCommitUseSessionSelection() {
@@ -4576,10 +4655,29 @@ final class InputControllerCoordinatorTests: XCTestCase {
         coordinator.hoverCandidatePanelSelection(.symbolCandidate(2))
 
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(2))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "／"])
 
         coordinator.commitCandidatePanelSelection(.symbolCandidate(2), client: client)
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["／"])
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "／", ""])
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testSymbolMouseCommitDoesNotWriteIntoChangedHost() {
+        let originatingClient = FakeInputControllerClient()
+        let changedClient = FakeInputControllerClient()
+        changedClient.selectedRangeValue = NSRange(location: 40, length: 0)
+        let (coordinator, host, _) = makeCoordinator(client: originatingClient)
+
+        XCTAssertTrue(coordinator.handleText("/", client: originatingClient))
+        host.currentClientValue = changedClient
+
+        coordinator.commitCandidatePanelSelection(.symbolCandidate(1), client: changedClient)
+
+        XCTAssertTrue(originatingClient.insertTextWrites.isEmpty)
+        XCTAssertTrue(changedClient.markedTextWrites.isEmpty)
+        XCTAssertTrue(changedClient.insertTextWrites.isEmpty)
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -4591,6 +4689,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("a", client: client))
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["、"])
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "", "a"])
+        XCTAssertEqual(Array(client.writeEventKinds.prefix(3)), ["markedText", "markedText", "insertText"])
         XCTAssertEqual(coordinator.composedString() as? String, "a")
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.symbolCandidates, [])
     }
@@ -4607,7 +4707,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(1))
         XCTAssertEqual(client.selectedRangeValue, NSRange(location: 42, length: 3))
-        XCTAssertEqual(client.markedTextWrites.count, markedWriteCount)
+        XCTAssertEqual(client.markedTextWrites.count, markedWriteCount + 1)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "/")
         XCTAssertEqual(client.insertTextWrites.count, insertWriteCount)
 
         XCTAssertTrue(
@@ -4618,7 +4719,8 @@ final class InputControllerCoordinatorTests: XCTestCase {
         )
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
         XCTAssertEqual(client.selectedRangeValue, NSRange(location: 42, length: 3))
-        XCTAssertEqual(client.markedTextWrites.count, markedWriteCount)
+        XCTAssertEqual(client.markedTextWrites.count, markedWriteCount + 2)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "、")
         XCTAssertEqual(client.insertTextWrites.count, insertWriteCount)
     }
 
@@ -4631,6 +4733,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.handle(commandSelectorName: "moveLeft:", client: client))
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(0))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、"])
 
         for expectedIndex in 1...3 {
             XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
@@ -4640,7 +4743,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
         XCTAssertEqual(host.panelStates.last?.windowState.selection, .symbolCandidate(3))
         XCTAssertEqual(client.selectedRangeValue, NSRange(location: 24, length: 0))
-        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "/", "／", "÷"])
         XCTAssertTrue(client.insertTextWrites.isEmpty)
     }
 
@@ -4686,6 +4789,25 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "2", keyCode: 19), client: client))
 
         XCTAssertEqual(client.insertTextWrites.last?.text, "/")
+    }
+
+    func testCommitOnlySymbolPreviewTracksSelectionAndCommitsOnce() {
+        let client = FakeInputControllerClient()
+        client.bundleIdentifier = "com.apple.Terminal"
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["\u{3000}"])
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.preeditDisplayText, "、")
+
+        XCTAssertTrue(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["\u{3000}", "\u{3000}"])
+        XCTAssertEqual(host.panelStates.last?.windowState.viewModel.preeditDisplayText, "/")
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["\u{3000}", "\u{3000}", ""])
+        XCTAssertEqual(client.insertTextWrites.map(\.text), ["/"])
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
     func testSymbolCandidateDigitUsesVisiblePageShortcut() {
@@ -4757,6 +4879,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         coordinator.hidePalettes()
 
         XCTAssertEqual(client.insertTextWrites.map(\.text), ["、"])
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -4774,6 +4897,22 @@ final class InputControllerCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(originatingClient.insertTextWrites.isEmpty)
         XCTAssertTrue(currentClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testExplicitCommitCancelsAndClearsOwnedSymbolMarkAfterSameHostRangeDrift() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 4, length: 0)
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        client.selectedRangeValue = NSRange(location: 20, length: 0)
+
+        XCTAssertTrue(coordinator.handleText(" ", client: client))
+
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
+        XCTAssertNil(client.markedRangeValue)
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -4801,6 +4940,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         symbolCoordinator.hidePalettes()
 
         XCTAssertTrue(symbolClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(symbolClient.markedTextWrites.map(\.text), ["、", ""])
         XCTAssertEqual(symbolHost.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -4828,6 +4968,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         symbolCoordinator.deactivateServer(client: symbolClient)
 
         XCTAssertTrue(symbolClient.insertTextWrites.isEmpty)
+        XCTAssertEqual(symbolClient.markedTextWrites.map(\.text), ["、", ""])
         XCTAssertEqual(symbolHost.candidatePanelFrames.last?.isVisible, false)
     }
 
@@ -4842,11 +4983,39 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 client: client
             )
         )
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
 
         _ = coordinator.handleText(" ", client: client)
 
         XCTAssertFalse(client.insertTextWrites.contains { $0.text == "、" })
+    }
+
+    func testExplicitCancelCompositionClearsSymbolWithoutAffectingTextFallback() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(coordinator.cancelComposition(client: client))
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        XCTAssertFalse(coordinator.cancelComposition(client: client))
+    }
+
+    func testIdleSymbolPresentationFailureDoesNotLeaveHiddenSession() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+        host.currentClientValue = nil
+
+        XCTAssertFalse(coordinator.handleText("/", client: nil))
+
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertTrue(client.markedTextWrites.isEmpty)
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertFalse(host.candidatePanelFrames.last?.isVisible ?? false)
+        XCTAssertFalse(coordinator.handle(commandSelectorName: "moveRight:", client: nil))
     }
 
     func testTextToSymbolCommitsTextBeforeOpeningIndependentSymbolSession() {
@@ -4860,7 +5029,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
             host.panelStates.last?.windowState.viewModel.symbolCandidates.map(\.text),
             ["、", "/", "／", "÷"]
         )
-        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(coordinator.composedString() as? String, "、")
         XCTAssertEqual(client.insertTextWrites.count, 1)
 
         _ = coordinator.handle(
@@ -4888,7 +5057,7 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(host.panelStates.last?.windowState.viewModel.symbolCandidates, [])
     }
 
-    func testTextToSymbolClearsCommitOnlyPreeditWithoutMarkingSymbol() {
+    func testTextToSymbolCreatesCommitOnlyPlaceholderWithSymbolPanelPreedit() {
         let client = FakeInputControllerClient()
         client.bundleIdentifier = "com.apple.Terminal"
         let (coordinator, host, _) = makeCoordinator(client: client)
@@ -4898,10 +5067,13 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handleText("/", client: client))
 
         let viewModel = host.panelStates.last?.windowState.viewModel
-        XCTAssertNil(viewModel?.preeditDisplayText)
+        XCTAssertEqual(viewModel?.preeditDisplayText, "、")
         XCTAssertEqual(viewModel?.symbolCandidates.map(\.text), ["、", "/", "／", "÷"])
-        XCTAssertEqual(client.markedTextWrites.map(\.text), ["\u{3000}", "\u{3000}", ""])
-        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(
+            client.markedTextWrites.map(\.text),
+            ["\u{3000}", "\u{3000}", "", "\u{3000}"]
+        )
+        XCTAssertEqual(coordinator.composedString() as? String, "、")
     }
 
     @MainActor
@@ -4980,6 +5152,27 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.handle(stroke: InputKeyStroke(text: "\u{1B}", keyCode: 53), client: client))
 
         XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+    }
+
+    func testSymbolCandidateBackspaceClearsOnlySymbolMarkedText() {
+        let client = FakeInputControllerClient()
+        client.selectedRangeValue = NSRange(location: 12, length: 0)
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+        XCTAssertTrue(
+            coordinator.handle(
+                stroke: InputKeyStroke(text: "\u{7F}", keyCode: 51),
+                client: client
+            )
+        )
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(client.selectedRangeValue, NSRange(location: 12, length: 0))
+        XCTAssertNil(client.markedRangeValue)
         XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
     }
 

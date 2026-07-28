@@ -13,9 +13,9 @@ Current behavior:
   trace, and intent handler as raw key events; unknown commands return to the
   host
 - consumes arrow and paging navigation for active symbol sessions at
-  every list position, including clamped boundaries, without marked-text,
-  insert-text, caret, or selection writes; the same commands pass through after
-  commit or cancellation
+  every list position, including clamped boundaries; changed selection updates
+  the same symbol marked range, while an unchanged revision performs no
+  duplicate marked-text write and never moves the host caret or selection
 - cancels an active symbol session before returning `false` for a
   Command/Control host shortcut, preventing the next Space from committing a
   stale symbol while preserving host handling
@@ -24,14 +24,14 @@ Current behavior:
   `InputActiveSessionRuntime`; text storage remains in
   `InputCompositionStateRuntime`
 - executes symbol transition plans in a fixed order: finish any required text
-  composition through the full commit path, update or clear session state,
-  perform host insertion, publish or hide the panel, then replay at most one
-  original intent
+  composition through the full commit path, present or clear the exact owned
+  symbol mark, perform at most one host insertion, publish or hide the panel,
+  then replay at most one original intent
 - commits active symbols for explicit commit, mouse selection, click-outside,
-  and deactivate only when the current host snapshot matches the session's
-  captured host identity and cursor ranges; focus lifecycle synchronizes the
-  shared mode generation before this decision, while reset, close, missing or
-  changed host context, host shortcut, and mode-generation transitions cancel
+  and deactivate only when the current host snapshot matches the latest
+  successful presentation snapshot; focus lifecycle synchronizes the shared
+  mode generation before this decision, while reset, close, missing or changed
+  host context, host shortcut, and mode-generation transitions clear/cancel
 - preserves the active symbol projection across external runtime-preference
   refreshes instead of replacing it with a normal suggestion frame, and keeps
   the panel on the page size captured when the symbol session began
@@ -51,9 +51,12 @@ Current behavior:
   placeholder with marked attributes that keeps IMK composition ownership
   without exposing raw pinyin
 - sends the real raw/preedit display text to the candidate-panel view model for
-  commit-only hosts only, so placeholder hosts show preedit above candidates
-  without writing it into the host text field while inline hosts avoid duplicate
-  preedit rows
+  commit-only hosts only, so placeholder hosts show text or the current symbol
+  above candidates without writing it into the host text field while inline
+  hosts avoid duplicate preedit rows
+- presents active symbol candidates through the same writer boundary: inline
+  hosts receive the selected symbol, commit-only hosts receive U+3000, and a
+  successful write records the post-write host snapshot before panel anchoring
 - commits through `InputControllerClient.insertText` with a centralized write
   stack; normal composition, commit, and direct passthrough writes use
   `NSNotFound` and do not trust stale host `markedRange`
@@ -63,10 +66,15 @@ Current behavior:
   session, missing callback clients never fall back to a stale host client, and
   unchanged Unicode remains passthrough in ASCII mode
 - treats host `markedRange` as advisory geometry/diagnostic state only; future reconversion must introduce an explicit owned range before replacing existing text
-- tracks KnowType-owned marked text by client and clears only that owned mark;
-  `InputClientCompositionWriter` owns the tracked client id and clear-before-
-  insert ordering, while idle Return/Enter returns to the host without clearing
-  stale host marked ranges
+- tracks KnowType-owned marked text by client and composition id and clears only
+  that exact mark; `InputClientCompositionWriter` owns clear-before-insert
+  ordering and stale ownership release, while idle Return/Enter returns to the
+  host without clearing stale host marked ranges
+- clears a text composition's final owned mark before advancing the anchor
+  composition id after Backspace
+- retains the short-lived IMK client adapter through the 50 ms symbol reanchor
+  callback, then revalidates composition id, revision, and host snapshot before
+  publishing
 - maps Return/Enter to raw commit; retired local segment selection is no longer generated on the production IMK path
 - publishes raw marked text and current-page Rime candidates synchronously
 - reads text composition snapshots from `InputActiveSessionRuntime` when building
