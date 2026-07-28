@@ -32,6 +32,10 @@ Current behavior:
   successful presentation snapshot; focus lifecycle synchronizes the shared
   mode generation before this decision, while reset, close, missing or changed
   host context, host shortcut, and mode-generation transitions clear/cancel
+- captures the current host client once during controller close and passes that
+  client through symbol and text lifecycle cleanup, so a matching owned mark is
+  cleared before ownership is released while a missing or changed host remains
+  write-isolated
 - preserves the active symbol projection across external runtime-preference
   refreshes instead of replacing it with a normal suggestion frame, and keeps
   the panel on the page size captured when the symbol session began

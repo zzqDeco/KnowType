@@ -5004,6 +5004,21 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.cancelComposition(client: client))
     }
 
+    func testInputControllerWillCloseCancelsSymbolAndClearsOwnedMarkedText() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("/", client: client))
+
+        coordinator.inputControllerWillClose()
+
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", ""])
+        XCTAssertTrue(client.insertTextWrites.isEmpty)
+        XCTAssertEqual(coordinator.composedString() as? String, "")
+        XCTAssertEqual(host.candidatePanelFrames.last?.isVisible, false)
+        XCTAssertFalse(coordinator.handle(commandSelectorName: "moveRight:", client: client))
+    }
+
     func testIdleSymbolPresentationFailureDoesNotLeaveHiddenSession() {
         let client = FakeInputControllerClient()
         let (coordinator, host, _) = makeCoordinator(client: client)

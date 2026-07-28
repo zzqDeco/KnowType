@@ -406,10 +406,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
+        let client = host?.currentClient
         if let plan = activeSessionRuntime.transition(for: .controllerClose) {
             _ = executeActiveSymbolTransitionPlan(
                 plan,
-                client: nil,
+                client: client,
                 hideReason: .compositionEnded
             )
         }
@@ -422,7 +423,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         lexicalCommitRuntime.cancelRefresh()
         taskSupervisor.cancelAll()
         resetPunctuationSessionContext()
-        _ = finishCompositionLifecycle(reason: .close, client: nil, commitPolicy: .none)
+        _ = finishCompositionLifecycle(reason: .close, client: client, commitPolicy: .none)
     }
 
     func reloadRuntimePreferencesForExternalChange() {
