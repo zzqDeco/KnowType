@@ -124,8 +124,10 @@ release a shared-gate lease held by cancellation-resistant transport. Generation
 changes clear provider-dependent recommendation cache, health, and
 structured-output capability state without resetting digest success timing.
 Each real gate attempt records at most one failure: the single-flight owner
-records a hard timeout, while cancellation-marked late transport errors only
-release the lease. Failure counts clamp at 16 in memory and persisted state.
+records a hard timeout against a gate-issued attempt id before the timeout is
+visible to its caller, while cancellation-marked late transport errors only
+release that same attempt's lease. Failure counts clamp at 16 in memory and
+persisted state.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -150,7 +152,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   below-batch pending event receives its own forced deadline. While the actor is
   waiting for a busy gate, new records append only and return before another
   digest snapshot decode; malformed or oversized local prefixes rearm the same
-  deadline when a tail remains.
+  deadline when a tail remains. Calls received during an active digest set one
+  coalesced rerun signal, which re-evaluates pending work once after the current
+  success, failure, or stale-generation completion.
 - Context Digest success archives only its claimed prefix and then best-effort
   retains processed history for at most 7 days, 100 files, and 10 MiB. Existing
   history is not pruned during startup or installation. Protected-only eligible
@@ -167,8 +171,11 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   Recovery bounded-reads the deterministic processed archive and verifies its
   byte count and SHA-256 before treating a missing receipt as completed. A claim
   whose generated hash is not yet present in ENV remains blocked, and corrupt
-  schedule state is replaced by a conservative minimum-interval delay or stays
-  fail-closed.
+  schedule state, including impossible date ordering or excessive future
+  deadlines, is replaced by a conservative minimum-interval delay or stays
+  fail-closed. Existing ENV content is chmod 0600 before any read; User Notes
+  headings overlapping or preceding the managed pair are ambiguous, and an
+  existing deterministic backup must be a matching regular non-symlink file.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; it and
   pending/processed typing-event files enforce mode 0600 on creation, rewrite,

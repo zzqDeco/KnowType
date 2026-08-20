@@ -369,19 +369,12 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 let generation = providerGeneration
                 let timeout = hardTimeoutNanoseconds
                 let task = Task<LLMResponse, Error> {
-                    do {
-                        return try await withTimeout(nanoseconds: timeout) {
-                            try await gate.execute(providerIdentity: identity, generation: generation) {
-                                try await provider.complete(llmRequest)
-                            }
-                        }
-                    } catch let error as TimeoutError {
-                        await gate.recordFailure(
-                            providerIdentity: identity,
-                            generation: generation,
-                            failure: error
-                        )
-                        throw error
+                    try await gate.executeWithHardTimeout(
+                        providerIdentity: identity,
+                        generation: generation,
+                        timeoutNanoseconds: timeout
+                    ) {
+                        try await provider.complete(llmRequest)
                     }
                 }
                 inFlight[payloadFingerprint] = task
@@ -726,6 +719,7 @@ private struct CandidateBuildResult {
 
 func withTimeout<T: Sendable>(
     nanoseconds: UInt64,
+    onTimeout: @escaping @Sendable (@escaping @Sendable () -> Bool) async throws -> Bool,
     operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
     let race = TimeoutRace<T>()
@@ -745,9 +739,12 @@ func withTimeout<T: Sendable>(
             let timeoutTask = Task {
                 do {
                     try await Task.sleep(nanoseconds: nanoseconds)
-                    race.complete(.failure(TimeoutError()))
+                    guard try await onTimeout(race.claimTimeout) else { return }
+                    race.completeClaimedTimeout(.failure(TimeoutError()))
                 } catch {
-                    return
+                    if !(error is CancellationError) {
+                        race.complete(.failure(error))
+                    }
                 }
             }
             race.setTasks([operationTask, timeoutTask])
@@ -762,6 +759,7 @@ private final class TimeoutRace<T: Sendable>: @unchecked Sendable {
     private var continuation: CheckedContinuation<T, Error>?
     private var tasks: [Task<Void, Never>] = []
     private var completed = false
+    private var timeoutClaimed = false
 
     func setContinuation(_ continuation: CheckedContinuation<T, Error>) -> Bool {
         lock.lock()
@@ -788,7 +786,32 @@ private final class TimeoutRace<T: Sendable>: @unchecked Sendable {
 
     func complete(_ result: Result<T, Error>) {
         lock.lock()
-        guard !completed else {
+        guard !completed, !timeoutClaimed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        let tasks = tasks
+        self.tasks = []
+        lock.unlock()
+
+        tasks.forEach { $0.cancel() }
+        continuation?.resume(with: result)
+    }
+
+    func claimTimeout() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !completed, !timeoutClaimed else { return false }
+        timeoutClaimed = true
+        return true
+    }
+
+    func completeClaimedTimeout(_ result: Result<T, Error>) {
+        lock.lock()
+        guard !completed, timeoutClaimed else {
             lock.unlock()
             return
         }

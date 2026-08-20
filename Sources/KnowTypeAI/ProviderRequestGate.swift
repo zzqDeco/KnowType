@@ -26,10 +26,19 @@ public actor ProviderRequestGate {
 
     private struct State {
         var generation: UInt64 = 0
-        var inFlight = false
+        var activeAttemptID: UUID?
+        var timedOutAttemptID: UUID?
         var failureCount = 0
         var cooldownUntil: Date?
         var failureClass: ProviderRequestFailureClass?
+
+        var inFlight: Bool { activeAttemptID != nil }
+    }
+
+    private struct Attempt: Sendable {
+        var id: UUID
+        var identityHash: String
+        var generation: UInt64
     }
 
     private struct PersistedEntry: Codable {
@@ -80,6 +89,7 @@ public actor ProviderRequestGate {
         state.cooldownUntil = nil
         state.failureClass = nil
         state.failureCount = 0
+        state.timedOutAttemptID = nil
         states[key] = state
         clearPersistedEntry(for: key)
         resumeAvailabilityWaiters(for: key)
@@ -131,6 +141,40 @@ public actor ProviderRequestGate {
         generation: UInt64,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
+        let attempt = try beginAttempt(
+            providerIdentity: providerIdentity,
+            generation: generation
+        )
+        return try await perform(attempt: attempt, operation: operation)
+    }
+
+    func executeWithHardTimeout<T: Sendable>(
+        providerIdentity: String,
+        generation: UInt64,
+        timeoutNanoseconds: UInt64,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let attempt = try beginAttempt(
+            providerIdentity: providerIdentity,
+            generation: generation
+        )
+        return try await withTimeout(
+            nanoseconds: timeoutNanoseconds,
+            onTimeout: { claimTimeout in
+                try await self.recordTimeout(
+                    for: attempt,
+                    claimingTimeout: claimTimeout
+                )
+            }
+        ) {
+            try await self.perform(attempt: attempt, operation: operation)
+        }
+    }
+
+    private func beginAttempt(
+        providerIdentity: String,
+        generation: UInt64
+    ) throws -> Attempt {
         loadPersistedStateIfNeeded()
         let key = Self.identityHash(providerIdentity)
         var state = state(for: key)
@@ -143,6 +187,7 @@ public actor ProviderRequestGate {
             state.failureCount = 0
             state.cooldownUntil = nil
             state.failureClass = nil
+            state.timedOutAttemptID = nil
             clearPersistedEntry(for: key)
         }
         if state.inFlight { throw ProviderRequestGateError.busy }
@@ -152,59 +197,135 @@ public actor ProviderRequestGate {
                 failureClass: state.failureClass ?? .transport
             )
         }
-        state.inFlight = true
+        let attempt = Attempt(id: UUID(), identityHash: key, generation: generation)
+        state.activeAttemptID = attempt.id
+        state.timedOutAttemptID = nil
         states[key] = state
+        return attempt
+    }
 
+    private func perform<T: Sendable>(
+        attempt: Attempt,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let result: Result<T, Error>
         do {
-            let value = try await operation()
-            var completed = states[key, default: State()]
-            completed.inFlight = false
-            guard completed.generation == generation else {
-                states[key] = completed
-                resumeAvailabilityWaiters(for: key)
-                throw ProviderRequestGateError.staleGeneration
-            }
-            if let deadline = completed.cooldownUntil, deadline > now() {
-                states[key] = completed
-                persist(completed, for: key)
-                resumeAvailabilityWaiters(for: key)
-                return value
-            }
-            completed.failureCount = 0
-            completed.cooldownUntil = nil
-            completed.failureClass = nil
-            states[key] = completed
-            clearPersistedEntry(for: key)
-            resumeAvailabilityWaiters(for: key)
-            return value
+            result = .success(try await operation())
         } catch {
-            var failed = states[key, default: State()]
-            failed.inFlight = false
-            if failed.generation != generation || Task.isCancelled || Self.isCancellation(error) || Self.isStale(error) {
-                states[key] = failed
-                resumeAvailabilityWaiters(for: key)
-                throw failed.generation == generation ? error : ProviderRequestGateError.staleGeneration
-            }
-            if error is ProviderRequestBudgetError {
-                states[key] = failed
-                resumeAvailabilityWaiters(for: key)
-                throw error
-            }
-            let failureClass = Self.classify(error)
-            failed.failureCount = min(16, failed.failureCount + 1)
-            failed.failureClass = failureClass
-            failed.cooldownUntil = now().addingTimeInterval(
-                Self.cooldownSeconds(
-                    failureClass: failureClass,
-                    failureCount: failed.failureCount,
-                    retryAfter: (error as? ProviderRateLimitError)?.retryAfterSeconds
-                )
-            )
-            states[key] = failed
-            persist(failed, for: key)
-            resumeAvailabilityWaiters(for: key)
-            throw error
+            result = .failure(error)
         }
+        switch result {
+        case .success(let value):
+            return try finishSuccess(value, attempt: attempt)
+        case .failure(let error):
+            throw finishFailure(error, attempt: attempt)
+        }
+    }
+
+    private func recordTimeout(
+        for attempt: Attempt,
+        claimingTimeout: @Sendable () -> Bool
+    ) throws -> Bool {
+        var state = states[attempt.identityHash, default: State()]
+        guard state.generation == attempt.generation else {
+            throw ProviderRequestGateError.staleGeneration
+        }
+        guard state.activeAttemptID == attempt.id else { return false }
+        guard state.timedOutAttemptID != attempt.id,
+              claimingTimeout() else { return false }
+
+        state.failureCount = min(16, state.failureCount + 1)
+        state.failureClass = .timeout
+        state.cooldownUntil = now().addingTimeInterval(
+            Self.cooldownSeconds(
+                failureClass: .timeout,
+                failureCount: state.failureCount,
+                retryAfter: nil
+            )
+        )
+        state.timedOutAttemptID = attempt.id
+        states[attempt.identityHash] = state
+        persist(state, for: attempt.identityHash)
+        return true
+    }
+
+    private func finishSuccess<T: Sendable>(_ value: T, attempt: Attempt) throws -> T {
+        var state = states[attempt.identityHash, default: State()]
+        guard state.activeAttemptID == attempt.id else {
+            throw ProviderRequestGateError.staleGeneration
+        }
+        state.activeAttemptID = nil
+        let timedOut = state.timedOutAttemptID == attempt.id
+        state.timedOutAttemptID = nil
+        guard state.generation == attempt.generation else {
+            states[attempt.identityHash] = state
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+            throw ProviderRequestGateError.staleGeneration
+        }
+        if timedOut {
+            states[attempt.identityHash] = state
+            persist(state, for: attempt.identityHash)
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+            throw TimeoutError()
+        }
+        if let deadline = state.cooldownUntil, deadline > now() {
+            states[attempt.identityHash] = state
+            persist(state, for: attempt.identityHash)
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+            return value
+        }
+        state.failureCount = 0
+        state.cooldownUntil = nil
+        state.failureClass = nil
+        states[attempt.identityHash] = state
+        clearPersistedEntry(for: attempt.identityHash)
+        resumeAvailabilityWaiters(for: attempt.identityHash)
+        return value
+    }
+
+    private func finishFailure(_ error: Error, attempt: Attempt) -> Error {
+        var state = states[attempt.identityHash, default: State()]
+        guard state.activeAttemptID == attempt.id else {
+            return ProviderRequestGateError.staleGeneration
+        }
+        state.activeAttemptID = nil
+        let timedOut = state.timedOutAttemptID == attempt.id
+        state.timedOutAttemptID = nil
+        if state.generation != attempt.generation {
+            states[attempt.identityHash] = state
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+            return ProviderRequestGateError.staleGeneration
+        }
+        if timedOut {
+            states[attempt.identityHash] = state
+            persist(state, for: attempt.identityHash)
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+            return TimeoutError()
+        }
+        if Task.isCancelled || Self.isCancellation(error) || Self.isStale(error) {
+            states[attempt.identityHash] = state
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+            return error
+        }
+        if error is ProviderRequestBudgetError {
+            states[attempt.identityHash] = state
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+            return error
+        }
+        let failureClass = Self.classify(error)
+        state.failureCount = min(16, state.failureCount + 1)
+        state.failureClass = failureClass
+        state.cooldownUntil = now().addingTimeInterval(
+            Self.cooldownSeconds(
+                failureClass: failureClass,
+                failureCount: state.failureCount,
+                retryAfter: (error as? ProviderRateLimitError)?.retryAfterSeconds
+            )
+        )
+        states[attempt.identityHash] = state
+        persist(state, for: attempt.identityHash)
+        resumeAvailabilityWaiters(for: attempt.identityHash)
+        return error
     }
 
     public func recordLocalCommitFailure(providerIdentity: String, generation: UInt64) {

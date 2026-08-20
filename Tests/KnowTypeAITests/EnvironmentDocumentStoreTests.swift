@@ -123,6 +123,99 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadSnapshot(), first)
     }
 
+    func testExistingEnvironmentPermissionsAreRestrictedBeforeContentRead() throws {
+        let directory = makeDirectory()
+        let url = directory.appendingPathComponent("ENV.md")
+        try Data(EnvironmentDocumentStore.defaultContent.utf8).write(to: url)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: url.path
+        )
+        let probe = EnvironmentDocumentStoreTestProbe()
+        let store = EnvironmentDocumentStore(fileURL: url, testProbe: probe)
+
+        _ = try store.loadSnapshot()
+
+        let permissions = try FileManager.default.attributesOfItem(
+            atPath: url.path
+        )[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o600)
+        XCTAssertEqual(probe.documentReadCount, 1)
+    }
+
+    func testEnvironmentPermissionFailureFailsBeforeContentRead() throws {
+        let directory = makeDirectory()
+        let url = directory.appendingPathComponent("ENV.md")
+        let content = EnvironmentDocumentStore.defaultContent + "\nprivate fixture"
+        try Data(content.utf8).write(to: url)
+        let probe = EnvironmentDocumentStoreTestProbe()
+        probe.failNextPermissionChanges(1)
+        let store = EnvironmentDocumentStore(fileURL: url, testProbe: probe)
+
+        XCTAssertThrowsError(try store.loadSnapshot())
+
+        XCTAssertEqual(probe.documentReadCount, 0)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), content)
+    }
+
+    func testUserNotesHeadingBeforeInsideOrOverlappingGeneratedPairFailsClosedIdempotently() throws {
+        let fixtures = [
+            """
+            # KnowType Environment
+
+            ## User Notes
+            note before pair
+
+            <!-- KNOWTYPE:BEGIN GENERATED -->
+            ## Global Style
+            - generated
+            <!-- KNOWTYPE:END GENERATED -->
+            """,
+            """
+            # KnowType Environment
+
+            <!-- KNOWTYPE:BEGIN GENERATED -->
+            ## Global Style
+            - generated
+            ## User Notes
+            note inside pair
+            <!-- KNOWTYPE:END GENERATED -->
+            """,
+            """
+            # KnowType Environment
+
+            <!-- KNOWTYPE:BEGIN GENERATED -->
+            <!-- KNOWTYPE:BEGIN GENERATED -->
+            ## Global Style
+            - overlapping generated structure
+            <!-- KNOWTYPE:END GENERATED -->
+            <!-- KNOWTYPE:END GENERATED -->
+
+            ## User Notes
+            note after overlapping pairs
+            """
+        ]
+
+        for content in fixtures {
+            let directory = makeDirectory()
+            let url = directory.appendingPathComponent("ENV.md")
+            try Data(content.utf8).write(to: url)
+            let store = EnvironmentDocumentStore(fileURL: url)
+
+            for _ in 0..<2 {
+                XCTAssertThrowsError(try store.loadSnapshot()) { error in
+                    XCTAssertEqual(error as? EnvironmentDocumentError, .ambiguousMigration)
+                }
+                XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), content)
+            }
+            let backups = try FileManager.default.contentsOfDirectory(
+                at: directory.appendingPathComponent("backups"),
+                includingPropertiesForKeys: nil
+            )
+            XCTAssertEqual(backups.count, 1)
+        }
+    }
+
     func testMarkerWordsInsideOrdinaryTextDoNotDefineManagedBoundary() throws {
         let directory = makeDirectory()
         let url = directory.appendingPathComponent("ENV.md")
@@ -176,6 +269,113 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("backups").path))
     }
 
+    func testExistingAuthenticBackupIsVerifiedAndRestrictedBeforeRepair() throws {
+        let directory = makeDirectory()
+        let url = directory.appendingPathComponent("ENV.md")
+        let content = recursivePollutionFixture()
+        try Data(content.utf8).write(to: url)
+        let backup = try prepareBackupTarget(for: content, in: directory)
+        try Data(content.utf8).write(to: backup)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: backup.path
+        )
+
+        _ = try EnvironmentDocumentStore(fileURL: url).loadSnapshot()
+
+        let permissions = try FileManager.default.attributesOfItem(
+            atPath: backup.path
+        )[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o600)
+        XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), content)
+    }
+
+    func testSuspiciousExistingBackupObjectsBlockRepairWithoutReplacement() throws {
+        for kind in ["directory", "symlink", "wrong-content", "oversized"] {
+            let directory = makeDirectory()
+            let url = directory.appendingPathComponent("ENV.md")
+            let content = recursivePollutionFixture()
+            try Data(content.utf8).write(to: url)
+            let backup = try prepareBackupTarget(for: content, in: directory)
+            let symlinkDestination = directory.appendingPathComponent("symlink-destination")
+
+            switch kind {
+            case "directory":
+                try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
+            case "symlink":
+                try Data("external".utf8).write(to: symlinkDestination)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o644],
+                    ofItemAtPath: symlinkDestination.path
+                )
+                try FileManager.default.createSymbolicLink(
+                    at: backup,
+                    withDestinationURL: symlinkDestination
+                )
+            case "oversized":
+                try Data(repeating: 0x78, count: Data(content.utf8).count + 1).write(to: backup)
+            default:
+                try Data("wrong".utf8).write(to: backup)
+            }
+
+            XCTAssertThrowsError(
+                try EnvironmentDocumentStore(fileURL: url).loadSnapshot()
+            )
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), content)
+            switch kind {
+            case "directory":
+                var isDirectory: ObjCBool = false
+                XCTAssertTrue(FileManager.default.fileExists(atPath: backup.path, isDirectory: &isDirectory))
+                XCTAssertTrue(isDirectory.boolValue)
+            case "symlink":
+                XCTAssertEqual(
+                    try FileManager.default.destinationOfSymbolicLink(atPath: backup.path),
+                    symlinkDestination.path
+                )
+                XCTAssertEqual(
+                    try String(contentsOf: symlinkDestination, encoding: .utf8),
+                    "external"
+                )
+                let permissions = try FileManager.default.attributesOfItem(
+                    atPath: symlinkDestination.path
+                )[.posixPermissions] as? NSNumber
+                XCTAssertEqual(permissions?.intValue, 0o644)
+            default:
+                if kind == "oversized" {
+                    XCTAssertEqual(try Data(contentsOf: backup).count, Data(content.utf8).count + 1)
+                } else {
+                    XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), "wrong")
+                }
+            }
+        }
+    }
+
+    func testExistingBackupReadOrPermissionFailureBlocksRepair() throws {
+        for failure in ["read", "permission"] {
+            let directory = makeDirectory()
+            let url = directory.appendingPathComponent("ENV.md")
+            let content = recursivePollutionFixture()
+            try Data(content.utf8).write(to: url)
+            let backup = try prepareBackupTarget(for: content, in: directory)
+            try Data(content.utf8).write(to: backup)
+            let probe = EnvironmentDocumentStoreTestProbe()
+            if failure == "read" {
+                probe.failNextBackupReads(2)
+            } else {
+                probe.failNextBackupPermissionChanges(2)
+            }
+
+            XCTAssertThrowsError(
+                try EnvironmentDocumentStore(
+                    fileURL: url,
+                    testProbe: probe
+                ).loadSnapshot()
+            )
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), content)
+            XCTAssertEqual(try String(contentsOf: backup, encoding: .utf8), content)
+        }
+    }
+
     func testDigestClaimContainsOnlyHashesAndCounts() throws {
         let directory = makeDirectory()
         let store = EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md"))
@@ -196,5 +396,32 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func recursivePollutionFixture() -> String {
+        """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - old
+        <!-- KNOWTYPE:END GENERATED -->
+
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - recursive
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        preserved note
+        """
+    }
+
+    private func prepareBackupTarget(for content: String, in directory: URL) throws -> URL {
+        let backups = directory.appendingPathComponent("backups", isDirectory: true)
+        try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
+        return backups.appendingPathComponent("ENV-\(AIDocumentSnapshot.hash(content)).md")
     }
 }

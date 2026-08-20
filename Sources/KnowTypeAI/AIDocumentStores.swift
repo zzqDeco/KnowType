@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 public struct AIUserDirectory: Sendable, Equatable {
@@ -115,6 +116,10 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var failedClaimClearsRemaining = 0
     private var failedArchiveReceiptWritesRemaining = 0
+    private var failedPermissionChangesRemaining = 0
+    private var failedBackupPermissionChangesRemaining = 0
+    private var failedBackupReadsRemaining = 0
+    private var documentReads = 0
 
     func failNextClaimClears(_ count: Int) {
         lock.lock()
@@ -126,6 +131,30 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
         lock.lock()
         failedArchiveReceiptWritesRemaining = max(0, count)
         lock.unlock()
+    }
+
+    func failNextPermissionChanges(_ count: Int) {
+        lock.lock()
+        failedPermissionChangesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextBackupPermissionChanges(_ count: Int) {
+        lock.lock()
+        failedBackupPermissionChangesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextBackupReads(_ count: Int) {
+        lock.lock()
+        failedBackupReadsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    var documentReadCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return documentReads
     }
 
     fileprivate func shouldFailClaimClear() -> Bool {
@@ -141,6 +170,36 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
         defer { lock.unlock() }
         guard failedArchiveReceiptWritesRemaining > 0 else { return false }
         failedArchiveReceiptWritesRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailPermissionChange() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedPermissionChangesRemaining > 0 else { return false }
+        failedPermissionChangesRemaining -= 1
+        return true
+    }
+
+    fileprivate func recordDocumentRead() {
+        lock.lock()
+        documentReads += 1
+        lock.unlock()
+    }
+
+    fileprivate func shouldFailBackupPermissionChange() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedBackupPermissionChangesRemaining > 0 else { return false }
+        failedBackupPermissionChangesRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailBackupRead() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedBackupReadsRemaining > 0 else { return false }
+        failedBackupReadsRemaining -= 1
         return true
     }
 }
@@ -191,8 +250,8 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
 
     public func loadSnapshot() throws -> AIDocumentSnapshot {
         try ensureExists(defaultContent: Self.defaultContent)
-        let data = try boundedData(at: fileURL)
         try setSecurePermissions(of: fileURL)
+        let data = try boundedData(at: fileURL)
         guard let content = String(data: data, encoding: .utf8) else {
             try backup(data: data)
             throw EnvironmentDocumentError.invalidUTF8
@@ -389,6 +448,13 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         }
 
         let hasValidPair = starts.count == 1 && ends.count == 1 && starts[0] < ends[0]
+        let hasKnownRecursivePairs = starts.count > 1
+            && notes.count == 1
+            && hasSequentialGeneratedPairs(starts: starts, ends: ends)
+        if !isMarkerless, let noteIndex = notes.first,
+           let finalGeneratedEnd = ends.max(), noteIndex <= finalGeneratedEnd {
+            throw EnvironmentDocumentError.ambiguousMigration
+        }
         let noteBody: String
         if isMarkerless {
             noteBody = markerlessUserNotesBody(in: content)
@@ -419,7 +485,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
             }
         } else if starts.isEmpty && ends.isEmpty {
             generated = defaultGeneratedMarkdown
-        } else if starts.count == ends.count, starts.count > 1, notes.count == 1 {
+        } else if hasKnownRecursivePairs {
             generated = defaultGeneratedMarkdown
             requiresBackup = true
         } else {
@@ -492,6 +558,15 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         return (starts[0], ends[0])
     }
 
+    private static func hasSequentialGeneratedPairs(starts: [Int], ends: [Int]) -> Bool {
+        guard starts.count == ends.count else { return false }
+        for index in starts.indices {
+            guard starts[index] < ends[index] else { return false }
+            if index > starts.startIndex, ends[index - 1] >= starts[index] { return false }
+        }
+        return true
+    }
+
     private static func bodyAfterHeading(in content: String, lineIndex: Int) -> String {
         let lines = content.components(separatedBy: "\n")
         let prefix = lines.prefix(lineIndex + 1).joined(separator: "\n")
@@ -537,6 +612,11 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     private func boundedData(at url: URL, limit: Int = maximumScanByteCount) throws -> Data {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
+        testProbe?.recordDocumentRead()
+        return try boundedData(from: handle, limit: limit)
+    }
+
+    private func boundedData(from handle: FileHandle, limit: Int) throws -> Data {
         var data = Data()
         while data.count <= limit {
             let chunkSize = min(64 * 1_024, limit + 1 - data.count)
@@ -554,11 +634,43 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let destination = directory.appendingPathComponent("ENV-\(digest).md")
-        if fileManager.fileExists(atPath: destination.path) {
-            try setSecurePermissions(of: destination)
+        if try validateExistingBackup(data: data, at: destination) {
             return
         }
         try atomicWrite(data: data, to: destination)
+    }
+
+    private func validateExistingBackup(data: Data, at url: URL) throws -> Bool {
+        let descriptor = url.path.withCString {
+            open($0, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        if descriptor < 0 {
+            guard errno == ENOENT else { throw EnvironmentDocumentError.ambiguousMigration }
+            return false
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0,
+              metadata.st_mode & S_IFMT == S_IFREG else {
+            throw EnvironmentDocumentError.ambiguousMigration
+        }
+        guard testProbe?.shouldFailBackupPermissionChange() != true,
+              fchmod(descriptor, mode_t(0o600)) == 0 else {
+            throw EnvironmentDocumentError.ambiguousMigration
+        }
+        if testProbe?.shouldFailBackupRead() == true {
+            throw EnvironmentDocumentError.ambiguousMigration
+        }
+        let existing = try boundedData(from: handle, limit: data.count)
+        let expectedDigest = SHA256.hash(data: data)
+        guard existing.count == data.count,
+              SHA256.hash(data: existing) == expectedDigest,
+              existing == data else {
+            throw EnvironmentDocumentError.ambiguousMigration
+        }
+        return true
     }
 
     private func atomicWrite(_ content: String, to url: URL) throws { try atomicWrite(data: Data(content.utf8), to: url) }
@@ -583,6 +695,9 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     private func setSecurePermissions(of url: URL) throws {
+        if testProbe?.shouldFailPermissionChange() == true {
+            throw CocoaError(.fileWriteNoPermission)
+        }
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

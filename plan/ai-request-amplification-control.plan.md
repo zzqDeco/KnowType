@@ -27,7 +27,9 @@ of already-started recommendations, and independent provider failure budgets.
   under the default `~/.knowtype` directory; local budget and cancellation do
   not create provider failure state. A single-flight attempt owner records a
   timeout once, cancellation-marked late errors do not increment it again, and
-  failure count clamps at 16 across memory and restart.
+  failure count clamps at 16 across memory and restart. The gate issues a
+  non-reusable attempt id and persists timeout failure before that attempt's
+  caller-visible timeout can expose lease availability.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is
@@ -42,7 +44,9 @@ of already-started recommendations, and independent provider failure budgets.
   tail. Each claim is one precise prefix of at most 50 events and 48 KiB.
   Protected-only local archive does not start the 600-second provider-success
   interval. Corrupt schedule state imposes a fresh minimum-interval delay or
-  remains fail-closed.
+  remains fail-closed, including impossible date ordering and excessive future
+  deadlines. Calls received while a digest is active coalesce into one immediate
+  post-completion re-evaluation.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
   avoids repeating the provider call. A durable archive receipt or bounded
@@ -50,7 +54,11 @@ of already-started recommendations, and independent provider failure budgets.
   together with timestamp/count schedule state, completes cleanup recovery
   across runtime or process rebuild. Corrupt evidence remains fail-closed. A
   claim saved before ENV replacement remains blocked while its generated hash
-  is absent from ENV, without persisting provider output or redispatching.
+  is absent from ENV, without persisting provider output or redispatching. A
+  restarted runtime performs this local recovery before its first append can
+  compact pending data. ENV permissions are restricted before reads, structural
+  User Notes must follow the unique managed pair, and existing hash-named
+  backups are verified as matching regular non-symlink files.
 
 ## Verification Boundary
 

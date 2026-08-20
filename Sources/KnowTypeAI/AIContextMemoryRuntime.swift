@@ -33,6 +33,8 @@ public actor LazyDefaultAIContextMemoryRuntime: AIContextEventRecording {
 }
 
 public actor AIContextMemoryRuntime: AIContextEventRecording {
+    private static let maximumScheduleInterval: TimeInterval = 24 * 60 * 60
+
     private struct GateWaitKey: Equatable {
         var identity: String
         var generation: UInt64
@@ -57,7 +59,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var lastDigestFailureAt: Date?
     private var deferredDiagnosticFailureAt: Date?
     private var digestInFlight = false
+    private var digestRerunRequested = false
+    private var digestRerunScheduled = false
     private var activeDigestClaimRawData: Data?
+    private var persistedClaimNeedsRecovery = true
     private var providerGeneration: UInt64?
     private var deadlineTask: Task<Void, Never>?
     private var gateWaitKey: GateWaitKey?
@@ -77,7 +82,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.eventStore = eventStore
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
-        self.minimumInterval = max(1, minimumInterval)
+        self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
         self.requestGate = requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
@@ -101,7 +106,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.eventStore = eventStore
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
-        self.minimumInterval = max(1, minimumInterval)
+        self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
         self.requestGate = requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(max(1, hardTimeoutMilliseconds)) * 1_000_000
@@ -122,7 +127,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.eventStore = eventStore
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
-        self.minimumInterval = max(1, minimumInterval)
+        self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
         self.requestGate = providerRegistry.requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
@@ -130,6 +135,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     public func record(_ event: AITypingEvent) async {
+        if digestInFlight { digestRerunRequested = true }
+        guard await preparePersistedClaimForRecord(now: nowProvider()) else { return }
         let lease: ProviderRuntimeLease?
         if let providerRegistry {
             let loaded = await providerRegistry.leaseForEligibleDispatch()
@@ -156,22 +163,34 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func processIfNeeded(now: Date, dispatchLease: ProviderRuntimeLease?) async {
-        guard gateWaitKey == nil,
-              !digestInFlight,
-              provider != nil || providerRegistry != nil else { return }
+        guard provider != nil || providerRegistry != nil else { return }
+        if digestInFlight {
+            digestRerunRequested = true
+            return
+        }
+        guard gateWaitKey == nil, !digestRerunScheduled else { return }
         digestInFlight = true
         defer {
             activeDigestClaimRawData = nil
             digestInFlight = false
+            if digestRerunRequested {
+                digestRerunRequested = false
+                scheduleCoalescedRerun()
+            }
         }
 
         loadScheduleStateIfNeeded(now: now)
         guard !scheduleStateBlocked else { return }
 
         switch await recoverDigestClaim(now: now) {
-        case .recovered, .blocked:
+        case .recovered:
+            persistedClaimNeedsRecovery = false
+            return
+        case .blocked:
+            persistedClaimNeedsRecovery = true
             return
         case .none:
+            persistedClaimNeedsRecovery = false
             break
         }
 
@@ -294,29 +313,27 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             )
             try ProviderRequestBudget.validate(request)
             activeDigestClaimRawData = snapshot.rawData
-            let timeout = hardTimeoutNanoseconds
             let registry = providerRegistry
             providerGateStarted = true
-            let gated: (LLMResponse, String) = try await withTimeout(nanoseconds: timeout) {
-                try await requestGate.execute(
-                    providerIdentity: requestIdentity,
-                    generation: requestGeneration
-                ) {
-                    let response: LLMResponse
-                    if let registry, let lease {
-                        response = try await registry.perform(using: lease) { provider in
-                            try await provider.complete(request)
-                        }
-                    } else {
-                        response = try await activeProvider.complete(request)
+            let gated: (LLMResponse, String) = try await requestGate.executeWithHardTimeout(
+                providerIdentity: requestIdentity,
+                generation: requestGeneration,
+                timeoutNanoseconds: hardTimeoutNanoseconds
+            ) {
+                let response: LLMResponse
+                if let registry, let lease {
+                    response = try await registry.perform(using: lease) { provider in
+                        try await provider.complete(request)
                     }
-                    guard response.candidates.count == 1,
-                          let candidate = response.candidates.first?.text else {
-                        throw EnvironmentDocumentError.invalidDigestCandidate
-                    }
-                    try EnvironmentDocumentStore.validateGeneratedMarkdown(candidate)
-                    return (response, candidate)
+                } else {
+                    response = try await activeProvider.complete(request)
                 }
+                guard response.candidates.count == 1,
+                      let candidate = response.candidates.first?.text else {
+                    throw EnvironmentDocumentError.invalidDigestCandidate
+                }
+                try EnvironmentDocumentStore.validateGeneratedMarkdown(candidate)
+                return (response, candidate)
             }
             _ = gated.0
             providerGateCompleted = true
@@ -331,6 +348,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 providerGeneration: requestGeneration
             )
             try environmentStore.saveDigestClaim(claim)
+            persistedClaimNeedsRecovery = true
             let persist: @Sendable () throws -> TypingEventArchiveResult = {
                 _ = try environmentStore.replaceGeneratedSection(with: generated)
                 let result = try eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
@@ -367,6 +385,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 result = try persist()
             }
             try environmentStore.clearDigestClaim()
+            persistedClaimNeedsRecovery = false
             try? environmentStore.clearDigestArchiveReceipt()
             recordDigestSuccess(at: now)
             emitArchiveDiagnostic(result)
@@ -385,13 +404,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         } catch EnvironmentDocumentError.invalidDigestCandidate {
             markDigestFailure(at: now)
-        } catch let error as TimeoutError {
+        } catch is TimeoutError {
             markDigestFailure(at: now)
-            await requestGate.recordFailure(
-                providerIdentity: requestIdentity,
-                generation: requestGeneration,
-                failure: error
-            )
         } catch {
             if error is CancellationError { return }
             markDigestFailure(at: now)
@@ -413,6 +427,18 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         case none
         case recovered
         case blocked
+    }
+
+    private func preparePersistedClaimForRecord(now: Date) async -> Bool {
+        guard activeDigestClaimRawData == nil, persistedClaimNeedsRecovery else { return true }
+        switch await recoverDigestClaim(now: now) {
+        case .none, .recovered:
+            persistedClaimNeedsRecovery = false
+            return true
+        case .blocked:
+            persistedClaimNeedsRecovery = true
+            return false
+        }
     }
 
     private func recoverDigestClaim(now: Date) async -> DigestClaimRecovery {
@@ -540,13 +566,32 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
     private func scheduleDeadline(at date: Date) {
         gateWaitKey = nil
+        digestRerunScheduled = false
         deadlineTask?.cancel()
-        let delay = max(0, date.timeIntervalSince(nowProvider()))
+        let delay = deadlineNanoseconds(until: date, now: nowProvider())
         deadlineTask = Task { [weak self] in
-            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
             guard !Task.isCancelled, let self else { return }
             await self.processIfNeeded(now: self.nowProvider())
         }
+    }
+
+    private func scheduleCoalescedRerun() {
+        guard !digestRerunScheduled else { return }
+        gateWaitKey = nil
+        deadlineTask?.cancel()
+        digestRerunScheduled = true
+        deadlineTask = Task { [weak self] in
+            guard !Task.isCancelled, let self else { return }
+            await self.runCoalescedRerun()
+        }
+    }
+
+    private func runCoalescedRerun() async {
+        guard digestRerunScheduled else { return }
+        digestRerunScheduled = false
+        deadlineTask = nil
+        await processIfNeeded(now: nowProvider(), dispatchLease: nil)
     }
 
     private func scheduleGateAvailabilityWake() {
@@ -556,6 +601,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         )
         if gateWaitKey == key, deadlineTask != nil { return }
         deadlineTask?.cancel()
+        digestRerunScheduled = false
         gateWaitKey = key
         let gate = requestGate
         deadlineTask = Task { [weak self] in
@@ -570,6 +616,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
     private func cancelDeadline() {
         gateWaitKey = nil
+        digestRerunScheduled = false
         deadlineTask?.cancel()
         deadlineTask = nil
     }
@@ -619,6 +666,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         scheduleStateLoaded = true
         do {
             guard let state = try environmentStore.loadDigestScheduleState() else { return }
+            guard scheduleStateIsSemanticallyValid(state, now: now) else {
+                throw EnvironmentDocumentError.claimMismatch
+            }
             pendingSince = state.pendingSince
             lastDigestAt = state.lastSuccessfulDigestAt
             nextEligibleAt = state.nextEligibleAt
@@ -641,6 +691,53 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 scheduleStateBlocked = true
             }
         }
+    }
+
+    private func scheduleStateIsSemanticallyValid(
+        _ state: EnvironmentDigestScheduleState,
+        now: Date
+    ) -> Bool {
+        let maximumFutureDate = now.addingTimeInterval(
+            max(15 * 60, minimumInterval)
+        )
+        let dates = [state.pendingSince, state.lastSuccessfulDigestAt, state.nextEligibleAt]
+            .compactMap { $0 }
+        guard dates.allSatisfy({
+            $0.timeIntervalSince1970.isFinite && $0 <= maximumFutureDate
+        }) else { return false }
+        if let pendingSince = state.pendingSince, pendingSince > now { return false }
+        if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt,
+           lastSuccessfulDigestAt > now { return false }
+        guard state.pendingSince == nil || state.lastSuccessfulDigestAt == nil else { return false }
+
+        let expectedDeadline: Date?
+        if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt {
+            expectedDeadline = lastSuccessfulDigestAt.addingTimeInterval(minimumInterval)
+        } else if let pendingSince = state.pendingSince {
+            expectedDeadline = pendingSince.addingTimeInterval(minimumInterval)
+        } else {
+            expectedDeadline = nil
+        }
+        switch (state.nextEligibleAt, expectedDeadline) {
+        case (nil, _):
+            return true
+        case (let actual?, let expected?):
+            return abs(actual.timeIntervalSince(expected)) < 0.001
+        case (.some, nil):
+            return false
+        }
+    }
+
+    private func deadlineNanoseconds(until deadline: Date, now: Date) -> UInt64 {
+        let interval = deadline.timeIntervalSince(now)
+        guard interval.isFinite, interval > 0 else { return 0 }
+        let bounded = min(interval, max(15 * 60, minimumInterval))
+        return UInt64((bounded * 1_000_000_000).rounded(.up))
+    }
+
+    private static func boundedMinimumInterval(_ interval: TimeInterval) -> TimeInterval {
+        guard interval.isFinite else { return 600 }
+        return min(max(1, interval), maximumScheduleInterval)
     }
 
     private func persistScheduleState() throws {

@@ -552,18 +552,16 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         let operation = SuspendedFailingGateOperation()
         let owner = Task {
             do {
-                let _: Int = try await withTimeout(nanoseconds: 20_000_000) {
-                    try await gate.execute(providerIdentity: identity, generation: 0) {
-                        try await operation.run()
-                    }
-                }
-                XCTFail("expected timeout")
-            } catch let error as TimeoutError {
-                await gate.recordFailure(
+                let _: Int = try await gate.executeWithHardTimeout(
                     providerIdentity: identity,
                     generation: 0,
-                    failure: error
-                )
+                    timeoutNanoseconds: 20_000_000
+                ) {
+                    try await operation.run()
+                }
+                XCTFail("expected timeout")
+            } catch is TimeoutError {
+                // The gate records the owning attempt before exposing the timeout.
             } catch {
                 XCTFail("unexpected error: \(error)")
             }
@@ -597,6 +595,84 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             generation: 0
         )
         XCTAssertEqual(finalDeadline?.timeIntervalSince(now), 60, accuracy: 0.001)
+    }
+
+    func testTimeoutAttemptOwnsFailureBeforeCancellationTriggeredLateErrorReleasesLease() async throws {
+        let now = Date()
+        let identity = "timeout-release-race"
+        let gate = ProviderRequestGate(now: { now })
+        let operation = CancellationTriggeredFailingGateOperation()
+
+        do {
+            let _: Int = try await gate.executeWithHardTimeout(
+                providerIdentity: identity,
+                generation: 0,
+                timeoutNanoseconds: 20_000_000
+            ) {
+                try await operation.run()
+            }
+            XCTFail("expected timeout")
+        } catch is TimeoutError {
+            // Expected.
+        }
+
+        try await waitUntil { await operation.finished }
+        let deadline = await gate.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        XCTAssertEqual(deadline?.timeIntervalSince(now), 60, accuracy: 0.001)
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 0) { 1 }
+            XCTFail("late 5xx must retain the owning timeout cooldown")
+        } catch ProviderRequestGateError.cooldown {
+            // Expected after the cancellation-triggered completion releases the lease.
+        }
+    }
+
+    func testHardTimeoutAttemptCallerCancellationBeforeDeadlineDoesNotRecordFailure() async throws {
+        let gate = ProviderRequestGate()
+        let operation = SuspendedFailingGateOperation()
+        let request = Task {
+            try await gate.executeWithHardTimeout(
+                providerIdentity: "cancel-before-timeout",
+                generation: 0,
+                timeoutNanoseconds: 1_000_000_000
+            ) {
+                try await operation.run()
+            }
+        }
+
+        try await waitUntil { await operation.started }
+        request.cancel()
+        do {
+            _ = try await request.value
+            XCTFail("expected caller cancellation")
+        } catch is CancellationError {
+            // Expected before the hard-timeout task can claim the attempt.
+        }
+        await operation.finish()
+
+        var released = false
+        let releaseDeadline = Date().addingTimeInterval(2)
+        while !released, Date() < releaseDeadline {
+            do {
+                let value = try await gate.execute(
+                    providerIdentity: "cancel-before-timeout",
+                    generation: 0
+                ) { 2 }
+                XCTAssertEqual(value, 2)
+                released = true
+            } catch ProviderRequestGateError.busy {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+        }
+        XCTAssertTrue(released)
+        let cooldown = await gate.cooldownDeadline(
+            providerIdentity: "cancel-before-timeout",
+            generation: 0
+        )
+        XCTAssertNil(cooldown)
     }
 
     func testCallerCancellationDoesNotCountCancellationResistantLateFailure() async throws {
@@ -781,6 +857,18 @@ private actor SuspendedFailingGateOperation {
     func finish() {
         continuation?.resume()
         continuation = nil
+    }
+}
+
+private actor CancellationTriggeredFailingGateOperation {
+    private(set) var finished = false
+
+    func run() async throws -> Int {
+        while !Task.isCancelled {
+            await Task.yield()
+        }
+        finished = true
+        throw ProviderError.httpStatus(503, "late cancellation failure")
     }
 }
 

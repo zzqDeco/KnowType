@@ -79,7 +79,8 @@ request per identity, fences generations, clamps `Retry-After` to 15 seconds to
 15 minutes, and applies privacy-safe cooldowns for missing retry hints. Persisted
 gate state contains only the identity hash, deadline, failure class, and a
 bounded count in atomic mode-0600 storage; it never persists in-flight state.
-One real gate attempt records at most one failure, and its in-memory and
+One real gate attempt receives a non-reusable gate attempt id and records at
+most one failure before caller-visible timeout release, and its in-memory and
 persisted failure count clamps at 16.
 
 ## Input Client Compatibility
@@ -744,7 +745,8 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   pending event has an independent forced deadline; while gate availability is
   pending, appended records return before another snapshot decode, and locally
   archived blank, malformed, or oversized prefixes rearm the deadline for tail
-  data
+  data; calls arriving during a digest coalesce into one post-completion
+  re-evaluation rather than a concurrent digest
 - updates only the generated section in canonical `ENV.md`, with one managed
   marker pair and one User Notes section; markerless documents remain user
   content, only exact marker lines define managed boundaries, and ambiguous
@@ -768,7 +770,11 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   deterministic processed archive and requires both recorded byte count and
   SHA-256; a same-size corrupt archive remains blocked. A pre-ENV claim whose
   generated hash does not match ENV also remains blocked, and corrupt schedule
-  state cannot trigger an immediate fresh-runtime batch dispatch
+  state cannot trigger an immediate fresh-runtime batch dispatch. The first
+  record after restart completes local claim recovery before append or
+  compaction. ENV is chmod 0600 before reads, User Notes must follow the unique
+  managed pair, and existing deterministic backups are verified without
+  following symlinks before repair proceeds
 
 `LexicalProfileStore`:
 

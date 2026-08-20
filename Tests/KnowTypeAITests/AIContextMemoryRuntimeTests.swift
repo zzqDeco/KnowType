@@ -656,7 +656,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertFalse(environment.contains("Provider A digest"))
     }
 
-    func testContextGenerationChangeDoesNotCancelOldDigestAndPreservesPendingEvents() async throws {
+    func testContextGenerationChangeCoalescesInFlightSignalsAndRerunsPendingEvents() async throws {
         let directory = makeTemporaryDirectory()
         let eventsURL = directory.appendingPathComponent("events")
         let environmentURL = directory.appendingPathComponent("ENV.md")
@@ -686,6 +686,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         }
         try await waitUntil { await providerA.requestCount == 1 }
         await runtime.record(makeContextEvent(rawInput: "zaijian", committedText: "再见"))
+        await runtime.record(makeContextEvent(rawInput: "mingtian", committedText: "明天"))
+        await runtime.processIfNeeded()
         source.set(
             revision: 2,
             fingerprint: String(repeating: "b", count: 64),
@@ -697,13 +699,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(cancellationCount, 0)
         await providerA.finish(responseText: "## Global Style\n- Provider A stale digest.")
         await oldDigest.value
-
-        let pendingBeforeRetry = try await eventStore.pendingEvents()
-        let staleEnvironment = try String(contentsOf: environmentURL, encoding: .utf8)
-        XCTAssertEqual(pendingBeforeRetry.map(\.rawInput), ["nihao", "zaijian"])
-        XCTAssertFalse(staleEnvironment.contains("Provider A stale digest"))
-
-        await runtime.processIfNeeded()
+        try await waitUntil { await providerB.requestCount == 1 }
 
         let pendingAfterRetry = try await eventStore.pendingEvents()
         let currentEnvironment = try String(contentsOf: environmentURL, encoding: .utf8)
@@ -713,6 +709,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(providerBRequests.count, 1)
         XCTAssertTrue(providerBRequests[0].rawInput?.contains("nihao") == true)
         XCTAssertTrue(providerBRequests[0].rawInput?.contains("zaijian") == true)
+        XCTAssertTrue(providerBRequests[0].rawInput?.contains("mingtian") == true)
     }
 
     func testProtectedOnlyPendingRegistryBatchDoesNotReadProviderFiles() async throws {
@@ -1915,13 +1912,79 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             minimumInterval: 600,
             requestGate: ProviderRequestGate()
         )
-        await restartedRuntime.processIfNeeded()
+        await restartedRuntime.record(
+            makeContextEvent(rawInput: "must-be-dropped", committedText: "不得追加")
+        )
 
         let requests = await provider.requests
         let pending = try await eventStore.pendingEvents()
         XCTAssertTrue(requests.isEmpty)
         XCTAssertEqual(pending.map(\.rawInput), ["claimed-before-env"])
         XCTAssertEqual(try environmentStore.loadDigestClaim(), claim)
+    }
+
+    func testRestartedRecordRecoversClaimBeforeBacklogCompaction() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+        let generated = "## Global Style\n- committed before restart"
+
+        try await eventStore.append(
+            makeContextEvent(rawInput: "claimed-prefix", committedText: "已声明前缀")
+        )
+        let claimedSnapshot = try eventStore.pendingDigestSnapshot()
+        _ = try environmentStore.replaceGeneratedSection(with: generated)
+        try environmentStore.saveDigestClaim(
+            EnvironmentDigestClaim(
+                claimedPrefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+                claimedPrefixByteCount: claimedSnapshot.rawData.count,
+                claimedEventCount: claimedSnapshot.claimedEventCount,
+                generatedSHA256: AIDocumentSnapshot.hash(generated),
+                providerGeneration: 0
+            )
+        )
+        for index in 0..<499 {
+            try await eventStore.append(
+                makeContextEvent(rawInput: "tail-\(index)", committedText: "尾部\(index)")
+            )
+        }
+        XCTAssertEqual(try eventStore.inventory().eventCount, 500)
+
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
+        )
+
+        await runtime.record(
+            makeContextEvent(rawInput: "first-after-restart", committedText: "重启后首次")
+        )
+
+        let pending = try await TypingEventStore(
+            eventsDirectoryURL: eventsDirectory
+        ).pendingEvents()
+        let providerRequests = await provider.requests
+        XCTAssertTrue(providerRequests.isEmpty)
+        XCTAssertEqual(pending.count, 500)
+        XCTAssertEqual(pending.first?.rawInput, "tail-0")
+        XCTAssertEqual(pending.last?.rawInput, "first-after-restart")
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-claim.json").path
+            )
+        )
+        XCTAssertTrue(
+            eventStore.hasProcessedArchive(
+                prefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+                byteCount: claimedSnapshot.rawData.count
+            )
+        )
     }
 
     func testCorruptScheduleStateDefersBatchAcrossRestart() async throws {
@@ -1980,6 +2043,73 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let requestsAfterDeadline = await secondProvider.requests
         XCTAssertEqual(requestsAfterDeadline.count, 1)
         XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testSemanticallyInvalidScheduleStateRebuildsConservativeDeadline() async throws {
+        let invalidStates: [(ManualContextClock, EnvironmentDigestScheduleState)] = (0..<3).map { index in
+            let clock = ManualContextClock()
+            let now = clock.now()
+            let state: EnvironmentDigestScheduleState
+            switch index {
+            case 0:
+                state = EnvironmentDigestScheduleState(
+                    pendingSince: now,
+                    lastSuccessfulDigestAt: nil,
+                    nextEligibleAt: now.addingTimeInterval(-1),
+                    pendingEventCount: 1
+                )
+            case 1:
+                state = EnvironmentDigestScheduleState(
+                    pendingSince: now.addingTimeInterval(1),
+                    lastSuccessfulDigestAt: nil,
+                    nextEligibleAt: now.addingTimeInterval(11),
+                    pendingEventCount: 1
+                )
+            default:
+                state = EnvironmentDigestScheduleState(
+                    pendingSince: nil,
+                    lastSuccessfulDigestAt: now,
+                    nextEligibleAt: now.addingTimeInterval(10_000),
+                    pendingEventCount: 1
+                )
+            }
+            return (clock, state)
+        }
+
+        for (clock, state) in invalidStates {
+            let directory = makeTemporaryDirectory()
+            let eventsDirectory = directory.appendingPathComponent("events")
+            let environmentURL = directory.appendingPathComponent("ENV.md")
+            let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+            let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+            try await eventStore.append(
+                makeContextEvent(rawInput: "semantic-corruption", committedText: "语义损坏")
+            )
+            try environmentStore.saveDigestScheduleState(state)
+            let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must defer")
+            let runtime = AIContextMemoryRuntime(
+                provider: provider,
+                eventStore: eventStore,
+                environmentStore: environmentStore,
+                batchSize: 1,
+                minimumInterval: 10,
+                requestGate: ProviderRequestGate(),
+                nowProvider: clock.now
+            )
+
+            await runtime.processIfNeeded(now: clock.now())
+
+            let providerRequests = await provider.requests
+            XCTAssertTrue(providerRequests.isEmpty)
+            let repaired = try XCTUnwrap(environmentStore.loadDigestScheduleState())
+            XCTAssertEqual(repaired.pendingSince, clock.now())
+            XCTAssertNil(repaired.lastSuccessfulDigestAt)
+            XCTAssertEqual(
+                repaired.nextEligibleAt?.timeIntervalSince(clock.now()),
+                10,
+                accuracy: 0.001
+            )
+        }
     }
 
     func testPersistedSuccessIntervalStillBlocksBatchTailAfterRuntimeRebuild() async throws {
