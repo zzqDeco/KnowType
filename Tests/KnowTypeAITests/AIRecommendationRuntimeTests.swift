@@ -112,11 +112,42 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             debounceMilliseconds: 0
         )
         let request = AIRecommendationRequest(rawInput: "legacysharedgate", compositionID: 1)
+        let firstRequestStarts = await provider.firstRequestStartStream()
+        let firstTaskCompletions = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
 
         let firstTask = Task {
-            await firstRuntime.recommendation(for: request)
+            let state = await firstRuntime.recommendation(for: request)
+            firstTaskCompletions.continuation.yield(())
+            firstTaskCompletions.continuation.finish()
+            return state
         }
-        await provider.waitForFirstRequestStart()
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: firstRequestStarts,
+            firstTaskCompletions: firstTaskCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        switch startResult {
+        case .started:
+            break
+        case .firstTaskCompleted:
+            let state = await firstTask.value
+            await provider.releaseAllRequests()
+            firstTask.cancel()
+            _ = await firstTask.value
+            XCTFail("first legacy request completed before provider start: \(state)")
+            return
+        case .timedOut:
+            await provider.releaseAllRequests()
+            firstTask.cancel()
+            let state = await firstTask.value
+            XCTFail("timed out waiting for first legacy provider start: \(state)")
+            return
+        }
+        let firstRequestIsBlocked = await provider.isFirstRequestBlocked
+        XCTAssertTrue(firstRequestIsBlocked)
+
         let secondTask = Task {
             await secondRuntime.recommendation(for: request)
         }
@@ -126,7 +157,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(secondState, .idle)
         XCTAssertEqual(requestCountWhileFirstIsInFlight, 1)
 
-        await provider.releaseFirstRequest()
+        await provider.releaseAllRequests()
         let firstState = await firstTask.value
         let finalRequestCount = await provider.requestCount
 
@@ -1655,20 +1686,23 @@ private actor RecordingLLMProvider: LLMProvider {
 private actor ControlledLegacySharedGateLLMProvider: LLMProvider {
     nonisolated let providerName: String
     private var recordedRequests: [LLMRequest] = []
-    private var firstRequestStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private let firstRequestStarts: AsyncStream<Void>
+    private let firstRequestStartContinuation: AsyncStream<Void>.Continuation
+    private var firstRequestStartStreamFinished = false
     private var firstRequestReleaseWaiters: [CheckedContinuation<Void, Never>] = []
     private var firstRequestReleased = false
 
     init(providerName: String) {
         self.providerName = providerName
+        let startEvents = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.firstRequestStarts = startEvents.stream
+        self.firstRequestStartContinuation = startEvents.continuation
     }
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         recordedRequests.append(request)
         if recordedRequests.count == 1 {
-            let startWaiters = firstRequestStartWaiters
-            firstRequestStartWaiters.removeAll()
-            startWaiters.forEach { $0.resume() }
+            finishFirstRequestStartStream(signallingStart: true)
             if !firstRequestReleased {
                 await withCheckedContinuation { continuation in
                     firstRequestReleaseWaiters.append(continuation)
@@ -1680,22 +1714,77 @@ private actor ControlledLegacySharedGateLLMProvider: LLMProvider {
         ])
     }
 
-    func waitForFirstRequestStart() async {
-        guard recordedRequests.isEmpty else { return }
-        await withCheckedContinuation { continuation in
-            firstRequestStartWaiters.append(continuation)
-        }
+    func firstRequestStartStream() -> AsyncStream<Void> {
+        firstRequestStarts
     }
 
-    func releaseFirstRequest() {
+    func releaseAllRequests() {
+        finishFirstRequestStartStream(signallingStart: false)
         firstRequestReleased = true
         let releaseWaiters = firstRequestReleaseWaiters
         firstRequestReleaseWaiters.removeAll()
         releaseWaiters.forEach { $0.resume() }
     }
 
+    var isFirstRequestBlocked: Bool {
+        !firstRequestReleased && !firstRequestReleaseWaiters.isEmpty
+    }
+
     var requestCount: Int {
         recordedRequests.count
+    }
+
+    private func finishFirstRequestStartStream(signallingStart: Bool) {
+        guard !firstRequestStartStreamFinished else { return }
+        firstRequestStartStreamFinished = true
+        if signallingStart {
+            firstRequestStartContinuation.yield(())
+        }
+        firstRequestStartContinuation.finish()
+    }
+}
+
+private enum LegacyProviderStartResult: Sendable {
+    case started
+    case firstTaskCompleted
+    case timedOut
+}
+
+private func waitForLegacyProviderStart(
+    providerStarts: AsyncStream<Void>,
+    firstTaskCompletions: AsyncStream<Void>,
+    timeoutNanoseconds: UInt64
+) async -> LegacyProviderStartResult {
+    await withTaskGroup(
+        of: LegacyProviderStartResult?.self,
+        returning: LegacyProviderStartResult.self
+    ) { group in
+        group.addTask {
+            var iterator = providerStarts.makeAsyncIterator()
+            guard await iterator.next() != nil else { return nil }
+            return .started
+        }
+        group.addTask {
+            var iterator = firstTaskCompletions.makeAsyncIterator()
+            guard await iterator.next() != nil else { return nil }
+            return .firstTaskCompleted
+        }
+        group.addTask {
+            do {
+                try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                return .timedOut
+            } catch {
+                return nil
+            }
+        }
+
+        while let candidate = await group.next() {
+            guard let result = candidate else { continue }
+            group.cancelAll()
+            while await group.next() != nil {}
+            return result
+        }
+        return .timedOut
     }
 }
 
