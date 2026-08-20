@@ -3,6 +3,8 @@ import KnowTypeCore
 import KnowTypeProviders
 
 public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
+    private static let sharedLegacyRequestGate = ProviderRequestGate.shared
+
     private let providerRegistry: ProviderRuntimeRegistry?
     private let providerLoader: (@Sendable () -> (any LLMProvider)?)?
     private let legacyRequestGate: ProviderRequestGate?
@@ -56,12 +58,30 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     ) {
         self.providerRegistry = nil
         self.providerLoader = providerLoader
-        self.legacyRequestGate = .shared
+        self.legacyRequestGate = Self.sharedLegacyRequestGate
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
         self.environmentStore = EnvironmentDocumentStore()
         self.correctionStore = CorrectionInstructionStore()
+    }
+
+    init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)?,
+        environmentStore: EnvironmentDocumentStore,
+        correctionStore: CorrectionInstructionStore,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds
+    ) {
+        self.providerRegistry = nil
+        self.providerLoader = providerLoader
+        self.legacyRequestGate = Self.sharedLegacyRequestGate
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = environmentStore
+        self.correctionStore = correctionStore
     }
 
     init(
@@ -136,7 +156,7 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         if let runtime {
             return await runtime.recommendation(for: request)
         }
-        let requestGate = legacyRequestGate ?? .shared
+        let requestGate = legacyRequestGate ?? Self.sharedLegacyRequestGate
         let provider = providerLoader?()
         guard provider != nil else {
             providerAvailability.update(.unavailable)

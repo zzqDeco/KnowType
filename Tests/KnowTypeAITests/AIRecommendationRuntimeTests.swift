@@ -91,6 +91,52 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(providerRequestCount, 1)
     }
 
+    func testLegacyProviderLoaderDefaultSharesGateAcrossRuntimes() async {
+        let provider = ControlledLegacySharedGateLLMProvider(
+            providerName: "legacy-shared-gate-\(UUID().uuidString)"
+        )
+        let firstDocuments = temporaryRecommendationDocumentStores()
+        let secondDocuments = temporaryRecommendationDocumentStores()
+        let firstRuntime = LazyDefaultAIRecommendationRuntime(
+            providerLoader: { provider },
+            environmentStore: firstDocuments.environment,
+            correctionStore: firstDocuments.correction,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceMilliseconds: 0
+        )
+        let secondRuntime = LazyDefaultAIRecommendationRuntime(
+            providerLoader: { provider },
+            environmentStore: secondDocuments.environment,
+            correctionStore: secondDocuments.correction,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceMilliseconds: 0
+        )
+        let request = AIRecommendationRequest(rawInput: "legacysharedgate", compositionID: 1)
+
+        let firstTask = Task {
+            await firstRuntime.recommendation(for: request)
+        }
+        await provider.waitForFirstRequestStart()
+        let secondTask = Task {
+            await secondRuntime.recommendation(for: request)
+        }
+        let secondState = await secondTask.value
+        let requestCountWhileFirstIsInFlight = await provider.requestCount
+
+        XCTAssertEqual(secondState, .idle)
+        XCTAssertEqual(requestCountWhileFirstIsInFlight, 1)
+
+        await provider.releaseFirstRequest()
+        let firstState = await firstTask.value
+        let finalRequestCount = await provider.requestCount
+
+        guard case .ready(let candidate) = firstState else {
+            return XCTFail("expected the admitted legacy request to complete")
+        }
+        XCTAssertEqual(candidate.displayText, "shared gate completed")
+        XCTAssertEqual(finalRequestCount, 1)
+    }
+
     func testTriggerPolicyAllowsThreeCharacterRawInputWithoutLockedPrefix() {
         let policy = AIRecommendationTriggerPolicy.default
 
@@ -1603,6 +1649,53 @@ private actor RecordingLLMProvider: LLMProvider {
 
     var requests: [LLMRequest] {
         recordedRequests
+    }
+}
+
+private actor ControlledLegacySharedGateLLMProvider: LLMProvider {
+    nonisolated let providerName: String
+    private var recordedRequests: [LLMRequest] = []
+    private var firstRequestStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstRequestReleaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstRequestReleased = false
+
+    init(providerName: String) {
+        self.providerName = providerName
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        if recordedRequests.count == 1 {
+            let startWaiters = firstRequestStartWaiters
+            firstRequestStartWaiters.removeAll()
+            startWaiters.forEach { $0.resume() }
+            if !firstRequestReleased {
+                await withCheckedContinuation { continuation in
+                    firstRequestReleaseWaiters.append(continuation)
+                }
+            }
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "shared gate completed", confidence: 0.9)
+        ])
+    }
+
+    func waitForFirstRequestStart() async {
+        guard recordedRequests.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            firstRequestStartWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstRequest() {
+        firstRequestReleased = true
+        let releaseWaiters = firstRequestReleaseWaiters
+        firstRequestReleaseWaiters.removeAll()
+        releaseWaiters.forEach { $0.resume() }
+    }
+
+    var requestCount: Int {
+        recordedRequests.count
     }
 }
 
