@@ -19,6 +19,7 @@ actor AIContextMemoryRuntimeTestProbe {
     private(set) var claimRecoveryClaimLoadCount = 0
     private(set) var claimRecoveryGatePreflightPauseCount = 0
     private(set) var claimRecoveryRetryScheduleCount = 0
+    private(set) var claimBlockedReevaluationCount = 0
 
     init(
         pausesBeforeGuardedCommit: Bool = false,
@@ -83,6 +84,10 @@ actor AIContextMemoryRuntimeTestProbe {
 
     func recordClaimRecoveryRetrySchedule() {
         claimRecoveryRetryScheduleCount += 1
+    }
+
+    func recordClaimBlockedReevaluation() {
+        claimBlockedReevaluationCount += 1
     }
 }
 
@@ -170,6 +175,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var digestRerunRequested = false
     private var digestRerunScheduled = false
     private var digestClaimProtection: DigestClaimProtection?
+    private var claimBlockedReevaluationRequested = false
+    private var claimBlockedReevaluationScheduled = false
     private var persistedClaimNeedsRecovery = true
     private var providerGeneration: UInt64?
     private var deadlineTask: Task<Void, Never>?
@@ -360,7 +367,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 break
             }
         }
-        guard digestClaimProtection == nil else { return }
+        guard digestClaimProtection == nil else {
+            claimBlockedReevaluationRequested = true
+            return
+        }
 
         let inventory: TypingEventInventory
         do { inventory = try eventStore.inventory() } catch { return }
@@ -869,7 +879,12 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard digestRerunScheduled else { return }
         digestRerunScheduled = false
         deadlineTask = nil
+        let recordsClaimBlockedReevaluation = claimBlockedReevaluationScheduled
+        claimBlockedReevaluationScheduled = false
         await processIfNeeded(now: nowProvider(), dispatchLease: nil)
+        if recordsClaimBlockedReevaluation {
+            await testProbe?.recordClaimBlockedReevaluation()
+        }
     }
 
     private func scheduleGateAvailabilityWake() {
@@ -1139,9 +1154,21 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private func finishDigestClaimProtectionIfComplete(_ protection: DigestClaimProtection) {
         if protection.processFinished, protection.attemptFinished {
             digestClaimProtection = nil
+            scheduleClaimBlockedReevaluationIfNeeded()
         } else {
             digestClaimProtection = protection
         }
+    }
+
+    private func scheduleClaimBlockedReevaluationIfNeeded() {
+        guard claimBlockedReevaluationRequested else { return }
+        claimBlockedReevaluationRequested = false
+        let pendingEventCount = (try? eventStore.inventory().eventCount) ?? 0
+        guard !gatePersistenceBlocked,
+              claimRecoveryRetryAt == nil,
+              pendingEventCount > 0 else { return }
+        claimBlockedReevaluationScheduled = true
+        scheduleCoalescedRerun()
     }
 
     private func emitAppendDiagnostics(_ result: TypingEventAppendResult) {

@@ -43,7 +43,12 @@
 - A live digest claim remains an append/compaction protection until both the
   actor's digest flow and the matching gate attempt finish. Caller timeout or
   cancellation therefore cannot expose its exact prefix while a
-  cancellation-resistant transport still owns the gate lease.
+  cancellation-resistant transport still owns the gate lease. A record,
+  manual, or deadline wake that reaches the live-claim guard latches one
+  pending re-evaluation. After both owners finish, one actor-owned full
+  `processIfNeeded` pass runs when pending events remain, rechecking interval,
+  cooldown, gate, and generation eligibility. No blocked wake means no
+  post-completion rerun.
 - Deadline conversion clamps finite positive durations before producing
   nanoseconds.
 
@@ -53,5 +58,5 @@
   protection through compaction, anchorless schedule repair, busy-waiter
   coalescing, processed-archive recovery states, semantic schedule repair,
   bounded blocked-recovery retries, gate preflight latching, first-record claim
-  recovery single-flight interleavings, and cancellation-resistant timeout
-  flow.
+  recovery single-flight interleavings, cancellation-resistant timeout flow,
+  and claim-blocked wake resumption after real transport completion.

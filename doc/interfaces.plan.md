@@ -761,7 +761,12 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   archived blank, malformed, or oversized prefixes rearm the deadline for tail
   data; calls arriving during a digest coalesce into one post-completion
   re-evaluation rather than a concurrent digest, except that an already
-  installed gate waiter remains the sole wake source for its contention episode
+  installed gate waiter remains the sole wake source for its contention
+  episode. If such a record, manual, or deadline wake reaches a live-claim
+  guard, one signal is retained until both the actor flow and real gate attempt
+  finish; one actor-owned `processIfNeeded` pass then rechecks pending data,
+  interval, cooldown, gate, and generation eligibility. No blocked wake or
+  pending data causes no post-completion rerun
 - updates only the generated section in canonical `ENV.md`, with one managed
   marker pair and one User Notes section; markerless documents remain user
   content, only exact marker lines define managed boundaries, and ambiguous

@@ -56,6 +56,11 @@ of already-started recommendations, and independent provider failure budgets.
   also repaired conservatively. Calls received while a digest is active
   coalesce into one immediate post-completion re-evaluation, unless a busy-gate
   availability waiter already owns the single wake for that contention episode.
+  When a record, manual, or deadline wake reaches an active live-claim guard,
+  one signal remains latched until the actor flow and real gate attempt both
+  finish. If pending events remain, one actor-owned full re-evaluation then
+  reapplies interval, cooldown, gate, and generation checks; no blocked wake
+  produces no late-completion rerun.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
   avoids repeating the provider call. A durable archive receipt or bounded

@@ -2927,21 +2927,46 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
 
         let startedAt = Date()
-        await runtime.record(makeContextEvent(rawInput: "timeout", committedText: "超时"))
+        let digest = Task {
+            await runtime.record(makeContextEvent(rawInput: "timeout", committedText: "超时"))
+        }
+        do {
+            try await waitUntil { await provider.continuationInstallationCount == 1 }
+        } catch {
+            digest.cancel()
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            await digest.value
+            throw error
+        }
+        let installedContinuationCount = await provider.continuationInstallationCount
+        guard installedContinuationCount == 1 else {
+            digest.cancel()
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            await digest.value
+            return
+        }
+        await digest.value
         let requestCount = await provider.requestCount
-        let pendingAfterTimeout = try await eventStore.pendingEvents()
         XCTAssertLessThan(Date().timeIntervalSince(startedAt), 1)
         XCTAssertEqual(requestCount, 1)
-        XCTAssertEqual(pendingAfterTimeout.map(\.rawInput), ["timeout"])
 
+        var retainedGateLease = false
         do {
             _ = try await gate.execute(providerIdentity: provider.providerName, generation: 0) { 1 }
             XCTFail("timed-out transport must retain the shared gate lease")
         } catch ProviderRequestGateError.busy {
-            // Expected while the cancellation-resistant transport is still running.
+            retainedGateLease = true
+        } catch {
+            XCTFail("expected busy gate while timed-out transport runs: \(error)")
         }
+        XCTAssertTrue(retainedGateLease)
 
-        await provider.finish(generatedMarkdown: "## Global Style\n- late")
+        let finishedStartedTransport = await provider.finish(
+            generatedMarkdown: "## Global Style\n- late"
+        )
+        XCTAssertTrue(finishedStartedTransport)
+        let pendingAfterTimeout = try await eventStore.pendingEvents()
+        XCTAssertEqual(pendingAfterTimeout.map(\.rawInput), ["timeout"])
         var observedCooldown = false
         let completionDeadline = Date().addingTimeInterval(2)
         while !observedCooldown, Date() < completionDeadline {
@@ -2978,6 +3003,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
         let provider = CancellationResistantDigestLLMProvider()
         let gate = ProviderRequestGate(now: clock.now)
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe()
         try await eventStore.append(
             makeContextEvent(rawInput: "claimed", committedText: "受保护前缀")
         )
@@ -2991,29 +3017,66 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             hardTimeoutMilliseconds: 20,
             diagnosticSink: { _ in },
             requestGate: gate,
-            nowProvider: clock.now
+            nowProvider: clock.now,
+            testProbe: runtimeProbe
         )
 
-        await runtime.processIfNeeded(now: clock.now())
+        let firstAttempt = Task {
+            await runtime.processIfNeeded(now: clock.now())
+        }
+        do {
+            try await waitUntil { await provider.continuationInstallationCount == 1 }
+        } catch {
+            firstAttempt.cancel()
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            await firstAttempt.value
+            throw error
+        }
+        let firstContinuationCount = await provider.continuationInstallationCount
+        guard firstContinuationCount == 1 else {
+            firstAttempt.cancel()
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            await firstAttempt.value
+            return
+        }
+        await firstAttempt.value
         let protectionAfterTimeout = await runtime.hasActiveDigestClaimProtectionForTesting()
         XCTAssertTrue(protectionAfterTimeout)
 
-        for index in 0..<3 {
-            await runtime.record(
-                makeContextEvent(rawInput: "tail-\(index)", committedText: "尾部\(index)")
+        do {
+            for index in 0..<3 {
+                await runtime.record(
+                    makeContextEvent(rawInput: "tail-\(index)", committedText: "尾部\(index)")
+                )
+            }
+            let compactedPending = try await eventStore.pendingEvents()
+            XCTAssertEqual(compactedPending.count, 3)
+            XCTAssertEqual(compactedPending.first?.rawInput, "claimed")
+            XCTAssertFalse(
+                eventStore.hasProcessedArchive(
+                    prefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+                    byteCount: claimedSnapshot.rawData.count
+                )
             )
+        } catch {
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            throw error
         }
-        let compactedPending = try await eventStore.pendingEvents()
-        XCTAssertEqual(compactedPending.count, 3)
-        XCTAssertEqual(compactedPending.first?.rawInput, "claimed")
-        XCTAssertFalse(
-            eventStore.hasProcessedArchive(
-                prefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
-                byteCount: claimedSnapshot.rawData.count
-            )
-        )
 
-        await provider.finish(generatedMarkdown: "## Global Style\n- late")
+        let finishedFirstTransport = await provider.finish(
+            generatedMarkdown: "## Global Style\n- late"
+        )
+        XCTAssertTrue(finishedFirstTransport)
+        do {
+            try await waitUntil { await runtimeProbe.claimBlockedReevaluationCount == 1 }
+        } catch {
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            throw error
+        }
+        let reevaluationCount = await runtimeProbe.claimBlockedReevaluationCount
+        let requestCountDuringCooldown = await provider.requestCount
+        XCTAssertEqual(reevaluationCount, 1)
+        XCTAssertEqual(requestCountDuringCooldown, 1)
         try await waitUntil {
             !(await runtime.hasActiveDigestClaimProtectionForTesting())
         }
@@ -3034,15 +3097,25 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let retry = Task {
             await runtime.processIfNeeded(now: clock.now())
         }
-        try await waitUntil { await provider.requestCount == 2 }
-        let requestCount = await provider.requestCount
-        guard requestCount == 2 else {
+        do {
+            try await waitUntil { await provider.continuationInstallationCount == 2 }
+        } catch {
             retry.cancel()
-            await provider.finish(generatedMarkdown: "## Global Style\n- retry")
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            await retry.value
+            throw error
+        }
+        let retryContinuationCount = await provider.continuationInstallationCount
+        guard retryContinuationCount == 2 else {
+            retry.cancel()
+            _ = await provider.finish(generatedMarkdown: "## Global Style\n- retry")
             await retry.value
             return
         }
-        await provider.finish(generatedMarkdown: "## Global Style\n- retry")
+        let finishedRetryTransport = await provider.finish(
+            generatedMarkdown: "## Global Style\n- retry"
+        )
+        XCTAssertTrue(finishedRetryTransport)
         await retry.value
 
         let finalEnvironment = try environmentStore.loadSnapshot().content
@@ -3174,26 +3247,41 @@ private actor SuspendedDigestLLMProvider: LLMProvider {
 private actor CancellationResistantDigestLLMProvider: LLMProvider {
     nonisolated let providerName = "cancellation-resistant-digest"
     private var count = 0
+    private var installedContinuationCount = 0
     private var continuation: CheckedContinuation<LLMResponse, Never>?
+    private var queuedResponses: [LLMResponse] = []
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         count += 1
+        if !queuedResponses.isEmpty {
+            return queuedResponses.removeFirst()
+        }
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
+            installedContinuationCount += 1
         }
     }
 
-    func finish(generatedMarkdown: String) {
-        continuation?.resume(
-            returning: LLMResponse(candidates: [
-                LLMCandidate(text: generatedMarkdown, confidence: 0.9)
-            ])
-        )
-        continuation = nil
+    @discardableResult
+    func finish(generatedMarkdown: String) -> Bool {
+        let response = LLMResponse(candidates: [
+            LLMCandidate(text: generatedMarkdown, confidence: 0.9)
+        ])
+        guard let continuation else {
+            queuedResponses.append(response)
+            return false
+        }
+        self.continuation = nil
+        continuation.resume(returning: response)
+        return true
     }
 
     var requestCount: Int {
         count
+    }
+
+    var continuationInstallationCount: Int {
+        installedContinuationCount
     }
 }
 
