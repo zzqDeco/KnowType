@@ -44,6 +44,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private let nowProvider: @Sendable () -> Date
     private var providerIdentity = "context-digest"
     private var lastDigestAt: Date?
+    private var pendingSince: Date?
+    private var nextEligibleAt: Date?
+    private var scheduleStateLoaded = false
     private var lastDigestFailureAt: Date?
     private var deferredDiagnosticFailureAt: Date?
     private var digestInFlight = false
@@ -148,6 +151,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             digestInFlight = false
         }
 
+        loadScheduleStateIfNeeded()
+
         switch await recoverDigestClaim(now: now) {
         case .recovered, .blocked:
             return
@@ -157,7 +162,12 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
         let inventory: TypingEventInventory
         do { inventory = try eventStore.inventory() } catch { return }
-        guard inventory.eventCount > 0 else { cancelDeadline(); return }
+        guard inventory.eventCount > 0 else {
+            pendingSince = nil
+            try? persistScheduleState()
+            cancelDeadline()
+            return
+        }
 
         if inventory.isProtectedOnly {
             do {
@@ -169,19 +179,31 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
 
         let intervalElapsed: Bool
+        let deferredDeadline: Date
         if let lastDigestAt {
             intervalElapsed = now.timeIntervalSince(lastDigestAt) >= minimumInterval
+            deferredDeadline = nextEligibleAt ?? lastDigestAt.addingTimeInterval(minimumInterval)
         } else {
-            intervalElapsed = inventory.eventCount >= batchSize
+            if inventory.eventCount >= batchSize {
+                intervalElapsed = true
+                deferredDeadline = now
+            } else {
+                if pendingSince == nil {
+                    pendingSince = now
+                    guard (try? persistScheduleState()) != nil else { return }
+                }
+                deferredDeadline = pendingSince!.addingTimeInterval(minimumInterval)
+                intervalElapsed = now >= deferredDeadline
+            }
         }
         guard intervalElapsed else {
-            scheduleDeadline(at: (lastDigestAt ?? now).addingTimeInterval(minimumInterval))
+            scheduleDeadline(at: deferredDeadline)
             emitDiagnostic(
                 stage: "context_digest_deferred",
                 fields: [
                     .init(.eventCount, inventory.eventCount),
                     .init(.byteCount, inventory.byteCount),
-                    .init(.deadline, Int(ceil((lastDigestAt ?? now).addingTimeInterval(minimumInterval).timeIntervalSince(now))))
+                    .init(.deadline, Int(ceil(deferredDeadline.timeIntervalSince(now))))
                 ]
             )
             return
@@ -220,7 +242,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         }
         if snapshot.events.allSatisfy(TypingEventStore.isProtectedOnlyEvent) {
-            do { try eventStore.archivePendingEvents(matching: snapshot); lastDigestAt = now } catch { return }
+            do {
+                try eventStore.archivePendingEvents(matching: snapshot)
+                recordDigestSuccess(at: now)
+            } catch { return }
             return
         }
         guard !snapshot.requestContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -287,7 +312,32 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             try environmentStore.saveDigestClaim(claim)
             let persist: @Sendable () throws -> TypingEventArchiveResult = {
                 _ = try environmentStore.replaceGeneratedSection(with: generated)
-                return try eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
+                let result = try eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
+                guard eventStore.hasProcessedArchive(
+                    prefixSHA256: Self.sha256(snapshot.rawData),
+                    byteCount: snapshot.rawData.count
+                ) else {
+                    throw TypingEventStoreError.pendingContentChanged
+                }
+                try environmentStore.saveDigestArchiveReceipt(
+                    EnvironmentDigestArchiveReceipt(
+                        claimedPrefixSHA256: Self.sha256(snapshot.rawData),
+                        claimedPrefixByteCount: snapshot.rawData.count,
+                        claimedEventCount: snapshot.claimedEventCount,
+                        generatedSHA256: claim.generatedSHA256,
+                        archivedByteCount: snapshot.rawData.count
+                    )
+                )
+                let tailCount = try eventStore.inventory().eventCount
+                try environmentStore.saveDigestScheduleState(
+                    EnvironmentDigestScheduleState(
+                        pendingSince: nil,
+                        lastSuccessfulDigestAt: now,
+                        nextEligibleAt: tailCount > 0 ? now.addingTimeInterval(minimumInterval) : nil,
+                        pendingEventCount: tailCount
+                    )
+                )
+                return result
             }
             let result: TypingEventArchiveResult
             if let providerRegistry, let lease {
@@ -296,6 +346,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 result = try persist()
             }
             try environmentStore.clearDigestClaim()
+            try? environmentStore.clearDigestArchiveReceipt()
             recordDigestSuccess(at: now)
             emitArchiveDiagnostic(result)
         } catch ProviderRequestBudgetError {
@@ -307,6 +358,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         } catch ProviderRequestGateError.cooldown(let deadline, _) {
             scheduleDeadline(at: deadline)
         } catch ProviderRequestGateError.busy {
+            scheduleGateAvailabilityWake()
             return
         } catch TypingEventStoreError.pendingContentChanged {
             return
@@ -342,13 +394,33 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         } catch {
             return .blocked
         }
-        guard let claim else { return .none }
+        guard let claim else {
+            try? environmentStore.clearDigestArchiveReceipt()
+            return .none
+        }
         do {
             let environment = try environmentStore.loadSnapshot()
             guard EnvironmentDocumentStore.generatedSectionHash(from: environment.content) == claim.generatedSHA256 else {
                 try environmentStore.clearDigestClaim()
+                try? environmentStore.clearDigestArchiveReceipt()
                 return .none
             }
+
+            if let receipt = try environmentStore.loadDigestArchiveReceipt(),
+               receiptMatches(receipt, claim: claim) {
+                if let snapshot = try? eventStore.pendingDigestSnapshot(
+                    prefixByteCount: claim.claimedPrefixByteCount,
+                    eventCount: claim.claimedEventCount
+                ), Self.sha256(snapshot.rawData) == claim.claimedPrefixSHA256 {
+                    try eventStore.archivePendingEvents(matching: snapshot)
+                }
+                try persistScheduleState(afterSuccessAt: now)
+                try environmentStore.clearDigestClaim()
+                try? environmentStore.clearDigestArchiveReceipt()
+                recordDigestSuccess(at: now)
+                return .recovered
+            }
+
             let snapshot = try eventStore.pendingDigestSnapshot(
                 prefixByteCount: claim.claimedPrefixByteCount,
                 eventCount: claim.claimedEventCount
@@ -357,7 +429,24 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 return .blocked
             }
             try eventStore.archivePendingEvents(matching: snapshot)
+            guard eventStore.hasProcessedArchive(
+                prefixSHA256: claim.claimedPrefixSHA256,
+                byteCount: claim.claimedPrefixByteCount
+            ) else {
+                return .blocked
+            }
+            try environmentStore.saveDigestArchiveReceipt(
+                EnvironmentDigestArchiveReceipt(
+                    claimedPrefixSHA256: claim.claimedPrefixSHA256,
+                    claimedPrefixByteCount: claim.claimedPrefixByteCount,
+                    claimedEventCount: claim.claimedEventCount,
+                    generatedSHA256: claim.generatedSHA256,
+                    archivedByteCount: claim.claimedPrefixByteCount
+                )
+            )
+            try persistScheduleState(afterSuccessAt: now)
             try environmentStore.clearDigestClaim()
+            try? environmentStore.clearDigestArchiveReceipt()
             recordDigestSuccess(at: now)
             return .recovered
         } catch {
@@ -365,18 +454,41 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
     }
 
+    private func receiptMatches(
+        _ receipt: EnvironmentDigestArchiveReceipt,
+        claim: EnvironmentDigestClaim
+    ) -> Bool {
+        receipt.claimedPrefixSHA256 == claim.claimedPrefixSHA256 &&
+            receipt.claimedPrefixByteCount == claim.claimedPrefixByteCount &&
+            receipt.claimedEventCount == claim.claimedEventCount &&
+            receipt.generatedSHA256 == claim.generatedSHA256 &&
+            receipt.archivedByteCount == claim.claimedPrefixByteCount &&
+            eventStore.hasProcessedArchive(
+                prefixSHA256: claim.claimedPrefixSHA256,
+                byteCount: claim.claimedPrefixByteCount
+            )
+    }
+
     private func applyProviderLease(_ lease: ProviderRuntimeLease) {
+        let changed = providerGeneration != lease.generation || providerIdentity != lease.fingerprint
         providerGeneration = lease.generation
         providerIdentity = lease.fingerprint
+        if changed {
+            lastDigestFailureAt = nil
+            deferredDiagnosticFailureAt = nil
+        }
     }
 
     private func invalidateProviderRuntimeState() {
+        lastDigestFailureAt = nil
+        deferredDiagnosticFailureAt = nil
         providerGeneration = nil
         providerIdentity = "context-digest"
     }
 
     private func recordDigestSuccess(at now: Date) {
         lastDigestAt = now
+        pendingSince = nil
         lastDigestFailureAt = nil
         deferredDiagnosticFailureAt = nil
         let hasPendingTail: Bool
@@ -385,8 +497,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         } catch {
             hasPendingTail = true
         }
+        nextEligibleAt = hasPendingTail ? now.addingTimeInterval(minimumInterval) : nil
+        try? persistScheduleState()
         if hasPendingTail {
-            scheduleDeadline(at: now.addingTimeInterval(minimumInterval))
+            scheduleDeadline(at: nextEligibleAt!)
         } else {
             cancelDeadline()
         }
@@ -414,9 +528,66 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
     }
 
+    private func scheduleGateAvailabilityWake() {
+        deadlineTask?.cancel()
+        let gate = requestGate
+        let identity = providerIdentity
+        let generation = providerGeneration ?? 0
+        deadlineTask = Task { [weak self] in
+            await gate.waitForAvailability(providerIdentity: identity, generation: generation)
+            guard !Task.isCancelled, let self else { return }
+            await self.processIfNeeded(now: self.nowProvider())
+        }
+    }
+
     private func cancelDeadline() {
         deadlineTask?.cancel()
         deadlineTask = nil
+    }
+
+    private func loadScheduleStateIfNeeded() {
+        guard !scheduleStateLoaded else { return }
+        scheduleStateLoaded = true
+        do {
+            guard let state = try environmentStore.loadDigestScheduleState() else { return }
+            pendingSince = state.pendingSince
+            lastDigestAt = state.lastSuccessfulDigestAt
+            nextEligibleAt = state.nextEligibleAt
+        } catch {
+            try? environmentStore.clearDigestScheduleState()
+        }
+    }
+
+    private func persistScheduleState() throws {
+        let eventCount: Int
+        do {
+            eventCount = try eventStore.inventory().eventCount
+        } catch {
+            eventCount = 0
+        }
+        try environmentStore.saveDigestScheduleState(
+            EnvironmentDigestScheduleState(
+                pendingSince: pendingSince,
+                lastSuccessfulDigestAt: lastDigestAt,
+                nextEligibleAt: nextEligibleAt,
+                pendingEventCount: max(0, min(500, eventCount))
+            )
+        )
+    }
+
+    private func persistScheduleState(afterSuccessAt now: Date) throws {
+        let tailCount = try eventStore.inventory().eventCount
+        lastDigestAt = now
+        pendingSince = nil
+        nextEligibleAt = tailCount > 0 ? now.addingTimeInterval(minimumInterval) : nil
+        try environmentStore.saveDigestScheduleState(
+            EnvironmentDigestScheduleState(
+                pendingSince: nil,
+                lastSuccessfulDigestAt: now,
+                nextEligibleAt: nextEligibleAt,
+                pendingEventCount: tailCount
+            )
+        )
     }
 
     private func emitAppendDiagnostics(_ result: TypingEventAppendResult) {

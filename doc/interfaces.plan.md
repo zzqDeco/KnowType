@@ -75,7 +75,8 @@ non-provider outcome and its budgeted payload fingerprint is the recommendation
 cache key. `ProviderRequestGate` hashes provider identity, permits one in-flight
 request per identity, fences generations, clamps `Retry-After` to 15 seconds to
 15 minutes, and applies privacy-safe cooldowns for missing retry hints. Persisted
-gate state contains only the identity hash, deadline, and failure class.
+gate state contains only the identity hash, deadline, failure class, and a
+bounded count in atomic mode-0600 storage; it never persists in-flight state.
 
 ## Input Client Compatibility
 
@@ -717,7 +718,7 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   so text entered without an available provider is not retained for later upload
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
 - limits AI raw input and locked prefix to 4 KiB UTF-8 before dispatch; event
-  fields remain bounded before JSONL append
+  text fields are bounded to 2,048 Unicode scalars before JSONL append
 - caps pending data at 500 events or 1 MiB; overflow atomically keeps the newest
   data within a 450-event/768 KiB compaction target
 - claims no more than the oldest 50 events or 48 KiB for one provider digest,
@@ -725,8 +726,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   after a successful commit cannot be bypassed by the batch threshold
 - archives processed event files under `~/.knowtype/events/processed/` and,
   after successful digests only, keeps at most 7 days, 100 files, and 10 MiB
-- summarizes through one actor-owned deadline task for batch, interval, and
-  provider-cooldown wakeups
+- summarizes through one actor-owned deadline task for batch, interval,
+  provider-cooldown, and shared-gate availability wakeups; a first below-batch
+  pending event has an independent forced deadline
 - updates only the generated section in canonical `ENV.md`, with one managed
   marker pair and one User Notes section; markerless documents remain user
   content and ambiguous migrations fail closed
@@ -739,7 +741,8 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   below-threshold and unchanged-generation cooldown paths do not decode JSONL
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, and `context_archive_pruned` diagnostics
-- persists only privacy-safe claim metadata so an ENV-success/archive-failure
+- persists only privacy-safe claim metadata plus bounded timestamp/count schedule
+  state and a deterministic archive receipt, so an ENV-success/archive-failure
   path is recoverable without repeating the provider call; appended tail events
   remain outside the old claim
 

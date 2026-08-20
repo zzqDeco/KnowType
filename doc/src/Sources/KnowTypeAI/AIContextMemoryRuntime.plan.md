@@ -30,9 +30,11 @@
   event, applies generation changes before append, and reuses that lease for an
   immediately eligible digest. Batch, interval, protected-only, and unchanged
   generation cooldown gates use inventory before any digest snapshot decode.
-- One actor-owned deadline task wakes batch, interval, and provider-cooldown
-  deadlines. A successful commit starts a 600-second minimum interval that a
-  batch of 50 cannot bypass; provider generation changes do not reset it.
+- One actor-owned deadline task wakes batch, interval, provider-cooldown, and
+  shared-gate availability events. The first below-batch pending event records
+  a forced deadline. A successful commit starts a 600-second minimum interval
+  that a batch of 50 cannot bypass; provider generation changes do not reset
+  it.
 - Stale responses cannot write `ENV.md` or archive events. Shared gate cooldown
   and max-one-in-flight identity state apply equally to recommendation and
   digest.
@@ -43,8 +45,9 @@
   snapshot file claim. While transport is in flight, backlog compaction retains
   that exact claim plus the newest bounded tail. Events appended after the
   claimed prefix remain pending.
-- Failed and empty digests retain the minimum retry interval while still
-  checking for a changed provider revision. Protected-only pending batches
+- Failed and empty digests use the shared gate's 60-second exponential retry
+  (429 `Retry-After` is clamped to 15 seconds through 15 minutes), which is
+  separate from the 600-second successful-commit interval. Protected-only pending batches
   archive locally without provider or provider-profile reads; a protected-only
   bounded prefix in a mixed backlog is also archived without a provider call.
 - Raw input and locked prefix over 4 KiB skip AI without semantic truncation.
@@ -63,9 +66,12 @@
 - A privacy-safe claim records only prefix hash, byte/event counts, generated
   section hash, and provider generation. ENV-success/archive-failure recovery
   reads and validates only the claimed byte/event prefix, archives that exact
-  prefix, and leaves appended tail bytes pending. A matching ENV with a changed
-  claim prefix fails closed without another provider request. Successful commits
-  rearm the one deadline task when a tail remains; an empty store cancels it.
+  prefix, and leaves appended tail bytes pending. A durable archive receipt
+  distinguishes completed archive from cleanup failure; a matching ENV with a
+  changed claim prefix still fails closed without another provider request.
+  Timestamp/count schedule state survives runtime or process rebuild and is
+  written before claim cleanup. Successful commits rearm the one deadline task
+  when a tail remains; an empty store cancels it.
 
 ## Tests
 

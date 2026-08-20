@@ -18,6 +18,8 @@ public struct AIUserDirectory: Sendable, Equatable {
     public var acceptedFeedbackMirrorURL: URL { rootURL.appendingPathComponent("ACCEPTED_AI_FEEDBACK.md") }
     public var environmentBackupsDirectoryURL: URL { rootURL.appendingPathComponent("backups", isDirectory: true) }
     public var environmentDigestClaimURL: URL { rootURL.appendingPathComponent("ENV.digest-claim.json") }
+    public var environmentDigestScheduleURL: URL { rootURL.appendingPathComponent("ENV.digest-schedule.json") }
+    public var environmentDigestArchiveReceiptURL: URL { rootURL.appendingPathComponent("ENV.digest-archive-receipt.json") }
 }
 
 public struct AIDocumentSnapshot: Sendable, Equatable {
@@ -57,6 +59,47 @@ public struct EnvironmentDigestClaim: Codable, Sendable, Equatable {
     }
 }
 
+public struct EnvironmentDigestScheduleState: Codable, Sendable, Equatable {
+    public var pendingSince: Date?
+    public var lastSuccessfulDigestAt: Date?
+    public var nextEligibleAt: Date?
+    public var pendingEventCount: Int
+
+    public init(
+        pendingSince: Date?,
+        lastSuccessfulDigestAt: Date?,
+        nextEligibleAt: Date?,
+        pendingEventCount: Int
+    ) {
+        self.pendingSince = pendingSince
+        self.lastSuccessfulDigestAt = lastSuccessfulDigestAt
+        self.nextEligibleAt = nextEligibleAt
+        self.pendingEventCount = pendingEventCount
+    }
+}
+
+public struct EnvironmentDigestArchiveReceipt: Codable, Sendable, Equatable {
+    public var claimedPrefixSHA256: String
+    public var claimedPrefixByteCount: Int
+    public var claimedEventCount: Int
+    public var generatedSHA256: String
+    public var archivedByteCount: Int
+
+    public init(
+        claimedPrefixSHA256: String,
+        claimedPrefixByteCount: Int,
+        claimedEventCount: Int,
+        generatedSHA256: String,
+        archivedByteCount: Int
+    ) {
+        self.claimedPrefixSHA256 = claimedPrefixSHA256
+        self.claimedPrefixByteCount = claimedPrefixByteCount
+        self.claimedEventCount = claimedEventCount
+        self.generatedSHA256 = generatedSHA256
+        self.archivedByteCount = archivedByteCount
+    }
+}
+
 public enum EnvironmentDocumentError: Error, Sendable, Equatable {
     case scanLimitExceeded
     case invalidUTF8
@@ -66,6 +109,25 @@ public enum EnvironmentDocumentError: Error, Sendable, Equatable {
     case userNotesTooLarge
     case environmentProjectionTooLarge
     case claimMismatch
+}
+
+final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failedClaimClearsRemaining = 0
+
+    func failNextClaimClears(_ count: Int) {
+        lock.lock()
+        failedClaimClearsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    fileprivate func shouldFailClaimClear() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedClaimClearsRemaining > 0 else { return false }
+        failedClaimClearsRemaining -= 1
+        return true
+    }
 }
 
 public struct EnvironmentDocumentStore: @unchecked Sendable {
@@ -94,15 +156,28 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
 
     private let fileURL: URL
     private let fileManager: FileManager
+    private let testProbe: EnvironmentDocumentStoreTestProbe?
 
     public init(fileURL: URL = AIUserDirectory.defaultDirectory().environmentURL, fileManager: FileManager = .default) {
         self.fileURL = fileURL
         self.fileManager = fileManager
+        self.testProbe = nil
+    }
+
+    init(
+        fileURL: URL,
+        fileManager: FileManager = .default,
+        testProbe: EnvironmentDocumentStoreTestProbe?
+    ) {
+        self.fileURL = fileURL
+        self.fileManager = fileManager
+        self.testProbe = testProbe
     }
 
     public func loadSnapshot() throws -> AIDocumentSnapshot {
         try ensureExists(defaultContent: Self.defaultContent)
         let data = try boundedData(at: fileURL)
+        try setSecurePermissions(of: fileURL)
         guard let content = String(data: data, encoding: .utf8) else {
             try backup(data: data)
             throw EnvironmentDocumentError.invalidUTF8
@@ -130,6 +205,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
 
     public func loadDigestClaim() throws -> EnvironmentDigestClaim? {
         guard fileManager.fileExists(atPath: claimURL.path) else { return nil }
+        try setSecurePermissions(of: claimURL)
         let data = try boundedData(at: claimURL, limit: 32 * 1_024)
         return try JSONDecoder().decode(EnvironmentDigestClaim.self, from: data)
     }
@@ -143,7 +219,53 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
 
     public func clearDigestClaim() throws {
         guard fileManager.fileExists(atPath: claimURL.path) else { return }
+        if testProbe?.shouldFailClaimClear() == true {
+            throw CocoaError(.fileWriteUnknown)
+        }
         try fileManager.removeItem(at: claimURL)
+    }
+
+    public func loadDigestScheduleState() throws -> EnvironmentDigestScheduleState? {
+        guard fileManager.fileExists(atPath: scheduleURL.path) else { return nil }
+        try setSecurePermissions(of: scheduleURL)
+        let data = try boundedData(at: scheduleURL, limit: 16 * 1_024)
+        let state = try JSONDecoder().decode(EnvironmentDigestScheduleState.self, from: data)
+        guard state.pendingEventCount >= 0, state.pendingEventCount <= 500 else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        return state
+    }
+
+    public func saveDigestScheduleState(_ state: EnvironmentDigestScheduleState) throws {
+        guard state.pendingEventCount >= 0, state.pendingEventCount <= 500 else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try atomicWrite(data: encoder.encode(state), to: scheduleURL)
+    }
+
+    public func clearDigestScheduleState() throws {
+        guard fileManager.fileExists(atPath: scheduleURL.path) else { return }
+        try fileManager.removeItem(at: scheduleURL)
+    }
+
+    public func loadDigestArchiveReceipt() throws -> EnvironmentDigestArchiveReceipt? {
+        guard fileManager.fileExists(atPath: archiveReceiptURL.path) else { return nil }
+        try setSecurePermissions(of: archiveReceiptURL)
+        let data = try boundedData(at: archiveReceiptURL, limit: 16 * 1_024)
+        return try JSONDecoder().decode(EnvironmentDigestArchiveReceipt.self, from: data)
+    }
+
+    public func saveDigestArchiveReceipt(_ receipt: EnvironmentDigestArchiveReceipt) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try atomicWrite(data: encoder.encode(receipt), to: archiveReceiptURL)
+    }
+
+    public func clearDigestArchiveReceipt() throws {
+        guard fileManager.fileExists(atPath: archiveReceiptURL.path) else { return }
+        try fileManager.removeItem(at: archiveReceiptURL)
     }
 
     public static func validateGeneratedMarkdown(_ candidate: String) throws {
@@ -246,9 +368,14 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
             throw EnvironmentDocumentError.ambiguousMigration
         }
 
+        let hasValidPair = starts.count == 1 && ends.count == 1 && starts[0] < ends[0]
         let noteBody: String
         if isMarkerless {
             noteBody = markerlessUserNotesBody(in: content)
+        } else if hasValidPair, notes.isEmpty {
+            let startRange = content.range(of: generatedStart)!
+            let endRange = content.range(of: generatedEnd, range: startRange.upperBound..<content.endIndex)!
+            noteBody = userTextOutsideGeneratedPair(in: content, startRange: startRange, endRange: endRange)
         } else if let noteIndex = notes.first {
             noteBody = bodyAfterHeading(in: content, lineIndex: noteIndex)
         } else {
@@ -256,7 +383,6 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         }
         try validateUserNotes(noteBody)
 
-        let hasValidPair = starts.count == 1 && ends.count == 1 && starts[0] < ends[0]
         let generated: String
         var requiresBackup = false
         if hasValidPair {
@@ -309,8 +435,30 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     private static func markerlessUserNotesBody(in content: String) -> String {
         content
             .components(separatedBy: "\n")
-            .filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) != userNotesTitle }
+            .filter {
+                let line = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                return line != userNotesTitle
+            }
             .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func userTextOutsideGeneratedPair(
+        in content: String,
+        startRange: Range<String.Index>,
+        endRange: Range<String.Index>
+    ) -> String {
+        let prefix = String(content[..<startRange.lowerBound])
+        let suffix = String(content[endRange.upperBound...])
+        return [prefix, suffix]
+            .joined(separator: "\n")
+            .components(separatedBy: "\n")
+            .filter {
+                let line = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                return line != documentTitle && line != userNotesTitle
+            }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func bodyAfterHeading(in content: String, lineIndex: Int) -> String {
@@ -345,6 +493,8 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     private var claimURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("ENV.digest-claim.json") }
+    private var scheduleURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("ENV.digest-schedule.json") }
+    private var archiveReceiptURL: URL { fileURL.deletingLastPathComponent().appendingPathComponent("ENV.digest-archive-receipt.json") }
 
     private func ensureExists(defaultContent: String) throws {
         let directory = fileURL.deletingLastPathComponent()
@@ -354,10 +504,16 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     private func boundedData(at url: URL, limit: Int = maximumScanByteCount) throws -> Data {
-        if let values = try? url.resourceValues(forKeys: [.fileSizeKey]), let size = values.fileSize, size > limit {
-            throw EnvironmentDocumentError.scanLimitExceeded
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var data = Data()
+        while data.count <= limit {
+            let chunkSize = min(64 * 1_024, limit + 1 - data.count)
+            guard chunkSize > 0 else { break }
+            let chunk = try handle.read(upToCount: chunkSize) ?? Data()
+            if chunk.isEmpty { break }
+            data.append(chunk)
         }
-        let data = try Data(contentsOf: url)
         guard data.count <= limit else { throw EnvironmentDocumentError.scanLimitExceeded }
         return data
     }
@@ -367,7 +523,10 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let destination = directory.appendingPathComponent("ENV-\(digest).md")
-        guard !fileManager.fileExists(atPath: destination.path) else { return }
+        if fileManager.fileExists(atPath: destination.path) {
+            try setSecurePermissions(of: destination)
+            return
+        }
         try atomicWrite(data: data, to: destination)
     }
 
@@ -377,14 +536,23 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         let directory = url.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let temporaryURL = directory.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
-        try data.write(to: temporaryURL, options: .atomic)
-        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporaryURL.path)
-        if fileManager.fileExists(atPath: url.path) {
-            _ = try fileManager.replaceItemAt(url, withItemAt: temporaryURL)
-        } else {
-            try fileManager.moveItem(at: temporaryURL, to: url)
+        do {
+            try data.write(to: temporaryURL, options: .atomic)
+            try setSecurePermissions(of: temporaryURL)
+            if fileManager.fileExists(atPath: url.path) {
+                _ = try fileManager.replaceItemAt(url, withItemAt: temporaryURL)
+            } else {
+                try fileManager.moveItem(at: temporaryURL, to: url)
+            }
+            try setSecurePermissions(of: url)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
         }
-        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private func setSecurePermissions(of url: URL) throws {
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }
 

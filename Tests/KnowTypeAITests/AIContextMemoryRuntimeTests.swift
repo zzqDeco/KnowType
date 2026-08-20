@@ -204,6 +204,36 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
     }
 
+    func testInitialPendingBelowBatchDrainsAtForcedDeadline() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let provider = DelayedDigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- forced deadline",
+            delayNanoseconds: 20_000_000
+        )
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 2,
+            minimumInterval: 1,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "first", committedText: "第一"))
+        XCTAssertTrue((await provider.requests).isEmpty)
+        clock.advance(by: 2)
+
+        try await waitUntil { !(await provider.requests).isEmpty }
+        try await waitUntil {
+            let pending = try? await eventStore.pendingEvents()
+            return pending?.isEmpty == true
+        }
+        XCTAssertEqual((await provider.requests).count, 1)
+    }
+
     func testDigestArchivesOnlyEventsIncludedInProviderRequest() async throws {
         let directory = makeTemporaryDirectory()
         let eventsDirectory = directory.appendingPathComponent("events", isDirectory: true)
@@ -1466,6 +1496,126 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual((await provider.requests).count, 3)
     }
 
+    func testBusyGateWakeDrainsPendingDigestWithoutPolling() async throws {
+        let directory = makeTemporaryDirectory()
+        let provider = DelayedDigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- gate wake",
+            delayNanoseconds: 20_000_000
+        )
+        let gate = ProviderRequestGate()
+        let blockerProbe = ContextGateProbe()
+        let blocker = Task {
+            try await gate.execute(providerIdentity: provider.providerName, generation: 0) {
+                await blockerProbe.markStarted()
+                try await Task.sleep(nanoseconds: 120_000_000)
+            }
+        }
+        try await waitUntil { await blockerProbe.started }
+
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 1,
+            requestGate: gate
+        )
+        await runtime.record(makeContextEvent(rawInput: "queued", committedText: "排队"))
+        XCTAssertTrue((await provider.requests).isEmpty)
+
+        try await blocker.value
+        try await waitUntil { !(await provider.requests).isEmpty }
+        XCTAssertEqual((await provider.requests).count, 1)
+    }
+
+    func testClaimCleanupFailureWithTailRecoversAfterRestartWithoutProviderRetry() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL, testProbe: environmentProbe)
+        let provider = SuspendedDigestLLMProvider()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
+        )
+
+        let firstDigest = Task {
+            await runtime.record(makeContextEvent(rawInput: "claimed", committedText: "已声明"))
+        }
+        try await waitUntilProviderReceivesRequest(provider)
+        try await eventStore.append(makeContextEvent(rawInput: "tail", committedText: "尾部"))
+        environmentProbe.failNextClaimClears(1)
+        await provider.finish(generatedMarkdown: "## Global Style\n- recovered")
+        await firstDigest.value
+
+        XCTAssertEqual((await provider.requests).count, 1)
+        let pendingAfterFailure = try await eventStore.pendingEvents()
+        XCTAssertEqual(pendingAfterFailure.map(\.rawInput), ["tail"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ENV.digest-claim.json").path))
+
+        let recoveryProvider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- should not run")
+        let restartedRuntime = AIContextMemoryRuntime(
+            provider: recoveryProvider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
+        )
+        await restartedRuntime.processIfNeeded()
+
+        XCTAssertTrue((await recoveryProvider.requests).isEmpty)
+        let pendingAfterRecovery = try await eventStore.pendingEvents()
+        XCTAssertEqual(pendingAfterRecovery.map(\.rawInput), ["tail"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ENV.digest-claim.json").path))
+    }
+
+    func testPersistedSuccessIntervalStillBlocksBatchTailAfterRuntimeRebuild() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let firstProvider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- first")
+        let firstRuntime = AIContextMemoryRuntime(
+            provider: firstProvider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 10,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+        await firstRuntime.record(makeContextEvent(rawInput: "first", committedText: "第一"))
+        for index in 0..<50 {
+            try await eventStore.append(makeContextEvent(rawInput: "tail-\(index)", committedText: "尾部\(index)"))
+        }
+
+        let secondProvider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- second")
+        let secondRuntime = AIContextMemoryRuntime(
+            provider: secondProvider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 10,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+        await secondRuntime.processIfNeeded()
+        XCTAssertTrue((await secondProvider.requests).isEmpty)
+
+        clock.advance(by: 11)
+        await secondRuntime.processIfNeeded()
+        XCTAssertEqual((await secondProvider.requests).count, 1)
+    }
+
     func testDirectContextAndRecommendationShareProviderIdentityGate() async throws {
         let directory = makeTemporaryDirectory()
         let provider = DelayedDigestLLMProvider(
@@ -1525,6 +1675,14 @@ private final class ManualContextClock: @unchecked Sendable {
         lock.lock()
         current = current.addingTimeInterval(interval)
         lock.unlock()
+    }
+}
+
+private actor ContextGateProbe {
+    private(set) var started = false
+
+    func markStarted() {
+        started = true
     }
 }
 

@@ -64,6 +64,24 @@ private actor SequencedMockHTTPClient: HTTPClient {
     }
 }
 
+private final class CountingModelDiscovery: ProviderModelDiscovering, @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+
+    func resolvedModel(for configuration: ProviderConfiguration) async throws -> String {
+        lock.lock()
+        calls += 1
+        lock.unlock()
+        return "model"
+    }
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return calls
+    }
+}
+
 private func requestBodyObject(
     _ request: URLRequest?,
     file: StaticString = #filePath,
@@ -1033,5 +1051,53 @@ final class ProviderAdapterTests: XCTestCase {
         }
         let capturedRequest = await client.capturedRequest()
         XCTAssertNil(capturedRequest)
+    }
+
+    func testOpenAIAdaptersRejectLogicalBudgetBeforeModelDiscoveryOrHTTP() async throws {
+        let oversized = LLMRequest(
+            task: .continuation,
+            rawInput: String(repeating: "界", count: 4_097)
+        )
+        let chatClient = MockHTTPClient(json: #"{"choices":[]}"#)
+        let chatDiscovery = CountingModelDiscovery()
+        let chat = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.example.com")!,
+                model: "model"
+            ),
+            httpClient: chatClient,
+            modelDiscovery: chatDiscovery
+        )
+        do {
+            _ = try await chat.complete(oversized)
+            XCTFail("expected local budget rejection")
+        } catch is ProviderRequestBudgetError {
+            // Expected.
+        }
+        XCTAssertEqual(chatDiscovery.callCount, 0)
+        let chatRequest = await chatClient.capturedRequest()
+        XCTAssertNil(chatRequest)
+
+        let responsesClient = MockHTTPClient(json: #"{"output":[]}"#)
+        let responsesDiscovery = CountingModelDiscovery()
+        let responses = OpenAIResponsesProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIResponses,
+                baseURL: URL(string: "https://api.example.com")!,
+                model: "model"
+            ),
+            httpClient: responsesClient,
+            modelDiscovery: responsesDiscovery
+        )
+        do {
+            _ = try await responses.complete(oversized)
+            XCTFail("expected local budget rejection")
+        } catch is ProviderRequestBudgetError {
+            // Expected.
+        }
+        XCTAssertEqual(responsesDiscovery.callCount, 0)
+        let responsesRequest = await responsesClient.capturedRequest()
+        XCTAssertNil(responsesRequest)
     }
 }

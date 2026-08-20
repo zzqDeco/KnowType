@@ -29,9 +29,10 @@
   excludes them from protected/unprotected event classification and provider
   request content. A protected-only backlog therefore remains local even when a
   partial JSONL line is present.
-- Event text is bounded as UTF-8 before append; raw input and locked prefix over
-  4 KiB are never semantically truncated for an AI request. Diagnostics expose
-  only removed counts and bytes.
+- `rawInput` and `committedText` are bounded to 2,048 Unicode scalars before
+  append. Raw input and locked prefix over 4 KiB UTF-8 are never semantically
+  truncated for an AI request. Diagnostics expose only removed counts and
+  bytes.
 - Pending data is compacted atomically to the newest 450 events and at most
   768 KiB after crossing 500 events or 1 MiB. While a digest is in flight, its
   claimed prefix is retained ahead of the newest bounded tail.
@@ -42,7 +43,9 @@
 - Successful prefix archive uses exact raw-byte matching so events appended
   during a digest remain pending. Claim recovery reads exactly the recorded
   byte/event prefix rather than decoding the whole pending snapshot, and a
-  changed prefix returns `pendingContentChanged` for fail-closed recovery.
+  changed prefix returns `pendingContentChanged` for fail-closed recovery. A
+  bounded legacy oversized-line archive also verifies the expected prefix
+  before reading at most the pending-file limit.
 
 ## Tests
 

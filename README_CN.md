@@ -279,7 +279,8 @@ Application Support 中，不会直接注入 provider 请求。Canonical JSON �
 中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或
 CORRECTION 数据。
 已提交的 Context Digest 事件会先以 JSONL 保存在本机
-`~/.knowtype/events/`。文本字段最多保留 4 KiB UTF-8；pending 最多保留
+`~/.knowtype/events/`。事件文本字段最多保留 2048 个 Unicode scalar；raw input
+或 locked prefix 超过 4 KiB UTF-8 时跳过 AI 且不做语义截断。pending 最多保留
 500 条或 1 MiB，溢出后丢弃最旧的派生事件。每次 provider digest 最多 claim
 最旧的 50 条或 48 KiB，且成功提交后 600 秒 minimumInterval 不能被 batch
 阈值绕过。`ENV.md` 最多有一个 managed generated marker pair 和一个 canonical

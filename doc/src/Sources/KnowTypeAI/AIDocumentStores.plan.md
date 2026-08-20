@@ -20,7 +20,10 @@ Maintains bounded, canonical local AI context documents under `~/.knowtype`.
   Invalid candidates do not write ENV or claim/archive events.
 - Scan input is capped at 1 MiB. Generated and User Notes content are each
   capped at 4 KiB, and the ENV projection is capped at 8 KiB. Backup and claim
-  files are not included in provider context.
+  files are not included in provider context. Digest schedule state and an
+  archive receipt contain only timestamps, counts, and hashes; all are bounded,
+  atomically written with mode 0600, and used to recover cleanup without a
+  second provider call.
 - `CorrectionInstructionStore` owns `CORRECTION.md` creation and loading.
 - `AIUserDirectory` also exposes the readable accepted-learning mirror path
   `~/.knowtype/ACCEPTED_AI_LEARNING.md`; canonical accepted-learning JSON files

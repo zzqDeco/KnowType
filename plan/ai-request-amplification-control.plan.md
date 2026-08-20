@@ -23,16 +23,22 @@ of already-started recommendations, and independent provider failure budgets.
   fingerprints are computed from the budgeted payload.
 - One hashed `ProviderRequestGate` is shared by recommendation and digest.
   Each identity has one in-flight request, generation fencing, bounded 429 or
-  exponential cooldown, and privacy-safe state.
+  60-second exponential failure cooldown, and bounded 0600 privacy-safe state
+  under the default `~/.knowtype` directory; local budget and cancellation do
+  not create provider failure state.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch.
 - Digest uses one actor-owned deadline task. A successful commit starts the
   600-second interval; batch, cooldown, and interval wakeups cannot bypass it.
-  Each claim is one precise prefix of at most 50 events and 48 KiB.
+  A below-batch first pending event gets a forced deadline, and gate busy uses
+  an availability waiter rather than polling. Each claim is one precise prefix
+  of at most 50 events and 48 KiB.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
-  avoids repeating the provider call.
+  avoids repeating the provider call. A durable archive receipt and timestamp /
+  count schedule state complete cleanup recovery across runtime or process
+  rebuild.
 
 ## Verification Boundary
 

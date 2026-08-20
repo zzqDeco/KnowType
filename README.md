@@ -327,9 +327,10 @@ data. Clear removes accepted-learning/feedback history, summary, and mirror
 files and scrubs accepted-AI context from the lexical profile without deleting
 Rime, provider, Keychain, ENV, or CORRECTION data.
 Committed Context Digest events are queued locally as JSONL under
-`~/.knowtype/events/`. Text fields are limited to 4 KiB of UTF-8, and pending
-data keeps at most 500 events or 1 MiB by dropping the oldest derived events
-after overflow. Each provider digest claims at most the oldest 50 events or
+`~/.knowtype/events/`. Event text fields are limited to 2,048 Unicode scalars;
+raw input and locked prefixes over 4 KiB UTF-8 skip an AI request without
+semantic truncation. Pending data keeps at most 500 events or 1 MiB by dropping
+the oldest derived events after overflow. Each provider digest claims at most the oldest 50 events or
 48 KiB and cannot bypass the 600-second interval after a successful commit.
 `ENV.md` has one managed generated pair and one canonical User Notes section;
 invalid digest candidates are rejected before any write or archive claim.

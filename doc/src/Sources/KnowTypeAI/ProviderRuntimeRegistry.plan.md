@@ -34,9 +34,13 @@
   stale drop.
 - Diagnostics contain revision, generation, configured state, and only the
   first 12 hexadecimal characters of the SHA-256 fingerprint.
-- Gate persistence, when present, contains only the full privacy-safe identity
-  hash, cooldown deadline, and failure class; it never stores endpoint, model,
-  prompt, input, output, or credentials.
+- The shared gate persists cooldown state by default under `~/.knowtype` using
+  bounded atomic mode-0600 storage. It contains only the privacy-safe identity
+  hash, cooldown deadline, failure class, and a bounded failure count; it never
+  stores in-flight state, endpoint, model, prompt, input, output, or credentials.
+  Expired, successful, invalidated, and superseded-generation entries are
+  removed; malformed state is safely ignored. Test-created gates are
+  in-memory unless a temporary persistence URL is explicitly supplied.
 
 ## Tests
 

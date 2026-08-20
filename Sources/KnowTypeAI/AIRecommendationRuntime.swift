@@ -77,9 +77,11 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
                 await runtime.recommendation(for: request)
             }
         } catch ProviderRuntimeRegistryError.staleGeneration {
-            self.runtime = nil
-            runtimeGeneration = nil
-            providerAvailability.update(.unknown)
+            if self.runtime === runtime, runtimeGeneration == lease.generation {
+                self.runtime = nil
+                runtimeGeneration = nil
+                providerAvailability.update(.unknown)
+            }
             return .stale
         } catch {
             return .idle

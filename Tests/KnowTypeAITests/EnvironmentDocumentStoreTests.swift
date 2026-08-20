@@ -83,6 +83,46 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         XCTAssertEqual(second, first)
     }
 
+    func testMarkerlessUserNotesHeadingKeepsTextBeforeAndAfterExactlyOnce() throws {
+        let directory = makeDirectory()
+        let url = directory.appendingPathComponent("ENV.md")
+        let markerless = "before heading\n## User Notes\ninside heading\nafter heading\n"
+        try Data(markerless.utf8).write(to: url)
+        let store = EnvironmentDocumentStore(fileURL: url)
+
+        let first = try store.loadSnapshot()
+        XCTAssertTrue(first.content.contains("before heading"))
+        XCTAssertTrue(first.content.contains("inside heading"))
+        XCTAssertTrue(first.content.contains("after heading"))
+        XCTAssertEqual(first.content.components(separatedBy: EnvironmentDocumentStore.userNotesTitle).count, 2)
+        XCTAssertEqual(try store.loadSnapshot(), first)
+    }
+
+    func testMarkerfulPairWithoutNotesExtractsOutsideTextWithoutLoss() throws {
+        let directory = makeDirectory()
+        let url = directory.appendingPathComponent("ENV.md")
+        let content = """
+        # KnowType Environment
+
+        user text before generated
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - stable generated value
+        <!-- KNOWTYPE:END GENERATED -->
+
+        user text after generated
+        """
+        try Data(content.utf8).write(to: url)
+        let store = EnvironmentDocumentStore(fileURL: url)
+
+        let first = try store.loadSnapshot()
+        XCTAssertTrue(first.content.contains("user text before generated"))
+        XCTAssertTrue(first.content.contains("user text after generated"))
+        XCTAssertEqual(first.content.components(separatedBy: EnvironmentDocumentStore.userNotesTitle).count, 2)
+        XCTAssertEqual(try store.loadSnapshot(), first)
+    }
+
     func testAmbiguousUserNotesFailsClosedAndLeavesBackup() throws {
         let directory = makeDirectory()
         let url = directory.appendingPathComponent("ENV.md")

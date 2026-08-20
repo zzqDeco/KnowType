@@ -141,7 +141,8 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   same-generation failure cooldown returns before reading pending JSONL. A
   successful digest also owns a 600-second minimum interval that the batch
   threshold cannot bypass; a single actor-owned deadline task wakes batch,
-  interval, and provider-cooldown work.
+  interval, provider-cooldown, and shared-gate availability work. The first
+  below-batch pending event receives its own forced deadline.
 - Context Digest success archives only its claimed prefix and then best-effort
   retains processed history for at most 7 days, 100 files, and 10 MiB. Existing
   history is not pruned during startup or installation. Protected-only eligible
@@ -150,7 +151,8 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   managed marker pair plus one canonical User Notes section. It treats
   markerless files as user content, backs up abnormal files by content hash with
   mode 0600, rejects invalid digest candidates before writes, and exposes a
-  privacy-safe digest claim for recovery.
+  privacy-safe digest claim for recovery, plus bounded 0600 schedule state and
+  archive receipt metadata containing only timestamps, counts, and hashes.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.

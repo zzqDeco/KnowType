@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum TypingEventStoreError: Error, Equatable {
@@ -446,7 +447,7 @@ public final class TypingEventStore: @unchecked Sendable {
             if snapshot.events.isEmpty,
                snapshot.claimedEventCount > 0,
                snapshot.rawData.count >= retentionPolicy.maximumDigestByteCount {
-                _ = try archiveOversizedDigestLineSynchronously()
+                _ = try archiveOversizedDigestLineSynchronously(expectedRawData: snapshot.rawData)
                 return
             }
             _ = try archivePendingEventsSynchronously(
@@ -461,6 +462,17 @@ public final class TypingEventStore: @unchecked Sendable {
         _ = withTypingEventFileLock {
             typingEventInventoryCache.removeValue(forKey: normalizedPath(for: eventsFileURL))
         }
+    }
+
+    func hasProcessedArchive(prefixSHA256: String, byteCount: Int) -> Bool {
+        guard prefixSHA256.count == 64,
+              prefixSHA256.allSatisfy(\.isHexDigit),
+              byteCount >= 0 else { return false }
+        let url = processedDirectoryURL.appendingPathComponent("typing-events-\(prefixSHA256).jsonl")
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+              values.isRegularFile != false,
+              values.fileSize == byteCount else { return false }
+        return true
     }
 
     private func boundedText(_ text: String?) -> (text: String?, removedScalarCount: Int) {
@@ -805,8 +817,15 @@ public final class TypingEventStore: @unchecked Sendable {
               fileManager.fileExists(atPath: eventsFileURL.path) else {
             return .empty
         }
-        let currentData = try Data(contentsOf: eventsFileURL)
-        guard currentData.starts(with: rawData) else {
+        let handle = try FileHandle(forReadingFrom: eventsFileURL)
+        defer { try? handle.close() }
+        let currentData = try readBounded(
+            from: handle,
+            offset: 0,
+            byteCount: retentionPolicy.maximumPendingByteCount + 1
+        )
+        guard currentData.count <= retentionPolicy.maximumPendingByteCount,
+              currentData.starts(with: rawData) else {
             throw TypingEventStoreError.pendingContentChanged
         }
         if testProbe?.shouldFailPendingArchive() == true {
@@ -814,8 +833,7 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         try beforeArchive()
         try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
-        let formatter = ISO8601DateFormatter()
-        let filename = "typing-events-\(formatter.string(from: now()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
+        let filename = archiveFilename(for: rawData)
         let destination = processedDirectoryURL.appendingPathComponent(filename)
         try rawData.write(to: destination, options: .atomic)
 
@@ -830,16 +848,24 @@ public final class TypingEventStore: @unchecked Sendable {
         return pruneProcessedArchives ? pruneProcessedArchivesSynchronously() : .empty
     }
 
-    private func archiveOversizedDigestLineSynchronously() throws -> TypingEventArchiveResult {
+    private func archiveOversizedDigestLineSynchronously(expectedRawData: Data) throws -> TypingEventArchiveResult {
         guard fileManager.fileExists(atPath: eventsFileURL.path) else { return .empty }
-        let currentData = try Data(contentsOf: eventsFileURL)
+        let handle = try FileHandle(forReadingFrom: eventsFileURL)
+        defer { try? handle.close() }
+        let currentData = try readBounded(
+            from: handle,
+            offset: 0,
+            byteCount: retentionPolicy.maximumPendingByteCount + 1
+        )
+        guard currentData.count <= retentionPolicy.maximumPendingByteCount,
+              currentData.starts(with: expectedRawData) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
         guard !currentData.isEmpty else { return .empty }
         let lineEnd = currentData.firstIndex(of: 0x0A).map { currentData.index(after: $0) } ?? currentData.endIndex
         let line = Data(currentData[..<lineEnd])
         try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
-        let formatter = ISO8601DateFormatter()
-        let filename = "typing-events-\(formatter.string(from: now()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
-        try line.write(to: processedDirectoryURL.appendingPathComponent(filename), options: .atomic)
+        try line.write(to: processedDirectoryURL.appendingPathComponent(archiveFilename(for: line)), options: .atomic)
         let remainingData = Data(currentData[lineEnd...])
         if remainingData.isEmpty {
             try fileManager.removeItem(at: eventsFileURL)
@@ -849,6 +875,11 @@ public final class TypingEventStore: @unchecked Sendable {
         testProbe?.recordAtomicRewrite()
         cacheInventory(inventory(for: remainingData))
         return .empty
+    }
+
+    private func archiveFilename(for data: Data) -> String {
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return "typing-events-\(digest).jsonl"
     }
 
     private func pruneProcessedArchivesSynchronously() -> TypingEventArchiveResult {

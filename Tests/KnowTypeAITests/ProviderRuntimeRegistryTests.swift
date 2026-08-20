@@ -178,6 +178,41 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertEqual(current.readyDisplayText, "B result")
     }
 
+    func testStaleOldRuntimeCannotClearNewRuntimeInstalledDuringActorReentry() async throws {
+        let providerA = SuspendedGenerationLLMProvider(name: "provider-a")
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B result")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: providerA
+        )
+        let runtime = LazyDefaultAIRecommendationRuntime(
+            providerRegistry: makeRegistry(source: source),
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceMilliseconds: 0
+        )
+        let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
+
+        let oldRequest = Task { await runtime.recommendation(for: request) }
+        try await waitUntil { await providerA.requestCount == 1 }
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+
+        let newState = await runtime.recommendation(for: request)
+        XCTAssertEqual(newState.readyDisplayText, "B result")
+        await providerA.finish(responseText: "A stale result")
+        let oldState = await oldRequest.value
+        XCTAssertEqual(oldState, .stale)
+
+        let cachedState = await runtime.recommendation(for: request)
+        XCTAssertEqual(cachedState.readyDisplayText, "B result")
+        let providerBCount = await providerB.requestCount
+        XCTAssertEqual(providerBCount, 1)
+    }
+
     func testMissedNotificationRevisionChangeDropsSuspendedWork() async throws {
         let providerA = SuspendedGenerationLLMProvider(name: "provider-a")
         let providerB = NamedLLMProvider(name: "provider-b", responseText: "B result")
@@ -367,6 +402,73 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    func testRequestGateDoesNotCooldownLocalBudgetFailure() async throws {
+        let now = Date()
+        let gate = ProviderRequestGate(now: { now })
+        let budget = ProviderRequestBudgetError(
+            task: .continuation,
+            component: "raw_input",
+            byteCount: 4_097,
+            limit: 4 * 1_024
+        )
+
+        do {
+            _ = try await gate.execute(providerIdentity: "budget-provider", generation: 0) {
+                throw budget
+            } as LLMResponse
+            XCTFail("expected local budget rejection")
+        } catch let error as ProviderRequestBudgetError {
+            XCTAssertEqual(error, budget)
+        }
+        await gate.recordFailure(
+            providerIdentity: "budget-provider",
+            generation: 0,
+            failure: budget
+        )
+        let cooldown = await gate.cooldownDeadline(providerIdentity: "budget-provider", generation: 0)
+        XCTAssertNil(cooldown)
+        _ = try await gate.execute(providerIdentity: "budget-provider", generation: 0) {
+            LLMResponse(candidates: [])
+        } as LLMResponse
+    }
+
+    func testPersistentGateStateIsHashedBoundedAndClearsOnInvalidate() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let now = Date()
+        let identity = "provider-with-secret-and-model"
+        let gate = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 0) {
+                throw ProviderRateLimitError(retryAfterSeconds: 30, bodyByteCount: 12)
+            } as LLMResponse
+            XCTFail("expected rate limit")
+        } catch is ProviderRateLimitError {
+            // Expected.
+        }
+
+        let persisted = try Data(contentsOf: stateURL)
+        XCTAssertFalse(String(decoding: persisted, as: UTF8.self).contains(identity))
+        let permissions = try FileManager.default.attributesOfItem(atPath: stateURL.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue ?? 0, 0o600)
+
+        let reloaded = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+        let reloadedDeadline = await reloaded.cooldownDeadline(providerIdentity: identity, generation: 0)
+        XCTAssertNotNil(reloadedDeadline)
+        await reloaded.invalidate(providerIdentity: identity, generation: 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
+
+        try Data("corrupt".utf8).write(to: stateURL)
+        _ = try await ProviderRequestGate(now: { now }, persistenceURL: stateURL).execute(
+            providerIdentity: identity,
+            generation: 0
+        ) {
+            LLMResponse(candidates: [])
+        } as LLMResponse
     }
 
     func testRequestGateSerializesSameIdentityButAllowsDifferentIdentity() async throws {
@@ -566,14 +668,16 @@ func makeRegistry(
     source: ProviderRuntimeTestSource,
     signal: TestProviderRevisionSignal = TestProviderRevisionSignal(),
     capabilityReset: @escaping ProviderRuntimeRegistry.CapabilityReset = {},
-    diagnosticSink: any ProviderRuntimeDiagnosticSink = NoopProviderRuntimeDiagnosticSink()
+    diagnosticSink: any ProviderRuntimeDiagnosticSink = NoopProviderRuntimeDiagnosticSink(),
+    requestGate: ProviderRequestGate = ProviderRequestGate()
 ) -> ProviderRuntimeRegistry {
     ProviderRuntimeRegistry(
         revisionLoader: { source.loadRevision() },
         runtimeLoader: { source.loadRuntime() },
         revisionUpdates: { signal.stream },
         capabilityReset: capabilityReset,
-        diagnosticSink: diagnosticSink
+        diagnosticSink: diagnosticSink,
+        requestGate: requestGate
     )
 }
 
