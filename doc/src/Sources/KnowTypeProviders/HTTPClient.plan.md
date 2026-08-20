@@ -22,7 +22,10 @@ tests.
   absent, capped at 15 minutes. This provider-failure cooldown is distinct
   from Context Digest's 600-second successful-commit interval.
 - Adapters validate the logical request before transport and the serialized HTTP
-  body after encoding. Local budget failures are distinct from provider failures.
+  body after encoding. OpenAI Chat and Responses run aggregate logical-payload
+  preflight before model discovery, so local over-limit requests perform neither
+  discovery nor completion HTTP. Local budget failures are distinct from
+  provider failures.
 
 ## Tests
 

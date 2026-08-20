@@ -645,8 +645,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             onStateChange: { publishedStates.append($0) }
         )
         XCTAssertNotEqual(firstRequestID, pendingRequestID(second))
-        let secondStarted = await waitUntilAsync { await provider.requests.count == 2 }
-        XCTAssertTrue(secondStarted)
+        let requestCountBeforeFirstCompletion = await provider.requests.count
+        XCTAssertEqual(requestCountBeforeFirstCompletion, 1)
 
         await provider.finish(rawInput: "abc", state: .stale)
         let oldStaleDropped = await waitUntil {
@@ -659,6 +659,9 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(oldStaleDropped)
         XCTAssertTrue(publishedStates.isEmpty)
 
+        let secondStarted = await waitUntilAsync { await provider.requests.count == 2 }
+        XCTAssertTrue(secondStarted)
+
         await provider.finish(rawInput: "abcd", state: readyState("新结果"))
         let newReadyApplied = await waitUntil {
             publishedStates.contains { state in
@@ -669,6 +672,49 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             }
         }
         XCTAssertTrue(newReadyApplied)
+        XCTAssertFalse(publishedStates.contains(.idle))
+    }
+
+    @MainActor
+    func testOlderStaleCompletionDoesNotOverwriteNewSkipStateWithIdle() async {
+        let provider = ControlledRuntimeAIRecommendationProvider()
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let first = runtime.schedule(
+            context: context(rawInput: "abc", rawRevision: 1),
+            currentSnapshot: { snapshot(rawInput: "abc", rawRevision: 1) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let firstRequestID = pendingRequestID(first)
+        let firstStarted = await waitUntilAsync { await provider.requests.count == 1 }
+        XCTAssertTrue(firstStarted)
+
+        let skipped = runtime.schedule(
+            context: context(rawInput: "ab", rawRevision: 2),
+            currentSnapshot: { snapshot(rawInput: "ab", rawRevision: 2) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertEqual(skipped, .ineligible(reason: "AI 无推荐"))
+
+        await provider.finish(rawInput: "abc", state: .stale)
+        let staleDropped = await waitUntil {
+            diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped
+                    && $0.requestID == firstRequestID
+                    && $0.reason == "provider_generation_changed"
+            }
+        }
+
+        XCTAssertTrue(staleDropped)
+        XCTAssertTrue(publishedStates.isEmpty)
         XCTAssertFalse(publishedStates.contains(.idle))
     }
 

@@ -33,6 +33,11 @@ public actor LazyDefaultAIContextMemoryRuntime: AIContextEventRecording {
 }
 
 public actor AIContextMemoryRuntime: AIContextEventRecording {
+    private struct GateWaitKey: Equatable {
+        var identity: String
+        var generation: UInt64
+    }
+
     private let provider: (any LLMProvider)?
     private let providerRegistry: ProviderRuntimeRegistry?
     private let eventStore: TypingEventStore
@@ -42,6 +47,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private let diagnosticSink: @Sendable ([InputDebugDiagnostics.Field]) -> Void
     private let requestGate: ProviderRequestGate
     private let nowProvider: @Sendable () -> Date
+    private let hardTimeoutNanoseconds: UInt64
     private var providerIdentity = "context-digest"
     private var lastDigestAt: Date?
     private var pendingSince: Date?
@@ -53,6 +59,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var activeDigestClaimRawData: Data?
     private var providerGeneration: UInt64?
     private var deadlineTask: Task<Void, Never>?
+    private var gateWaitKey: GateWaitKey?
 
     public init(
         provider: (any LLMProvider)?,
@@ -72,6 +79,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.minimumInterval = max(1, minimumInterval)
         self.requestGate = requestGate
         self.nowProvider = nowProvider
+        self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
         self.providerIdentity = providerIdentity ?? provider?.providerName ?? "context-digest"
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
@@ -82,6 +90,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         environmentStore: EnvironmentDocumentStore,
         batchSize: Int,
         minimumInterval: TimeInterval,
+        hardTimeoutMilliseconds: Int = AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds,
         diagnosticSink: @escaping @Sendable ([InputDebugDiagnostics.Field]) -> Void,
         requestGate: ProviderRequestGate = .shared,
         nowProvider: @escaping @Sendable () -> Date = Date.init
@@ -94,6 +103,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.minimumInterval = max(1, minimumInterval)
         self.requestGate = requestGate
         self.nowProvider = nowProvider
+        self.hardTimeoutNanoseconds = UInt64(max(1, hardTimeoutMilliseconds)) * 1_000_000
         self.providerIdentity = provider?.providerName ?? "context-digest"
         self.diagnosticSink = diagnosticSink
     }
@@ -114,6 +124,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.minimumInterval = max(1, minimumInterval)
         self.requestGate = providerRegistry.requestGate
         self.nowProvider = nowProvider
+        self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
 
@@ -144,7 +155,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func processIfNeeded(now: Date, dispatchLease: ProviderRuntimeLease?) async {
-        guard !digestInFlight, provider != nil || providerRegistry != nil else { return }
+        guard gateWaitKey == nil,
+              !digestInFlight,
+              provider != nil || providerRegistry != nil else { return }
         digestInFlight = true
         defer {
             activeDigestClaimRawData = nil
@@ -238,7 +251,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         do { snapshot = try eventStore.pendingDigestSnapshot() } catch { return }
         guard !snapshot.rawData.isEmpty else { return }
         guard snapshot.claimedEventCount > 0, !snapshot.events.isEmpty else {
-            do { try eventStore.archivePendingEvents(matching: snapshot) } catch { return }
+            do {
+                try eventStore.archivePendingEvents(matching: snapshot)
+                try scheduleAfterLocalArchive(now: now)
+            } catch { return }
             return
         }
         if snapshot.events.allSatisfy(TypingEventStore.isProtectedOnlyEvent) {
@@ -249,12 +265,17 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         }
         guard !snapshot.requestContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            try? eventStore.archivePendingEvents(matching: snapshot)
+            do {
+                try eventStore.archivePendingEvents(matching: snapshot)
+                try scheduleAfterLocalArchive(now: now)
+            } catch { return }
             return
         }
 
         var providerGateStarted = false
         var providerGateCompleted = false
+        let requestIdentity = providerIdentity
+        let requestGeneration = providerGeneration ?? 0
         do {
             let currentEnvironment = try environmentStore.loadSnapshot()
             let request = LLMRequest(
@@ -267,35 +288,29 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             )
             try ProviderRequestBudget.validate(request)
             activeDigestClaimRawData = snapshot.rawData
-            let identity = providerIdentity
-            let generation = providerGeneration ?? 0
+            let timeout = hardTimeoutNanoseconds
+            let registry = providerRegistry
             providerGateStarted = true
-            let gated: (LLMResponse, String) = try await requestGate.execute(
-                providerIdentity: identity,
-                generation: generation
-            ) {
-                let response: LLMResponse
-                if let providerRegistry, let lease {
-                    response = try await providerRegistry.perform(using: lease) { provider in
-                        try await withTimeout(
-                            nanoseconds: UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
-                        ) {
+            let gated: (LLMResponse, String) = try await withTimeout(nanoseconds: timeout) {
+                try await requestGate.execute(
+                    providerIdentity: requestIdentity,
+                    generation: requestGeneration
+                ) {
+                    let response: LLMResponse
+                    if let registry, let lease {
+                        response = try await registry.perform(using: lease) { provider in
                             try await provider.complete(request)
                         }
+                    } else {
+                        response = try await activeProvider.complete(request)
                     }
-                } else {
-                    response = try await withTimeout(
-                        nanoseconds: UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
-                    ) {
-                        try await activeProvider.complete(request)
+                    guard response.candidates.count == 1,
+                          let candidate = response.candidates.first?.text else {
+                        throw EnvironmentDocumentError.invalidDigestCandidate
                     }
+                    try EnvironmentDocumentStore.validateGeneratedMarkdown(candidate)
+                    return (response, candidate)
                 }
-                guard response.candidates.count == 1,
-                      let candidate = response.candidates.first?.text else {
-                    throw EnvironmentDocumentError.invalidDigestCandidate
-                }
-                try EnvironmentDocumentStore.validateGeneratedMarkdown(candidate)
-                return (response, candidate)
             }
             _ = gated.0
             providerGateCompleted = true
@@ -307,7 +322,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 generatedSHA256: AIDocumentSnapshot.hash(
                     generated.trimmingCharacters(in: .whitespacesAndNewlines)
                 ),
-                providerGeneration: generation
+                providerGeneration: requestGeneration
             )
             try environmentStore.saveDigestClaim(claim)
             let persist: @Sendable () throws -> TypingEventArchiveResult = {
@@ -364,18 +379,25 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         } catch EnvironmentDocumentError.invalidDigestCandidate {
             markDigestFailure(at: now)
+        } catch let error as TimeoutError {
+            markDigestFailure(at: now)
+            await requestGate.recordFailure(
+                providerIdentity: requestIdentity,
+                generation: requestGeneration,
+                failure: error
+            )
         } catch {
             if error is CancellationError { return }
             markDigestFailure(at: now)
             if providerGateCompleted {
                 await requestGate.recordLocalCommitFailure(
-                    providerIdentity: providerIdentity,
-                    generation: providerGeneration ?? 0
+                    providerIdentity: requestIdentity,
+                    generation: requestGeneration
                 )
             } else if !providerGateStarted {
                 await requestGate.recordLocalCommitFailure(
-                    providerIdentity: providerIdentity,
-                    generation: providerGeneration ?? 0
+                    providerIdentity: requestIdentity,
+                    generation: requestGeneration
                 )
             }
         }
@@ -406,8 +428,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 return .none
             }
 
-            if let receipt = try environmentStore.loadDigestArchiveReceipt(),
-               receiptMatches(receipt, claim: claim) {
+            switch eventStore.processedArchiveValidation(
+                prefixSHA256: claim.claimedPrefixSHA256,
+                byteCount: claim.claimedPrefixByteCount
+            ) {
+            case .valid:
                 if let snapshot = try? eventStore.pendingDigestSnapshot(
                     prefixByteCount: claim.claimedPrefixByteCount,
                     eventCount: claim.claimedEventCount
@@ -419,6 +444,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 try? environmentStore.clearDigestArchiveReceipt()
                 recordDigestSuccess(at: now)
                 return .recovered
+            case .invalid:
+                return .blocked
+            case .missing:
+                break
             }
 
             let snapshot = try eventStore.pendingDigestSnapshot(
@@ -454,32 +483,19 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
     }
 
-    private func receiptMatches(
-        _ receipt: EnvironmentDigestArchiveReceipt,
-        claim: EnvironmentDigestClaim
-    ) -> Bool {
-        receipt.claimedPrefixSHA256 == claim.claimedPrefixSHA256 &&
-            receipt.claimedPrefixByteCount == claim.claimedPrefixByteCount &&
-            receipt.claimedEventCount == claim.claimedEventCount &&
-            receipt.generatedSHA256 == claim.generatedSHA256 &&
-            receipt.archivedByteCount == claim.claimedPrefixByteCount &&
-            eventStore.hasProcessedArchive(
-                prefixSHA256: claim.claimedPrefixSHA256,
-                byteCount: claim.claimedPrefixByteCount
-            )
-    }
-
     private func applyProviderLease(_ lease: ProviderRuntimeLease) {
         let changed = providerGeneration != lease.generation || providerIdentity != lease.fingerprint
         providerGeneration = lease.generation
         providerIdentity = lease.fingerprint
         if changed {
+            cancelGateAvailabilityWait()
             lastDigestFailureAt = nil
             deferredDiagnosticFailureAt = nil
         }
     }
 
     private func invalidateProviderRuntimeState() {
+        cancelGateAvailabilityWait()
         lastDigestFailureAt = nil
         deferredDiagnosticFailureAt = nil
         providerGeneration = nil
@@ -519,6 +535,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func scheduleDeadline(at date: Date) {
+        gateWaitKey = nil
         deadlineTask?.cancel()
         let delay = max(0, date.timeIntervalSince(nowProvider()))
         deadlineTask = Task { [weak self] in
@@ -529,20 +546,68 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func scheduleGateAvailabilityWake() {
+        let key = GateWaitKey(
+            identity: providerIdentity,
+            generation: providerGeneration ?? 0
+        )
+        if gateWaitKey == key, deadlineTask != nil { return }
         deadlineTask?.cancel()
+        gateWaitKey = key
         let gate = requestGate
-        let identity = providerIdentity
-        let generation = providerGeneration ?? 0
         deadlineTask = Task { [weak self] in
-            await gate.waitForAvailability(providerIdentity: identity, generation: generation)
+            await gate.waitForAvailability(
+                providerIdentity: key.identity,
+                generation: key.generation
+            )
             guard !Task.isCancelled, let self else { return }
-            await self.processIfNeeded(now: self.nowProvider())
+            await self.gateAvailabilityDidWake(key)
         }
     }
 
     private func cancelDeadline() {
+        gateWaitKey = nil
         deadlineTask?.cancel()
         deadlineTask = nil
+    }
+
+    private func cancelGateAvailabilityWait() {
+        guard gateWaitKey != nil else { return }
+        gateWaitKey = nil
+        deadlineTask?.cancel()
+        deadlineTask = nil
+    }
+
+    private func gateAvailabilityDidWake(_ key: GateWaitKey) async {
+        guard gateWaitKey == key else { return }
+        gateWaitKey = nil
+        deadlineTask = nil
+        await processIfNeeded(now: nowProvider())
+    }
+
+    private func scheduleAfterLocalArchive(now: Date) throws {
+        let inventory = try eventStore.inventory()
+        guard inventory.eventCount > 0 else {
+            pendingSince = nil
+            nextEligibleAt = nil
+            try persistScheduleState()
+            cancelDeadline()
+            return
+        }
+
+        let deadline: Date
+        if let lastDigestAt {
+            let eligibleAt = lastDigestAt.addingTimeInterval(minimumInterval)
+            nextEligibleAt = eligibleAt
+            deadline = max(now, eligibleAt)
+        } else if inventory.eventCount >= batchSize {
+            pendingSince = pendingSince ?? now
+            deadline = now
+        } else {
+            pendingSince = pendingSince ?? now
+            deadline = pendingSince!.addingTimeInterval(minimumInterval)
+        }
+        try persistScheduleState()
+        scheduleDeadline(at: deadline)
     }
 
     private func loadScheduleStateIfNeeded() {

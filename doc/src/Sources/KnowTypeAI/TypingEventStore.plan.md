@@ -23,8 +23,12 @@
 - Inventory entries are shared by normalized file path and are rescanned only
   when file metadata no longer matches the cached snapshot. If an existing file
   already exceeds 1 MiB, recovery first reads only a bounded suffix and rewrites
-  the retained tail before inventory decoding; oversized legacy records are
-  discarded rather than loaded as one unbounded value.
+  the retained tail before inventory decoding; an oversized legacy line inside
+  the 1 MiB hard limit is retained for bounded local prefix archive rather than
+  provider decoding. Inventory, full-snapshot,
+  prefix archive, and legacy archive safety checks use file-handle reads capped
+  at the pending hard limit plus one detection byte rather than metadata or
+  whole-file allocation.
 - Inventory counts undecodable lines toward backlog size and prefix claims but
   excludes them from protected/unprotected event classification and provider
   request content. A protected-only backlog therefore remains local even when a
@@ -45,7 +49,9 @@
   byte/event prefix rather than decoding the whole pending snapshot, and a
   changed prefix returns `pendingContentChanged` for fail-closed recovery. A
   bounded legacy oversized-line archive also verifies the expected prefix
-  before reading at most the pending-file limit.
+  before reading at most the pending-file limit. Deterministic processed-archive
+  recovery bounded-reads the expected byte count plus one and verifies SHA-256;
+  filename or metadata size alone is never completion evidence.
 
 ## Tests
 

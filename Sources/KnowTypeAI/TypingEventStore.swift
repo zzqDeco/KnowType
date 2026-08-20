@@ -71,6 +71,12 @@ struct TypingEventArchiveResult: Sendable, Equatable {
     static let empty = TypingEventArchiveResult(deletedFileCount: 0, deletedByteCount: 0)
 }
 
+enum ProcessedArchiveValidation: Sendable, Equatable {
+    case missing
+    case valid
+    case invalid
+}
+
 final class TypingEventStoreTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var inventoryScans = 0
@@ -465,14 +471,31 @@ public final class TypingEventStore: @unchecked Sendable {
     }
 
     func hasProcessedArchive(prefixSHA256: String, byteCount: Int) -> Bool {
+        processedArchiveValidation(prefixSHA256: prefixSHA256, byteCount: byteCount) == .valid
+    }
+
+    func processedArchiveValidation(
+        prefixSHA256: String,
+        byteCount: Int
+    ) -> ProcessedArchiveValidation {
         guard prefixSHA256.count == 64,
               prefixSHA256.allSatisfy(\.isHexDigit),
-              byteCount >= 0 else { return false }
+              byteCount >= 0,
+              byteCount <= retentionPolicy.maximumPendingByteCount else { return .invalid }
         let url = processedDirectoryURL.appendingPathComponent("typing-events-\(prefixSHA256).jsonl")
-        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
-              values.isRegularFile != false,
-              values.fileSize == byteCount else { return false }
-        return true
+        guard fileManager.fileExists(atPath: url.path) else { return .missing }
+        do {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile != false else { return .invalid }
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try readBounded(from: handle, offset: 0, byteCount: byteCount + 1)
+            guard data.count == byteCount else { return .invalid }
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            return digest == prefixSHA256.lowercased() ? .valid : .invalid
+        } catch {
+            return .invalid
+        }
     }
 
     private func boundedText(_ text: String?) -> (text: String?, removedScalarCount: Int) {
@@ -496,12 +519,15 @@ public final class TypingEventStore: @unchecked Sendable {
         preservingClaimedPrefix claimedPrefix: Data? = nil
     ) throws -> TypingEventInventory {
         let key = Self.normalizedPath(for: eventsFileURL)
-        let metadata = fileMetadata()
-        if let cached = typingEventInventoryCache[key], cached.metadata == metadata {
-            return cached.inventory
+        guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+            typingEventInventoryCache[key] = TypingEventInventoryCacheEntry(
+                metadata: nil,
+                inventory: .empty
+            )
+            testProbe?.recordInventoryScan()
+            return .empty
         }
-        if let metadata,
-           metadata.byteCount > retentionPolicy.maximumPendingByteCount {
+        if try pendingFileExceedsHardLimit() {
             let compaction = try compactPendingSynchronously(
                 preservingClaimedPrefix: claimedPrefix,
                 originalEventCount: nil
@@ -509,18 +535,23 @@ public final class TypingEventStore: @unchecked Sendable {
             testProbe?.recordInventoryScan()
             return compaction.inventory
         }
-        let data: Data
-        if fileManager.fileExists(atPath: eventsFileURL.path) {
-            data = try Data(contentsOf: eventsFileURL)
-            testProbe?.recordBufferedRead(byteCount: data.count)
-        } else {
-            data = Data()
+        let metadata = fileMetadata()
+        if let cached = typingEventInventoryCache[key], cached.metadata == metadata {
+            return cached.inventory
+        }
+        let data = try readPendingFileBounded()
+        if data.count > retentionPolicy.maximumPendingByteCount {
+            let compaction = try compactPendingSynchronously(
+                preservingClaimedPrefix: claimedPrefix,
+                originalEventCount: nil
+            )
+            testProbe?.recordInventoryScan()
+            return compaction.inventory
         }
         let lines = Self.lines(in: data)
         let inventory = inventory(for: lines, byteCount: data.count)
         if inventory.eventCount > retentionPolicy.maximumPendingEventCount
-            || inventory.byteCount > retentionPolicy.maximumPendingByteCount
-            || lines.contains(where: { $0.count > retentionPolicy.maximumDigestByteCount }) {
+            || inventory.byteCount > retentionPolicy.maximumPendingByteCount {
             let compaction = try compactPendingSynchronously(
                 preservingClaimedPrefix: claimedPrefix,
                 originalEventCount: inventory.eventCount
@@ -551,9 +582,13 @@ public final class TypingEventStore: @unchecked Sendable {
         droppedEventCount: Int,
         droppedByteCount: Int
     ) {
-        let originalByteCount = fileMetadata()?.byteCount ?? 0
         let handle = try FileHandle(forReadingFrom: eventsFileURL)
         defer { try? handle.close() }
+        let fileLength = try handle.seekToEnd()
+        guard fileLength <= UInt64(Int.max) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        let originalByteCount = Int(fileLength)
         let retainedPrefix: Data
         if let claimedPrefix,
            !claimedPrefix.isEmpty,
@@ -662,7 +697,38 @@ public final class TypingEventStore: @unchecked Sendable {
                 claimedEventCount: 0
             )
         }
-        return decodeSnapshot(try Data(contentsOf: eventsFileURL))
+        var data = try readPendingFileBounded()
+        if data.count > retentionPolicy.maximumPendingByteCount {
+            _ = try compactPendingSynchronously(
+                preservingClaimedPrefix: nil,
+                originalEventCount: nil
+            )
+            data = try readPendingFileBounded()
+        }
+        guard data.count <= retentionPolicy.maximumPendingByteCount else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        return decodeSnapshot(data)
+    }
+
+    private func pendingFileExceedsHardLimit() throws -> Bool {
+        let handle = try FileHandle(forReadingFrom: eventsFileURL)
+        defer { try? handle.close() }
+        return !(try readBounded(
+            from: handle,
+            offset: retentionPolicy.maximumPendingByteCount,
+            byteCount: 1
+        )).isEmpty
+    }
+
+    private func readPendingFileBounded() throws -> Data {
+        let handle = try FileHandle(forReadingFrom: eventsFileURL)
+        defer { try? handle.close() }
+        return try readBounded(
+            from: handle,
+            offset: 0,
+            byteCount: retentionPolicy.maximumPendingByteCount + 1
+        )
     }
 
     private func readDigestPrefixSynchronously() throws -> Data {

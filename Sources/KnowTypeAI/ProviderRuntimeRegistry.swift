@@ -300,9 +300,6 @@ public actor ProviderRuntimeRegistry {
             )
         }
         generation &+= 1
-        let cancellations = activeOperations.values
-        activeOperations.removeAll()
-        cancellations.forEach { $0() }
         await capabilityReset()
         diagnosticSink.record(
             ProviderRuntimeDiagnosticEvent(

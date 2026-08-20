@@ -34,10 +34,13 @@
   shared-gate availability events. The first below-batch pending event records
   a forced deadline. A successful commit starts a 600-second minimum interval
   that a batch of 50 cannot bypass; provider generation changes do not reset
-  it.
+  it. Gate-busy state suppresses additional snapshot decode until the one
+  cancellable availability waiter wakes, is invalidated, or is cancelled.
 - Stale responses cannot write `ENV.md` or archive events. Shared gate cooldown
   and max-one-in-flight identity state apply equally to recommendation and
-  digest.
+  digest. The caller-visible hard timeout wraps gate execution; it returns
+  immediately while cancellation-resistant provider work keeps the identity
+  lease until actual completion.
 - Direct provider-injected runtimes derive their gate identity from
   `provider.providerName` by default, matching direct recommendation runtimes;
   registry-backed runtimes continue to use the generation fingerprint.
@@ -56,7 +59,9 @@
   through a bounded suffix read before inventory decoding. A provider request
   contains at most 50 oldest events or 48 KiB, plus 64 KiB logical and 96 KiB
   HTTP-body limits; blank, malformed, and oversized legacy prefixes are
-  recovered locally instead of being sent.
+  recovered locally instead of being sent. If a local archive leaves a tail,
+  inventory is rechecked and the single eligible deadline is rearmed without
+  waiting for another input event.
 - A successful digest prunes `processed/` best-effort to 7 days, 100 files, and
   10 MiB. Startup, install, protected-only archive, and failed digests do not
   trigger historical cleanup.
@@ -66,9 +71,12 @@
 - A privacy-safe claim records only prefix hash, byte/event counts, generated
   section hash, and provider generation. ENV-success/archive-failure recovery
   reads and validates only the claimed byte/event prefix, archives that exact
-  prefix, and leaves appended tail bytes pending. A durable archive receipt
-  distinguishes completed archive from cleanup failure; a matching ENV with a
-  changed claim prefix still fails closed without another provider request.
+  prefix, and leaves appended tail bytes pending. A durable archive receipt or
+  a bounded deterministic processed-archive read with matching byte count and
+  SHA-256 distinguishes completed archive from cleanup failure; missing,
+  oversized, or same-size corrupt archive evidence remains blocked. A matching
+  ENV with a changed claim prefix still fails closed without another provider
+  request.
   Timestamp/count schedule state survives runtime or process rebuild and is
   written before claim cleanup. Successful commits rearm the one deadline task
   when a tail remains; an empty store cancels it.

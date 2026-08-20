@@ -12,8 +12,8 @@ Current responsibilities:
   enter cooldown.
 - `LazyDefaultAIRecommendationRuntime` can be constructed with
   `debounceMilliseconds: 0` for the input-method path, where
-  `InputAIRecommendationRuntime` owns the trailing debounce, best-effort stale
-  transport cancellation, and stale-drop sequencing.
+  `InputAIRecommendationRuntime` owns the trailing debounce, keeps started
+  transport running, and generation-fences stale completion.
 - `AIRecommendationDiagnosticSink` records request substates through macOS unified logging by default. Events carry request/composition identifiers, lengths, counts, elapsed milliseconds, and normalized reasons, but never raw input, candidate text, context document bodies, or API keys.
 - `LexicalContextBuilder` produces top-K local lexical and tone summaries from recent commits, selection history, accepted AI summaries, and stored Rime userdb terms; current composition candidates, full DB files, full accepted-learning history, and raw logs are not sent. When the same accepted text appears in both accepted-AI summary and current recent commits, accepted-AI summary is the canonical source and the duplicate current commit is filtered. Input-method callers construct this context only after cheap AI schedule eligibility passes, and sanitization uses cached regular expressions.
 - `LexicalProfileStore` persists canonical lexical profile JSON under Application Support and mirrors readable `~/.knowtype/LEXICAL_PROFILE.md` for diagnostics.
@@ -24,14 +24,18 @@ Current responsibilities:
   app selection history out of lexical profile inputs, but those correction
   protection rules are not the cloud-AI disabled-state gate.
 - `AIContextMemoryRuntime` records committed typing events and periodically asks the provider to summarize them into `ENV.md`.
-- `ProviderRuntimeRegistry` owns process-level provider leases and cancels
-  recommendation/context work when the revision generation changes. Disk
-  revision fallback runs only before eligible AI dispatch.
+- `ProviderRuntimeRegistry` owns process-level provider leases and fences
+  recommendation/context results when the revision generation changes without
+  cancelling started provider operations. Disk revision fallback runs only
+  before eligible AI dispatch.
 - Production shares one `AIContextMemoryRuntime` actor across all input
   controllers. `TypingEventStore` stores event batches as JSONL and atomically
   claims the processed prefix while ENV and archive persistence remain guarded
   by the current provider generation.
-- `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, replacing only the generated section. Loaded snapshots normalize duplicate generated markers and persist the repair best-effort while still returning the repaired in-memory content if write-back fails.
+- `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, replacing
+  only the generated section. A repair that requires backup or canonical
+  write-back fails closed if either persistence step fails; no unpersisted
+  repaired snapshot is returned.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; deterministic traditional input does not read this file.
 - `AIHealthMonitor` keeps transient provider failures from hammering the provider or blocking input.
 

@@ -123,11 +123,47 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadSnapshot(), first)
     }
 
+    func testMarkerWordsInsideOrdinaryTextDoNotDefineManagedBoundary() throws {
+        let directory = makeDirectory()
+        let url = directory.appendingPathComponent("ENV.md")
+        let literalStart = "keep literal <!-- KNOWTYPE:BEGIN GENERATED --> text"
+        let literalEnd = "keep literal <!-- KNOWTYPE:END GENERATED --> text"
+        let content = """
+        # KnowType Environment
+
+        \(literalStart)
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - stable generated value
+        <!-- KNOWTYPE:END GENERATED -->
+
+        \(literalEnd)
+        """
+        try Data(content.utf8).write(to: url)
+        let store = EnvironmentDocumentStore(fileURL: url)
+
+        let first = try store.loadSnapshot()
+        XCTAssertEqual(EnvironmentDocumentStore.generatedSection(from: first.content), "## Global Style\n- stable generated value")
+        XCTAssertTrue(first.content.contains(literalStart))
+        XCTAssertTrue(first.content.contains(literalEnd))
+        let canonicalLines = first.content.components(separatedBy: "\n")
+        XCTAssertEqual(canonicalLines.filter { $0 == EnvironmentDocumentStore.generatedStart }.count, 1)
+        XCTAssertEqual(canonicalLines.filter { $0 == EnvironmentDocumentStore.generatedEnd }.count, 1)
+        XCTAssertEqual(try store.loadSnapshot(), first)
+    }
+
     func testAmbiguousUserNotesFailsClosedAndLeavesBackup() throws {
         let directory = makeDirectory()
         let url = directory.appendingPathComponent("ENV.md")
         let ambiguous = """
         # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        ## Global Style
+        - existing
+        <!-- KNOWTYPE:END GENERATED -->
+
         ## User Notes
         one
         ## User Notes

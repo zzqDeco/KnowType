@@ -587,11 +587,15 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     func testProviderCancellationErrorDoesNotEnterCooldownOrUnavailable() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = FailingLLMProvider(error: CancellationError())
+        let documents = temporaryRecommendationDocumentStores()
         let runtime = AIRecommendationRuntime(
             provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
             healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = cancellableRecommendationRequest()
 
@@ -612,11 +616,15 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     func testProviderURLErrorCancelledDoesNotEnterCooldownOrUnavailable() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = FailingLLMProvider(error: URLError(.cancelled))
+        let documents = temporaryRecommendationDocumentStores()
         let runtime = AIRecommendationRuntime(
             provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
             healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = cancellableRecommendationRequest()
 
@@ -643,7 +651,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -668,10 +677,14 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     func testRecommendationDiagnosticsRecordStructuredDecodeErrors() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = FailingLLMProvider(error: ProviderError.invalidResponse("structured_decode_error: missing candidates"))
+        let documents = temporaryRecommendationDocumentStores()
         let runtime = AIRecommendationRuntime(
             provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -981,10 +994,14 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
     func testRepeatedProviderFailuresEnterCooldown() async {
         let provider = FailingLLMProvider(error: ProviderError.httpStatus(503, "unavailable"))
+        let documents = temporaryRecommendationDocumentStores()
         let runtime = AIRecommendationRuntime(
             provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
             healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
-            debounceMilliseconds: 0
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -1047,14 +1064,19 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(sanitizeEmptyEvents.first?.acceptedCount, 0)
     }
 
-    func testHardTimeoutReturnsWithoutWaitingForCancellationResistantProvider() async {
+    func testHardTimeoutReturnsWithoutWaitingForCancellationResistantProvider() async throws {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = SlowCancellationResistantLLMProvider()
+        let gate = ProviderRequestGate()
+        let documents = temporaryRecommendationDocumentStores()
         let runtime = AIRecommendationRuntime(
             provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
             debounceMilliseconds: 0,
             hardTimeoutMilliseconds: 20,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: gate
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -1077,6 +1099,39 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let timeoutEvent = diagnosticSink.events.first { $0.stage == .timeout }
         XCTAssertEqual(timeoutEvent?.reason, "hard_timeout")
         XCTAssertNotNil(timeoutEvent?.elapsedMilliseconds)
+
+        do {
+            _ = try await gate.execute(providerIdentity: provider.providerName, generation: 0) { 1 }
+            XCTFail("timed-out transport must retain the shared gate lease")
+        } catch ProviderRequestGateError.busy {
+            // Expected while the cancellation-resistant transport is still running.
+        }
+
+        let providerDeadline = Date().addingTimeInterval(2)
+        while !(await provider.isFinished), Date() < providerDeadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let providerDidFinish = await provider.isFinished
+        XCTAssertTrue(providerDidFinish)
+
+        var observedCooldown = false
+        let gateDeadline = Date().addingTimeInterval(2)
+        while !observedCooldown, Date() < gateDeadline {
+            do {
+                _ = try await gate.execute(providerIdentity: provider.providerName, generation: 0) { 2 }
+                XCTFail("late provider success must not clear the caller timeout cooldown")
+                break
+            } catch ProviderRequestGateError.busy {
+                try await Task.sleep(nanoseconds: 20_000_000)
+            } catch ProviderRequestGateError.cooldown {
+                observedCooldown = true
+            }
+        }
+        XCTAssertTrue(observedCooldown)
+
+        await gate.invalidate(providerIdentity: provider.providerName, generation: 0)
+        let value = try await gate.execute(providerIdentity: provider.providerName, generation: 1) { 3 }
+        XCTAssertEqual(value, 3)
     }
 
     func testOversizedRawInputSkipsProviderWithoutRecordingFailure() async {
@@ -1114,6 +1169,18 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let updated = try environmentStore.replaceGeneratedSection(with: "## Global Style\n- Test style.")
         XCTAssertTrue(updated.content.contains("## Global Style\n- Test style."))
         XCTAssertTrue(updated.content.contains("## User Notes"))
+    }
+
+    func testCorrectionStoreRejectsContentOverFourKiBWithBoundedRead() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let correctionURL = directory.appendingPathComponent("CORRECTION.md")
+        try Data(repeating: 0x61, count: 4 * 1_024 + 1).write(to: correctionURL)
+        let store = CorrectionInstructionStore(fileURL: correctionURL)
+
+        XCTAssertThrowsError(try store.loadSnapshot()) { error in
+            XCTAssertEqual(error as? EnvironmentDocumentError, .userNotesTooLarge)
+        }
     }
 
     func testEnvironmentReplacementPreservesExistingContentWhenMarkersAreMissing() {
@@ -1359,6 +1426,7 @@ private actor QueuedLLMProvider: LLMProvider {
 private actor SlowCancellationResistantLLMProvider: LLMProvider {
     nonisolated let providerName = "slow"
     private var count = 0
+    private var finished = false
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         count += 1
@@ -1370,6 +1438,7 @@ private actor SlowCancellationResistantLLMProvider: LLMProvider {
                 continue
             }
         }
+        finished = true
         return LLMResponse(candidates: [
             LLMCandidate(text: "继续推进", confidence: 0.9)
         ])
@@ -1377,6 +1446,10 @@ private actor SlowCancellationResistantLLMProvider: LLMProvider {
 
     var requestCount: Int {
         count
+    }
+
+    var isFinished: Bool {
+        finished
     }
 }
 
@@ -1415,4 +1488,15 @@ private func cancellableRecommendationRequest() -> AIRecommendationRequest {
 private func temporaryDirectory() -> URL {
     FileManager.default.temporaryDirectory
         .appendingPathComponent("KnowTypeAITests-\(UUID().uuidString)", isDirectory: true)
+}
+
+private func temporaryRecommendationDocumentStores() -> (
+    environment: EnvironmentDocumentStore,
+    correction: CorrectionInstructionStore
+) {
+    let directory = temporaryDirectory()
+    return (
+        EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+        CorrectionInstructionStore(fileURL: directory.appendingPathComponent("CORRECTION.md"))
+    )
 }

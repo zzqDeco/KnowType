@@ -1054,9 +1054,27 @@ final class ProviderAdapterTests: XCTestCase {
     }
 
     func testOpenAIAdaptersRejectLogicalBudgetBeforeModelDiscoveryOrHTTP() async throws {
+        let environment = """
+        # KnowType Environment
+
+        <!-- KNOWTYPE:BEGIN GENERATED -->
+        \(String(repeating: "g", count: 3_500))
+        <!-- KNOWTYPE:END GENERATED -->
+
+        ## User Notes
+        \(String(repeating: "u", count: 3_500))
+        """
         let oversized = LLMRequest(
             task: .continuation,
-            rawInput: String(repeating: "界", count: 4_097)
+            lockedPrefix: String(repeating: "l", count: 4_000),
+            rawInput: String(repeating: "r", count: 4_000),
+            appContext: String(repeating: "a", count: 4_000),
+            contextDocuments: [
+                "ENV.md": environment,
+                "CORRECTION.md": String(repeating: "c", count: 4_000),
+                "LEXICAL_PROFILE.md": String(repeating: "x", count: 6_000),
+                "AI_FEEDBACK.md": String(repeating: "f", count: 4_000)
+            ]
         )
         let chatClient = MockHTTPClient(json: #"{"choices":[]}"#)
         let chatDiscovery = CountingModelDiscovery()
@@ -1072,8 +1090,8 @@ final class ProviderAdapterTests: XCTestCase {
         do {
             _ = try await chat.complete(oversized)
             XCTFail("expected local budget rejection")
-        } catch is ProviderRequestBudgetError {
-            // Expected.
+        } catch let error as ProviderRequestBudgetError {
+            XCTAssertEqual(error.component, "logical_payload")
         }
         XCTAssertEqual(chatDiscovery.callCount, 0)
         let chatRequest = await chatClient.capturedRequest()
@@ -1093,8 +1111,8 @@ final class ProviderAdapterTests: XCTestCase {
         do {
             _ = try await responses.complete(oversized)
             XCTFail("expected local budget rejection")
-        } catch is ProviderRequestBudgetError {
-            // Expected.
+        } catch let error as ProviderRequestBudgetError {
+            XCTAssertEqual(error.component, "logical_payload")
         }
         XCTAssertEqual(responsesDiscovery.callCount, 0)
         let responsesRequest = await responsesClient.capturedRequest()

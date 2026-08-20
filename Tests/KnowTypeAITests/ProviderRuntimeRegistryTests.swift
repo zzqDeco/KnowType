@@ -144,7 +144,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertNil(capability)
     }
 
-    func testGenerationChangeCancelsInFlightRecommendationAndDropsOldResult() async throws {
+    func testGenerationChangeDoesNotCancelInFlightRecommendationAndDropsOldResult() async throws {
         let providerA = SuspendedGenerationLLMProvider(name: "provider-a")
         let providerB = NamedLLMProvider(name: "provider-b", responseText: "B result")
         let source = ProviderRuntimeTestSource(
@@ -169,7 +169,9 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             provider: providerB
         )
         signal.send(2)
-        try await waitUntil { await providerA.cancellationCount == 1 }
+        try await waitUntil { await registry.currentGeneration() == 2 }
+        let cancellationCount = await providerA.cancellationCount
+        XCTAssertEqual(cancellationCount, 0)
         await providerA.finish(responseText: "A stale result")
         let oldState = await oldRequest.value
 
@@ -506,10 +508,121 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         let firstValue = try await first.value
         XCTAssertEqual(firstValue, 1)
     }
+
+    func testCooldownAvailabilityWaitIsReleasedImmediatelyByGenerationInvalidate() async throws {
+        let now = Date()
+        let gate = ProviderRequestGate(now: { now })
+        do {
+            _ = try await gate.execute(providerIdentity: "cooldown-provider", generation: 0) {
+                throw ProviderRateLimitError(retryAfterSeconds: 15 * 60, bodyByteCount: 1)
+            } as LLMResponse
+            XCTFail("expected rate limit")
+        } catch is ProviderRateLimitError {
+            // Expected.
+        }
+
+        let probe = RequestGateProbe()
+        let waiter = Task {
+            await gate.waitForAvailability(providerIdentity: "cooldown-provider", generation: 0)
+            await probe.markAvailabilityFinished()
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let availabilityFinishedBeforeInvalidate = await probe.availabilityFinished
+        XCTAssertFalse(availabilityFinishedBeforeInvalidate)
+
+        await gate.invalidate(providerIdentity: "cooldown-provider", generation: 0)
+        try await waitUntil { await probe.availabilityFinished }
+        await waiter.value
+    }
+
+    func testNewGenerationWaiterWakesWhenOldOperationFinishesStale() async throws {
+        let gate = ProviderRequestGate()
+        let operation = SuspendedGateOperation()
+        let oldRequest = Task {
+            do {
+                _ = try await gate.execute(providerIdentity: "generation-provider", generation: 0) {
+                    await operation.run()
+                    return 1
+                }
+                XCTFail("old operation must be stale after invalidation")
+            } catch ProviderRequestGateError.staleGeneration {
+                // Expected after the old provider operation actually finishes.
+            } catch {
+                XCTFail("unexpected error: \(error)")
+            }
+        }
+        try await waitUntil { await operation.started }
+
+        await gate.invalidate(providerIdentity: "generation-provider", generation: 0)
+        let waiterProbe = RequestGateProbe()
+        let waiter = Task {
+            await gate.waitForAvailability(providerIdentity: "generation-provider", generation: 1)
+            await waiterProbe.markAvailabilityFinished()
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let finishedBeforeOldOperation = await waiterProbe.availabilityFinished
+        XCTAssertFalse(finishedBeforeOldOperation)
+
+        await operation.finish()
+        await oldRequest.value
+        try await waitUntil { await waiterProbe.availabilityFinished }
+        await waiter.value
+    }
+
+    func testPersistentGateWriterTrimsDeterministicallyAndExpiresAcrossRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let now = Date()
+        let identities = (0..<300).map { "provider-\($0)" }
+        let gate = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+
+        for identity in identities {
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: ProviderError.httpStatus(503, "unavailable")
+            )
+        }
+
+        let data = try Data(contentsOf: stateURL)
+        XCTAssertLessThanOrEqual(data.count, 64 * 1_024)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let entries = try XCTUnwrap(object["entries"] as? [[String: Any]])
+        XCTAssertLessThanOrEqual(entries.count, 256)
+
+        let ordered = identities.sorted {
+            ProviderRequestGate.identityHash($0) < ProviderRequestGate.identityHash($1)
+        }
+        let retainedIdentity = try XCTUnwrap(ordered.first)
+        let trimmedIdentity = try XCTUnwrap(ordered.last)
+        let reloaded = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+        let includedDeadline = await reloaded.cooldownDeadline(
+            providerIdentity: retainedIdentity,
+            generation: 0
+        )
+        let excludedDeadline = await reloaded.cooldownDeadline(
+            providerIdentity: trimmedIdentity,
+            generation: 0
+        )
+        XCTAssertNotNil(includedDeadline)
+        XCTAssertNil(excludedDeadline)
+
+        let expired = ProviderRequestGate(
+            now: { now.addingTimeInterval(61) },
+            persistenceURL: stateURL
+        )
+        _ = await expired.cooldownDeadline(
+            providerIdentity: retainedIdentity,
+            generation: 0
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
+    }
 }
 
 private actor RequestGateProbe {
     private var started = false
+    private var didFinishAvailabilityWait = false
 
     func markStarted() {
         started = true
@@ -517,6 +630,31 @@ private actor RequestGateProbe {
 
     var hasStarted: Bool {
         started
+    }
+
+    func markAvailabilityFinished() {
+        didFinishAvailabilityWait = true
+    }
+
+    var availabilityFinished: Bool {
+        didFinishAvailabilityWait
+    }
+}
+
+private actor SuspendedGateOperation {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var started = false
+
+    func run() async {
+        started = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 

@@ -344,8 +344,8 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 let generation = providerGeneration
                 let timeout = hardTimeoutNanoseconds
                 let task = Task<LLMResponse, Error> {
-                    try await gate.execute(providerIdentity: identity, generation: generation) {
-                        try await withTimeout(nanoseconds: timeout) {
+                    try await withTimeout(nanoseconds: timeout) {
+                        try await gate.execute(providerIdentity: identity, generation: generation) {
                             try await provider.complete(llmRequest)
                         }
                     }
@@ -471,6 +471,11 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             }
             await healthMonitor.recordFailure(error)
             if error is TimeoutError {
+                await requestGate.recordFailure(
+                    providerIdentity: providerIdentity,
+                    generation: providerGeneration,
+                    failure: error
+                )
                 record(
                     .timeout,
                     request: request,

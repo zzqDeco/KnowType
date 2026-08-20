@@ -28,17 +28,22 @@ of already-started recommendations, and independent provider failure budgets.
   not create provider failure state.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
-  while only the latest trailing revision may dispatch.
+  while only the latest trailing revision may dispatch. Caller hard timeout is
+  outside the shared gate, so cancellation-resistant transport retains its
+  identity lease until actual completion and late success does not erase the
+  timeout cooldown.
 - Digest uses one actor-owned deadline task. A successful commit starts the
   600-second interval; batch, cooldown, and interval wakeups cannot bypass it.
   A below-batch first pending event gets a forced deadline, and gate busy uses
-  an availability waiter rather than polling. Each claim is one precise prefix
-  of at most 50 events and 48 KiB.
+  one cancellable availability waiter rather than polling or repeated snapshot
+  decode. Locally archived invalid prefixes rearm the unique deadline for any
+  tail. Each claim is one precise prefix of at most 50 events and 48 KiB.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
-  avoids repeating the provider call. A durable archive receipt and timestamp /
-  count schedule state complete cleanup recovery across runtime or process
-  rebuild.
+  avoids repeating the provider call. A durable archive receipt or bounded
+  byte-count plus SHA-256 verification of the deterministic processed archive,
+  together with timestamp/count schedule state, completes cleanup recovery
+  across runtime or process rebuild. Corrupt evidence remains fail-closed.
 
 ## Verification Boundary
 

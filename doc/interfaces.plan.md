@@ -692,13 +692,17 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - uses one 450 ms debounce before provider calls; newer input replaces the
   debounce request and leaves at most one trailing revision after transport
   starts
-- hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
+- returns a caller-visible hard timeout after 10 seconds by default, independent
+  of the provider profile's network timeout; the shared-gate lease remains held
+  until cancellation-resistant provider transport actually finishes, and the
+  late completion does not erase the recorded timeout cooldown
 - caches by the actual budgeted provider payload fingerprint plus generation,
   rather than by unbounded source strings
 - rejects stale results at the coordinator boundary
 - rebuilds cache and health state for each provider generation; an internal
   stale-generation state clears its own normal pending slot to `.idle`, while an
-  older stale request cannot clear a newer request
+  older stale request cannot clear a newer request or overwrite a newer skip
+  state
 - skips cloud requests for too-short context: with a confirmed locked prefix, fewer than two Han characters or fewer than six visible mixed/Latin characters; without a locked prefix, fewer than three visible raw-input characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
@@ -728,10 +732,17 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   after successful digests only, keeps at most 7 days, 100 files, and 10 MiB
 - summarizes through one actor-owned deadline task for batch, interval,
   provider-cooldown, and shared-gate availability wakeups; a first below-batch
-  pending event has an independent forced deadline
+  pending event has an independent forced deadline; while gate availability is
+  pending, appended records return before another snapshot decode, and locally
+  archived blank, malformed, or oversized prefixes rearm the deadline for tail
+  data
 - updates only the generated section in canonical `ENV.md`, with one managed
   marker pair and one User Notes section; markerless documents remain user
-  content and ambiguous migrations fail closed
+  content, only exact marker lines define managed boundaries, and ambiguous
+  migrations fail closed
+- accepts exactly one non-empty generated markdown candidate within 4 KiB and
+  200 lines; multipart, titled, marked, or empty output fails without ENV or
+  pending-prefix commit
 - sanitizes Level 0 protected content before writing logs
 - is shared across all controllers in the process, so one pending snapshot
   starts at most one digest request
@@ -744,7 +755,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - persists only privacy-safe claim metadata plus bounded timestamp/count schedule
   state and a deterministic archive receipt, so an ENV-success/archive-failure
   path is recoverable without repeating the provider call; appended tail events
-  remain outside the old claim
+  remain outside the old claim. Receipt-missing recovery bounded-reads the
+  deterministic processed archive and requires both recorded byte count and
+  SHA-256; a same-size corrupt archive remains blocked
 
 `LexicalProfileStore`:
 

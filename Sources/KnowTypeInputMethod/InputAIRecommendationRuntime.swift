@@ -242,6 +242,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         publishIdle: Bool
     ) {
         let ownsActiveRequest = activeWork?.requestID == work.requestID
+        let ownsCurrentPublishSlot = ownsActiveRequest && generation == work.generation
         let hasTrailingWork = trailingWork != nil
         if ownsActiveRequest {
             activeWork = nil
@@ -257,7 +258,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             dispatchTrailingIfNeeded()
         } else {
             state = activeWork == nil ? .idle : state
-            if publishIdle, ownsActiveRequest, !work.context.isProviderAvailabilityProbe {
+            if publishIdle, ownsCurrentPublishSlot, !work.context.isProviderAvailabilityProbe {
                 work.onStateChange(.idle)
             }
         }

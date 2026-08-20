@@ -21,6 +21,9 @@ public enum ProviderRequestGateError: Error, Sendable, Equatable {
 public actor ProviderRequestGate {
     public static let shared = ProviderRequestGate(persistenceURL: defaultPersistenceURL())
 
+    private static let maximumPersistenceByteCount = 64 * 1_024
+    private static let maximumPersistedEntryCount = 256
+
     private struct State {
         var generation: UInt64 = 0
         var inFlight = false
@@ -40,13 +43,18 @@ public actor ProviderRequestGate {
         var entries: [PersistedEntry]
     }
 
+    private struct AvailabilityWaiter {
+        var continuation: CheckedContinuation<Void, Never>
+        var deadlineTask: Task<Void, Never>?
+    }
+
     private var states: [String: State] = [:]
     private let now: @Sendable () -> Date
     private let persistenceURL: URL?
     private let fileManager: FileManager
     private var persistedEntries: [String: PersistedEntry] = [:]
     private var persistenceLoaded = false
-    private var availabilityWaiters: [String: [UUID: CheckedContinuation<Void, Never>]] = [:]
+    private var availabilityWaiters: [String: [UUID: AvailabilityWaiter]] = [:]
 
     public init(
         now: @escaping @Sendable () -> Date = Date.init,
@@ -102,23 +110,15 @@ public actor ProviderRequestGate {
                 if persistedEntries[key] != nil { clearPersistedEntry(for: key) }
                 return
             }
-            if let deadline = state.cooldownUntil, deadline > now() {
-                do {
-                    try await Task.sleep(nanoseconds: Self.nanoseconds(until: deadline, now: now()))
-                } catch {
-                    return
-                }
-                continue
-            }
-
             let waiterID = UUID()
             await withTaskCancellationHandler(operation: {
                 await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                    if Task.isCancelled {
-                        continuation.resume()
-                    } else {
-                        availabilityWaiters[key, default: [:]][waiterID] = continuation
-                    }
+                    registerAvailabilityWaiter(
+                        continuation,
+                        for: key,
+                        id: waiterID,
+                        generation: generation
+                    )
                 }
             }, onCancel: {
                 Task { await self.cancelAvailabilityWaiter(for: key, id: waiterID) }
@@ -161,7 +161,14 @@ public actor ProviderRequestGate {
             completed.inFlight = false
             guard completed.generation == generation else {
                 states[key] = completed
+                resumeAvailabilityWaiters(for: key)
                 throw ProviderRequestGateError.staleGeneration
+            }
+            if let deadline = completed.cooldownUntil, deadline > now() {
+                states[key] = completed
+                persist(completed, for: key)
+                resumeAvailabilityWaiters(for: key)
+                return value
             }
             completed.failureCount = 0
             completed.cooldownUntil = nil
@@ -256,6 +263,7 @@ public actor ProviderRequestGate {
 
     private static func classify(_ error: Error) -> ProviderRequestFailureClass {
         if error is TimeoutError { return .timeout }
+        if error is EnvironmentDocumentError { return .invalidOutput }
         if let rateLimit = error as? ProviderRateLimitError, rateLimit.statusCode == 429 {
             return .rateLimit
         }
@@ -306,7 +314,11 @@ public actor ProviderRequestGate {
         persistenceLoaded = true
         guard let persistenceURL,
               fileManager.fileExists(atPath: persistenceURL.path) else { return }
-        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: persistenceURL.path)
+        do {
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: persistenceURL.path)
+        } catch {
+            return
+        }
         guard let data = try? boundedData(at: persistenceURL, limit: 64 * 1_024),
               let decoded = try? JSONDecoder().decode(PersistedState.self, from: data) else {
             return
@@ -322,6 +334,9 @@ public actor ProviderRequestGate {
             validEntries[entry.identityHash] = entry
         }
         persistedEntries = validEntries
+        if validEntries.count != decoded.entries.count {
+            writePersistedState()
+        }
     }
 
     private func persist(_ state: State, for key: String) {
@@ -349,12 +364,41 @@ public actor ProviderRequestGate {
 
     private func writePersistedState() {
         guard let persistenceURL else { return }
-        if persistedEntries.isEmpty {
+        let currentDate = now()
+        var entries = persistedEntries.values
+            .filter {
+                $0.deadline > currentDate &&
+                    $0.identityHash.count == 64 &&
+                    $0.identityHash.allSatisfy(\.isHexDigit) &&
+                    $0.failureCount >= 1 &&
+                    $0.failureCount <= 16
+            }
+            .sorted {
+                if $0.deadline != $1.deadline { return $0.deadline > $1.deadline }
+                return $0.identityHash < $1.identityHash
+            }
+        if entries.count > Self.maximumPersistedEntryCount {
+            entries.removeLast(entries.count - Self.maximumPersistedEntryCount)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var data = try? encoder.encode(PersistedState(entries: entries))
+        while let encoded = data,
+              encoded.count > Self.maximumPersistenceByteCount,
+              !entries.isEmpty {
+            entries.removeLast()
+            data = try? encoder.encode(PersistedState(entries: entries))
+        }
+        persistedEntries = Dictionary(uniqueKeysWithValues: entries.map { ($0.identityHash, $0) })
+        if entries.isEmpty {
             try? fileManager.removeItem(at: persistenceURL)
             return
         }
-        let entries = persistedEntries.values.sorted { $0.identityHash < $1.identityHash }
-        guard let data = try? JSONEncoder().encode(PersistedState(entries: entries)) else { return }
+        guard let data, data.count <= Self.maximumPersistenceByteCount else {
+            try? fileManager.removeItem(at: persistenceURL)
+            return
+        }
         let directory = persistenceURL.deletingLastPathComponent()
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -396,14 +440,62 @@ public actor ProviderRequestGate {
         return UInt64(min(interval, 15 * 60) * 1_000_000_000)
     }
 
+    private func registerAvailabilityWaiter(
+        _ continuation: CheckedContinuation<Void, Never>,
+        for key: String,
+        id: UUID,
+        generation: UInt64
+    ) {
+        if Task.isCancelled {
+            continuation.resume()
+            return
+        }
+        let state = state(for: key)
+        if generation < state.generation ||
+            (!state.inFlight && (state.cooldownUntil == nil || state.cooldownUntil ?? .distantPast <= now())) {
+            continuation.resume()
+            return
+        }
+        let deadlineTask: Task<Void, Never>?
+        if let deadline = state.cooldownUntil, deadline > now() {
+            let delay = Self.nanoseconds(until: deadline, now: now())
+            deadlineTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: delay)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await self?.resumeAvailabilityWaiter(for: key, id: id)
+            }
+        } else {
+            deadlineTask = nil
+        }
+        availabilityWaiters[key, default: [:]][id] = AvailabilityWaiter(
+            continuation: continuation,
+            deadlineTask: deadlineTask
+        )
+    }
+
     private func resumeAvailabilityWaiters(for key: String) {
         guard let waiterMap = availabilityWaiters.removeValue(forKey: key) else { return }
-        waiterMap.values.forEach { $0.resume() }
+        waiterMap.values.forEach {
+            $0.deadlineTask?.cancel()
+            $0.continuation.resume()
+        }
+    }
+
+    private func resumeAvailabilityWaiter(for key: String, id: UUID) {
+        guard let waiter = availabilityWaiters[key]?.removeValue(forKey: id) else { return }
+        if availabilityWaiters[key]?.isEmpty == true { availabilityWaiters[key] = nil }
+        waiter.deadlineTask?.cancel()
+        waiter.continuation.resume()
     }
 
     private func cancelAvailabilityWaiter(for key: String, id: UUID) {
-        guard let continuation = availabilityWaiters[key]?.removeValue(forKey: id) else { return }
+        guard let waiter = availabilityWaiters[key]?.removeValue(forKey: id) else { return }
         if availabilityWaiters[key]?.isEmpty == true { availabilityWaiters[key] = nil }
-        continuation.resume()
+        waiter.deadlineTask?.cancel()
+        waiter.continuation.resume()
     }
 }

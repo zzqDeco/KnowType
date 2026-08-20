@@ -114,10 +114,17 @@ public enum EnvironmentDocumentError: Error, Sendable, Equatable {
 final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var failedClaimClearsRemaining = 0
+    private var failedArchiveReceiptWritesRemaining = 0
 
     func failNextClaimClears(_ count: Int) {
         lock.lock()
         failedClaimClearsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextArchiveReceiptWrites(_ count: Int) {
+        lock.lock()
+        failedArchiveReceiptWritesRemaining = max(0, count)
         lock.unlock()
     }
 
@@ -126,6 +133,14 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
         defer { lock.unlock() }
         guard failedClaimClearsRemaining > 0 else { return false }
         failedClaimClearsRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailArchiveReceiptWrite() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedArchiveReceiptWritesRemaining > 0 else { return false }
+        failedArchiveReceiptWritesRemaining -= 1
         return true
     }
 }
@@ -258,6 +273,9 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     public func saveDigestArchiveReceipt(_ receipt: EnvironmentDigestArchiveReceipt) throws {
+        if testProbe?.shouldFailArchiveReceiptWrite() == true {
+            throw CocoaError(.fileWriteUnknown)
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         try atomicWrite(data: encoder.encode(receipt), to: archiveReceiptURL)
@@ -282,10 +300,11 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     public static func generatedSection(from content: String) -> String? {
-        guard let start = content.range(of: generatedStart),
-              let end = content.range(of: generatedEnd, range: start.upperBound..<content.endIndex),
-              start.upperBound <= end.lowerBound else { return nil }
-        return String(content[start.upperBound..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = content.components(separatedBy: "\n")
+        guard let markers = structuredGeneratedMarkerIndices(in: lines) else { return nil }
+        return lines[(markers.start + 1)..<markers.end]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public static func generatedSectionHash(from content: String) -> String? {
@@ -295,15 +314,16 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public static func replacingGeneratedSection(in content: String, with generatedMarkdown: String) -> String {
         let repaired = repairingGeneratedSectionMarkers(in: content)
         let generated = generatedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let startRange = repaired.range(of: generatedStart),
-              let endRange = repaired.range(of: generatedEnd, range: startRange.upperBound..<repaired.endIndex),
-              startRange.upperBound <= endRange.lowerBound else {
+        var lines = repaired.components(separatedBy: "\n")
+        guard let markers = structuredGeneratedMarkerIndices(in: lines) else {
             let preserved = repaired.trimmingCharacters(in: .whitespacesAndNewlines)
             return "\(documentTitle)\n\n\(generatedStart)\n\(generated)\n\(generatedEnd)\n\n\(preserved)"
         }
-        var next = repaired
-        next.replaceSubrange(startRange.upperBound..<endRange.lowerBound, with: "\n\(generated)\n")
-        return next
+        lines.replaceSubrange(
+            (markers.start + 1)..<markers.end,
+            with: generated.components(separatedBy: "\n")
+        )
+        return lines.joined(separator: "\n")
     }
 
     public static func repairingGeneratedSectionMarkers(in content: String) -> String {
@@ -373,9 +393,11 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         if isMarkerless {
             noteBody = markerlessUserNotesBody(in: content)
         } else if hasValidPair, notes.isEmpty {
-            let startRange = content.range(of: generatedStart)!
-            let endRange = content.range(of: generatedEnd, range: startRange.upperBound..<content.endIndex)!
-            noteBody = userTextOutsideGeneratedPair(in: content, startRange: startRange, endRange: endRange)
+            noteBody = userTextOutsideGeneratedPair(
+                in: lines,
+                startIndex: starts[0],
+                endIndex: ends[0]
+            )
         } else if let noteIndex = notes.first {
             noteBody = bodyAfterHeading(in: content, lineIndex: noteIndex)
         } else {
@@ -386,9 +408,9 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         let generated: String
         var requiresBackup = false
         if hasValidPair {
-            let startRange = content.range(of: generatedStart)!
-            let endRange = content.range(of: generatedEnd, range: startRange.upperBound..<content.endIndex)!
-            let existing = String(content[startRange.upperBound..<endRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let existing = lines[(starts[0] + 1)..<ends[0]]
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             if (try? validateGeneratedMarkdown(existing)) != nil && titles <= 1 {
                 generated = existing
             } else {
@@ -444,21 +466,30 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     private static func userTextOutsideGeneratedPair(
-        in content: String,
-        startRange: Range<String.Index>,
-        endRange: Range<String.Index>
+        in lines: [String],
+        startIndex: Int,
+        endIndex: Int
     ) -> String {
-        let prefix = String(content[..<startRange.lowerBound])
-        let suffix = String(content[endRange.upperBound...])
-        return [prefix, suffix]
-            .joined(separator: "\n")
-            .components(separatedBy: "\n")
+        let prefix = Array(lines[..<startIndex])
+        let suffix = endIndex + 1 < lines.count ? Array(lines[(endIndex + 1)...]) : []
+        return (prefix + suffix)
             .filter {
                 let line = $0.trimmingCharacters(in: .whitespacesAndNewlines)
                 return line != documentTitle && line != userNotesTitle
             }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func structuredGeneratedMarkerIndices(in lines: [String]) -> (start: Int, end: Int)? {
+        let starts = lines.indices.filter {
+            lines[$0].trimmingCharacters(in: .whitespacesAndNewlines) == generatedStart
+        }
+        let ends = lines.indices.filter {
+            lines[$0].trimmingCharacters(in: .whitespacesAndNewlines) == generatedEnd
+        }
+        guard starts.count == 1, ends.count == 1, starts[0] < ends[0] else { return nil }
+        return (starts[0], ends[0])
     }
 
     private static func bodyAfterHeading(in content: String, lineIndex: Int) -> String {
@@ -577,8 +608,17 @@ public struct CorrectionInstructionStore: @unchecked Sendable {
 
     public func loadSnapshot() throws -> AIDocumentSnapshot {
         try ensureExists()
-        let data = try Data(contentsOf: fileURL)
-        guard data.count <= 4 * 1_024, let content = String(data: data, encoding: .utf8) else {
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        let limit = 4 * 1_024
+        var data = Data()
+        while data.count <= limit {
+            let chunk = try handle.read(upToCount: min(1_024, limit + 1 - data.count)) ?? Data()
+            if chunk.isEmpty { break }
+            data.append(chunk)
+        }
+        guard data.count <= 4 * 1_024,
+              let content = String(data: data, encoding: .utf8) else {
             throw EnvironmentDocumentError.userNotesTooLarge
         }
         return AIDocumentSnapshot(content: content)
