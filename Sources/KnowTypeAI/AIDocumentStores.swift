@@ -112,6 +112,11 @@ public enum EnvironmentDocumentError: Error, Sendable, Equatable {
     case claimMismatch
 }
 
+private enum EnvironmentDocumentStoreReadKind {
+    case environmentDocument
+    case metadata
+}
+
 final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var failedClaimClearsRemaining = 0
@@ -119,7 +124,8 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
     private var failedPermissionChangesRemaining = 0
     private var failedBackupPermissionChangesRemaining = 0
     private var failedBackupReadsRemaining = 0
-    private var documentReads = 0
+    private var environmentDocumentReads = 0
+    private var metadataReads = 0
 
     func failNextClaimClears(_ count: Int) {
         lock.lock()
@@ -154,7 +160,19 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
     var documentReadCount: Int {
         lock.lock()
         defer { lock.unlock() }
-        return documentReads
+        return environmentDocumentReads + metadataReads
+    }
+
+    var environmentDocumentReadCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return environmentDocumentReads
+    }
+
+    var metadataReadCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return metadataReads
     }
 
     fileprivate func shouldFailClaimClear() -> Bool {
@@ -181,9 +199,14 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
         return true
     }
 
-    fileprivate func recordDocumentRead() {
+    fileprivate func recordDocumentRead(_ kind: EnvironmentDocumentStoreReadKind) {
         lock.lock()
-        documentReads += 1
+        switch kind {
+        case .environmentDocument:
+            environmentDocumentReads += 1
+        case .metadata:
+            metadataReads += 1
+        }
         lock.unlock()
     }
 
@@ -251,7 +274,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public func loadSnapshot() throws -> AIDocumentSnapshot {
         try ensureExists(defaultContent: Self.defaultContent)
         try setSecurePermissions(of: fileURL)
-        let data = try boundedData(at: fileURL)
+        let data = try boundedData(at: fileURL, readKind: .environmentDocument)
         guard let content = String(data: data, encoding: .utf8) else {
             try backup(data: data)
             throw EnvironmentDocumentError.invalidUTF8
@@ -280,7 +303,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public func loadDigestClaim() throws -> EnvironmentDigestClaim? {
         guard fileManager.fileExists(atPath: claimURL.path) else { return nil }
         try setSecurePermissions(of: claimURL)
-        let data = try boundedData(at: claimURL, limit: 32 * 1_024)
+        let data = try boundedData(at: claimURL, limit: 32 * 1_024, readKind: .metadata)
         return try JSONDecoder().decode(EnvironmentDigestClaim.self, from: data)
     }
 
@@ -302,7 +325,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public func loadDigestScheduleState() throws -> EnvironmentDigestScheduleState? {
         guard fileManager.fileExists(atPath: scheduleURL.path) else { return nil }
         try setSecurePermissions(of: scheduleURL)
-        let data = try boundedData(at: scheduleURL, limit: 16 * 1_024)
+        let data = try boundedData(at: scheduleURL, limit: 16 * 1_024, readKind: .metadata)
         let state = try JSONDecoder().decode(EnvironmentDigestScheduleState.self, from: data)
         guard state.pendingEventCount >= 0, state.pendingEventCount <= 500 else {
             throw EnvironmentDocumentError.claimMismatch
@@ -327,7 +350,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     public func loadDigestArchiveReceipt() throws -> EnvironmentDigestArchiveReceipt? {
         guard fileManager.fileExists(atPath: archiveReceiptURL.path) else { return nil }
         try setSecurePermissions(of: archiveReceiptURL)
-        let data = try boundedData(at: archiveReceiptURL, limit: 16 * 1_024)
+        let data = try boundedData(at: archiveReceiptURL, limit: 16 * 1_024, readKind: .metadata)
         return try JSONDecoder().decode(EnvironmentDigestArchiveReceipt.self, from: data)
     }
 
@@ -609,10 +632,14 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         try atomicWrite(defaultContent, to: fileURL)
     }
 
-    private func boundedData(at url: URL, limit: Int = maximumScanByteCount) throws -> Data {
+    private func boundedData(
+        at url: URL,
+        limit: Int = maximumScanByteCount,
+        readKind: EnvironmentDocumentStoreReadKind
+    ) throws -> Data {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
-        testProbe?.recordDocumentRead()
+        testProbe?.recordDocumentRead(readKind)
         return try boundedData(from: handle, limit: limit)
     }
 

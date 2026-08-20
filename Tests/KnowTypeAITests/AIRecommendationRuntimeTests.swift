@@ -40,7 +40,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = LazyDefaultAIRecommendationRuntime(
             providerLoader: { loader.load() },
             diagnosticSink: diagnosticSink,
-            debounceMilliseconds: 0
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
         )
 
         let state = await runtime.recommendation(
@@ -66,7 +67,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = LazyDefaultAIRecommendationRuntime(
             providerLoader: { loader.load() },
             diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            providerAvailability: providerAvailability
+            providerAvailability: providerAvailability,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(rawInput: "zhegefangan", compositionID: 1)
 
@@ -143,7 +145,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let request = AIRecommendationRequest(
             rawInput: "zhege fangan",
             lockedPrefix: nil,
@@ -172,7 +178,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "这个方案还可以再细化一下。", confidence: 0.88)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
 
         _ = await runtime.recommendation(
             for: AIRecommendationRequest(
@@ -202,7 +212,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "zhege url",
@@ -232,7 +243,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "can be handled naturally", confidence: 0.82)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let request = AIRecommendationRequest(
             rawInput: "ijustworks",
             lockedPrefix: nil,
@@ -260,7 +275,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "API latency 可以继续优化。", confidence: 0.82)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let request = AIRecommendationRequest(
             rawInput: "api",
             lockedPrefix: nil,
@@ -288,7 +307,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "ni",
@@ -315,7 +335,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "wo",
@@ -341,7 +362,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "我觉得这个方案还可以再细化一下。", confidence: 0.88)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let request = AIRecommendationRequest(
             rawInput: "wo juede",
             lockedPrefix: "  我觉得这个方案 ",
@@ -383,7 +408,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
                 LLMCandidate(text: testCase.providerText, confidence: 0.88)
             ]))
-            let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+            let runtime = AIRecommendationRuntime(
+                provider: provider,
+                debounceMilliseconds: 0,
+                requestGate: ProviderRequestGate()
+            )
             let request = AIRecommendationRequest(
                 rawInput: "continuation",
                 lockedPrefix: testCase.prefix,
@@ -407,7 +436,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "我觉得这个方案，", confidence: 0.88)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let request = AIRecommendationRequest(
             rawInput: "continuation",
             lockedPrefix: "我觉得这个方案",
@@ -432,7 +465,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "continuation",
@@ -461,7 +495,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             let runtime = AIRecommendationRuntime(
                 provider: provider,
                 debounceMilliseconds: 0,
-                diagnosticSink: diagnosticSink
+                diagnosticSink: diagnosticSink,
+                requestGate: ProviderRequestGate()
             )
             let request = AIRecommendationRequest(
                 rawInput: "continuation",
@@ -487,7 +522,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -524,7 +560,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "wo",
@@ -556,7 +593,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 200,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "api",
@@ -715,7 +753,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -768,7 +807,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             correctionStore: CorrectionInstructionStore(fileURL: correctionURL),
-            debounceMilliseconds: 0
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -794,17 +834,22 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(firstCandidate.displayText, "你好继续推进")
         XCTAssertEqual(secondCandidate.displayText, "你好继续推进")
         XCTAssertEqual(requests.count, 1)
-        XCTAssertEqual(requests[0].task, .continuation)
-        XCTAssertEqual(requests[0].lockedPrefix, "你好")
-        XCTAssertEqual(requests[0].contextDocuments["ENV.md"]?.contains("Prefer concise Chinese"), true)
-        XCTAssertEqual(requests[0].contextDocuments["CORRECTION.md"]?.contains("Preserve API tokens"), true)
+        let providerRequest = try XCTUnwrap(requests.first)
+        XCTAssertEqual(providerRequest.task, .continuation)
+        XCTAssertEqual(providerRequest.lockedPrefix, "你好")
+        XCTAssertEqual(providerRequest.contextDocuments["ENV.md"]?.contains("Prefer concise Chinese"), true)
+        XCTAssertEqual(providerRequest.contextDocuments["CORRECTION.md"]?.contains("Preserve API tokens"), true)
     }
 
     func testRecommendationCacheIncludesRawInput() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "继续推进", confidence: 0.88)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let candidate = CorrectionCandidate(
             text: "你好",
             source: "traditional",
@@ -832,11 +877,15 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requests.map(\.rawInput), ["nihao", "ni hao"])
     }
 
-    func testRecommendationIncludesLexicalProfileAndCacheKey() async {
+    func testRecommendationIncludesLexicalProfileAndCacheKey() async throws {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "继续推进", confidence: 0.88)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let candidate = CorrectionCandidate(
             text: "你好",
             source: "traditional",
@@ -874,16 +923,22 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let requests = await provider.requests
 
         XCTAssertEqual(requests.count, 2)
-        XCTAssertTrue(requests[0].contextDocuments["LEXICAL_PROFILE.md"]?.contains("请同步这个方案") == true)
-        XCTAssertTrue(requests[1].contextDocuments["LEXICAL_PROFILE.md"]?.contains("这个方向可以继续") == true)
+        let firstRequest = try XCTUnwrap(requests.first)
+        let secondRequest = try XCTUnwrap(requests.dropFirst().first)
+        XCTAssertTrue(firstRequest.contextDocuments["LEXICAL_PROFILE.md"]?.contains("请同步这个方案") == true)
+        XCTAssertTrue(secondRequest.contextDocuments["LEXICAL_PROFILE.md"]?.contains("这个方向可以继续") == true)
         XCTAssertNotEqual(firstLexical.sha256, secondLexical.sha256)
     }
 
-    func testRecommendationIncludesFeedbackContextAndCacheKey() async {
+    func testRecommendationIncludesFeedbackContextAndCacheKey() async throws {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "继续推进", confidence: 0.88)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let candidate = CorrectionCandidate(
             text: "你好",
             source: "traditional",
@@ -940,8 +995,10 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         let requests = await provider.requests
         XCTAssertEqual(requests.count, 2)
-        XCTAssertTrue(requests[0].contextDocuments["AI_FEEDBACK.md"]?.contains("冗长表达") == true)
-        XCTAssertTrue(requests[1].contextDocuments["AI_FEEDBACK.md"]?.contains("机械复述") == true)
+        let firstRequest = try XCTUnwrap(requests.first)
+        let secondRequest = try XCTUnwrap(requests.dropFirst().first)
+        XCTAssertTrue(firstRequest.contextDocuments["AI_FEEDBACK.md"]?.contains("冗长表达") == true)
+        XCTAssertTrue(secondRequest.contextDocuments["AI_FEEDBACK.md"]?.contains("机械复述") == true)
         XCTAssertNotEqual(firstFeedback.sha256, secondFeedback.sha256)
     }
 
@@ -969,7 +1026,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let runtime = AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
@@ -1035,7 +1093,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             provider: provider,
             healthMonitor: AIHealthMonitor(failureThreshold: 1, cooldownSeconds: 60),
             debounceMilliseconds: 0,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: ProviderRequestGate()
         )
         let request = AIRecommendationRequest(
             rawInput: "nihao",
@@ -1193,7 +1252,11 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "不应发送", confidence: 0.9)
         ]))
-        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            debounceMilliseconds: 0,
+            requestGate: ProviderRequestGate()
+        )
         let request = AIRecommendationRequest(
             rawInput: String(repeating: "界", count: 4_097),
             compositionID: 1
@@ -1516,7 +1579,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(providerRequests.isEmpty)
         XCTAssertEqual(gateProbe.preflightCheckCount, 1)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
-        XCTAssertEqual(environmentProbe.documentReadCount, 0)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: environmentURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: correctionURL.path))
         XCTAssertTrue(diagnostics.events.allSatisfy { $0.reason == "gate_persistence_blocked" })

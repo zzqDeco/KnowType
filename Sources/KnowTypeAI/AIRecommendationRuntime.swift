@@ -5,6 +5,7 @@ import KnowTypeProviders
 public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     private let providerRegistry: ProviderRuntimeRegistry?
     private let providerLoader: (@Sendable () -> (any LLMProvider)?)?
+    private let legacyRequestGate: ProviderRequestGate?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let providerAvailability: AIRecommendationProviderAvailabilityState
     private let debounceMilliseconds: Int
@@ -21,6 +22,7 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     ) {
         self.providerRegistry = providerRegistry
         self.providerLoader = nil
+        self.legacyRequestGate = nil
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
@@ -38,6 +40,7 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     ) {
         self.providerRegistry = providerRegistry
         self.providerLoader = nil
+        self.legacyRequestGate = nil
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
@@ -53,6 +56,24 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     ) {
         self.providerRegistry = nil
         self.providerLoader = providerLoader
+        self.legacyRequestGate = .shared
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = EnvironmentDocumentStore()
+        self.correctionStore = CorrectionInstructionStore()
+    }
+
+    init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)?,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds,
+        requestGate: ProviderRequestGate
+    ) {
+        self.providerRegistry = nil
+        self.providerLoader = providerLoader
+        self.legacyRequestGate = requestGate
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
@@ -115,13 +136,14 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         if let runtime {
             return await runtime.recommendation(for: request)
         }
+        let requestGate = legacyRequestGate ?? .shared
         let provider = providerLoader?()
         guard provider != nil else {
             providerAvailability.update(.unavailable)
-            return await makeRuntime(provider: nil).recommendation(for: request)
+            return await makeRuntime(provider: nil, requestGate: requestGate).recommendation(for: request)
         }
         providerAvailability.update(.available)
-        let runtime = makeRuntime(provider: provider)
+        let runtime = makeRuntime(provider: provider, requestGate: requestGate)
         self.runtime = runtime
         return await runtime.recommendation(for: request)
     }

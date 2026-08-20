@@ -93,7 +93,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: environmentStore,
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         await runtime.record(
@@ -127,7 +128,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         await runtime.record(
@@ -189,7 +191,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events")),
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 2,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         await runtime.record(
@@ -306,7 +309,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         let digest = Task {
@@ -581,7 +585,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
         let firstControllerRuntime = runtime
         let secondControllerRuntime = runtime
@@ -616,6 +621,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
 
     func testContextDigestReloadsAtoBWithoutRestart() async throws {
         let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
         let providerA = NamedLLMProvider(
             name: "provider-a",
             responseText: "## Global Style\n- Provider A digest."
@@ -635,10 +641,12 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events")),
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            nowProvider: clock.now
         )
 
         await runtime.record(makeContextEvent(rawInput: "nihao", committedText: "你好"))
+        clock.advance(by: 600)
         source.set(
             revision: 2,
             fingerprint: String(repeating: "b", count: 64),
@@ -895,7 +903,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 50,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         for index in 0..<49 {
@@ -1053,7 +1062,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 50,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         await runtime.processIfNeeded()
@@ -1534,7 +1544,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 1,
             minimumInterval: 600,
-            diagnosticSink: diagnostics.record
+            diagnosticSink: diagnostics.record,
+            requestGate: ProviderRequestGate()
         )
 
         await runtime.record(makeContextEvent(rawInput: "retention", committedText: "保留"))
@@ -1583,7 +1594,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         await runtime.record(makeContextEvent(rawInput: "success", committedText: "成功"))
@@ -1634,7 +1646,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 50,
             minimumInterval: 600,
-            diagnosticSink: diagnostics.record
+            diagnosticSink: diagnostics.record,
+            requestGate: ProviderRequestGate()
         )
         let sensitive = "sensitive-sentinel-" + String(repeating: "界", count: 3_000)
 
@@ -1655,7 +1668,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
 
         await runtime.record(makeContextEvent(rawInput: "first", committedText: "第一"))
@@ -1681,6 +1695,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 1,
             minimumInterval: 1,
+            requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
 
@@ -1850,7 +1865,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             )
         )
         let digestDecodesBeforeRuntime = eventStoreProbe.digestSnapshotDecodeCount
-        let environmentReadsBeforeRuntime = environmentProbe.documentReadCount
+        let environmentReadsBeforeRuntime = environmentProbe.environmentDocumentReadCount
         let diagnostics = ContextMemoryDiagnosticProbe()
         let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
         let runtime = AIContextMemoryRuntime(
@@ -1872,7 +1887,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(gateProbe.preflightCheckCount, 1)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
         XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, digestDecodesBeforeRuntime)
-        XCTAssertEqual(environmentProbe.documentReadCount, environmentReadsBeforeRuntime)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRuntime)
         XCTAssertEqual(diagnostics.stageCount("context_gate_persistence_blocked"), 1)
         XCTAssertFalse(diagnostics.lines.joined().contains("blocked-digest-private-input"))
         XCTAssertFalse(diagnostics.lines.joined().contains("阻断内容"))
@@ -2304,7 +2319,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             providerGeneration: 0
         )
         try environmentStore.saveDigestClaim(claim)
-        let readsBeforeRecovery = environmentProbe.documentReadCount
+        let readsBeforeRecovery = environmentProbe.environmentDocumentReadCount
         let clock = ManualContextClock()
         let sleeper = ControlledContextDeadlineSleeper()
         let runtimeProbe = AIContextMemoryRuntimeTestProbe(
@@ -2349,7 +2364,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(attemptsWhilePaused, 1)
         XCTAssertEqual(claimLoadsWhilePaused, 1)
         XCTAssertEqual(gateProbe.preflightCheckCount, 0)
-        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, readsBeforeRecovery)
         let requestsWhileRecoveryPaused = await provider.requests
         XCTAssertTrue(requestsWhileRecoveryPaused.isEmpty)
 
@@ -2368,7 +2383,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(claimLoadsAfterFailure, 1)
         XCTAssertEqual(retrySchedules, 1)
         XCTAssertEqual(gateProbe.preflightCheckCount, 1)
-        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery + 1)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, readsBeforeRecovery + 1)
         XCTAssertEqual(pendingAfterFailure.map(\.rawInput), ["single-flight-claimed"])
         let requestsAfterBlockedRecovery = await provider.requests
         XCTAssertTrue(requestsAfterBlockedRecovery.isEmpty)
@@ -2408,7 +2423,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 providerGeneration: 0
             )
         )
-        let readsBeforeRecovery = environmentProbe.documentReadCount
+        let readsBeforeRecovery = environmentProbe.environmentDocumentReadCount
         let runtimeProbe = AIContextMemoryRuntimeTestProbe(
             pausesBeforeClaimRecoveryGatePreflight: true
         )
@@ -2445,7 +2460,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(attemptsWhilePaused, 1)
         XCTAssertEqual(claimLoadsWhilePaused, 1)
         XCTAssertEqual(gateProbe.preflightCheckCount, 0)
-        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, readsBeforeRecovery)
 
         await runtimeProbe.releaseClaimRecoveryGatePreflight()
         await owner.value
@@ -2462,7 +2477,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(claimLoadsAfterRecovery, 1)
         XCTAssertEqual(retrySchedules, 0)
         XCTAssertEqual(gateProbe.preflightCheckCount, 1)
-        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery + 1)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, readsBeforeRecovery + 1)
         XCTAssertEqual(pendingInputs.count, 2)
         XCTAssertEqual(
             Set(pendingInputs),
@@ -2496,7 +2511,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             providerGeneration: 0
         )
         try environmentStore.saveDigestClaim(claim)
-        let documentReadsBeforeRecovery = environmentProbe.documentReadCount
+        let environmentReadsBeforeRecovery = environmentProbe.environmentDocumentReadCount
         let clock = ManualContextClock()
         let sleeper = ControlledContextDeadlineSleeper()
         let runtimeProbe = AIContextMemoryRuntimeTestProbe()
@@ -2524,7 +2539,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         try await waitUntil { await sleeper.suspensionCount == 1 }
         let attemptsAfterFirstFailure = await runtimeProbe.claimRecoveryAttemptCount
         XCTAssertEqual(attemptsAfterFirstFailure, 1)
-        XCTAssertEqual(environmentProbe.documentReadCount, documentReadsBeforeRecovery + 1)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRecovery + 1)
 
         for index in 0..<100 {
             await runtime.record(
@@ -2537,7 +2552,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let pendingDuringBackoff = try await eventStore.pendingEvents()
         XCTAssertEqual(attemptsDuringBackoff, 1)
         XCTAssertEqual(schedulesDuringBackoff, 1)
-        XCTAssertEqual(environmentProbe.documentReadCount, documentReadsBeforeRecovery + 1)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRecovery + 1)
         XCTAssertEqual(pendingDuringBackoff.map(\.rawInput), ["claimed-private-prefix"])
         let requestsDuringBackoff = await provider.requests
         XCTAssertTrue(requestsDuringBackoff.isEmpty)
@@ -2549,10 +2564,10 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         try await waitUntil { await runtimeProbe.claimRecoveryRetryScheduleCount == 2 }
         let schedulesAfterDeadline = await runtimeProbe.claimRecoveryRetryScheduleCount
         XCTAssertEqual(schedulesAfterDeadline, 2)
-        XCTAssertEqual(environmentProbe.documentReadCount, documentReadsBeforeRecovery + 2)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRecovery + 2)
 
         _ = try environmentStore.replaceGeneratedSection(with: repairedGenerated)
-        let documentReadsBeforeRepairWake = environmentProbe.documentReadCount
+        let environmentReadsBeforeRepairWake = environmentProbe.environmentDocumentReadCount
         clock.advance(by: 60)
         await sleeper.releaseNext()
         try await waitUntil { (try? environmentStore.loadDigestClaim()) == nil }
@@ -2560,7 +2575,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let attemptsAfterRepair = await runtimeProbe.claimRecoveryAttemptCount
         let pendingAfterRepair = try await eventStore.pendingEvents()
         XCTAssertEqual(attemptsAfterRepair, 3)
-        XCTAssertEqual(environmentProbe.documentReadCount, documentReadsBeforeRepairWake + 1)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRepairWake + 1)
         XCTAssertTrue(pendingAfterRepair.isEmpty)
         let requestsAfterRepair = await provider.requests
         XCTAssertTrue(requestsAfterRepair.isEmpty)
@@ -2793,12 +2808,12 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
-        await secondRuntime.processIfNeeded()
+        await secondRuntime.processIfNeeded(now: clock.now())
         let requestsBeforeInterval = await secondProvider.requests
         XCTAssertTrue(requestsBeforeInterval.isEmpty)
 
         clock.advance(by: 11)
-        await secondRuntime.processIfNeeded()
+        await secondRuntime.processIfNeeded(now: clock.now())
         let requestsAfterInterval = await secondProvider.requests
         XCTAssertEqual(requestsAfterInterval.count, 1)
     }
@@ -3124,7 +3139,8 @@ private final class ContextRuntimeFactoryProbe: @unchecked Sendable {
             eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
-            minimumInterval: 600
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
         )
     }
 
