@@ -175,7 +175,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(
             environment: ProcessInfo.processInfo.environment.merging(["KNOWTYPE_RIME_ENABLED": "1"]) { current, _ in current }
         ) else {
-            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+            XCTFail("Strict input perf requires pinned librime artifacts and a valid native Rime configuration")
+            return
         }
         let sandbox = FileManager.default.temporaryDirectory
             .appendingPathComponent("knowtype-hotpath-perf-\(UUID().uuidString)", isDirectory: true)
@@ -188,7 +189,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         var rimeEngine = RimeConversionEngine(configuration: configuration)
         XCTAssertTrue(rimeEngine.process(.text("w")).handled)
         guard rimeEngine.isNativeActive else {
-            throw XCTSkip("librime could not create a native session")
+            XCTFail("Strict input perf requires librime to create a native session")
+            return
         }
         XCTAssertTrue(rimeEngine.process(.text("o")).handled)
         _ = rimeEngine.process(.space)
