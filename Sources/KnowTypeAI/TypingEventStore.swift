@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 public enum TypingEventStoreError: Error, Equatable {
@@ -587,13 +588,23 @@ public final class TypingEventStore: @unchecked Sendable {
                 if testProbe?.shouldFailClaimedPrefixRead() == true {
                     return .indeterminate
                 }
-                let pendingHandle = try secureFileHandleForReading(at: eventsFileURL)
+                let pendingHandle: FileHandle
+                do {
+                    pendingHandle = try secureFileHandleForReading(at: eventsFileURL)
+                } catch {
+                    return Self.isExplicitMissingFileError(error) ? .missing : .indeterminate
+                }
                 defer { try? pendingHandle.close() }
-                let pendingPrefix = try readBounded(
-                    from: pendingHandle,
-                    offset: 0,
-                    byteCount: byteCount
-                )
+                let pendingPrefix: Data
+                do {
+                    pendingPrefix = try readBounded(
+                        from: pendingHandle,
+                        offset: 0,
+                        byteCount: byteCount
+                    )
+                } catch {
+                    return Self.isExplicitMissingFileError(error) ? .missing : .indeterminate
+                }
                 if pendingPrefix.count < byteCount {
                     return expectedData.starts(with: pendingPrefix)
                         ? .indeterminate
@@ -1078,7 +1089,11 @@ public final class TypingEventStore: @unchecked Sendable {
 
     private static func isExplicitMissingFileError(_ error: Error) -> Bool {
         let error = error as NSError
-        return error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError
+        if error.domain == NSCocoaErrorDomain {
+            return error.code == NSFileNoSuchFileError ||
+                error.code == NSFileReadNoSuchFileError
+        }
+        return error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT)
     }
 
     private func pruneProcessedArchivesSynchronously() throws -> TypingEventArchiveResult {
