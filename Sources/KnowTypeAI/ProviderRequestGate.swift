@@ -18,6 +18,72 @@ public enum ProviderRequestGateError: Error, Sendable, Equatable {
     case staleGeneration
 }
 
+enum ProviderRequestGatePersistenceError: Error, Sendable, Equatable {
+    case blocked
+}
+
+final class ProviderRequestGateTestProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failedPermissionChangesRemaining = 0
+    private var failedReadsRemaining = 0
+    private var failedWritesRemaining = 0
+    private var admittedAttempts = 0
+
+    var admittedAttemptCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return admittedAttempts
+    }
+
+    func failNextPermissionChanges(_ count: Int) {
+        lock.lock()
+        failedPermissionChangesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextReads(_ count: Int) {
+        lock.lock()
+        failedReadsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextWrites(_ count: Int) {
+        lock.lock()
+        failedWritesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    fileprivate func recordAttemptAdmission() {
+        lock.lock()
+        admittedAttempts += 1
+        lock.unlock()
+    }
+
+    fileprivate func shouldFailPermissionChange() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedPermissionChangesRemaining > 0 else { return false }
+        failedPermissionChangesRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailRead() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedReadsRemaining > 0 else { return false }
+        failedReadsRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailWrite() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedWritesRemaining > 0 else { return false }
+        failedWritesRemaining -= 1
+        return true
+    }
+}
+
 public actor ProviderRequestGate {
     public static let shared = ProviderRequestGate(persistenceURL: defaultPersistenceURL())
 
@@ -61,8 +127,10 @@ public actor ProviderRequestGate {
     private let now: @Sendable () -> Date
     private let persistenceURL: URL?
     private let fileManager: FileManager
+    private let testProbe: ProviderRequestGateTestProbe?
     private var persistedEntries: [String: PersistedEntry] = [:]
     private var persistenceLoaded = false
+    private var persistenceBlocked = false
     private var availabilityWaiters: [String: [UUID: AvailabilityWaiter]] = [:]
 
     public init(
@@ -73,6 +141,19 @@ public actor ProviderRequestGate {
         self.now = now
         self.persistenceURL = persistenceURL
         self.fileManager = fileManager
+        self.testProbe = nil
+    }
+
+    init(
+        now: @escaping @Sendable () -> Date = Date.init,
+        persistenceURL: URL? = nil,
+        fileManager: FileManager = .default,
+        testProbe: ProviderRequestGateTestProbe
+    ) {
+        self.now = now
+        self.persistenceURL = persistenceURL
+        self.fileManager = fileManager
+        self.testProbe = testProbe
     }
 
     public static func identityHash(_ identity: String) -> String {
@@ -91,14 +172,18 @@ public actor ProviderRequestGate {
         state.failureCount = 0
         state.timedOutAttemptID = nil
         states[key] = state
-        clearPersistedEntry(for: key)
+        if !persistenceBlocked {
+            clearPersistedEntry(for: key)
+        }
         resumeAvailabilityWaiters(for: key)
     }
 
     public func cooldownDeadline(providerIdentity: String, generation: UInt64) -> Date? {
         loadPersistedStateIfNeeded()
+        guard !persistenceBlocked else { return nil }
         let key = Self.identityHash(providerIdentity)
         let state = state(for: key)
+        guard !persistenceBlocked else { return nil }
         guard state.generation <= generation else { return nil }
         guard let deadline = state.cooldownUntil, deadline > now() else {
             if persistedEntries[key] != nil { clearPersistedEntry(for: key) }
@@ -111,7 +196,9 @@ public actor ProviderRequestGate {
         let key = Self.identityHash(providerIdentity)
         while !Task.isCancelled {
             loadPersistedStateIfNeeded()
+            guard !persistenceBlocked else { return }
             let state = state(for: key)
+            guard !persistenceBlocked else { return }
             if generation < state.generation {
                 return
             }
@@ -176,8 +263,14 @@ public actor ProviderRequestGate {
         generation: UInt64
     ) throws -> Attempt {
         loadPersistedStateIfNeeded()
+        guard !persistenceBlocked else {
+            throw ProviderRequestGatePersistenceError.blocked
+        }
         let key = Self.identityHash(providerIdentity)
         var state = state(for: key)
+        guard !persistenceBlocked else {
+            throw ProviderRequestGatePersistenceError.blocked
+        }
         if states[key] == nil, persistedEntries[key] != nil {
             state.generation = generation
         }
@@ -189,6 +282,9 @@ public actor ProviderRequestGate {
             state.failureClass = nil
             state.timedOutAttemptID = nil
             clearPersistedEntry(for: key)
+            guard !persistenceBlocked else {
+                throw ProviderRequestGatePersistenceError.blocked
+            }
         }
         if state.inFlight { throw ProviderRequestGateError.busy }
         if let deadline = state.cooldownUntil, deadline > now() {
@@ -201,6 +297,7 @@ public actor ProviderRequestGate {
         state.activeAttemptID = attempt.id
         state.timedOutAttemptID = nil
         states[key] = state
+        testProbe?.recordAttemptAdmission()
         return attempt
     }
 
@@ -344,9 +441,11 @@ public actor ProviderRequestGate {
         forcedClass: ProviderRequestFailureClass? = nil
     ) {
         loadPersistedStateIfNeeded()
+        guard !persistenceBlocked else { return }
         if failure is ProviderRequestBudgetError { return }
         let key = Self.identityHash(providerIdentity)
         var state = state(for: key)
+        guard !persistenceBlocked else { return }
         guard state.generation <= generation,
               !Self.isCancellation(failure),
               !Self.isStale(failure) else { return }
@@ -354,6 +453,7 @@ public actor ProviderRequestGate {
             state.generation = generation
             state.failureCount = 0
             clearPersistedEntry(for: key)
+            guard !persistenceBlocked else { return }
         }
         let failureClass = forcedClass ?? Self.classify(failure)
         state.failureCount = min(16, state.failureCount + 1)
@@ -433,30 +533,44 @@ public actor ProviderRequestGate {
     private func loadPersistedStateIfNeeded() {
         guard !persistenceLoaded else { return }
         persistenceLoaded = true
-        guard let persistenceURL,
-              fileManager.fileExists(atPath: persistenceURL.path) else { return }
+        guard let persistenceURL else { return }
         do {
-            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: persistenceURL.path)
+            let attributes = try fileManager.attributesOfItem(atPath: persistenceURL.path)
+            guard (attributes[.type] as? FileAttributeType) == .typeRegular else {
+                blockPersistence()
+                return
+            }
         } catch {
+            if Self.isExplicitMissingFileError(error) { return }
+            blockPersistence()
             return
         }
-        guard let data = try? boundedData(at: persistenceURL, limit: 64 * 1_024),
-              let decoded = try? JSONDecoder().decode(PersistedState.self, from: data) else {
-            return
-        }
-        let currentDate = now()
-        var validEntries: [String: PersistedEntry] = [:]
-        for entry in decoded.entries {
-            guard entry.identityHash.count == 64,
-                  entry.identityHash.allSatisfy(\.isHexDigit),
-                  entry.deadline > currentDate,
-                  entry.failureCount >= 1,
-                  entry.failureCount <= 16 else { continue }
-            validEntries[entry.identityHash] = entry
-        }
-        persistedEntries = validEntries
-        if validEntries.count != decoded.entries.count {
-            writePersistedState()
+        do {
+            try setSecurePermissions(of: persistenceURL)
+            let data = try boundedData(
+                at: persistenceURL,
+                limit: Self.maximumPersistenceByteCount
+            )
+            let decoded = try JSONDecoder().decode(PersistedState.self, from: data)
+            let currentDate = now()
+            var validEntries: [String: PersistedEntry] = [:]
+            for entry in decoded.entries {
+                guard entry.identityHash.count == 64,
+                      entry.identityHash.allSatisfy(\.isHexDigit),
+                      entry.failureCount >= 1,
+                      entry.failureCount <= 16,
+                      validEntries[entry.identityHash] == nil else {
+                    throw ProviderRequestGatePersistenceError.blocked
+                }
+                guard entry.deadline > currentDate else { continue }
+                validEntries[entry.identityHash] = entry
+            }
+            persistedEntries = validEntries
+            if validEntries.count != decoded.entries.count || validEntries.isEmpty {
+                try writePersistedState()
+            }
+        } catch {
+            blockPersistence()
         }
     }
 
@@ -475,16 +589,27 @@ public actor ProviderRequestGate {
             failureClass: failureClass,
             failureCount: state.failureCount
         )
-        writePersistedState()
+        do {
+            try writePersistedState()
+        } catch {
+            blockPersistence()
+        }
     }
 
     private func clearPersistedEntry(for key: String) {
         guard persistedEntries.removeValue(forKey: key) != nil else { return }
-        writePersistedState()
+        do {
+            try writePersistedState()
+        } catch {
+            blockPersistence()
+        }
     }
 
-    private func writePersistedState() {
+    private func writePersistedState() throws {
         guard let persistenceURL else { return }
+        guard !persistenceBlocked else {
+            throw ProviderRequestGatePersistenceError.blocked
+        }
         let currentDate = now()
         var entries = persistedEntries.values
             .filter {
@@ -504,46 +629,80 @@ public actor ProviderRequestGate {
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        var data = try? encoder.encode(PersistedState(entries: entries))
-        while let encoded = data,
-              encoded.count > Self.maximumPersistenceByteCount,
-              !entries.isEmpty {
+        var data = try encoder.encode(PersistedState(entries: entries))
+        while data.count > Self.maximumPersistenceByteCount, !entries.isEmpty {
             entries.removeLast()
-            data = try? encoder.encode(PersistedState(entries: entries))
+            data = try encoder.encode(PersistedState(entries: entries))
         }
         persistedEntries = Dictionary(uniqueKeysWithValues: entries.map { ($0.identityHash, $0) })
         if entries.isEmpty {
-            try? fileManager.removeItem(at: persistenceURL)
+            do {
+                try fileManager.removeItem(at: persistenceURL)
+            } catch {
+                guard Self.isExplicitMissingFileError(error) else { throw error }
+            }
             return
         }
-        guard let data, data.count <= Self.maximumPersistenceByteCount else {
-            try? fileManager.removeItem(at: persistenceURL)
-            return
+        guard data.count <= Self.maximumPersistenceByteCount else {
+            throw CocoaError(.fileWriteOutOfSpace)
         }
         let directory = persistenceURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporaryURL = directory.appendingPathComponent(
+            "." + persistenceURL.lastPathComponent + "." + UUID().uuidString + ".tmp"
+        )
         do {
-            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-            let temporaryURL = directory.appendingPathComponent(
-                "." + persistenceURL.lastPathComponent + "." + UUID().uuidString + ".tmp"
-            )
-            do {
-                try data.write(to: temporaryURL, options: .atomic)
-                try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporaryURL.path)
-                if fileManager.fileExists(atPath: persistenceURL.path) {
-                    _ = try fileManager.replaceItem(at: persistenceURL, withItemAt: temporaryURL)
-                } else {
-                    try fileManager.moveItem(at: temporaryURL, to: persistenceURL)
-                }
-                try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: persistenceURL.path)
-            } catch {
-                try? fileManager.removeItem(at: temporaryURL)
+            if testProbe?.shouldFailWrite() == true {
+                throw CocoaError(.fileWriteUnknown)
             }
+            try data.write(to: temporaryURL, options: .atomic)
+            try setSecurePermissions(of: temporaryURL)
+            let destinationExists: Bool
+            do {
+                let attributes = try fileManager.attributesOfItem(atPath: persistenceURL.path)
+                guard (attributes[.type] as? FileAttributeType) == .typeRegular else {
+                    throw ProviderRequestGatePersistenceError.blocked
+                }
+                destinationExists = true
+            } catch {
+                guard Self.isExplicitMissingFileError(error) else { throw error }
+                destinationExists = false
+            }
+            if destinationExists {
+                _ = try fileManager.replaceItem(at: persistenceURL, withItemAt: temporaryURL)
+            } else {
+                try fileManager.moveItem(at: temporaryURL, to: persistenceURL)
+            }
+            try setSecurePermissions(of: persistenceURL)
         } catch {
-            return
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
         }
     }
 
+    private func setSecurePermissions(of url: URL) throws {
+        if testProbe?.shouldFailPermissionChange() == true {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private func blockPersistence() {
+        guard persistenceURL != nil else { return }
+        persistenceBlocked = true
+        let keys = Array(availabilityWaiters.keys)
+        keys.forEach { resumeAvailabilityWaiters(for: $0) }
+    }
+
+    private static func isExplicitMissingFileError(_ error: Error) -> Bool {
+        let error = error as NSError
+        return error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError
+    }
+
     private func boundedData(at url: URL, limit: Int) throws -> Data {
+        if testProbe?.shouldFailRead() == true {
+            throw CocoaError(.fileReadUnknown)
+        }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var data = Data()

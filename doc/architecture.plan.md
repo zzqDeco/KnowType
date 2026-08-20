@@ -128,6 +128,9 @@ records a hard timeout against a gate-issued attempt id before the timeout is
 visible to its caller, while cancellation-marked late transport errors only
 release that same attempt's lease. Failure counts clamp at 16 in memory and
 persisted state.
+Unreadable, undecodable, or unwritable persistent gate state blocks new provider
+attempts until the state is verifiably repaired; generation invalidation never
+turns that persistence failure into an empty cooldown state.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -140,7 +143,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   periodically summarizes them into the generated section of
   `~/.knowtype/ENV.md`. Its snapshot claim, ENV update, and archive commit are
   serialized so later appends remain pending and stale provider generations
-  cannot persist results. Registry-backed recording requires a usable provider
+  cannot persist results; registry-backed claim creation starts inside the same
+  final current-lease guard as ENV and archive persistence. Registry-backed
+  recording requires a usable provider
   lease before appending, so events entered while no provider is available are
   not retained for a later provider. A path-shared inventory makes ordinary
   append and scheduling decisions constant-cost after the first scan. Pending
@@ -154,7 +159,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   digest snapshot decode; malformed or oversized local prefixes rearm the same
   deadline when a tail remains. Calls received during an active digest set one
   coalesced rerun signal, which re-evaluates pending work once after the current
-  success, failure, or stale-generation completion.
+  success, failure, or stale-generation completion. An installed gate
+  availability waiter takes precedence over that signal and wakes exactly one
+  backlog re-evaluation after the gate becomes available.
 - Context Digest success archives only its claimed prefix and then best-effort
   retains processed history for at most 7 days, 100 files, and 10 MiB. Existing
   history is not pruned during startup or installation. Protected-only eligible
@@ -169,7 +176,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   privacy-safe digest claim for recovery, plus bounded 0600 schedule state and
   archive receipt metadata containing only timestamps, counts, and hashes.
   Recovery bounded-reads the deterministic processed archive and verifies its
-  byte count and SHA-256 before treating a missing receipt as completed. A claim
+  byte count and SHA-256 before treating a missing receipt as completed. It then
+  distinguishes a missing or provably different pending prefix from an exact
+  prefix; truncated or unreadable pending evidence remains blocked. A claim
   whose generated hash is not yet present in ENV remains blocked, and corrupt
   schedule state, including impossible date ordering or excessive future
   deadlines, is replaced by a conservative minimum-interval delay or stays

@@ -77,6 +77,13 @@ enum ProcessedArchiveValidation: Sendable, Equatable {
     case invalid
 }
 
+enum PendingClaimedPrefixValidation: Sendable, Equatable {
+    case missing
+    case notMatching
+    case matching(TypingEventSnapshot)
+    case indeterminate
+}
+
 final class TypingEventStoreTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var inventoryScans = 0
@@ -86,6 +93,7 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     private var failedArchiveDeletionsRemaining = 0
     private var failedPendingArchivesRemaining = 0
     private var failedPermissionChangesRemaining = 0
+    private var failedClaimedPrefixReadsRemaining = 0
 
     var inventoryScanCount: Int {
         lock.lock()
@@ -126,6 +134,12 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     func failNextPermissionChanges(_ count: Int) {
         lock.lock()
         failedPermissionChangesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextClaimedPrefixReads(_ count: Int) {
+        lock.lock()
+        failedClaimedPrefixReadsRemaining = max(0, count)
         lock.unlock()
     }
 
@@ -180,6 +194,16 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
             return false
         }
         failedPermissionChangesRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailClaimedPrefixRead() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedClaimedPrefixReadsRemaining > 0 else {
+            return false
+        }
+        failedClaimedPrefixReadsRemaining -= 1
         return true
     }
 }
@@ -513,6 +537,82 @@ public final class TypingEventStore: @unchecked Sendable {
             return digest == prefixSHA256.lowercased() ? .valid : .invalid
         } catch {
             return .invalid
+        }
+    }
+
+    func pendingClaimedPrefixValidation(
+        prefixSHA256: String,
+        byteCount: Int,
+        eventCount: Int
+    ) -> PendingClaimedPrefixValidation {
+        guard prefixSHA256.count == 64,
+              prefixSHA256.allSatisfy(\.isHexDigit),
+              byteCount > 0,
+              byteCount <= retentionPolicy.maximumDigestByteCount,
+              eventCount > 0,
+              eventCount <= retentionPolicy.maximumDigestEventCount else {
+            return .indeterminate
+        }
+        return withTypingEventFileLock {
+            let archiveURL = processedDirectoryURL.appendingPathComponent(
+                "typing-events-\(prefixSHA256).jsonl"
+            )
+            do {
+                let archiveAttributes = try fileManager.attributesOfItem(atPath: archiveURL.path)
+                guard (archiveAttributes[.type] as? FileAttributeType) == .typeRegular else {
+                    return .indeterminate
+                }
+                let archiveHandle = try secureFileHandleForReading(at: archiveURL)
+                defer { try? archiveHandle.close() }
+                let expectedData = try readBounded(
+                    from: archiveHandle,
+                    offset: 0,
+                    byteCount: byteCount + 1
+                )
+                guard expectedData.count == byteCount,
+                      Self.sha256(expectedData) == prefixSHA256.lowercased() else {
+                    return .indeterminate
+                }
+
+                do {
+                    let pendingAttributes = try fileManager.attributesOfItem(
+                        atPath: eventsFileURL.path
+                    )
+                    guard (pendingAttributes[.type] as? FileAttributeType) == .typeRegular else {
+                        return .indeterminate
+                    }
+                } catch {
+                    return Self.isExplicitMissingFileError(error) ? .missing : .indeterminate
+                }
+                if testProbe?.shouldFailClaimedPrefixRead() == true {
+                    return .indeterminate
+                }
+                let pendingHandle = try secureFileHandleForReading(at: eventsFileURL)
+                defer { try? pendingHandle.close() }
+                let pendingPrefix = try readBounded(
+                    from: pendingHandle,
+                    offset: 0,
+                    byteCount: byteCount
+                )
+                if pendingPrefix.count < byteCount {
+                    return expectedData.starts(with: pendingPrefix)
+                        ? .indeterminate
+                        : .notMatching
+                }
+                guard pendingPrefix == expectedData else {
+                    return .notMatching
+                }
+                let snapshot = decodeSnapshot(
+                    pendingPrefix,
+                    requestByteLimit: retentionPolicy.maximumDigestByteCount
+                )
+                guard snapshot.claimedEventCount == eventCount else {
+                    return .indeterminate
+                }
+                return .matching(snapshot)
+            } catch {
+                return .indeterminate
+            }
         }
     }
 
@@ -968,8 +1068,17 @@ public final class TypingEventStore: @unchecked Sendable {
     }
 
     private func archiveFilename(for data: Data) -> String {
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let digest = Self.sha256(data)
         return "typing-events-\(digest).jsonl"
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func isExplicitMissingFileError(_ error: Error) -> Bool {
+        let error = error as NSError
+        return error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError
     }
 
     private func pruneProcessedArchivesSynchronously() throws -> TypingEventArchiveResult {

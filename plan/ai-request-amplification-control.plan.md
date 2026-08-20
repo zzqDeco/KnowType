@@ -29,7 +29,10 @@ of already-started recommendations, and independent provider failure budgets.
   timeout once, cancellation-marked late errors do not increment it again, and
   failure count clamps at 16 across memory and restart. The gate issues a
   non-reusable attempt id and persists timeout failure before that attempt's
-  caller-visible timeout can expose lease availability.
+  caller-visible timeout can expose lease availability. With persistence
+  enabled, permission, read, decode, encode, atomic-write, replace, or final
+  chmod failure blocks new attempts and cannot be cleared by generation
+  invalidation.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is
@@ -46,7 +49,8 @@ of already-started recommendations, and independent provider failure budgets.
   interval. Corrupt schedule state imposes a fresh minimum-interval delay or
   remains fail-closed, including impossible date ordering and excessive future
   deadlines. Calls received while a digest is active coalesce into one immediate
-  post-completion re-evaluation.
+  post-completion re-evaluation, unless a busy-gate availability waiter already
+  owns the single wake for that contention episode.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
   avoids repeating the provider call. A durable archive receipt or bounded
@@ -58,7 +62,11 @@ of already-started recommendations, and independent provider failure budgets.
   restarted runtime performs this local recovery before its first append can
   compact pending data. ENV permissions are restricted before reads, structural
   User Notes must follow the unique managed pair, and existing hash-named
-  backups are verified as matching regular non-symlink files.
+  backups are verified as matching regular non-symlink files. Registry-backed
+  claim creation begins inside the final synchronous current-lease guard, so a
+  stale result cannot leave a pre-ENV orphan claim. Valid processed-archive
+  evidence clears only missing or provably different pending data, archives an
+  exact prefix, and blocks truncated or unreadable pending state.
 
 ## Verification Boundary
 

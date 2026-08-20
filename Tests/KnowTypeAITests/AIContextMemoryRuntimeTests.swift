@@ -712,6 +712,66 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertTrue(providerBRequests[0].rawInput?.contains("mingtian") == true)
     }
 
+    func testRegistryStaleBeforeGuardedCommitDoesNotCreateOrphanClaim() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let providerA = NamedLLMProvider(
+            name: "provider-a",
+            responseText: "## Global Style\n- stale"
+        )
+        let providerB = NamedLLMProvider(
+            name: "provider-b",
+            responseText: "## Global Style\n- current"
+        )
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: providerA
+        )
+        let probe = AIContextMemoryRuntimeTestProbe(pausesBeforeGuardedCommit: true)
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source),
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600,
+            testProbe: probe
+        )
+
+        let staleDigest = Task {
+            await runtime.record(makeContextEvent(rawInput: "old", committedText: "旧"))
+        }
+        try await waitUntil { await probe.guardedCommitPauseCount == 1 }
+        let claimURL = directory.appendingPathComponent("ENV.digest-claim.json")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: claimURL.path))
+
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        await probe.releaseGuardedCommit()
+        await staleDigest.value
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: claimURL.path))
+        let pendingAfterStale = try await eventStore.pendingEvents()
+        XCTAssertEqual(pendingAfterStale.map(\.rawInput), ["old"])
+
+        await runtime.processIfNeeded()
+
+        let providerARequestCount = await providerA.requestCount
+        let providerBRequestCount = await providerB.requestCount
+        let pendingAfterRetry = try await eventStore.pendingEvents()
+        XCTAssertEqual(providerARequestCount, 1)
+        XCTAssertEqual(providerBRequestCount, 1)
+        XCTAssertTrue(pendingAfterRetry.isEmpty)
+        let environment = try String(contentsOf: environmentURL, encoding: .utf8)
+        XCTAssertTrue(environment.contains("current"))
+        XCTAssertFalse(environment.contains("stale"))
+    }
+
     func testProtectedOnlyPendingRegistryBatchDoesNotReadProviderFiles() async throws {
         let directory = makeTemporaryDirectory()
         let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
@@ -1684,7 +1744,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             generatedMarkdown: "## Global Style\n- gate wake",
             delayNanoseconds: 20_000_000
         )
-        let gate = ProviderRequestGate()
+        let gateProbe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(testProbe: gateProbe)
         let blockerProbe = ContextGateProbe()
         let blocker = Task {
             try await gate.execute(providerIdentity: provider.providerName, generation: 0) {
@@ -1700,25 +1761,185 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             retentionPolicy: .default,
             testProbe: eventStoreProbe
         )
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe(
+            pausesAfterGateWaiterInstall: true
+        )
         let runtime = AIContextMemoryRuntime(
             provider: provider,
             eventStore: eventStore,
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 1,
             minimumInterval: 1,
-            requestGate: gate
+            diagnosticSink: { _ in },
+            requestGate: gate,
+            testProbe: runtimeProbe
         )
-        await runtime.record(makeContextEvent(rawInput: "queued", committedText: "排队"))
+        let firstRecord = Task {
+            await runtime.record(makeContextEvent(rawInput: "queued", committedText: "排队"))
+        }
+        try await waitUntil { await runtimeProbe.gateWaiterPauseCount == 1 }
         XCTAssertTrue((await provider.requests).isEmpty)
         XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 1)
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 1)
 
         await runtime.record(makeContextEvent(rawInput: "queued-2", committedText: "继续排队"))
+        await runtime.record(makeContextEvent(rawInput: "queued-3", committedText: "仍在排队"))
+        await runtime.processIfNeeded()
         XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 1)
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 1)
+
+        await runtimeProbe.releaseGateWaiterInstall()
+        await firstRecord.value
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 1)
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 1)
 
         await blockerProbe.release()
         try await blocker.value
         try await waitUntil { !(await provider.requests).isEmpty }
         XCTAssertEqual((await provider.requests).count, 1)
+        try await waitUntil { eventStoreProbe.digestSnapshotDecodeCount == 2 }
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 2)
+    }
+
+    func testProcessedArchivePendingPrefixValidationIsExactAndFailClosed() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        let probe = TypingEventStoreTestProbe()
+        let store = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: .default,
+            testProbe: probe
+        )
+        let claimedEvent = makeContextEvent(rawInput: "claimed", committedText: "已声明")
+        try await store.append(claimedEvent)
+        let snapshot = try store.pendingDigestSnapshot()
+        let prefixSHA256 = AIDocumentSnapshot.hash(snapshot.rawContent)
+        _ = try store.commitPendingEvents(matching: snapshot, beforeArchive: {})
+
+        XCTAssertEqual(
+            store.pendingClaimedPrefixValidation(
+                prefixSHA256: prefixSHA256,
+                byteCount: snapshot.rawData.count,
+                eventCount: snapshot.claimedEventCount
+            ),
+            .missing
+        )
+
+        try await store.append(
+            makeContextEvent(
+                rawInput: "tail-only-" + String(repeating: "x", count: 512),
+                committedText: "尾部"
+            )
+        )
+        XCTAssertEqual(
+            store.pendingClaimedPrefixValidation(
+                prefixSHA256: prefixSHA256,
+                byteCount: snapshot.rawData.count,
+                eventCount: snapshot.claimedEventCount
+            ),
+            .notMatching
+        )
+
+        try snapshot.rawData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        switch store.pendingClaimedPrefixValidation(
+            prefixSHA256: prefixSHA256,
+            byteCount: snapshot.rawData.count,
+            eventCount: snapshot.claimedEventCount
+        ) {
+        case .matching(let recovered):
+            XCTAssertEqual(recovered.rawData, snapshot.rawData)
+        default:
+            XCTFail("expected exact claimed prefix")
+        }
+
+        try Data(snapshot.rawData.prefix(max(1, snapshot.rawData.count / 2))).write(
+            to: pendingURL,
+            options: .atomic
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        XCTAssertEqual(
+            store.pendingClaimedPrefixValidation(
+                prefixSHA256: prefixSHA256,
+                byteCount: snapshot.rawData.count,
+                eventCount: snapshot.claimedEventCount
+            ),
+            .indeterminate
+        )
+
+        try snapshot.rawData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        probe.failNextClaimedPrefixReads(1)
+        XCTAssertEqual(
+            store.pendingClaimedPrefixValidation(
+                prefixSHA256: prefixSHA256,
+                byteCount: snapshot.rawData.count,
+                eventCount: snapshot.claimedEventCount
+            ),
+            .indeterminate
+        )
+    }
+
+    func testProcessedArchiveRecoveryRetainsClaimWhenPendingPrefixReadFails() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: .default,
+            testProbe: probe
+        )
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+        let generated = "## Global Style\n- committed"
+        try await eventStore.append(
+            makeContextEvent(rawInput: "claimed", committedText: "已声明")
+        )
+        let snapshot = try eventStore.pendingDigestSnapshot()
+        let claim = EnvironmentDigestClaim(
+            claimedPrefixSHA256: AIDocumentSnapshot.hash(snapshot.rawContent),
+            claimedPrefixByteCount: snapshot.rawData.count,
+            claimedEventCount: snapshot.claimedEventCount,
+            generatedSHA256: AIDocumentSnapshot.hash(generated),
+            providerGeneration: 0
+        )
+        _ = try environmentStore.replaceGeneratedSection(with: generated)
+        try environmentStore.saveDigestClaim(claim)
+        _ = try eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
+        try snapshot.rawData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        probe.failNextClaimedPrefixReads(1)
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate()
+        )
+
+        await runtime.processIfNeeded()
+
+        XCTAssertTrue((await provider.requests).isEmpty)
+        XCTAssertEqual(try environmentStore.loadDigestClaim(), claim)
+        XCTAssertEqual(try Data(contentsOf: pendingURL), snapshot.rawData)
+        XCTAssertNil(try environmentStore.loadDigestScheduleState())
     }
 
     func testClaimCleanupFailureWithTailRecoversAfterRestartWithoutProviderRetry() async throws {

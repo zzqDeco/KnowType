@@ -20,9 +20,13 @@
   second failure or mutate a newer attempt.
 - Generation invalidation wakes waiters while stale transport remains fenced
   until its actual completion.
+- With persistence enabled, permission, bounded-read, decode, encoding,
+  atomic-write, replacement, or final-permission failure enters an actor-owned
+  blocked state. New attempts remain blocked across generation invalidation;
+  non-persistent gate instances are unaffected.
 
 ## Tests
 
 - `ProviderRuntimeRegistryTests` covers timeout/completion interleaving,
-  single-failure ownership, generation invalidation, persistence, and waiter
-  release.
+  single-failure ownership, generation invalidation, fail-closed persistence,
+  and waiter release.

@@ -439,14 +439,160 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertNotNil(reloadedDeadline)
         await reloaded.invalidate(providerIdentity: identity, generation: 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
+    }
 
-        try Data("corrupt".utf8).write(to: stateURL)
-        _ = try await ProviderRequestGate(now: { now }, persistenceURL: stateURL).execute(
+    func testPersistentGatePermissionFailureBlocksProviderDispatch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let now = Date()
+        let identity = "permission-secret-provider"
+        let seed = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+        await seed.recordFailure(
             providerIdentity: identity,
-            generation: 0
-        ) {
-            LLMResponse(candidates: [])
-        } as LLMResponse
+            generation: 0,
+            failure: ProviderError.httpStatus(503, "unavailable")
+        )
+        let probe = ProviderRequestGateTestProbe()
+        probe.failNextPermissionChanges(1)
+        let gate = ProviderRequestGate(
+            now: { now },
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        let operation = RequestGateProbe()
+
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 0) {
+                await operation.markStarted()
+                return 1
+            }
+            XCTFail("permission failure must block dispatch")
+        } catch ProviderRequestGatePersistenceError.blocked {
+            // Expected.
+        }
+
+        await gate.invalidate(providerIdentity: identity, generation: 0)
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 1) {
+                await operation.markStarted()
+                return 2
+            }
+            XCTFail("generation invalidation must not clear persistence failure")
+        } catch ProviderRequestGatePersistenceError.blocked {
+            // Expected.
+        }
+
+        let operationStarted = await operation.hasStarted
+        XCTAssertFalse(operationStarted)
+        let persisted = try Data(contentsOf: stateURL)
+        XCTAssertFalse(String(decoding: persisted, as: UTF8.self).contains(identity))
+    }
+
+    func testPersistentGateCorruptStateBlocksProviderDispatch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let identity = "corrupt-secret-provider"
+        try Data("corrupt".utf8).write(to: stateURL)
+        let gate = ProviderRequestGate(persistenceURL: stateURL)
+        let operation = RequestGateProbe()
+
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 0) {
+                await operation.markStarted()
+                return 1
+            }
+            XCTFail("corrupt persistent state must block dispatch")
+        } catch ProviderRequestGatePersistenceError.blocked {
+            // Expected.
+        }
+
+        let operationStarted = await operation.hasStarted
+        XCTAssertFalse(operationStarted)
+        XCTAssertFalse(
+            String(decoding: try Data(contentsOf: stateURL), as: UTF8.self).contains(identity)
+        )
+    }
+
+    func testPersistentGateCooldownWriteFailureBlocksSubsequentDispatch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let identity = "write-secret-provider"
+        let probe = ProviderRequestGateTestProbe()
+        probe.failNextWrites(1)
+        let gate = ProviderRequestGate(
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        let operation = RequestGateProbe()
+
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 0) {
+                await operation.markStarted()
+                throw ProviderError.httpStatus(503, "unavailable")
+            } as Int
+            XCTFail("expected provider failure")
+        } catch ProviderError.httpStatus(let status, _) {
+            XCTAssertEqual(status, 503)
+        }
+
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 0) {
+                await operation.markStarted()
+                return 2
+            }
+            XCTFail("failed cooldown persistence must block later dispatch")
+        } catch ProviderRequestGatePersistenceError.blocked {
+            // Expected.
+        }
+
+        let operationStartCount = await operation.startCount
+        XCTAssertEqual(operationStartCount, 1)
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )
+        for file in files {
+            let data = try Data(contentsOf: file)
+            XCTAssertFalse(String(decoding: data, as: UTF8.self).contains(identity))
+        }
+    }
+
+    func testPersistentGateReadFailureBlocksProviderDispatch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let now = Date()
+        let identity = "read-secret-provider"
+        let seed = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+        await seed.recordFailure(
+            providerIdentity: identity,
+            generation: 0,
+            failure: ProviderError.httpStatus(503, "unavailable")
+        )
+        let probe = ProviderRequestGateTestProbe()
+        probe.failNextReads(1)
+        let gate = ProviderRequestGate(
+            now: { now },
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        let operation = RequestGateProbe()
+
+        do {
+            _ = try await gate.execute(providerIdentity: identity, generation: 0) {
+                await operation.markStarted()
+                return 1
+            }
+            XCTFail("read failure must block dispatch")
+        } catch ProviderRequestGatePersistenceError.blocked {
+            // Expected.
+        }
+
+        let operationStarted = await operation.hasStarted
+        XCTAssertFalse(operationStarted)
     }
 
     func testRequestGateSerializesSameIdentityButAllowsDifferentIdentity() async throws {
@@ -806,14 +952,20 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
 
 private actor RequestGateProbe {
     private var started = false
+    private var starts = 0
     private var didFinishAvailabilityWait = false
 
     func markStarted() {
         started = true
+        starts += 1
     }
 
     var hasStarted: Bool {
         started
+    }
+
+    var startCount: Int {
+        starts
     }
 
     func markAvailabilityFinished() {

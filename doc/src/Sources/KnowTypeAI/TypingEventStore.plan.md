@@ -51,7 +51,10 @@
   bounded legacy oversized-line archive also verifies the expected prefix
   before reading at most the pending-file limit. Deterministic processed-archive
   recovery bounded-reads the expected byte count plus one and verifies SHA-256;
-  filename or metadata size alone is never completion evidence.
+  filename or metadata size alone is never completion evidence. With valid
+  archive evidence, a second bounded check classifies pending as missing,
+  provably different, exact, or indeterminate. Only an exact prefix is archived;
+  truncated, permission-denied, and unreadable states remain fail-closed.
 - Pending append, compaction, and tail rewrite paths plus deterministic
   processed archives force mode 0600. Existing pending/archive files are
   corrected before access, atomic writes protect both temporary and final

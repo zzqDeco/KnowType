@@ -16,10 +16,16 @@
 
 - Calls arriving during an active digest set one coalesced rerun. The rerun is
   scheduled only after the active digest clears and uses the then-current
-  provider lease.
+  provider lease. If a busy-gate availability waiter is already installed, it
+  remains the single wake source and the coalesced signal does not replace it.
+- Registry-backed claim creation, ENV replacement, archive, receipt, and
+  schedule persistence start inside one synchronous current-lease guard. Work
+  that is stale before the guard creates no claim.
 - Persisted claims are recovered locally before the first post-restart append,
   so compaction cannot remove a claimed prefix. Unverifiable claims block the
-  append and provider dispatch.
+  append and provider dispatch. A validated processed archive permits cleanup
+  only when pending is missing, provably different, or exactly archived;
+  truncated and unreadable pending evidence remains blocked.
 - Persisted schedule dates must have valid ordering and a bounded future
   deadline. Invalid state is replaced with a fresh minimum-interval delay.
 - Deadline conversion clamps finite positive durations before producing
@@ -27,5 +33,6 @@
 
 ## Tests
 
-- `AIContextMemoryRuntimeTests` covers stale-generation reruns, semantic schedule
-  repair, first-record claim recovery, and cancellation-resistant timeout flow.
+- `AIContextMemoryRuntimeTests` covers guarded claim creation, busy-waiter
+  coalescing, processed-archive recovery states, semantic schedule repair,
+  first-record claim recovery, and cancellation-resistant timeout flow.

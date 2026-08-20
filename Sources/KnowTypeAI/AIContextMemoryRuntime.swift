@@ -3,6 +3,53 @@ import Foundation
 import KnowTypeCore
 import KnowTypeProviders
 
+actor AIContextMemoryRuntimeTestProbe {
+    private let pausesBeforeGuardedCommit: Bool
+    private let pausesAfterGateWaiterInstall: Bool
+    private var guardedCommitReleased = false
+    private var gateWaiterReleased = false
+    private var guardedCommitContinuation: CheckedContinuation<Void, Never>?
+    private var gateWaiterContinuation: CheckedContinuation<Void, Never>?
+    private(set) var guardedCommitPauseCount = 0
+    private(set) var gateWaiterPauseCount = 0
+
+    init(
+        pausesBeforeGuardedCommit: Bool = false,
+        pausesAfterGateWaiterInstall: Bool = false
+    ) {
+        self.pausesBeforeGuardedCommit = pausesBeforeGuardedCommit
+        self.pausesAfterGateWaiterInstall = pausesAfterGateWaiterInstall
+    }
+
+    func pauseBeforeGuardedCommitIfNeeded() async {
+        guardedCommitPauseCount += 1
+        guard pausesBeforeGuardedCommit, !guardedCommitReleased else { return }
+        await withCheckedContinuation { continuation in
+            guardedCommitContinuation = continuation
+        }
+    }
+
+    func releaseGuardedCommit() {
+        guardedCommitReleased = true
+        guardedCommitContinuation?.resume()
+        guardedCommitContinuation = nil
+    }
+
+    func pauseAfterGateWaiterInstallIfNeeded() async {
+        gateWaiterPauseCount += 1
+        guard pausesAfterGateWaiterInstall, !gateWaiterReleased else { return }
+        await withCheckedContinuation { continuation in
+            gateWaiterContinuation = continuation
+        }
+    }
+
+    func releaseGateWaiterInstall() {
+        gateWaiterReleased = true
+        gateWaiterContinuation?.resume()
+        gateWaiterContinuation = nil
+    }
+}
+
 public actor LazyDefaultAIContextMemoryRuntime: AIContextEventRecording {
     private let providerLoader: @Sendable () -> (any LLMProvider)?
     private let runtimeFactory: @Sendable (any LLMProvider) -> AIContextMemoryRuntime
@@ -50,6 +97,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private let requestGate: ProviderRequestGate
     private let nowProvider: @Sendable () -> Date
     private let hardTimeoutNanoseconds: UInt64
+    private let testProbe: AIContextMemoryRuntimeTestProbe?
     private var providerIdentity = "context-digest"
     private var lastDigestAt: Date?
     private var pendingSince: Date?
@@ -86,6 +134,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.requestGate = requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
+        self.testProbe = nil
         self.providerIdentity = providerIdentity ?? provider?.providerName ?? "context-digest"
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
@@ -99,7 +148,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         hardTimeoutMilliseconds: Int = AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds,
         diagnosticSink: @escaping @Sendable ([InputDebugDiagnostics.Field]) -> Void,
         requestGate: ProviderRequestGate = .shared,
-        nowProvider: @escaping @Sendable () -> Date = Date.init
+        nowProvider: @escaping @Sendable () -> Date = Date.init,
+        testProbe: AIContextMemoryRuntimeTestProbe? = nil
     ) {
         self.provider = provider
         self.providerRegistry = nil
@@ -110,6 +160,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.requestGate = requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(max(1, hardTimeoutMilliseconds)) * 1_000_000
+        self.testProbe = testProbe
         self.providerIdentity = provider?.providerName ?? "context-digest"
         self.diagnosticSink = diagnosticSink
     }
@@ -131,6 +182,29 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.requestGate = providerRegistry.requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
+        self.testProbe = nil
+        self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
+    }
+
+    init(
+        providerRegistry: ProviderRuntimeRegistry,
+        eventStore: TypingEventStore,
+        environmentStore: EnvironmentDocumentStore,
+        batchSize: Int,
+        minimumInterval: TimeInterval,
+        nowProvider: @escaping @Sendable () -> Date = Date.init,
+        testProbe: AIContextMemoryRuntimeTestProbe
+    ) {
+        self.provider = nil
+        self.providerRegistry = providerRegistry
+        self.eventStore = eventStore
+        self.environmentStore = environmentStore
+        self.batchSize = max(1, batchSize)
+        self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
+        self.requestGate = providerRegistry.requestGate
+        self.nowProvider = nowProvider
+        self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
+        self.testProbe = testProbe
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
 
@@ -175,7 +249,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             digestInFlight = false
             if digestRerunRequested {
                 digestRerunRequested = false
-                scheduleCoalescedRerun()
+                if gateWaitKey == nil || deadlineTask == nil {
+                    scheduleCoalescedRerun()
+                }
             }
         }
 
@@ -337,6 +413,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             }
             _ = gated.0
             providerGateCompleted = true
+            await testProbe?.pauseBeforeGuardedCommitIfNeeded()
             let generated = gated.1
             let claim = EnvironmentDigestClaim(
                 claimedPrefixSHA256: Self.sha256(snapshot.rawData),
@@ -347,9 +424,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 ),
                 providerGeneration: requestGeneration
             )
-            try environmentStore.saveDigestClaim(claim)
-            persistedClaimNeedsRecovery = true
-            let persist: @Sendable () throws -> TypingEventArchiveResult = {
+            let persistAfterClaim: @Sendable () throws -> TypingEventArchiveResult = {
                 _ = try environmentStore.replaceGeneratedSection(with: generated)
                 let result = try eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
                 guard eventStore.hasProcessedArchive(
@@ -380,9 +455,15 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             }
             let result: TypingEventArchiveResult
             if let providerRegistry, let lease {
-                result = try await providerRegistry.commitIfCurrent(using: lease, operation: persist)
+                persistedClaimNeedsRecovery = true
+                result = try await providerRegistry.commitIfCurrent(using: lease) {
+                    try environmentStore.saveDigestClaim(claim)
+                    return try persistAfterClaim()
+                }
             } else {
-                result = try persist()
+                try environmentStore.saveDigestClaim(claim)
+                persistedClaimNeedsRecovery = true
+                result = try persistAfterClaim()
             }
             try environmentStore.clearDigestClaim()
             persistedClaimNeedsRecovery = false
@@ -399,6 +480,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             scheduleDeadline(at: deadline)
         } catch ProviderRequestGateError.busy {
             scheduleGateAvailabilityWake()
+            await testProbe?.pauseAfterGateWaiterInstallIfNeeded()
+            return
+        } catch ProviderRequestGatePersistenceError.blocked {
             return
         } catch TypingEventStoreError.pendingContentChanged {
             return
@@ -463,11 +547,17 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 byteCount: claim.claimedPrefixByteCount
             ) {
             case .valid:
-                if let snapshot = try? eventStore.pendingDigestSnapshot(
-                    prefixByteCount: claim.claimedPrefixByteCount,
+                switch eventStore.pendingClaimedPrefixValidation(
+                    prefixSHA256: claim.claimedPrefixSHA256,
+                    byteCount: claim.claimedPrefixByteCount,
                     eventCount: claim.claimedEventCount
-                ), Self.sha256(snapshot.rawData) == claim.claimedPrefixSHA256 {
+                ) {
+                case .matching(let snapshot):
                     try eventStore.archivePendingEvents(matching: snapshot)
+                case .missing, .notMatching:
+                    break
+                case .indeterminate:
+                    return .blocked
                 }
                 try persistScheduleState(afterSuccessAt: now)
                 try environmentStore.clearDigestClaim()

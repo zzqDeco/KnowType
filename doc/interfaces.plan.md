@@ -81,7 +81,10 @@ gate state contains only the identity hash, deadline, failure class, and a
 bounded count in atomic mode-0600 storage; it never persists in-flight state.
 One real gate attempt receives a non-reusable gate attempt id and records at
 most one failure before caller-visible timeout release, and its in-memory and
-persisted failure count clamps at 16.
+persisted failure count clamps at 16. Existing-state permission, bounded-read,
+decode, atomic-write, replace, or final-permission failure blocks subsequent
+attempts; generation invalidation does not reinterpret that failure as empty
+state.
 
 ## Input Client Compatibility
 
@@ -746,7 +749,8 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   pending, appended records return before another snapshot decode, and locally
   archived blank, malformed, or oversized prefixes rearm the deadline for tail
   data; calls arriving during a digest coalesce into one post-completion
-  re-evaluation rather than a concurrent digest
+  re-evaluation rather than a concurrent digest, except that an already
+  installed gate waiter remains the sole wake source for its contention episode
 - updates only the generated section in canonical `ENV.md`, with one managed
   marker pair and one User Notes section; markerless documents remain user
   content, only exact marker lines define managed boundaries, and ambiguous
@@ -757,8 +761,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - sanitizes Level 0 protected content before writing logs
 - is shared across all controllers in the process, so one pending snapshot
   starts at most one digest request
-- updates ENV and archives a pending prefix only while both its provider lease
-  and snapshot claim remain current; later appended events stay pending
+- creates a registry-backed claim and then updates ENV and archives a pending
+  prefix inside one synchronous current-lease guard; stale work before that
+  guard creates no claim, and later appended events stay pending
 - uses a path-shared process inventory for count/byte/protection gates, so
   below-threshold and unchanged-generation cooldown paths do not decode JSONL
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
@@ -768,7 +773,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   path is recoverable without repeating the provider call; appended tail events
   remain outside the old claim. Receipt-missing recovery bounded-reads the
   deterministic processed archive and requires both recorded byte count and
-  SHA-256; a same-size corrupt archive remains blocked. A pre-ENV claim whose
+  SHA-256. Recovery archives an exact pending prefix, accepts an explicitly
+  missing or different prefix as already archived, and blocks on truncated,
+  unreadable, or otherwise indeterminate pending evidence; a same-size corrupt
+  archive remains blocked. A pre-ENV claim whose
   generated hash does not match ENV also remains blocked, and corrupt schedule
   state cannot trigger an immediate fresh-runtime batch dispatch. The first
   record after restart completes local claim recovery before append or
