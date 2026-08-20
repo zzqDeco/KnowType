@@ -2777,6 +2777,54 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         }
     }
 
+    func testPendingScheduleWithoutTimeAnchorDefersBatchOnFreshRuntime() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+        try await eventStore.append(
+            makeContextEvent(rawInput: "anchorless", committedText: "无时间锚点")
+        )
+        try environmentStore.saveDigestScheduleState(
+            EnvironmentDigestScheduleState(
+                pendingSince: nil,
+                lastSuccessfulDigestAt: nil,
+                nextEligibleAt: nil,
+                pendingEventCount: 1
+            )
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- repaired")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 10,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requestsBeforeDeadline = await provider.requests
+        XCTAssertTrue(requestsBeforeDeadline.isEmpty)
+        let repaired = try XCTUnwrap(environmentStore.loadDigestScheduleState())
+        XCTAssertEqual(repaired.pendingSince, clock.now())
+        let repairedDeadline = try XCTUnwrap(repaired.nextEligibleAt)
+        XCTAssertEqual(
+            repairedDeadline.timeIntervalSince(clock.now()),
+            10,
+            accuracy: 0.001
+        )
+
+        clock.advance(by: 11)
+        await runtime.processIfNeeded(now: clock.now())
+        let requestsAfterDeadline = await provider.requests
+        XCTAssertEqual(requestsAfterDeadline.count, 1)
+    }
+
     func testPersistedSuccessIntervalStillBlocksBatchTailAfterRuntimeRebuild() async throws {
         let directory = makeTemporaryDirectory()
         let clock = ManualContextClock()
@@ -2912,6 +2960,101 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         await gate.invalidate(providerIdentity: provider.providerName, generation: 0)
         let value = try await gate.execute(providerIdentity: provider.providerName, generation: 1) { 3 }
         XCTAssertEqual(value, 3)
+    }
+
+    func testDigestTimeoutProtectsClaimThroughCompactionUntilTransportCompletes() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        var policy = TypingEventRetentionPolicy.default
+        policy.maximumPendingEventCount = 3
+        policy.compactedPendingEventCount = 3
+        policy.maximumDigestEventCount = 1
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: policy
+        )
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: directory.appendingPathComponent("ENV.md")
+        )
+        let provider = CancellationResistantDigestLLMProvider()
+        let gate = ProviderRequestGate(now: clock.now)
+        try await eventStore.append(
+            makeContextEvent(rawInput: "claimed", committedText: "受保护前缀")
+        )
+        let claimedSnapshot = try eventStore.pendingDigestSnapshot()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            hardTimeoutMilliseconds: 20,
+            diagnosticSink: { _ in },
+            requestGate: gate,
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+        let protectionAfterTimeout = await runtime.hasActiveDigestClaimProtectionForTesting()
+        XCTAssertTrue(protectionAfterTimeout)
+
+        for index in 0..<3 {
+            await runtime.record(
+                makeContextEvent(rawInput: "tail-\(index)", committedText: "尾部\(index)")
+            )
+        }
+        let compactedPending = try await eventStore.pendingEvents()
+        XCTAssertEqual(compactedPending.count, 3)
+        XCTAssertEqual(compactedPending.first?.rawInput, "claimed")
+        XCTAssertFalse(
+            eventStore.hasProcessedArchive(
+                prefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+                byteCount: claimedSnapshot.rawData.count
+            )
+        )
+
+        await provider.finish(generatedMarkdown: "## Global Style\n- late")
+        try await waitUntil {
+            !(await runtime.hasActiveDigestClaimProtectionForTesting())
+        }
+        let protectionAfterCompletion = await runtime.hasActiveDigestClaimProtectionForTesting()
+        guard !protectionAfterCompletion else { return }
+        let environmentAfterLateResult = try environmentStore.loadSnapshot().content
+        let pendingAfterLateResult = try await eventStore.pendingEvents()
+        XCTAssertFalse(environmentAfterLateResult.contains("- late"))
+        XCTAssertEqual(pendingAfterLateResult.first?.rawInput, "claimed")
+        XCTAssertFalse(
+            eventStore.hasProcessedArchive(
+                prefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+                byteCount: claimedSnapshot.rawData.count
+            )
+        )
+
+        clock.advance(by: 61)
+        let retry = Task {
+            await runtime.processIfNeeded(now: clock.now())
+        }
+        try await waitUntil { await provider.requestCount == 2 }
+        let requestCount = await provider.requestCount
+        guard requestCount == 2 else {
+            retry.cancel()
+            await provider.finish(generatedMarkdown: "## Global Style\n- retry")
+            await retry.value
+            return
+        }
+        await provider.finish(generatedMarkdown: "## Global Style\n- retry")
+        await retry.value
+
+        let finalEnvironment = try environmentStore.loadSnapshot().content
+        let finalPending = try await eventStore.pendingEvents()
+        XCTAssertTrue(finalEnvironment.contains("- retry"))
+        XCTAssertFalse(finalPending.contains { $0.rawInput == "claimed" })
+        XCTAssertTrue(
+            eventStore.hasProcessedArchive(
+                prefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+                byteCount: claimedSnapshot.rawData.count
+            )
+        )
     }
 }
 

@@ -15,6 +15,10 @@
 
 - Every admitted dispatch receives a non-reusable attempt id. Timeout failure is
   atomically recorded for that id before timeout is visible to the caller.
+- Caller cancellation after admission but before transport registration aborts
+  only that attempt, wakes availability waiters, and creates no failure or
+  cooldown. Once transport starts, its attempt remains owned until the real
+  operation reaches its fenced completion path.
 - Late success, cancellation, or error can release only its own attempt. A
   timeout-marked late result preserves the existing cooldown and cannot count a
   second failure or mutate a newer attempt.
@@ -30,6 +34,7 @@
 
 ## Tests
 
-- `ProviderRuntimeRegistryTests` covers timeout/completion interleaving,
-  single-failure ownership, generation invalidation, fail-closed persistence,
-  value-only preflight, and waiter release.
+- `ProviderRuntimeRegistryTests` covers admission-to-transport cancellation,
+  timeout/completion interleaving, single-failure ownership, generation
+  invalidation, fail-closed persistence, value-only preflight, and waiter
+  release.

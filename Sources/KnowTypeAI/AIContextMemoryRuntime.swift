@@ -138,6 +138,13 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         var waiters: [CheckedContinuation<DigestClaimRecovery, Never>] = []
     }
 
+    private struct DigestClaimProtection {
+        let token: UUID
+        let rawData: Data
+        var processFinished = false
+        var attemptFinished = false
+    }
+
     private let provider: (any LLMProvider)?
     private let providerRegistry: ProviderRuntimeRegistry?
     private let eventStore: TypingEventStore
@@ -162,7 +169,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var digestInFlight = false
     private var digestRerunRequested = false
     private var digestRerunScheduled = false
-    private var activeDigestClaimRawData: Data?
+    private var digestClaimProtection: DigestClaimProtection?
     private var persistedClaimNeedsRecovery = true
     private var providerGeneration: UInt64?
     private var deadlineTask: Task<Void, Never>?
@@ -255,6 +262,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         digestClaimRecoveryFlight?.waiters.count ?? 0
     }
 
+    func hasActiveDigestClaimProtectionForTesting() -> Bool {
+        digestClaimProtection != nil
+    }
+
     init(
         providerRegistry: ProviderRuntimeRegistry,
         eventStore: TypingEventStore,
@@ -295,7 +306,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         do {
             let result = try eventStore.appendBounded(
                 sanitized(event),
-                preservingClaimedPrefix: activeDigestClaimRawData
+                preservingClaimedPrefix: digestClaimProtection?.rawData
             )
             emitAppendDiagnostics(result)
             await processIfNeeded(now: nowProvider(), dispatchLease: lease)
@@ -320,8 +331,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
         guard gateWaitKey == nil, !digestRerunScheduled else { return }
         digestInFlight = true
+        var ownedClaimProtectionToken: UUID?
         defer {
-            activeDigestClaimRawData = nil
+            if let ownedClaimProtectionToken {
+                finishDigestClaimProcess(token: ownedClaimProtectionToken)
+            }
             digestInFlight = false
             if digestRerunRequested {
                 digestRerunRequested = false
@@ -346,6 +360,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 break
             }
         }
+        guard digestClaimProtection == nil else { return }
 
         let inventory: TypingEventInventory
         do { inventory = try eventStore.inventory() } catch { return }
@@ -483,13 +498,17 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 contextDocuments: ["ENV.md": currentEnvironment.content]
             )
             try ProviderRequestBudget.validate(request)
-            activeDigestClaimRawData = snapshot.rawData
+            let protectionToken = beginDigestClaimProtection(rawData: snapshot.rawData)
+            ownedClaimProtectionToken = protectionToken
             let registry = providerRegistry
             providerGateStarted = true
             let gated: (LLMResponse, String) = try await requestGate.executeWithHardTimeout(
                 providerIdentity: requestIdentity,
                 generation: requestGeneration,
-                timeoutNanoseconds: hardTimeoutNanoseconds
+                timeoutNanoseconds: hardTimeoutNanoseconds,
+                onAttemptCompletion: {
+                    await self.finishDigestClaimAttempt(token: protectionToken)
+                }
             ) {
                 let response: LLMResponse
                 if let registry, let lease {
@@ -604,7 +623,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func preparePersistedClaimForRecord(now: Date) async -> Bool {
-        guard activeDigestClaimRawData == nil, persistedClaimNeedsRecovery else { return true }
+        guard digestClaimProtection == nil, persistedClaimNeedsRecovery else { return true }
         switch await attemptDigestClaimRecovery(now: now) {
         case .none, .recovered:
             return true
@@ -1023,6 +1042,12 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt,
            lastSuccessfulDigestAt > now { return false }
         guard state.pendingSince == nil || state.lastSuccessfulDigestAt == nil else { return false }
+        if state.pendingSince == nil,
+           state.lastSuccessfulDigestAt == nil,
+           state.nextEligibleAt == nil,
+           state.pendingEventCount > 0 {
+            return false
+        }
 
         let expectedDeadline: Date?
         if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt {
@@ -1089,6 +1114,34 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 pendingEventCount: tailCount
             )
         )
+    }
+
+    private func beginDigestClaimProtection(rawData: Data) -> UUID {
+        let token = UUID()
+        digestClaimProtection = DigestClaimProtection(token: token, rawData: rawData)
+        return token
+    }
+
+    private func finishDigestClaimProcess(token: UUID) {
+        guard var protection = digestClaimProtection,
+              protection.token == token else { return }
+        protection.processFinished = true
+        finishDigestClaimProtectionIfComplete(protection)
+    }
+
+    private func finishDigestClaimAttempt(token: UUID) {
+        guard var protection = digestClaimProtection,
+              protection.token == token else { return }
+        protection.attemptFinished = true
+        finishDigestClaimProtectionIfComplete(protection)
+    }
+
+    private func finishDigestClaimProtectionIfComplete(_ protection: DigestClaimProtection) {
+        if protection.processFinished, protection.attemptFinished {
+            digestClaimProtection = nil
+        } else {
+            digestClaimProtection = protection
+        }
     }
 
     private func emitAppendDiagnostics(_ result: TypingEventAppendResult) {

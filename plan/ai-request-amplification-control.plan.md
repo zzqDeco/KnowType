@@ -34,7 +34,9 @@ of already-started recommendations, and independent provider failure budgets.
   chmod failure blocks new attempts and cannot be cleared by generation
   invalidation. A value-only preflight exposes that state before recommendation
   document projection or digest snapshot decoding; each runtime then latches it
-  without repeated admission work.
+  without repeated admission work. Cancellation between attempt admission and
+  transport registration aborts the matching attempt without cooldown and
+  wakes waiters; once transport starts, only its fenced completion releases it.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is
@@ -50,9 +52,10 @@ of already-started recommendations, and independent provider failure budgets.
   Protected-only local archive does not start the 600-second provider-success
   interval. Corrupt schedule state imposes a fresh minimum-interval delay or
   remains fail-closed, including impossible date ordering and excessive future
-  deadlines. Calls received while a digest is active coalesce into one immediate
-  post-completion re-evaluation, unless a busy-gate availability waiter already
-  owns the single wake for that contention episode.
+  deadlines; a positive pending count with all three time anchors absent is
+  also repaired conservatively. Calls received while a digest is active
+  coalesce into one immediate post-completion re-evaluation, unless a busy-gate
+  availability waiter already owns the single wake for that contention episode.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
   avoids repeating the provider call. A durable archive receipt or bounded
@@ -73,7 +76,9 @@ of already-started recommendations, and independent provider failure budgets.
   claim creation begins inside the final synchronous current-lease guard, so a
   stale result cannot leave a pre-ENV orphan claim. Valid processed-archive
   evidence clears only missing or provably different pending data, archives an
-  exact prefix, and blocks truncated or unreadable pending state.
+  exact prefix, and blocks truncated or unreadable pending state. An in-memory
+  active prefix remains protected through compaction until both the digest flow
+  and any cancellation-resistant gate attempt have actually finished.
 
 ## Verification Boundary
 

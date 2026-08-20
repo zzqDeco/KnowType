@@ -87,7 +87,10 @@ attempts; generation invalidation does not reinterpret that failure as empty
 state. An internal value-only preflight distinguishes available, busy, cooldown,
 stale-generation, and persistence-blocked states without admitting a transport.
 Recommendation and Context Digest latch persistence-blocked before reading their
-context documents or decoding a digest snapshot.
+context documents or decoding a digest snapshot. Cancellation after admission
+but before transport registration aborts only the matching attempt, wakes
+waiters, and records no failure; started transport retains ownership through
+its fenced completion.
 
 ## Input Client Compatibility
 
@@ -740,7 +743,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - limits AI raw input and locked prefix to 4 KiB UTF-8 before dispatch; event
   text fields are bounded to 2,048 Unicode scalars before JSONL append
 - caps pending data at 500 events or 1 MiB; overflow atomically keeps the newest
-  data within a 450-event/768 KiB compaction target
+  data within a 450-event/768 KiB compaction target, except that an active exact
+  digest prefix remains protected until both its actor flow and real gate
+  attempt have finished
 - claims no more than the oldest 50 events or 48 KiB for one provider digest,
   while always allowing one event to make progress; the 600-second interval
   after a successful commit cannot be bypassed by the batch threshold
@@ -786,7 +791,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   unreadable, or otherwise indeterminate pending evidence; a same-size corrupt
   archive remains blocked. A pre-ENV claim whose
   generated hash does not match ENV also remains blocked, and corrupt schedule
-  state cannot trigger an immediate fresh-runtime batch dispatch. The first
+  state cannot trigger an immediate fresh-runtime batch dispatch. In
+  particular, a positive pending count with no persisted time anchor is
+  conservatively delayed by the minimum interval. The first
   record after restart completes local claim recovery before append or
   compaction. A blocked claim recovery installs one bounded 60-second actor
   deadline; records before that deadline return without another recovery read,

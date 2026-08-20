@@ -37,13 +37,20 @@
 - Gate persistence is preflighted before digest snapshot decoding and ENV load;
   a blocked result is latched without an immediate retry.
 - Persisted schedule dates must have valid ordering and a bounded future
-  deadline. Invalid state is replaced with a fresh minimum-interval delay.
+  deadline. Three absent time anchors are valid only when the persisted pending
+  count is zero; a positive persisted pending count without an anchor is
+  replaced with a fresh minimum-interval delay.
+- A live digest claim remains an append/compaction protection until both the
+  actor's digest flow and the matching gate attempt finish. Caller timeout or
+  cancellation therefore cannot expose its exact prefix while a
+  cancellation-resistant transport still owns the gate lease.
 - Deadline conversion clamps finite positive durations before producing
   nanoseconds.
 
 ## Tests
 
-- `AIContextMemoryRuntimeTests` covers guarded claim creation, busy-waiter
+- `AIContextMemoryRuntimeTests` covers guarded claim creation, timeout claim
+  protection through compaction, anchorless schedule repair, busy-waiter
   coalescing, processed-archive recovery states, semantic schedule repair,
   bounded blocked-recovery retries, gate preflight latching, first-record claim
   recovery single-flight interleavings, and cancellation-resistant timeout

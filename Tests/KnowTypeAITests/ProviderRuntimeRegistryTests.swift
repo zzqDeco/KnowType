@@ -869,6 +869,76 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertNil(cooldown)
     }
 
+    func testCallerCancellationAfterAdmissionBeforeTransportAbortsAttempt() async throws {
+        let identity = "cancel-after-admission"
+        let testProbe = ProviderRequestGateTestProbe()
+        let admissionPause = GateAttemptAdmissionPause()
+        let operationProbe = RequestGateProbe()
+        let gate = ProviderRequestGate(
+            testProbe: testProbe,
+            afterAttemptAdmission: {
+                await admissionPause.suspendIfNeeded()
+            }
+        )
+        let request = Task<Int, Error> {
+            try await gate.executeWithHardTimeout(
+                providerIdentity: identity,
+                generation: 0,
+                timeoutNanoseconds: 1_000_000_000
+            ) {
+                await operationProbe.markStarted()
+                return 1
+            }
+        }
+
+        try await waitUntil { await admissionPause.hasEntered }
+        let entered = await admissionPause.hasEntered
+        guard entered else {
+            request.cancel()
+            await admissionPause.release()
+            _ = try? await request.value
+            return
+        }
+        request.cancel()
+        let cancelledOperationStarted = await operationProbe.hasStarted
+        XCTAssertFalse(cancelledOperationStarted)
+        let replacement = Task<Int, Error> {
+            await gate.waitForAvailability(providerIdentity: identity, generation: 0)
+            return try await gate.execute(providerIdentity: identity, generation: 0) {
+                await operationProbe.markStarted()
+                return 2
+            }
+        }
+        try await waitUntil { await operationProbe.hasStarted }
+        let replacementStarted = await operationProbe.hasStarted
+        guard replacementStarted else {
+            await admissionPause.release()
+            replacement.cancel()
+            _ = try? await replacement.value
+            _ = try? await request.value
+            return
+        }
+        let value = try await replacement.value
+        XCTAssertEqual(value, 2)
+
+        await admissionPause.release()
+        do {
+            _ = try await request.value
+            XCTFail("expected caller cancellation")
+        } catch is CancellationError {
+            // The matching admitted attempt is aborted before transport starts.
+        }
+
+        let cooldown = await gate.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        XCTAssertNil(cooldown)
+        XCTAssertEqual(testProbe.admittedAttemptCount, 2)
+        let finalStartCount = await operationProbe.startCount
+        XCTAssertEqual(finalStartCount, 1)
+    }
+
     func testCallerCancellationDoesNotCountCancellationResistantLateFailure() async throws {
         let gate = ProviderRequestGate()
         let operation = SuspendedFailingGateOperation()
@@ -1023,6 +1093,31 @@ private actor RequestGateProbe {
 
     var availabilityFinished: Bool {
         didFinishAvailabilityWait
+    }
+}
+
+private actor GateAttemptAdmissionPause {
+    private var entered = false
+    private var released = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    var hasEntered: Bool {
+        entered
+    }
+
+    func suspendIfNeeded() async {
+        guard !entered else { return }
+        entered = true
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
 
