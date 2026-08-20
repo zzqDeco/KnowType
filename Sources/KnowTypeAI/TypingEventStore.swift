@@ -47,7 +47,7 @@ struct TypingEventRetentionPolicy: Sendable, Equatable {
     var compactedPendingEventCount: Int = 450
     var compactedPendingByteCount: Int = 786_432
     var maximumDigestEventCount: Int = 50
-    var maximumDigestByteCount: Int = 262_144
+    var maximumDigestByteCount: Int = 48 * 1_024
     var maximumTextScalarCount: Int = 2_048
     var processedMaximumAge: TimeInterval = 7 * 24 * 60 * 60
     var processedMaximumFileCount: Int = 100
@@ -380,6 +380,12 @@ public final class TypingEventStore: @unchecked Sendable {
 
     func archivePendingEvents(matching snapshot: TypingEventSnapshot) throws {
         try withTypingEventFileLock {
+            if snapshot.events.isEmpty,
+               snapshot.claimedEventCount > 0,
+               snapshot.rawData.count >= retentionPolicy.maximumDigestByteCount {
+                _ = try archiveOversizedDigestLineSynchronously()
+                return
+            }
             _ = try archivePendingEventsSynchronously(
                 matchingRawData: snapshot.rawData,
                 pruneProcessedArchives: false
@@ -756,6 +762,27 @@ public final class TypingEventStore: @unchecked Sendable {
         testProbe?.recordAtomicRewrite()
         cacheInventory(inventory(for: remainingData))
         return pruneProcessedArchives ? pruneProcessedArchivesSynchronously() : .empty
+    }
+
+    private func archiveOversizedDigestLineSynchronously() throws -> TypingEventArchiveResult {
+        guard fileManager.fileExists(atPath: eventsFileURL.path) else { return .empty }
+        let currentData = try Data(contentsOf: eventsFileURL)
+        guard !currentData.isEmpty else { return .empty }
+        let lineEnd = currentData.firstIndex(of: 0x0A).map { currentData.index(after: $0) } ?? currentData.endIndex
+        let line = Data(currentData[..<lineEnd])
+        try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
+        let formatter = ISO8601DateFormatter()
+        let filename = "typing-events-\(formatter.string(from: now()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
+        try line.write(to: processedDirectoryURL.appendingPathComponent(filename), options: .atomic)
+        let remainingData = Data(currentData[lineEnd...])
+        if remainingData.isEmpty {
+            try fileManager.removeItem(at: eventsFileURL)
+        } else {
+            try remainingData.write(to: eventsFileURL, options: .atomic)
+        }
+        testProbe?.recordAtomicRewrite()
+        cacheInventory(inventory(for: remainingData))
+        return .empty
     }
 
     private func pruneProcessedArchivesSynchronously() -> TypingEventArchiveResult {

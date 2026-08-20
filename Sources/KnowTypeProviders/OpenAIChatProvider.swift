@@ -76,7 +76,7 @@ public struct OpenAIChatProvider: LLMProvider {
         body["response_format"] = structuredOutput
             ? LLMOutputContract.openAIChatResponseFormat(for: request.task)
             : LLMOutputContract.legacyJSONModeResponseFormat()
-        urlRequest.httpBody = try jsonData(body)
+        urlRequest.httpBody = try jsonData(body, task: request.task)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)

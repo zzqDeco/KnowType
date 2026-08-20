@@ -1010,4 +1010,28 @@ final class ProviderAdapterTests: XCTestCase {
             XCTAssertNil(capturedRequest)
         }
     }
+
+    func testAdapterRejectsLogicalBudgetBeforeTransport() async throws {
+        let client = MockHTTPClient(json: #"{"candidates":[{"text":"should not send"}]}"#)
+        let provider = CustomHTTPProvider(
+            configuration: ProviderConfiguration(
+                kind: .customHTTP,
+                baseURL: URL(string: "https://custom.example/infer")!,
+                model: "custom",
+                customBodyTemplate: "{}"
+            ),
+            httpClient: client
+        )
+
+        do {
+            _ = try await provider.complete(
+                LLMRequest(task: .continuation, rawInput: String(repeating: "界", count: 4_097))
+            )
+            XCTFail("expected local budget rejection")
+        } catch let error as ProviderRequestBudgetError {
+            XCTAssertEqual(error.component, "raw_input")
+        }
+        let capturedRequest = await client.capturedRequest()
+        XCTAssertNil(capturedRequest)
+    }
 }

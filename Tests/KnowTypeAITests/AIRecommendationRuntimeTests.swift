@@ -1079,6 +1079,23 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertNotNil(timeoutEvent?.elapsedMilliseconds)
     }
 
+    func testOversizedRawInputSkipsProviderWithoutRecordingFailure() async {
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "不应发送", confidence: 0.9)
+        ]))
+        let runtime = AIRecommendationRuntime(provider: provider, debounceMilliseconds: 0)
+        let request = AIRecommendationRequest(
+            rawInput: String(repeating: "界", count: 4_097),
+            compositionID: 1
+        )
+
+        let state = await runtime.recommendation(for: request)
+
+        XCTAssertEqual(state, .ineligible(reason: "AI 输入过长"))
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testDocumentStoresCreateDefaultsAndPreserveUserNotes() throws {
         let directory = temporaryDirectory()
         let environmentStore = EnvironmentDocumentStore(

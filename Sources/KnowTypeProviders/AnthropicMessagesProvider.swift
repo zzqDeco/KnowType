@@ -86,7 +86,7 @@ public struct AnthropicMessagesProvider: LLMProvider {
         if structuredOutput {
             body["output_config"] = LLMOutputContract.anthropicOutputConfig(for: request.task)
         }
-        urlRequest.httpBody = try jsonData(body)
+        urlRequest.httpBody = try jsonData(body, task: request.task)
         return urlRequest
     }
 }

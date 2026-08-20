@@ -29,15 +29,16 @@
   excludes them from protected/unprotected event classification and provider
   request content. A protected-only backlog therefore remains local even when a
   partial JSONL line is present.
-- Every event string is capped at 2,048 Unicode scalars. This keeps a single
-  encoded record below the 256 KiB digest-request limit while diagnostics expose
-  only removed scalar counts.
+- Event text is bounded as UTF-8 before append; raw input and locked prefix over
+  4 KiB are never semantically truncated for an AI request. Diagnostics expose
+  only removed counts and bytes.
 - Pending data is compacted atomically to the newest 450 events and at most
   768 KiB after crossing 500 events or 1 MiB. While a digest is in flight, its
   claimed prefix is retained ahead of the newest bounded tail.
-- Digest claims contain the oldest 50 lines and at most 256 KiB, including a
+- Digest claims contain the oldest 50 lines and at most 48 KiB, including a
   malformed record without a newline. Blank or undecodable claimed prefixes are
-  archived locally and never included in provider request content.
+  archived locally and never included in provider request content. One oversized
+  line is handled as a local archive unit so provider budgets are not bypassed.
 - Successful prefix archive uses exact raw-byte matching so events appended
   during a digest remain pending.
 

@@ -256,8 +256,9 @@ Keychain references. Base URLs may contain runtime query parameters, but not
 userinfo or fragments; diagnostics omit userinfo, query, and fragment.
 The running input-method host observes committed profile revisions. The next
 eligible recommendation or context digest uses the new provider without a host
-restart, cancels older in-flight provider work, and never polls provider files
-from the ordinary key path.
+restart. Older results are generation-fenced; started transports remain tracked
+by the shared provider gate until completion or hard timeout, and the ordinary
+key path never polls provider files.
 
 ```text
 ~/Library/Application Support/KnowType/providers.v2.json
@@ -326,13 +327,19 @@ data. Clear removes accepted-learning/feedback history, summary, and mirror
 files and scrubs accepted-AI context from the lexical profile without deleting
 Rime, provider, Keychain, ENV, or CORRECTION data.
 Committed Context Digest events are queued locally as JSONL under
-`~/.knowtype/events/`. Text fields are limited to 2,048 Unicode scalars, and
-pending data keeps at most 500 events or 1 MiB by dropping the oldest derived
-events after overflow. Each provider digest sends at most the oldest 50 events
-or 256 KiB. Successful claims move to `events/processed/`, which is retained
-for at most 7 days, 100 files, and 10 MiB; cleanup runs only after a successful
-digest, never during startup or install. Context diagnostics contain counts,
-bytes, and cooldown durations only, not typed text, provider output, or keys.
+`~/.knowtype/events/`. Text fields are limited to 4 KiB of UTF-8, and pending
+data keeps at most 500 events or 1 MiB by dropping the oldest derived events
+after overflow. Each provider digest claims at most the oldest 50 events or
+48 KiB and cannot bypass the 600-second interval after a successful commit.
+`ENV.md` has one managed generated pair and one canonical User Notes section;
+invalid digest candidates are rejected before any write or archive claim.
+Successful claims move to `events/processed/`, which is retained for at most 7
+days, 100 files, and 10 MiB; cleanup runs only after a successful digest, never
+during startup or install. Recommendation and digest requests use separate
+logical/body budgets but share one hashed provider gate, max one in-flight
+request per identity, and privacy-safe cooldown diagnostics. Context diagnostics
+contain counts, bytes, and cooldown durations only, not typed text, provider
+output, configuration, or keys.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS

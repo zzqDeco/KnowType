@@ -60,6 +60,11 @@ required for every test file.
 
 ## Sources/KnowTypeAI
 
+The AI runtime notes also cover the shared UTF-8 request budgets and provider
+gate used by recommendation and Context Digest. Those controls are intentionally
+kept in the AI boundary so provider adapters can enforce encoded HTTP limits
+without exposing provider-specific state to the input method.
+
 - [Overview](Sources/KnowTypeAI/README.plan.md)
 - [AIRecommendationRuntime](Sources/KnowTypeAI/AIRecommendationRuntime.plan.md)
 - [AIContextMemoryRuntime](Sources/KnowTypeAI/AIContextMemoryRuntime.plan.md)

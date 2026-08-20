@@ -261,7 +261,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
     }
 
     @MainActor
-    func testProviderDispatchAfterNewInputCancelsOldTransportWithoutApplying() async {
+    func testProviderDispatchAfterNewInputKeepsOldTransportAndRunsOneTrailingRequest() async {
         let provider = RecordingRuntimeAIRecommendationProvider(
             response: readyState("旧结果"),
             delayNanoseconds: 300_000_000
@@ -281,7 +281,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         let firstState = runtime.schedule(
             context: context(rawInput: "abc", compositionID: 1, rawRevision: 1),
             currentSnapshot: { currentSnapshot.snapshot },
-            onStateChange: { _ in XCTFail("cancelled request must not publish state") }
+            onStateChange: { _ in }
         )
         let firstRequestID = pendingRequestID(firstState)
         let firstTransportStarted = await waitUntilAsync {
@@ -301,33 +301,18 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertNotNil(secondRequestID)
         XCTAssertNotEqual(firstRequestID, secondRequestID)
         XCTAssertTrue(diagnosticSink.events.contains {
-            $0.stage == .cancelPrevious
-                && $0.requestID == firstRequestID
-                && $0.reason == "new_schedule"
-        })
-        XCTAssertTrue(diagnosticSink.events.contains {
             $0.stage == .transportLeftStale
                 && $0.requestID == firstRequestID
                 && $0.reason == "new_schedule"
         })
-        XCTAssertTrue(diagnosticSink.events.contains {
-            $0.stage == .transportCancellationRequested
-                && $0.requestID == firstRequestID
-                && $0.reason == "new_schedule"
+        XCTAssertFalse(diagnosticSink.events.contains {
+            $0.stage == .transportCancellationRequested && $0.requestID == firstRequestID
         })
-        XCTAssertTrue(diagnosticSink.events.contains {
-            $0.stage == .transportCancelledByNewInput
-                && $0.requestID == firstRequestID
-                && $0.reason == "new_schedule"
-        })
-        let cancelled = await waitUntil {
-            diagnosticSink.events.contains {
-                $0.stage == .cancelled
-                    && $0.requestID == firstRequestID
-                    && $0.reason == "task_cancelled_before_apply"
-            }
+        let trailingStarted = await waitUntilAsync {
+            await provider.requests.count == 2
         }
-        XCTAssertTrue(cancelled, "\(diagnosticSink.events)")
+        XCTAssertTrue(trailingStarted, "\(diagnosticSink.events)")
+        XCTAssertEqual((await provider.requests).map(\.rawInput), ["abc", "abcd"])
     }
 
     @MainActor

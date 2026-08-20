@@ -73,7 +73,7 @@ public struct GeminiNativeProvider: LLMProvider {
                     "parts": [["text": prompt]]
                 ]
             ]
-        ])
+        ], task: request.task)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)

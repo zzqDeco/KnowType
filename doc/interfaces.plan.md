@@ -66,6 +66,17 @@ Provider prompts are task-specific. Continuation requests distinguish confirmed 
 
 When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
+Provider dispatch is bounded before adapter serialization. Recommendation requests use
+32 KiB logical and 64 KiB HTTP-body limits; Context Digest uses 64 KiB logical and
+96 KiB HTTP-body limits, with a 48 KiB event claim and 8 KiB ENV projection.
+Generated notes, User Notes, correction, feedback, and lexical projections remain
+within their local 4/4/4/4/6 KiB UTF-8 limits. A local budget rejection is a
+non-provider outcome and its budgeted payload fingerprint is the recommendation
+cache key. `ProviderRequestGate` hashes provider identity, permits one in-flight
+request per identity, fences generations, clamps `Retry-After` to 15 seconds to
+15 minutes, and applies privacy-safe cooldowns for missing retry hints. Persisted
+gate state contains only the identity hash, deadline, and failure class.
+
 ## Input Client Compatibility
 
 Host write behavior is selected before each key write:
@@ -171,8 +182,8 @@ create `Application Support/KnowType` merely because the IMK host was launched.
 The process-level runtime registry observes the signal and returns leases with
 `revision`, `generation`, opaque `fingerprint`, and optional `provider`. It uses
 the file revision only as an eligible-dispatch fallback. A generation change
-cancels old lease operations and rejects late results before UI, ENV, or archive
-writes.
+fences old lease results before UI, ENV, or archive writes; started transport
+remains tracked by the shared provider gate until completion or hard timeout.
 Unmigrated legacy or missing post-migration canonical state fails closed. The
 install migration first publishes a recoverable provisional tombstone and only
 marks canonical metadata expected after the canonical file is durable.
@@ -677,9 +688,12 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
 - includes `LEXICAL_PROFILE.md` when the coordinator provides a lexical snapshot
 - creates default documents when missing
-- debounces for 350 ms by default before provider calls
+- uses one 450 ms debounce before provider calls; newer input replaces the
+  debounce request and leaves at most one trailing revision after transport
+  starts
 - hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
-- caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
+- caches by the actual budgeted provider payload fingerprint plus generation,
+  rather than by unbounded source strings
 - rejects stale results at the coordinator boundary
 - rebuilds cache and health state for each provider generation; an internal
   stale-generation state clears its own normal pending slot to `.idle`, while an
@@ -702,16 +716,20 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - requires a usable provider lease before a registry-backed event is appended,
   so text entered without an available provider is not retained for later upload
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
-- limits `rawInput` and `committedText` to 2,048 Unicode scalars before writing
+- limits AI raw input and locked prefix to 4 KiB UTF-8 before dispatch; event
+  fields remain bounded before JSONL append
 - caps pending data at 500 events or 1 MiB; overflow atomically keeps the newest
   data within a 450-event/768 KiB compaction target
-- claims no more than the oldest 50 events or 256 KiB for one provider digest,
-  while always allowing one event to make progress
+- claims no more than the oldest 50 events or 48 KiB for one provider digest,
+  while always allowing one event to make progress; the 600-second interval
+  after a successful commit cannot be bypassed by the batch threshold
 - archives processed event files under `~/.knowtype/events/processed/` and,
   after successful digests only, keeps at most 7 days, 100 files, and 10 MiB
-- summarizes after a batch threshold or interval
-- updates only the generated section in `ENV.md`
-- normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically on a best-effort basis; read-only or transient write failures still return the repaired in-memory snapshot
+- summarizes through one actor-owned deadline task for batch, interval, and
+  provider-cooldown wakeups
+- updates only the generated section in canonical `ENV.md`, with one managed
+  marker pair and one User Notes section; markerless documents remain user
+  content and ambiguous migrations fail closed
 - sanitizes Level 0 protected content before writing logs
 - is shared across all controllers in the process, so one pending snapshot
   starts at most one digest request
@@ -721,6 +739,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   below-threshold and unchanged-generation cooldown paths do not decode JSONL
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, and `context_archive_pruned` diagnostics
+- persists only privacy-safe claim metadata so an ENV-success/archive-failure
+  path is recoverable without repeating the provider call; appended tail events
+  remain outside the old claim
 
 `LexicalProfileStore`:
 

@@ -29,9 +29,16 @@ construction, cache interaction, health reporting, and the final
   request passes provider-dispatch eligibility. It caches one recommendation
   runtime per provider generation, so cache and health state do not cross a
   configuration change.
-- Registry generation changes cancel the old runtime operation. A provider that
-  ignores cancellation returns `.stale`, which is an internal control state and
-  must be dropped before candidate UI publication.
+- The runtime validates UTF-8 budgets before dispatch: raw input and locked
+  prefix are each at most 4 KiB, the recommendation logical payload is at most
+  32 KiB, and the adapter HTTP body is at most 64 KiB. Local budget rejection is
+  not a provider failure.
+- Cache keys use the actual budgeted request payload fingerprint. The shared
+  `ProviderRequestGate` enforces one in-flight request per hashed provider
+  identity and applies generation fencing and bounded cooldowns.
+- Registry generation changes fence the old runtime operation. A provider that
+  ignores cancellation can finish, but its result is `.stale` and is dropped
+  before candidate UI publication.
 
 ## Tests
 

@@ -63,7 +63,12 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         if let cached = self.runtime, runtimeGeneration == lease.generation {
             runtime = cached
         } else {
-            runtime = makeRuntime(provider: provider)
+            runtime = makeRuntime(
+                provider: provider,
+                providerIdentity: lease.fingerprint,
+                providerGeneration: lease.generation,
+                requestGate: registry.requestGate
+            )
             self.runtime = runtime
             runtimeGeneration = lease.generation
         }
@@ -96,11 +101,19 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         return await runtime.recommendation(for: request)
     }
 
-    private func makeRuntime(provider: (any LLMProvider)?) -> AIRecommendationRuntime {
+    private func makeRuntime(
+        provider: (any LLMProvider)?,
+        providerIdentity: String? = nil,
+        providerGeneration: UInt64 = 0,
+        requestGate: ProviderRequestGate = .shared
+    ) -> AIRecommendationRuntime {
         AIRecommendationRuntime(
             provider: provider,
             debounceMilliseconds: debounceMilliseconds,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: requestGate,
+            providerIdentity: providerIdentity,
+            providerGeneration: providerGeneration
         )
     }
 }
@@ -120,6 +133,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         var correctionHash: String
         var lexicalHash: String
         var feedbackHash: String
+        var payloadFingerprint: String
     }
 
     private struct CacheEntry {
@@ -135,7 +149,11 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     private let hardTimeoutNanoseconds: UInt64
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let cacheTTL: TimeInterval
+    private let requestGate: ProviderRequestGate
+    private let providerIdentity: String
+    private let providerGeneration: UInt64
     private var cache: [CacheKey: CacheEntry] = [:]
+    private var inFlight: [String: Task<LLMResponse, Error>] = [:]
 
     public init(
         provider: (any LLMProvider)?,
@@ -145,7 +163,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         debounceMilliseconds: Int = Defaults.debounceMilliseconds,
         hardTimeoutMilliseconds: Int = Defaults.hardTimeoutMilliseconds,
         diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
-        cacheTTL: TimeInterval = 300
+        cacheTTL: TimeInterval = 300,
+        requestGate: ProviderRequestGate = .shared,
+        providerIdentity: String? = nil,
+        providerGeneration: UInt64 = 0
     ) {
         self.provider = provider
         self.environmentStore = environmentStore
@@ -155,6 +176,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         self.hardTimeoutNanoseconds = UInt64(max(1, hardTimeoutMilliseconds)) * 1_000_000
         self.diagnosticSink = diagnosticSink
         self.cacheTTL = max(1, cacheTTL)
+        self.requestGate = requestGate
+        self.providerIdentity = providerIdentity ?? provider?.providerName ?? "knowtype-provider"
+        self.providerGeneration = providerGeneration
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
@@ -171,6 +195,17 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 reason: "empty_raw_or_context"
             )
             return .ineligible(reason: "AI 不适用")
+        }
+        guard Data(request.rawInput.utf8).count <= ProviderRequestBudget.rawInput,
+              request.lockedPrefix.map({ Data($0.utf8).count <= ProviderRequestBudget.lockedPrefix }) ?? true else {
+            record(
+                .skippedIneligible,
+                request: request,
+                providerName: provider?.providerName,
+                elapsedSince: startedAt,
+                reason: "request_budget_exceeded"
+            )
+            return .ineligible(reason: "AI 输入过长")
         }
         if Self.containsSecretLikeRecommendationText(request) {
             record(
@@ -245,34 +280,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 providerName: provider.providerName,
                 elapsedSince: startedAt
             )
-            let key = CacheKey(
-                lockedPrefix: request.lockedPrefix,
-                rawInput: request.rawInput,
-                appBundleID: request.appBundleID ?? "",
-                localeRawValue: request.locale.rawValue,
-                environmentHash: environment.sha256,
-                correctionHash: correction.sha256,
-                lexicalHash: request.lexicalContext?.sha256 ?? "",
-                feedbackHash: request.feedbackContext?.sha256 ?? ""
-            )
-            if let cached = cache[key], cached.expiresAt > Date() {
-                record(
-                    .cacheHit,
-                    request: request,
-                    providerName: provider.providerName,
-                    elapsedSince: startedAt,
-                    candidateCount: 1,
-                    acceptedCount: 1
-                )
-                return .ready(cached.candidate)
-            }
-            record(
-                .cacheMiss,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt
-            )
-
             var contextDocuments = [
                 "ENV.md": environment.content,
                 "CORRECTION.md": correction.content
@@ -295,6 +302,23 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 lengthLevel: .medium,
                 contextDocuments: contextDocuments
             )
+            let payloadFingerprint = try AIRequestBudget.fingerprint(for: llmRequest)
+            let key = CacheKey(
+                lockedPrefix: request.lockedPrefix,
+                rawInput: request.rawInput,
+                appBundleID: request.appBundleID ?? "",
+                localeRawValue: request.locale.rawValue,
+                environmentHash: environment.sha256,
+                correctionHash: correction.sha256,
+                lexicalHash: request.lexicalContext?.sha256 ?? "",
+                feedbackHash: request.feedbackContext?.sha256 ?? "",
+                payloadFingerprint: payloadFingerprint
+            )
+            if let cached = cache[key], cached.expiresAt > Date() {
+                record(.cacheHit, request: request, providerName: provider.providerName, elapsedSince: startedAt, candidateCount: 1, acceptedCount: 1)
+                return .ready(cached.candidate)
+            }
+            record(.cacheMiss, request: request, providerName: provider.providerName, elapsedSince: startedAt)
             record(
                 .structuredSchemaRequest,
                 request: request,
@@ -309,8 +333,24 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 elapsedSince: startedAt
             )
             let providerStartedAt = Date()
-            let response = try await withTimeout(nanoseconds: hardTimeoutNanoseconds) {
-                try await provider.complete(llmRequest)
+            let response: LLMResponse
+            if let pending = inFlight[payloadFingerprint] {
+                response = try await pending.value
+            } else {
+                let gate = requestGate
+                let identity = providerIdentity
+                let generation = providerGeneration
+                let timeout = hardTimeoutNanoseconds
+                let task = Task<LLMResponse, Error> {
+                    try await gate.execute(providerIdentity: identity, generation: generation) {
+                        try await withTimeout(nanoseconds: timeout) {
+                            try await provider.complete(llmRequest)
+                        }
+                    }
+                }
+                inFlight[payloadFingerprint] = task
+                defer { inFlight[payloadFingerprint] = nil }
+                response = try await task.value
             }
             record(
                 .providerResponse,
@@ -388,6 +428,12 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 acceptedCount: result.acceptedCount
             )
             return .ready(candidate)
+        } catch let error as ProviderRequestBudgetError {
+            record(.skippedIneligible, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "request_budget_\(error.component)")
+            return .ineligible(reason: "AI 请求过大")
+        } catch ProviderRequestGateError.staleGeneration {
+            record(.cancelled, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "stale_generation")
+            return .stale
         } catch is CancellationError {
             record(
                 .cancelled,
@@ -407,6 +453,19 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     reason: "transport_cancelled"
                 )
                 return .idle
+            }
+            if let gateError = error as? ProviderRequestGateError {
+                switch gateError {
+                case .cooldown:
+                    record(.cooldownActive, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "provider_cooldown")
+                    return .unavailable(reason: "AI 暂不可用")
+                case .busy:
+                    record(.cooldownActive, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "provider_busy")
+                    return .idle
+                case .staleGeneration:
+                    record(.cancelled, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "stale_generation")
+                    return .stale
+                }
             }
             await healthMonitor.recordFailure(error)
             if error is TimeoutError {
@@ -629,7 +688,7 @@ private struct CandidateBuildResult {
     var repairedCount: Int
 }
 
-private func withTimeout<T: Sendable>(
+func withTimeout<T: Sendable>(
     nanoseconds: UInt64,
     operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {

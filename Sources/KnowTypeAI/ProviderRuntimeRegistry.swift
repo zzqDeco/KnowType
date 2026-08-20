@@ -94,6 +94,7 @@ public actor ProviderRuntimeRegistry {
     private let revisionUpdates: RevisionUpdates
     private let capabilityReset: CapabilityReset
     private let diagnosticSink: any ProviderRuntimeDiagnosticSink
+    public nonisolated let requestGate: ProviderRequestGate
     private var currentLease: ProviderRuntimeLease?
     private var generation: UInt64 = 0
     private var latestSignaledRevision: UInt64?
@@ -113,13 +114,15 @@ public actor ProviderRuntimeRegistry {
         capabilityReset: @escaping CapabilityReset = {
             await ProviderRuntimeCapabilityState.reset()
         },
-        diagnosticSink: any ProviderRuntimeDiagnosticSink = InputDebugProviderRuntimeDiagnosticSink()
+        diagnosticSink: any ProviderRuntimeDiagnosticSink = InputDebugProviderRuntimeDiagnosticSink(),
+        requestGate: ProviderRequestGate = .shared
     ) {
         self.revisionLoader = revisionLoader
         self.runtimeLoader = runtimeLoader
         self.revisionUpdates = revisionUpdates
         self.capabilityReset = capabilityReset
         self.diagnosticSink = diagnosticSink
+        self.requestGate = requestGate
     }
 
     deinit {
@@ -289,6 +292,13 @@ public actor ProviderRuntimeRegistry {
         fingerprint: String,
         providerConfigured: Bool
     ) async {
+        let oldGeneration = generation
+        if let currentLease {
+            await requestGate.invalidate(
+                providerIdentity: currentLease.fingerprint,
+                generation: oldGeneration
+            )
+        }
         generation &+= 1
         let cancellations = activeOperations.values
         activeOperations.removeAll()

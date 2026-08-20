@@ -330,6 +330,44 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertFalse(line.contains("private-model"))
         XCTAssertTrue(line.contains("providerFingerprint=\(loaded.fingerprint.prefix(12))"))
     }
+
+    func testSharedRequestGateClampsRetryAfterAndFencesGeneration() async {
+        let now = Date()
+        let gate = ProviderRequestGate(now: { now })
+        do {
+            _ = try await gate.execute(providerIdentity: "provider-config-secret", generation: 1) {
+                throw ProviderRateLimitError(retryAfterSeconds: 1, bodyByteCount: 24)
+            } as LLMResponse
+            XCTFail("expected rate limit")
+        } catch is ProviderRateLimitError {
+            // Expected.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        let deadline = await gate.cooldownDeadline(providerIdentity: "provider-config-secret", generation: 1)
+        XCTAssertEqual(deadline?.timeIntervalSince(now), 15, accuracy: 0.001)
+        do {
+            _ = try await gate.execute(providerIdentity: "provider-config-secret", generation: 1) {
+                LLMResponse(candidates: [])
+            } as LLMResponse
+            XCTFail("expected cooldown")
+        } catch ProviderRequestGateError.cooldown {
+            // Expected.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        await gate.invalidate(providerIdentity: "provider-config-secret", generation: 1)
+        do {
+            _ = try await gate.execute(providerIdentity: "provider-config-secret", generation: 1) {
+                LLMResponse(candidates: [])
+            } as LLMResponse
+            XCTFail("expected stale generation")
+        } catch ProviderRequestGateError.staleGeneration {
+            // Expected.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
 }
 
 final class ProviderRuntimeTestSource: @unchecked Sendable {

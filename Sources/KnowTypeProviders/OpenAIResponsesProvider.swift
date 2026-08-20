@@ -97,7 +97,7 @@ public struct OpenAIResponsesProvider: LLMProvider {
         case .promptOnly:
             break
         }
-        urlRequest.httpBody = try jsonData(body)
+        urlRequest.httpBody = try jsonData(body, task: request.task)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)

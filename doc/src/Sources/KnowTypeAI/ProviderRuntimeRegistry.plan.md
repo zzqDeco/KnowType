@@ -4,8 +4,9 @@
 
 - Own the process-level provider revision, generation, opaque fingerprint, and
   provider lease used by recommendation and context-memory runtimes.
-- Cancel generation-bound operations and reject cancellation-resistant results
-  after provider configuration changes.
+- Share the process-level `ProviderRequestGate` with recommendation and digest;
+  reject stale generations while allowing already-started transport to finish
+  under the gate's max-one-in-flight lease.
 
 ## Boundaries
 
@@ -23,15 +24,19 @@
   fallback. Operation completion and guarded persistence check it again before
   accepting provider work; ineligible recommendation and protected-only pending
   digest paths do not.
-- A generation change cancels active operations and clears structured-output
-  capability state. Per-generation recommendation runtimes supply fresh cache
-  and health state.
+- A generation change invalidates the old gate generation, clears structured-
+  output capability state, and fences late results. It does not reset the
+  digest's last successful commit time. Per-generation recommendation runtimes
+  supply fresh cache and health state.
 - `perform(using:)` refreshes disk revision and checks generation before
   accepting either success or failure. `commitIfCurrent(using:)` repeats the
   refresh before persistence, so missed notifications still produce only a
   stale drop.
 - Diagnostics contain revision, generation, configured state, and only the
   first 12 hexadecimal characters of the SHA-256 fingerprint.
+- Gate persistence, when present, contains only the full privacy-safe identity
+  hash, cooldown deadline, and failure class; it never stores endpoint, model,
+  prompt, input, output, or credentials.
 
 ## Tests
 

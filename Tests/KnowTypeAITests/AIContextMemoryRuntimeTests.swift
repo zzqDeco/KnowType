@@ -904,7 +904,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(event.candidateSource.unicodeScalars.count, 2_048)
         XCTAssertEqual(result.truncatedScalarCount, 893_856)
         XCTAssertLessThanOrEqual(result.inventory.byteCount, 786_432)
-        XCTAssertLessThanOrEqual(snapshot.requestData.count, 262_144)
+        XCTAssertLessThanOrEqual(snapshot.requestData.count, 48 * 1_024)
     }
 
     func testDigestClaimsAtMostFiftyEventsAndLeavesBacklogTailPending() async throws {
@@ -936,7 +936,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let pendingEvents = try await eventStore.pendingEvents()
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests[0].rawInput?.split(whereSeparator: \.isNewline).count, 50)
-        XCTAssertLessThanOrEqual(requestData.count, 262_144)
+        XCTAssertLessThanOrEqual(requestData.count, 48 * 1_024)
         XCTAssertEqual(pendingEvents.count, 25)
         XCTAssertEqual(pendingEvents.first?.rawInput, "raw-50")
         XCTAssertEqual(probe.digestSnapshotDecodeCount, 1)
@@ -1000,9 +1000,9 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         await runtime.processIfNeeded()
 
         let requests = await provider.requests
-        XCTAssertEqual(snapshot.rawData.count, 262_144)
+        XCTAssertEqual(snapshot.rawData.count, 48 * 1_024)
         XCTAssertTrue(snapshot.events.isEmpty)
-        XCTAssertLessThanOrEqual(snapshot.requestData.count, 262_144)
+        XCTAssertLessThanOrEqual(snapshot.requestData.count, 48 * 1_024)
         XCTAssertTrue(requests.isEmpty)
         XCTAssertEqual(try eventStore.inventory().eventCount, 0)
     }
@@ -1338,6 +1338,27 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertTrue(line.contains("stage=context_event_truncated"))
         XCTAssertTrue(line.contains("truncatedScalarCount="))
         XCTAssertFalse(line.contains("sensitive-sentinel"))
+    }
+
+    func testBatchThresholdCannotBypassMinimumIntervalAfterSuccessfulDigest() async throws {
+        let directory = makeTemporaryDirectory()
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- bounded")
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "first", committedText: "第一"))
+        try await eventStore.append(makeContextEvent(rawInput: "second", committedText: "第二"))
+        await runtime.processIfNeeded(now: Date().addingTimeInterval(1))
+
+        let requestCount = await provider.requests.count
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
     }
 }
 

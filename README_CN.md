@@ -217,8 +217,9 @@ Profile 文件使用带 revision 的事务格式，多个设置窗口不会静�
 所需的 query，但不能包含 userinfo 或 fragment；诊断输出会移除 userinfo、
 query 和 fragment。
 运行中的输入法 host 会观察已提交的 profile revision。下一次满足条件的推荐或
-context digest 会直接使用新 provider，无需重启 host；旧的 in-flight provider
-请求会被取消，普通按键热路径不会轮询 provider 文件。
+context digest 会直接使用新 provider，无需重启 host。旧结果会被 generation
+fence 丢弃；已经开始的 transport 由共享 provider gate 跟踪到完成或硬超时，
+普通按键热路径不会轮询 provider 文件。
 
 ```text
 ~/Library/Application Support/KnowType/providers.v2.json
@@ -278,12 +279,16 @@ Application Support 中，不会直接注入 provider 请求。Canonical JSON �
 中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或
 CORRECTION 数据。
 已提交的 Context Digest 事件会先以 JSONL 保存在本机
-`~/.knowtype/events/`。文本字段最多保留 2,048 个 Unicode scalar；pending
-最多保留 500 条或 1 MiB，溢出后丢弃最旧的派生事件。每次 provider digest
-最多发送最旧的 50 条或 256 KiB。成功 claim 会移入 `events/processed/`，该目录
-最多保留 7 天、100 个文件和 10 MiB；清理只在 digest 成功后执行，启动和安装
-不会改写历史数据。Context 诊断仅包含计数、字节数和冷却时长，不包含输入原文、
-provider 输出或 Key。
+`~/.knowtype/events/`。文本字段最多保留 4 KiB UTF-8；pending 最多保留
+500 条或 1 MiB，溢出后丢弃最旧的派生事件。每次 provider digest 最多 claim
+最旧的 50 条或 48 KiB，且成功提交后 600 秒 minimumInterval 不能被 batch
+阈值绕过。`ENV.md` 最多有一个 managed generated marker pair 和一个 canonical
+User Notes；非法 digest candidate 会在写入或 claim 前拒绝。成功 claim 会移入
+`events/processed/`，该目录最多保留 7 天、100 个文件和 10 MiB；清理只在
+digest 成功后执行，启动和安装不会改写历史数据。Recommendation 与 digest
+使用各自的逻辑/HTTP 预算，但共享 privacy-safe provider identity gate，每个
+identity 最多一个 in-flight 请求，并共享 429 冷却。Context 诊断仅包含计数、
+字节数和冷却时长，不包含输入原文、notes、candidate、provider 输出、配置或 Key。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
 输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给

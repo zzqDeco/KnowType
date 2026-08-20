@@ -14,8 +14,13 @@ tests.
 ## Behavior Notes
 
 - Mock clients keep adapter tests deterministic and offline.
-- Production request construction, headers, timeouts, and response decoding stay
-  in the provider layer.
+- Production request construction, headers, timeouts, response decoding, and
+  encoded-body budget checks stay in the provider layer.
+- A 429 response becomes `ProviderRateLimitError` with only status, bounded
+  `Retry-After`, and body byte count. Retry hints are clamped to 15 seconds to
+  15 minutes; the shared AI gate applies exponential fallback when absent.
+- Adapters validate the logical request before transport and the serialized HTTP
+  body after encoding. Local budget failures are distinct from provider failures.
 
 ## Tests
 
