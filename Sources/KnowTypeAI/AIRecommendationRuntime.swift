@@ -181,6 +181,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     private let providerGeneration: UInt64
     private var cache: [CacheKey: CacheEntry] = [:]
     private var inFlight: [String: Task<LLMResponse, Error>] = [:]
+    private var gatePersistenceBlocked = false
 
     public init(
         provider: (any LLMProvider)?,
@@ -267,6 +268,16 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: "AI 未配置")
         }
+        if gatePersistenceBlocked {
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "gate_persistence_blocked"
+            )
+            return .unavailable(reason: "AI 暂不可用")
+        }
         if let reason = await healthMonitor.unavailableReason() {
             record(
                 .cooldownActive,
@@ -276,6 +287,41 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 reason: reason
             )
             return .unavailable(reason: reason)
+        }
+        switch await requestGate.preflight(
+            providerIdentity: providerIdentity,
+            generation: providerGeneration
+        ) {
+        case .available, .busy:
+            break
+        case .cooldown:
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "provider_cooldown"
+            )
+            return .unavailable(reason: "AI 暂不可用")
+        case .staleGeneration:
+            record(
+                .cancelled,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "stale_generation"
+            )
+            return .stale
+        case .persistenceBlocked:
+            gatePersistenceBlocked = true
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "gate_persistence_blocked"
+            )
+            return .unavailable(reason: "AI 暂不可用")
         }
 
         var waitingForIdle = false
@@ -463,6 +509,16 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         } catch ProviderRequestGateError.staleGeneration {
             record(.cancelled, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "stale_generation")
             return .stale
+        } catch ProviderRequestGatePersistenceError.blocked {
+            gatePersistenceBlocked = true
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "gate_persistence_blocked"
+            )
+            return .unavailable(reason: "AI 暂不可用")
         } catch is CancellationError {
             record(
                 .cancelled,

@@ -24,9 +24,12 @@
   atomic-write, replacement, or final-permission failure enters an actor-owned
   blocked state. New attempts remain blocked across generation invalidation;
   non-persistent gate instances are unaffected.
+- An internal value-only preflight reports available, busy, cooldown,
+  stale-generation, or persistence-blocked without acquiring an attempt. It
+  lets callers stop before document projection or digest snapshot decoding.
 
 ## Tests
 
 - `ProviderRuntimeRegistryTests` covers timeout/completion interleaving,
   single-failure ownership, generation invalidation, fail-closed persistence,
-  and waiter release.
+  value-only preflight, and waiter release.

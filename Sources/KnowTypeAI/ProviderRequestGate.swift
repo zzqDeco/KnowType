@@ -22,17 +22,32 @@ enum ProviderRequestGatePersistenceError: Error, Sendable, Equatable {
     case blocked
 }
 
+enum ProviderRequestGatePreflightState: Sendable, Equatable {
+    case available
+    case busy
+    case cooldown(deadline: Date, failureClass: ProviderRequestFailureClass)
+    case staleGeneration
+    case persistenceBlocked
+}
+
 final class ProviderRequestGateTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var failedPermissionChangesRemaining = 0
     private var failedReadsRemaining = 0
     private var failedWritesRemaining = 0
     private var admittedAttempts = 0
+    private var preflightChecks = 0
 
     var admittedAttemptCount: Int {
         lock.lock()
         defer { lock.unlock() }
         return admittedAttempts
+    }
+
+    var preflightCheckCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return preflightChecks
     }
 
     func failNextPermissionChanges(_ count: Int) {
@@ -56,6 +71,12 @@ final class ProviderRequestGateTestProbe: @unchecked Sendable {
     fileprivate func recordAttemptAdmission() {
         lock.lock()
         admittedAttempts += 1
+        lock.unlock()
+    }
+
+    fileprivate func recordPreflightCheck() {
+        lock.lock()
+        preflightChecks += 1
         lock.unlock()
     }
 
@@ -190,6 +211,47 @@ public actor ProviderRequestGate {
             return nil
         }
         return deadline
+    }
+
+    func preflight(
+        providerIdentity: String,
+        generation: UInt64
+    ) -> ProviderRequestGatePreflightState {
+        testProbe?.recordPreflightCheck()
+        loadPersistedStateIfNeeded()
+        guard !persistenceBlocked else { return .persistenceBlocked }
+
+        let key = Self.identityHash(providerIdentity)
+        var state = state(for: key)
+        guard !persistenceBlocked else { return .persistenceBlocked }
+        if states[key] == nil, persistedEntries[key] != nil {
+            state.generation = generation
+        }
+        if generation < state.generation { return .staleGeneration }
+        if generation > state.generation {
+            state.generation = generation
+            state.failureCount = 0
+            state.cooldownUntil = nil
+            state.failureClass = nil
+            state.timedOutAttemptID = nil
+            states[key] = state
+            clearPersistedEntry(for: key)
+            guard !persistenceBlocked else { return .persistenceBlocked }
+        }
+        if state.inFlight { return .busy }
+        if let deadline = state.cooldownUntil, deadline > now() {
+            return .cooldown(
+                deadline: deadline,
+                failureClass: state.failureClass ?? .transport
+            )
+        }
+        return .available
+    }
+
+    func persistencePreflight() -> ProviderRequestGatePreflightState {
+        testProbe?.recordPreflightCheck()
+        loadPersistedStateIfNeeded()
+        return persistenceBlocked ? .persistenceBlocked : .available
     }
 
     public func waitForAvailability(providerIdentity: String, generation: UInt64) async {

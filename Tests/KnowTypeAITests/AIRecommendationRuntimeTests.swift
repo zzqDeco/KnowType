@@ -1469,6 +1469,57 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
         XCTAssertEqual(diskContent, polluted)
     }
+
+    func testPersistenceBlockedGateLatchesBeforeRecommendationDocumentReads() async throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let gateStateURL = directory.appendingPathComponent("gate.json")
+        try Data("corrupt-gate-state".utf8).write(to: gateStateURL)
+        let gateProbe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(
+            persistenceURL: gateStateURL,
+            testProbe: gateProbe
+        )
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let correctionURL = directory.appendingPathComponent("CORRECTION.md")
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "must not run", confidence: 0.9)
+        ]))
+        let diagnostics = RecordingDiagnosticSink()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: environmentURL,
+                testProbe: environmentProbe
+            ),
+            correctionStore: CorrectionInstructionStore(fileURL: correctionURL),
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnostics,
+            requestGate: gate
+        )
+        let sensitiveInput = "blocked-recommendation-private-input"
+        let request = AIRecommendationRequest(rawInput: sensitiveInput, compositionID: 42)
+
+        var states: [AIRecommendationState] = []
+        for _ in 0..<10 {
+            states.append(await runtime.recommendation(for: request))
+        }
+
+        for state in states {
+            guard case .unavailable = state else {
+                return XCTFail("persistence-blocked recommendation must be unavailable")
+            }
+        }
+        XCTAssertTrue((await provider.requests).isEmpty)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 1)
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
+        XCTAssertEqual(environmentProbe.documentReadCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: environmentURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: correctionURL.path))
+        XCTAssertTrue(diagnostics.events.allSatisfy { $0.reason == "gate_persistence_blocked" })
+        XCTAssertFalse(String(describing: diagnostics.events).contains(sensitiveInput))
+    }
 }
 
 private actor RecordingLLMProvider: LLMProvider {

@@ -130,7 +130,10 @@ release that same attempt's lease. Failure counts clamp at 16 in memory and
 persisted state.
 Unreadable, undecodable, or unwritable persistent gate state blocks new provider
 attempts until the state is verifiably repaired; generation invalidation never
-turns that persistence failure into an empty cooldown state.
+turns that persistence failure into an empty cooldown state. A value-only gate
+preflight exposes that state before recommendation context projection or digest
+snapshot decoding, and each runtime latches it for the lifetime of that gate
+instance.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -150,7 +153,8 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   not retained for a later provider. A path-shared inventory makes ordinary
   append and scheduling decisions constant-cost after the first scan. Pending
   data is capped at 500 events/1 MiB, digest claims at 50 events/48 KiB, and a
-  same-generation failure cooldown returns before reading pending JSONL. A
+  same-generation failure cooldown or latched gate-persistence failure returns
+  before reading pending JSONL. A
   successful digest also owns a 600-second minimum interval that the batch
   threshold cannot bypass; a single actor-owned deadline task wakes batch,
   interval, provider-cooldown, and shared-gate availability work. The first
@@ -180,6 +184,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   distinguishes a missing or provably different pending prefix from an exact
   prefix; truncated or unreadable pending evidence remains blocked. A claim
   whose generated hash is not yet present in ENV remains blocked, and corrupt
+  claim evidence is retried at most once per bounded 60-second actor deadline;
+  intervening records are rejected without another recovery read or append. A
+  successful or claim-missing retry clears that local latch. Corrupt
   schedule state, including impossible date ordering or excessive future
   deadlines, is replaced by a conservative minimum-interval delay or stays
   fail-closed. Existing ENV content is chmod 0600 before any read; User Notes

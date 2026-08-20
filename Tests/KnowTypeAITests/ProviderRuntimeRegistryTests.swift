@@ -515,6 +515,50 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         )
     }
 
+    func testGatePreflightDistinguishesCooldownStaleAndPersistenceBlockedWithoutAdmission() async throws {
+        let now = Date()
+        let identity = "preflight-private-provider"
+        let gate = ProviderRequestGate(now: { now })
+
+        let available = await gate.preflight(providerIdentity: identity, generation: 0)
+        XCTAssertEqual(available, .available)
+
+        await gate.recordFailure(
+            providerIdentity: identity,
+            generation: 0,
+            failure: ProviderError.httpStatus(503, "unavailable")
+        )
+        let coolingDown = await gate.preflight(providerIdentity: identity, generation: 0)
+        guard case .cooldown(let deadline, let failureClass) = coolingDown else {
+            return XCTFail("expected cooldown preflight")
+        }
+        XCTAssertEqual(deadline.timeIntervalSince(now), 60, accuracy: 0.001)
+        XCTAssertEqual(failureClass, .server5xx)
+
+        await gate.invalidate(providerIdentity: identity, generation: 0)
+        let stale = await gate.preflight(providerIdentity: identity, generation: 0)
+        XCTAssertEqual(stale, .staleGeneration)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        try Data("corrupt-value-only-state".utf8).write(to: stateURL)
+        let probe = ProviderRequestGateTestProbe()
+        let blockedGate = ProviderRequestGate(persistenceURL: stateURL, testProbe: probe)
+        for _ in 0..<10 {
+            let blocked = await blockedGate.preflight(
+                providerIdentity: identity,
+                generation: 0
+            )
+            XCTAssertEqual(blocked, .persistenceBlocked)
+        }
+
+        XCTAssertEqual(probe.preflightCheckCount, 10)
+        XCTAssertEqual(probe.admittedAttemptCount, 0)
+        let persisted = String(decoding: try Data(contentsOf: stateURL), as: UTF8.self)
+        XCTAssertFalse(persisted.contains(identity))
+    }
+
     func testPersistentGateCooldownWriteFailureBlocksSubsequentDispatch() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

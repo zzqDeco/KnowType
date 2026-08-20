@@ -26,6 +26,12 @@
   append and provider dispatch. A validated processed archive permits cleanup
   only when pending is missing, provably different, or exactly archived;
   truncated and unreadable pending evidence remains blocked.
+- The first blocked recovery installs one bounded 60-second actor deadline.
+  Records during that backoff return before recovery reads or append, and the
+  deadline permits one retry before another bounded backoff. Successful or
+  missing-claim recovery clears the latch.
+- Gate persistence is preflighted before digest snapshot decoding and ENV load;
+  a blocked result is latched without an immediate retry.
 - Persisted schedule dates must have valid ordering and a bounded future
   deadline. Invalid state is replaced with a fresh minimum-interval delay.
 - Deadline conversion clamps finite positive durations before producing
@@ -35,4 +41,5 @@
 
 - `AIContextMemoryRuntimeTests` covers guarded claim creation, busy-waiter
   coalescing, processed-archive recovery states, semantic schedule repair,
-  first-record claim recovery, and cancellation-resistant timeout flow.
+  bounded blocked-recovery retries, gate preflight latching, first-record claim
+  recovery, and cancellation-resistant timeout flow.

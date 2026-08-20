@@ -17,8 +17,12 @@
 - A hard timeout returns to recommendation callers immediately while a
   cancellation-resistant transport keeps its gate lease until actual
   completion.
+- The runtime performs a value-only gate preflight before ENV, correction, or
+  optional context projection. Persistence-blocked is latched for that runtime
+  and returns unavailable without repeated preflight or document reads.
 
 ## Tests
 
 - `AIRecommendationRuntimeTests` covers shared-payload timeout ownership and
-  lease retention through cancellation-resistant completion.
+  lease retention through cancellation-resistant completion, plus
+  persistence-blocked preflight latching.

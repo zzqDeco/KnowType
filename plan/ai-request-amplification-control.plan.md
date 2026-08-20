@@ -32,7 +32,9 @@ of already-started recommendations, and independent provider failure budgets.
   caller-visible timeout can expose lease availability. With persistence
   enabled, permission, read, decode, encode, atomic-write, replace, or final
   chmod failure blocks new attempts and cannot be cleared by generation
-  invalidation.
+  invalidation. A value-only preflight exposes that state before recommendation
+  document projection or digest snapshot decoding; each runtime then latches it
+  without repeated admission work.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is
@@ -60,7 +62,9 @@ of already-started recommendations, and independent provider failure budgets.
   claim saved before ENV replacement remains blocked while its generated hash
   is absent from ENV, without persisting provider output or redispatching. A
   restarted runtime performs this local recovery before its first append can
-  compact pending data. ENV permissions are restricted before reads, structural
+  compact pending data. A blocked recovery uses one bounded 60-second actor
+  deadline; records during backoff do not repeat recovery reads or append, and
+  each deadline permits one retry. ENV permissions are restricted before reads, structural
   User Notes must follow the unique managed pair, and existing hash-named
   backups are verified as matching regular non-symlink files. Registry-backed
   claim creation begins inside the final synchronous current-lease guard, so a

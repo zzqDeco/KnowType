@@ -84,7 +84,10 @@ most one failure before caller-visible timeout release, and its in-memory and
 persisted failure count clamps at 16. Existing-state permission, bounded-read,
 decode, atomic-write, replace, or final-permission failure blocks subsequent
 attempts; generation invalidation does not reinterpret that failure as empty
-state.
+state. An internal value-only preflight distinguishes available, busy, cooldown,
+stale-generation, and persistence-blocked states without admitting a transport.
+Recommendation and Context Digest latch persistence-blocked before reading their
+context documents or decoding a digest snapshot.
 
 ## Input Client Compatibility
 
@@ -697,6 +700,9 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 `AIRecommendationRuntime`:
 
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
+- checks the shared gate's value-only persistence state before either document
+  read; a blocked gate instance returns unavailable without repeated preflight
+  or context projection
 - includes `LEXICAL_PROFILE.md` when the coordinator provides a lexical snapshot
 - creates default documents when missing
 - uses one 450 ms debounce before provider calls; newer input replaces the
@@ -767,7 +773,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - uses a path-shared process inventory for count/byte/protection gates, so
   below-threshold and unchanged-generation cooldown paths do not decode JSONL
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
-  `context_digest_deferred`, and `context_archive_pruned` diagnostics
+  `context_digest_deferred`, `context_archive_pruned`,
+  `context_gate_persistence_blocked`, and
+  `context_claim_recovery_blocked` diagnostics
 - persists only privacy-safe claim metadata plus bounded timestamp/count schedule
   state and a deterministic archive receipt, so an ENV-success/archive-failure
   path is recoverable without repeating the provider call; appended tail events
@@ -780,7 +788,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   generated hash does not match ENV also remains blocked, and corrupt schedule
   state cannot trigger an immediate fresh-runtime batch dispatch. The first
   record after restart completes local claim recovery before append or
-  compaction. ENV is chmod 0600 before reads, User Notes must follow the unique
+  compaction. A blocked claim recovery installs one bounded 60-second actor
+  deadline; records before that deadline return without another recovery read,
+  append, or provider dispatch, and each deadline permits only one retry. ENV is
+  chmod 0600 before reads, User Notes must follow the unique
   managed pair, and existing deterministic backups are verified without
   following symlinks before repair proceeds
 
