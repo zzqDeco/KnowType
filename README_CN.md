@@ -194,7 +194,7 @@ generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.8-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.9-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -206,7 +206,7 @@ shasum -a 256 -c KnowType-v0.2.8-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.8-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.9-macos-local-mvp.zip
 ```
 
 ## 配置
@@ -339,9 +339,9 @@ launchctl unsetenv KNOWTYPE_ANCHOR_DEBUG
 | `Return` / `Enter` | 提交原始 composition。 |
 | `Tab` | 第二候选位的 AI 推荐 ready 时提交 AI 推荐；pending 或 unavailable 时保持 composition。 |
 | `0` | 有纠错候选可见时提交原始 composition；没有 active composition 时输入 `0`，或在兼容宿主中直通给宿主。 |
-| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时再提交 composition 加标点、显示符号候选、直接插入标点，或在兼容宿主中直通给宿主。 |
-| `/` 等多义符号 | 中文标点模式下显示符号候选；`Space`/`1` 提交第一项，数字提交对应符号，`Escape` 取消。候选活动期间方向键和翻页命令均由输入法消费，包括首尾边界；关闭后恢复宿主正常导航。 |
-| Command/Control 宿主快捷键 | 先取消已打开的符号候选 overlay，再把快捷键交给当前宿主，避免后续 `Space` 提交旧符号。 |
+| 普通标点 | composition 活跃时先交给 Rime schema 处理；Rime 不处理时只生成最终 direct 输出或有序符号候选。空闲半角 ASCII 由宿主兼容 writer 决定由 KnowType 插入还是交还宿主；直通时不会打开符号 session。 |
+| `/` 等多义符号 | 中文标点模式下打开符号 composition。inline 宿主以 marked text 预览当前符号；commit-only 宿主保留 placeholder，并在候选窗顶部显示同一预览。`Space`、Return、当前页有效数字或鼠标选择提交；`Escape`、Backspace 取消；再次按相同 trigger 会移动到下一候选。候选活动期间方向键和翻页命令均被消费，包括首尾边界；其他 printable 输入会先提交当前符号，再正常处理一次原按键。 |
+| Command/Control 宿主快捷键 | 先清理并取消已打开的符号 composition，再把快捷键交给当前宿主，避免残留 marked text 或后续 `Space` 提交旧符号。 |
 | `Option + .` | 中文输入模式下手动切换中文/英文标点，覆盖持续到下一次中英切换；ASCII 模式下保持英文标点并仅重显状态。 |
 | `Option + /` | 切换进程级中文/ASCII 输入模式，同时恢复中文/英文标点联动；所有 App 共享。 |
 | `Shift + Space` | 切换进程级半角/全角字符，不改变中英输入或标点模式。全角会转换 ASCII `!` 到 `~` 及普通空格，不转换控制字符、Tab 或换行。 |
@@ -366,10 +366,21 @@ IDE、Electron shell 和未知客户端默认都使用 inline attributed marked 
 状态。KnowType 只向 InputMethodKit 注册 key-down 事件，以保留 IMK 的默认行为：
 用户点击 marked range 外部时提交 active composition。快捷键修饰键仍从 key-down
 flags 读取。InputMethodKit responder 导航命令只在符号候选活动时单独处理，避免
-同一次方向键继续移动宿主光标或选区。因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
+同一次方向键继续移动宿主光标或选区。文字 composition 会在符号 session 打开前先
+完整提交；取消符号不会恢复或删除已经提交的文字。显式 commit 会确认当前符号；
+点击外部或 deactivate 只有在焦点、宿主身份和光标范围仍与 session 创建时一致时
+才确认，宿主上下文变化或缺失时会取消且不写入。reset、close、宿主快捷键和输入
+模式变化也会取消。符号 session 不启动 AI、Rime 学习或 Provider context。inline
+宿主以 marked text 显示当前符号；终端类或 override commit-only 宿主保留 U+3000
+carrier，并在候选窗 preedit 行显示同一当前符号。选择变化会同步更新预览，首尾
+边界未移动时不会重复改写 mark。已打开的符号 session 在偏好刷新后仍沿用创建时
+的分页大小，保证候选窗分页与数字选择一致。焦点生命周期会先同步共享输入模式，模式已变化时取消
+旧符号而不提交；兼容直通的标点会在读取文档上下文或改变引号状态前交还宿主。
+因此 Terminal、iTerm、MacVim 和 Emacs 风格宿主也默认进入中文模式；
 它们的中文 composition 使用带 marked attributes 的全角空格 attributed marked-text placeholder 稳住宿主
 composition 和候选窗 anchor；真实 raw/preedit 会显示在 KnowType 候选窗候选行
-上方，确认时再通过 `insertText` 上屏。切到 ASCII 后，空闲半角 printable 输入会直通
+上方，符号 composition 也在同一位置显示当前符号，确认时再通过 `insertText`
+上屏。切到 ASCII 后，空闲半角 printable 输入会直通
 当前宿主；全角 printable 输入由 KnowType 转换后插入。仍可用 UserDefaults override 将任意
 bundle 强制回 `commitOnlyComposition`，用于处理真实不兼容 inline marked text 的宿主。
 

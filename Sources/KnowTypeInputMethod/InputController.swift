@@ -268,6 +268,13 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
         coordinator.commitComposition(client: effectiveInputControllerClient(from: sender))
     }
 
+    public override func cancelComposition() {
+        guard !coordinator.cancelComposition(client: currentInputControllerClient) else {
+            return
+        }
+        super.cancelComposition()
+    }
+
     public override func hidePalettes() {
         super.hidePalettes()
         coordinator.hidePalettes()

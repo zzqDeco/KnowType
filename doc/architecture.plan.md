@@ -244,12 +244,21 @@ LevelDB state.
   path share one candidate-navigation intent and handled contract; unknown
   selectors remain available to the focused host.
 - Command/Control key-down maps to a host-shortcut intent. An active symbol
-  overlay is cancelled before the event returns to the host, while key-up and
+  session is cancelled before the event returns to the host, while key-up and
   flags-changed remain outside the production event registration.
 - `InputSessionController` remains available for core suggestion and commit policy, but the active IMK path uses Rime prefix snapshots for keydown responsiveness and delegates AI recommendation to `KnowTypeAI`.
 - `CompositionBuffer` remains available for legacy/session tests, but native Rime preedit is the production marked-text source during active Chinese composition.
 - `InputMethodLexiconRuntime` remains available for legacy demos/tests and settings visibility, but local lexicon rebuilds are not part of the IMK key path.
 - Runtime preferences are loaded at controller startup and new composition boundaries; active marked text is not rewritten when settings change.
+- External runtime-preference refreshes reproject an active symbol session
+  instead of publishing a normal suggestion frame over its candidate overlay;
+  the panel uses the page size captured by that session.
+- Text-to-symbol transitions use the native full-composition commit path and
+  open symbol candidates only after text reaches idle. Focus and click-outside
+  lifecycle first synchronizes the shared input-mode generation, then commits
+  only when the current host identity and cursor ranges match the symbol
+  session's captured host snapshot; generation or host-context changes cancel
+  the symbol without a host write.
 - Default runtime engine requests rebuild from current local lexicon directory contents instead of a process-wide static cache.
 - The IMK controller publishes Rime preedit marked text and immediate current-page Rime prefix candidates on the keydown path, then updates the fixed AI recommendation slot asynchronously.
 - Runtime local lexicon snapshot checks and engine rebuilds are retired from the IMK coordinator; Rime artifacts and shared data are validated by bundle smoke tests.
@@ -268,13 +277,32 @@ LevelDB state.
 - `InputNativeCandidateNavigationRuntime` owns displayed native selection
   state, panel selection mapping, Rime highlight, current-page select, paging,
   and boundary paging decisions.
-- While a symbol-candidate session is active, arrow and paging navigation is
-  consumed even when its clamped selection cannot move. Ending the session
-  restores ordinary host navigation without a host text or selection write.
-- `InputCompositionStateRuntime` owns raw input, `CompositionBuffer`,
-  composition id/revision, and delete-count state. The coordinator still owns
-  Rime calls, host insertion, marked text, panel publication, and lifecycle
+- `InputPunctuatorRuntime` resolves every production symbol rule to either final
+  direct output or an immutable ordered candidate list. ASCII passthrough is a
+  host-writer decision rather than a third symbol rule, and the coordinator
+  applies that decision before punctuation context reads or rule evaluation.
+- `InputActiveSessionRuntime` is the only active input-state owner. Its
+  `ActiveInputSession` is mutually exclusive `none`, `text`, or `symbol`, and
+  text and symbol sessions share one monotonic composition-id domain.
+- `SymbolComposition` owns trigger, immutable candidates, selected index,
+  revision, paging, captured host identity/ranges, lifecycle policies, and the
+  latest successful presentation revision, carrier, and post-write host
+  snapshot. `CandidatePanelState` is only its render projection.
+- While a symbol session is active, arrow and paging navigation is consumed
+  even when its clamped selection cannot move. The same trigger advances
+  selection; printable fallthrough commits the current symbol and replays the
+  original intent once. Ending the session restores ordinary host navigation.
+- `InputCompositionStateRuntime` stores the text-session raw input,
+  `CompositionBuffer`, revision, and delete-count state behind
+  `InputActiveSessionRuntime`. The coordinator still owns Rime calls, host
+  insertion, marked text, panel publication, AI cancellation, and lifecycle
   side effects.
+- Symbol sessions expose the selected candidate through `composedString()` and
+  an empty `originalString()`. Inline hosts receive the selected symbol as
+  marked text; commit-only hosts receive the existing U+3000 placeholder while
+  the panel preedit row shows the selected symbol. Selection changes update the
+  same owned mark, while clamped navigation does not rewrite an unchanged
+  revision.
 - `InputCompositionLifecycleRuntime` owns composition begin/finish lifecycle
   plans, first-begin trace-once state, finish reason mapping, finished
   composition id capture, and owned marked-text clear intent.
@@ -297,9 +325,11 @@ LevelDB state.
   presentation, computes panel size and edge avoidance, and compresses vertical rows when a constrained visible
   frame cannot fit the natural height.
 
-The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Inline hosts receive Rime preedit as an attributed marked-text payload, including partial-commit states where confirmed Chinese text and remaining raw input coexist. Terminal-style or override commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real preedit row above candidate rows for those hosts. Commit planning is value-only, then the coordinator clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, or an explicitly selected AI recommendation depending on the shortcut.
+The IMK controller uses `IMKTextInput.setMarkedText` during active composition. Inline hosts receive Rime preedit or the selected symbol as an attributed marked-text payload, including partial-commit text states where confirmed Chinese text and remaining raw input coexist. Terminal-style or override commit-only hosts receive only the full-width-space attributed placeholder; the candidate panel carries the real text or symbol preedit row above candidate rows for those hosts. Commit planning is value-only, then the coordinator clears KnowType-owned marked text and inserts raw input, the highlighted Rime candidate, an explicitly selected AI recommendation, or exactly one selected symbol depending on the active session.
 `InputClientCompositionWriter` owns the host carrier write state, idle
 half-width ASCII passthrough decisions, and KnowType-owned marked-text cleanup.
+Owned marks are identified by both client and composition id so a stale symbol
+transition cannot clear a newer composition.
 The lower-level
 `InputClientWriteCoordinator` still owns the actual `setMarkedText`/`insertText`
 calls, `NSNotFound` replacement ranges, and privacy-safe diagnostics.

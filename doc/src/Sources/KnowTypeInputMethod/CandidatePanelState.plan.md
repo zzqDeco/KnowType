@@ -19,12 +19,13 @@ candidate panel.
   not reimplemented in state.
 - Commit-only preedit is stored in the view model and can make the panel
   visible, but it has no `CandidatePanelSelection`, no numeric shortcut, and no
-  raw-input fallback selection.
+  raw-input fallback selection. This includes the current symbol preview while
+  a commit-only `SymbolComposition` owns the placeholder marked range.
 - Mode-status rows are fixed disabled rows. They may make the panel visible
   while no composition is active, but they never become selection targets.
-- Symbol-candidate rows are ordinary selectable pageable rows for a temporary
-  symbol session. Their number shortcuts are local to the visible page and they
-  do not participate in prefix learning or AI continuation.
+- Symbol-candidate rows are a render projection of `SymbolComposition`.
+  Selection truth, revision, paging, and number-shortcut resolution stay in
+  `InputActiveSessionRuntime`; panel state must not become a second owner.
 - Disabled AI status rows are visible rows but have no selection identity, no
   numeric shortcut, and are skipped by keyboard and mouse selection.
 - `selectVisibleRow` is the shared path for hover/click selection and only

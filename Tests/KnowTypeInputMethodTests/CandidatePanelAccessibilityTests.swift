@@ -94,6 +94,56 @@ final class CandidatePanelAccessibilityTests: XCTestCase {
         XCTAssertEqual(children[1].accessibilityLabel(), "1，你")
     }
 
+    func testCommitOnlySymbolPreviewAndSelectionAreVoiceOverReadable() throws {
+        let view = CandidatePanelContentView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 73),
+            appearance: .snapshotLight
+        )
+        let model = CandidatePanelRenderModel(
+            title: "KnowType",
+            previewText: nil,
+            rows: [
+                CandidatePanelRenderRow(
+                    kind: .preedit,
+                    selection: nil,
+                    shortcutLabel: nil,
+                    text: "/",
+                    isSelected: false,
+                    isEnabled: false,
+                    visualRole: .rawInput,
+                    accessibilityLabel: "预编辑，/"
+                ),
+                CandidatePanelRenderRow(
+                    kind: .symbolCandidate,
+                    selection: .symbolCandidate(0),
+                    shortcutLabel: "1",
+                    text: "、",
+                    isSelected: false,
+                    visualRole: .symbolCandidate,
+                    accessibilityLabel: "符号，1，、"
+                ),
+                CandidatePanelRenderRow(
+                    kind: .symbolCandidate,
+                    selection: .symbolCandidate(1),
+                    shortcutLabel: "2",
+                    text: "/",
+                    isSelected: true,
+                    visualRole: .symbolCandidate,
+                    accessibilityLabel: "符号，2，/"
+                )
+            ]
+        )
+
+        view.update(model: model, layoutPlan: verticalLayoutPlan())
+
+        let children = try XCTUnwrap(view.accessibilityChildren() as? [NSAccessibilityElement])
+        let selected = try XCTUnwrap(view.accessibilitySelectedChildren() as? [NSAccessibilityElement])
+        XCTAssertEqual(children.map { $0.accessibilityLabel() }, ["预编辑，/", "符号，1，、", "符号，2，/"])
+        XCTAssertEqual(selected.count, 1)
+        XCTAssertEqual(selected.first?.accessibilityLabel(), "符号，2，/")
+        XCTAssertTrue(children[2].isAccessibilitySelected())
+    }
+
     func testEnabledAccessibilityPressCommitsExactSelection() throws {
         let view = CandidatePanelContentView(
             frame: NSRect(x: 0, y: 0, width: 320, height: 73),

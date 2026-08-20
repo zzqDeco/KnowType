@@ -80,6 +80,135 @@ final class InputClientCompositionWriterTests: XCTestCase {
         )
     }
 
+    func testSymbolPresentationReportsInlineCarrierAndWritesCurrentCandidate() {
+        let writer = InputClientCompositionWriter(
+            compatibilityPolicy: InputClientCompatibilityPolicy(userDefaults: nil)
+        )
+        let client = WriteClient()
+        let state = InputClientCompositionWriteState(
+            compositionID: 20,
+            rawLength: 1,
+            inputModeState: .init(),
+            hasActiveComposition: true
+        )
+
+        let result = writer.presentSymbolComposition(
+            client: client,
+            state: state,
+            markedDisplayText: "÷"
+        )
+
+        XCTAssertEqual(
+            result,
+            InputClientCompositionPresentationResult(
+                didWrite: true,
+                carrier: .inline,
+                shouldReanchor: true
+            )
+        )
+        XCTAssertEqual(client.markedTextWrites.last?.text, "÷")
+        XCTAssertEqual(client.markedTextWrites.last?.selectionRange, NSRange(location: 1, length: 0))
+    }
+
+    func testSymbolPresentationReportsPlaceholderAndKeepsCandidateForPanel() {
+        let suiteName = "KnowTypeSymbolCompositionWriterTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        defaults.set(
+            InputClientWriteMode.commitOnlyComposition.rawValue,
+            forKey: "input.client.com.example.Terminal.writeMode"
+        )
+        let writer = InputClientCompositionWriter(
+            compatibilityPolicy: InputClientCompatibilityPolicy(userDefaults: defaults)
+        )
+        let client = WriteClient(bundleIdentifier: "com.example.Terminal")
+        let state = InputClientCompositionWriteState(
+            compositionID: 21,
+            rawLength: 1,
+            inputModeState: .init(),
+            hasActiveComposition: true
+        )
+
+        let result = writer.presentSymbolComposition(
+            client: client,
+            state: state,
+            markedDisplayText: "、"
+        )
+
+        XCTAssertEqual(result.carrier, .placeholder)
+        XCTAssertTrue(result.didWrite)
+        XCTAssertEqual(client.markedTextWrites.last?.text, "\u{3000}")
+        XCTAssertEqual(
+            writer.candidatePanelPreeditDisplayText(
+                client: client,
+                state: state,
+                markedDisplayText: "、"
+            ),
+            "、"
+        )
+    }
+
+    func testOwnedMarkedTextRequiresMatchingClientAndCompositionID() {
+        let writer = InputClientCompositionWriter(
+            compatibilityPolicy: InputClientCompatibilityPolicy(userDefaults: nil)
+        )
+        let client = WriteClient()
+        let firstState = InputClientCompositionWriteState(
+            compositionID: 30,
+            rawLength: 1,
+            inputModeState: .init(),
+            hasActiveComposition: true
+        )
+        var secondState = firstState
+        secondState.compositionID = 31
+
+        XCTAssertTrue(
+            writer.presentSymbolComposition(
+                client: client,
+                state: firstState,
+                markedDisplayText: "、"
+            ).didWrite
+        )
+        XCTAssertTrue(
+            writer.presentSymbolComposition(
+                client: client,
+                state: secondState,
+                markedDisplayText: "/"
+            ).didWrite
+        )
+
+        XCTAssertFalse(writer.clearOwnedMarkedTextIfNeeded(client: client, state: firstState))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "/"])
+        XCTAssertTrue(writer.clearOwnedMarkedTextIfNeeded(client: client, state: secondState))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、", "/", ""])
+    }
+
+    func testReleasingOwnedMarkedTextDoesNotWriteToUnavailableClient() {
+        let writer = InputClientCompositionWriter(
+            compatibilityPolicy: InputClientCompatibilityPolicy(userDefaults: nil)
+        )
+        let client = WriteClient()
+        let state = InputClientCompositionWriteState(
+            compositionID: 40,
+            rawLength: 1,
+            inputModeState: .init(),
+            hasActiveComposition: true
+        )
+
+        XCTAssertTrue(
+            writer.presentSymbolComposition(
+                client: client,
+                state: state,
+                markedDisplayText: "、"
+            ).didWrite
+        )
+        XCTAssertTrue(writer.releaseOwnedMarkedText(compositionID: state.compositionID))
+        XCTAssertFalse(writer.clearOwnedMarkedTextIfNeeded(client: client, state: state))
+        XCTAssertEqual(client.markedTextWrites.map(\.text), ["、"])
+    }
+
     func testInsertClearsOwnedMarkedTextBeforeInsert() {
         let writer = InputClientCompositionWriter(compatibilityPolicy: InputClientCompatibilityPolicy(userDefaults: nil))
         let client = WriteClient()

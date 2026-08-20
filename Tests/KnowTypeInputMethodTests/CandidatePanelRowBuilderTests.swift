@@ -154,6 +154,27 @@ final class CandidatePanelRowBuilderTests: XCTestCase {
         XCTAssertEqual(CandidatePanelRowBuilder().defaultSelection(in: viewModel), .symbolCandidate(0))
     }
 
+    func testCommitOnlySymbolPreviewIsReadableAboveSelectableSymbolRows() {
+        let viewModel = CandidatePanelViewModel(
+            rawInput: "",
+            preeditDisplayText: "、",
+            prefixCandidates: [],
+            continuationCandidates: [],
+            symbolCandidates: [
+                InputSymbolCandidate(text: "、"),
+                InputSymbolCandidate(text: "/")
+            ]
+        )
+
+        let rows = CandidatePanelRowBuilder().buildRows(in: viewModel)
+
+        XCTAssertEqual(rows.fixedRows.map(\.kind), [.preedit])
+        XCTAssertEqual(rows.fixedRows.first?.text, "、")
+        XCTAssertEqual(rows.fixedRows.first?.accessibilityLabel, "预编辑，、")
+        XCTAssertEqual(rows.pageableRows.map(\.selection), [.symbolCandidate(0), .symbolCandidate(1)])
+        XCTAssertEqual(rows.pageableRows.map(\.accessibilityLabel), ["符号，1，、", "符号，2，/"])
+    }
+
     func testPrefixSelectionUsesRawRangeShape() {
         let viewModel = CandidatePanelViewModel(
             rawInput: "nihao",
