@@ -344,7 +344,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertTrue(line.contains("providerFingerprint=\(loaded.fingerprint.prefix(12))"))
     }
 
-    func testSharedRequestGateClampsRetryAfterAndFencesGeneration() async {
+    func testSharedRequestGateClampsRetryAfterAndFencesGeneration() async throws {
         let now = Date()
         let gate = ProviderRequestGate(now: { now })
         do {
@@ -358,7 +358,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
         let deadline = await gate.cooldownDeadline(providerIdentity: "provider-config-secret", generation: 1)
-        XCTAssertEqual(deadline?.timeIntervalSince(now), 15, accuracy: 0.001)
+        let unwrappedDeadline = try XCTUnwrap(deadline)
+        XCTAssertEqual(unwrappedDeadline.timeIntervalSince(now), 15, accuracy: 0.001)
         do {
             _ = try await gate.execute(providerIdentity: "provider-config-secret", generation: 1) {
                 LLMResponse(candidates: [])
@@ -763,7 +764,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             providerIdentity: identity,
             generation: 0
         )
-        XCTAssertEqual(timeoutDeadline?.timeIntervalSince(now), 60, accuracy: 0.001)
+        let unwrappedTimeoutDeadline = try XCTUnwrap(timeoutDeadline)
+        XCTAssertEqual(unwrappedTimeoutDeadline.timeIntervalSince(now), 60, accuracy: 0.001)
 
         await operation.finish()
         var releasedWithCooldown = false
@@ -784,7 +786,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             providerIdentity: identity,
             generation: 0
         )
-        XCTAssertEqual(finalDeadline?.timeIntervalSince(now), 60, accuracy: 0.001)
+        let unwrappedFinalDeadline = try XCTUnwrap(finalDeadline)
+        XCTAssertEqual(unwrappedFinalDeadline.timeIntervalSince(now), 60, accuracy: 0.001)
     }
 
     func testTimeoutAttemptOwnsFailureBeforeCancellationTriggeredLateErrorReleasesLease() async throws {
@@ -811,7 +814,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             providerIdentity: identity,
             generation: 0
         )
-        XCTAssertEqual(deadline?.timeIntervalSince(now), 60, accuracy: 0.001)
+        let unwrappedDeadline = try XCTUnwrap(deadline)
+        XCTAssertEqual(unwrappedDeadline.timeIntervalSince(now), 60, accuracy: 0.001)
         do {
             _ = try await gate.execute(providerIdentity: identity, generation: 0) { 1 }
             XCTFail("late 5xx must retain the owning timeout cooldown")
@@ -923,7 +927,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             providerIdentity: identity,
             generation: 0
         )
-        XCTAssertEqual(deadline?.timeIntervalSince(now), 15 * 60, accuracy: 0.001)
+        let unwrappedDeadline = try XCTUnwrap(deadline)
+        XCTAssertEqual(unwrappedDeadline.timeIntervalSince(now), 15 * 60, accuracy: 0.001)
     }
 
     func testPersistentGateWriterTrimsDeterministicallyAndExpiresAcrossRestart() async throws {

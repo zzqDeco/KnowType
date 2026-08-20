@@ -223,7 +223,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
 
         await runtime.record(makeContextEvent(rawInput: "first", committedText: "第一"))
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let requestsBeforeDeadline = await provider.requests
+        XCTAssertTrue(requestsBeforeDeadline.isEmpty)
         clock.advance(by: 2)
 
         try await waitUntil { !(await provider.requests).isEmpty }
@@ -231,7 +232,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             let pending = try? await eventStore.pendingEvents()
             return pending?.isEmpty == true
         }
-        XCTAssertEqual((await provider.requests).count, 1)
+        let requestsAfterDeadline = await provider.requests
+        XCTAssertEqual(requestsAfterDeadline.count, 1)
     }
 
     func testDigestArchivesOnlyEventsIncludedInProviderRequest() async throws {
@@ -1596,6 +1598,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         probe.failNextPendingArchives(1)
         let eventStore = TypingEventStore(
             eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: .default,
             testProbe: probe
         )
         let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- recovered")
@@ -1715,7 +1718,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTAssertEqual(tailAfterSecond, 10)
-        XCTAssertEqual((await provider.requests).count, 2)
+        let requestsAfterSecondDigest = await provider.requests
+        XCTAssertEqual(requestsAfterSecondDigest.count, 2)
 
         clock.advance(by: 2)
         var thirdRequestSeen = false
@@ -1735,7 +1739,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         }
         XCTAssertTrue(pendingAfterThird.isEmpty)
         try await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertEqual((await provider.requests).count, 3)
+        let requestsAfterThirdDigest = await provider.requests
+        XCTAssertEqual(requestsAfterThirdDigest.count, 3)
     }
 
     func testBusyGateWakeDrainsPendingDigestWithoutPolling() async throws {
@@ -1778,7 +1783,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             await runtime.record(makeContextEvent(rawInput: "queued", committedText: "排队"))
         }
         try await waitUntil { await runtimeProbe.gateWaiterPauseCount == 1 }
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let requestsWhileGateBusy = await provider.requests
+        XCTAssertTrue(requestsWhileGateBusy.isEmpty)
         XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 1)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 1)
 
@@ -1797,7 +1803,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         await blockerProbe.release()
         try await blocker.value
         try await waitUntil { !(await provider.requests).isEmpty }
-        XCTAssertEqual((await provider.requests).count, 1)
+        let requestsAfterGateWake = await provider.requests
+        XCTAssertEqual(requestsAfterGateWake.count, 1)
         try await waitUntil { eventStoreProbe.digestSnapshotDecodeCount == 2 }
         XCTAssertEqual(gateProbe.admittedAttemptCount, 2)
     }
@@ -1859,7 +1866,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             await runtime.processIfNeeded()
         }
 
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let blockedProviderRequests = await provider.requests
+        XCTAssertTrue(blockedProviderRequests.isEmpty)
         XCTAssertEqual(gateProbe.preflightCheckCount, 1)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
         XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, digestDecodesBeforeRuntime)
@@ -2003,7 +2011,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
 
         await runtime.processIfNeeded()
 
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let providerRequests = await provider.requests
+        XCTAssertTrue(providerRequests.isEmpty)
         XCTAssertEqual(try environmentStore.loadDigestClaim(), claim)
         XCTAssertEqual(try Data(contentsOf: pendingURL), snapshot.rawData)
         XCTAssertNil(try environmentStore.loadDigestScheduleState())
@@ -2035,7 +2044,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         await provider.finish(generatedMarkdown: "## Global Style\n- recovered")
         await firstDigest.value
 
-        XCTAssertEqual((await provider.requests).count, 1)
+        let requestsAfterCleanupFailure = await provider.requests
+        XCTAssertEqual(requestsAfterCleanupFailure.count, 1)
         let pendingAfterFailure = try await eventStore.pendingEvents()
         XCTAssertEqual(pendingAfterFailure.map(\.rawInput), ["tail"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ENV.digest-claim.json").path))
@@ -2051,7 +2061,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
         await restartedRuntime.processIfNeeded()
 
-        XCTAssertTrue((await recoveryProvider.requests).isEmpty)
+        let recoveryRequests = await recoveryProvider.requests
+        XCTAssertTrue(recoveryRequests.isEmpty)
         let pendingAfterRecovery = try await eventStore.pendingEvents()
         XCTAssertEqual(pendingAfterRecovery.map(\.rawInput), ["tail"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ENV.digest-claim.json").path))
@@ -2280,7 +2291,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(claimLoadsWhilePaused, 1)
         XCTAssertEqual(gateProbe.preflightCheckCount, 0)
         XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery)
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let requestsWhileRecoveryPaused = await provider.requests
+        XCTAssertTrue(requestsWhileRecoveryPaused.isEmpty)
 
         await runtimeProbe.releaseClaimRecoveryGatePreflight()
         await owner.value
@@ -2299,7 +2311,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(gateProbe.preflightCheckCount, 1)
         XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery + 1)
         XCTAssertEqual(pendingAfterFailure.map(\.rawInput), ["single-flight-claimed"])
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let requestsAfterBlockedRecovery = await provider.requests
+        XCTAssertTrue(requestsAfterBlockedRecovery.isEmpty)
         XCTAssertEqual(diagnostics.stageCount("context_claim_recovery_blocked"), 1)
         let diagnosticLines = diagnostics.lines.joined()
         XCTAssertFalse(diagnosticLines.contains("single-flight-claimed"))
@@ -2397,7 +2410,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             Set(["single-flight-appended-1", "single-flight-appended-2"])
         )
         XCTAssertNil(try environmentStore.loadDigestClaim())
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let providerRequestsAfterRecovery = await provider.requests
+        XCTAssertTrue(providerRequestsAfterRecovery.isEmpty)
     }
 
     func testBlockedClaimRecoveryCoalescesRecordsAndRetriesOncePerDeadline() async throws {
@@ -2466,7 +2480,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(schedulesDuringBackoff, 1)
         XCTAssertEqual(environmentProbe.documentReadCount, documentReadsBeforeRecovery + 1)
         XCTAssertEqual(pendingDuringBackoff.map(\.rawInput), ["claimed-private-prefix"])
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let requestsDuringBackoff = await provider.requests
+        XCTAssertTrue(requestsDuringBackoff.isEmpty)
 
         clock.advance(by: 60)
         await sleeper.releaseNext()
@@ -2488,7 +2503,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(attemptsAfterRepair, 3)
         XCTAssertEqual(environmentProbe.documentReadCount, documentReadsBeforeRepairWake + 1)
         XCTAssertTrue(pendingAfterRepair.isEmpty)
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let requestsAfterRepair = await provider.requests
+        XCTAssertTrue(requestsAfterRepair.isEmpty)
         XCTAssertEqual(diagnostics.stageCount("context_claim_recovery_blocked"), 2)
         let diagnosticLines = diagnostics.lines.joined()
         XCTAssertFalse(diagnosticLines.contains("claimed-private-prefix"))
@@ -2591,8 +2607,9 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
         XCTAssertEqual(repairedSchedule.pendingSince, clock.now())
         XCTAssertNil(repairedSchedule.lastSuccessfulDigestAt)
+        let nextEligibleAt = try XCTUnwrap(repairedSchedule.nextEligibleAt)
         XCTAssertEqual(
-            repairedSchedule.nextEligibleAt?.timeIntervalSince(clock.now()),
+            nextEligibleAt.timeIntervalSince(clock.now()),
             10,
             accuracy: 0.001
         )
@@ -2677,8 +2694,9 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             let repaired = try XCTUnwrap(environmentStore.loadDigestScheduleState())
             XCTAssertEqual(repaired.pendingSince, clock.now())
             XCTAssertNil(repaired.lastSuccessfulDigestAt)
+            let repairedNextEligibleAt = try XCTUnwrap(repaired.nextEligibleAt)
             XCTAssertEqual(
-                repaired.nextEligibleAt?.timeIntervalSince(clock.now()),
+                repairedNextEligibleAt.timeIntervalSince(clock.now()),
                 10,
                 accuracy: 0.001
             )
@@ -2717,11 +2735,13 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             nowProvider: clock.now
         )
         await secondRuntime.processIfNeeded()
-        XCTAssertTrue((await secondProvider.requests).isEmpty)
+        let requestsBeforeInterval = await secondProvider.requests
+        XCTAssertTrue(requestsBeforeInterval.isEmpty)
 
         clock.advance(by: 11)
         await secondRuntime.processIfNeeded()
-        XCTAssertEqual((await secondProvider.requests).count, 1)
+        let requestsAfterInterval = await secondProvider.requests
+        XCTAssertEqual(requestsAfterInterval.count, 1)
     }
 
     func testDirectContextAndRecommendationShareProviderIdentityGate() async throws {

@@ -315,7 +315,8 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             await provider.requests.count == 2
         }
         XCTAssertTrue(trailingStarted, "\(diagnosticSink.events)")
-        XCTAssertEqual((await provider.requests).map(\.rawInput), ["abc", "abcd"])
+        let trailingRequests = await provider.requests
+        XCTAssertEqual(trailingRequests.map(\.rawInput), ["abc", "abcd"])
     }
 
     @MainActor

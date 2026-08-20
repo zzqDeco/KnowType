@@ -1178,7 +1178,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             providerIdentity: provider.providerName,
             generation: 0
         )
-        XCTAssertEqual(deadline?.timeIntervalSince(fixedNow), 60, accuracy: 0.001)
+        let cooldownDeadline = try XCTUnwrap(deadline)
+        XCTAssertEqual(cooldownDeadline.timeIntervalSince(fixedNow), 60, accuracy: 0.001)
 
         let finishDeadline = Date().addingTimeInterval(2)
         while !(await provider.isFinished), Date() < finishDeadline {
@@ -1511,7 +1512,8 @@ final class AIRecommendationRuntimeTests: XCTestCase {
                 return XCTFail("persistence-blocked recommendation must be unavailable")
             }
         }
-        XCTAssertTrue((await provider.requests).isEmpty)
+        let providerRequests = await provider.requests
+        XCTAssertTrue(providerRequests.isEmpty)
         XCTAssertEqual(gateProbe.preflightCheckCount, 1)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
         XCTAssertEqual(environmentProbe.documentReadCount, 0)
