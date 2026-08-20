@@ -186,6 +186,11 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   whose generated hash is not yet present in ENV remains blocked, and corrupt
   claim evidence is retried at most once per bounded 60-second actor deadline;
   intervening records are rejected without another recovery read or append. A
+  first recovery establishes an actor-owned single-flight before its first
+  cross-actor await, so concurrent record and process calls share one claim,
+  gate, ENV, archive, and pending validation result. Only the current flight
+  owner updates recovery latches or retry scheduling; a generation reset
+  supersedes the old token without allowing it to clear newer state. A
   successful or claim-missing retry clears that local latch. Corrupt
   schedule state, including impossible date ordering or excessive future
   deadlines, is replaced by a conservative minimum-interval delay or stays

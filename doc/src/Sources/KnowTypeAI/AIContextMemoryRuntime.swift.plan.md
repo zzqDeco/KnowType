@@ -26,6 +26,10 @@
   append and provider dispatch. A validated processed archive permits cleanup
   only when pending is missing, provably different, or exactly archived;
   truncated and unreadable pending evidence remains blocked.
+- Initial claim recovery registers an actor-owned single-flight token before
+  its first cross-actor await. Concurrent record and process callers wait for
+  the same result; only the current owner mutates recovery, cleanup, gate latch,
+  or retry state, and reset supersedes an older token.
 - The first blocked recovery installs one bounded 60-second actor deadline.
   Records during that backoff return before recovery reads or append, and the
   deadline permits one retry before another bounded backoff. Successful or
@@ -42,4 +46,5 @@
 - `AIContextMemoryRuntimeTests` covers guarded claim creation, busy-waiter
   coalescing, processed-archive recovery states, semantic schedule repair,
   bounded blocked-recovery retries, gate preflight latching, first-record claim
-  recovery, and cancellation-resistant timeout flow.
+  recovery single-flight interleavings, and cancellation-resistant timeout
+  flow.

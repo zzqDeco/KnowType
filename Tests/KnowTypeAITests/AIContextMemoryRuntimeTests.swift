@@ -2211,6 +2211,195 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(try environmentStore.loadDigestClaim(), claim)
     }
 
+    func testBlockedPersistedClaimRecoveryIsSingleFlightAcrossConcurrentRecords() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        try await eventStore.append(
+            makeContextEvent(rawInput: "single-flight-claimed", committedText: "已声明")
+        )
+        let snapshot = try eventStore.pendingDigestSnapshot()
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: directory.appendingPathComponent("ENV.md"),
+            testProbe: environmentProbe
+        )
+        _ = try environmentStore.loadSnapshot()
+        let expectedGenerated = "## Global Style\n- expected after repair"
+        let claim = EnvironmentDigestClaim(
+            claimedPrefixSHA256: AIDocumentSnapshot.hash(snapshot.rawContent),
+            claimedPrefixByteCount: snapshot.rawData.count,
+            claimedEventCount: snapshot.claimedEventCount,
+            generatedSHA256: AIDocumentSnapshot.hash(expectedGenerated),
+            providerGeneration: 0
+        )
+        try environmentStore.saveDigestClaim(claim)
+        let readsBeforeRecovery = environmentProbe.documentReadCount
+        let clock = ManualContextClock()
+        let sleeper = ControlledContextDeadlineSleeper()
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe(
+            pausesBeforeClaimRecoveryGatePreflight: true
+        )
+        let gateProbe = ProviderRequestGateTestProbe()
+        let diagnostics = ContextMemoryDiagnosticProbe()
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            diagnosticSink: { diagnostics.record($0) },
+            requestGate: ProviderRequestGate(testProbe: gateProbe),
+            nowProvider: { clock.now() },
+            testProbe: runtimeProbe,
+            claimRecoveryBackoff: 60,
+            claimRecoverySleeper: { nanoseconds in
+                await sleeper.suspend(nanoseconds: nanoseconds)
+            }
+        )
+
+        let owner = Task { await runtime.processIfNeeded(now: clock.now()) }
+        try await waitUntil { await runtimeProbe.claimRecoveryGatePreflightPauseCount == 1 }
+        let firstRecord = Task {
+            await runtime.record(
+                makeContextEvent(rawInput: "single-flight-dropped-1", committedText: "不得追加一")
+            )
+        }
+        let secondRecord = Task {
+            await runtime.record(
+                makeContextEvent(rawInput: "single-flight-dropped-2", committedText: "不得追加二")
+            )
+        }
+        let concurrentProcess = Task { await runtime.processIfNeeded(now: clock.now()) }
+        try await waitUntil { await runtime.claimRecoveryWaiterCountForTesting() == 3 }
+
+        let attemptsWhilePaused = await runtimeProbe.claimRecoveryAttemptCount
+        let claimLoadsWhilePaused = await runtimeProbe.claimRecoveryClaimLoadCount
+        XCTAssertEqual(attemptsWhilePaused, 1)
+        XCTAssertEqual(claimLoadsWhilePaused, 1)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 0)
+        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery)
+        XCTAssertTrue((await provider.requests).isEmpty)
+
+        await runtimeProbe.releaseClaimRecoveryGatePreflight()
+        await owner.value
+        await firstRecord.value
+        await secondRecord.value
+        await concurrentProcess.value
+        try await waitUntil { await sleeper.suspensionCount == 1 }
+
+        let attemptsAfterFailure = await runtimeProbe.claimRecoveryAttemptCount
+        let claimLoadsAfterFailure = await runtimeProbe.claimRecoveryClaimLoadCount
+        let retrySchedules = await runtimeProbe.claimRecoveryRetryScheduleCount
+        let pendingAfterFailure = try await eventStore.pendingEvents()
+        XCTAssertEqual(attemptsAfterFailure, 1)
+        XCTAssertEqual(claimLoadsAfterFailure, 1)
+        XCTAssertEqual(retrySchedules, 1)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 1)
+        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery + 1)
+        XCTAssertEqual(pendingAfterFailure.map(\.rawInput), ["single-flight-claimed"])
+        XCTAssertTrue((await provider.requests).isEmpty)
+        XCTAssertEqual(diagnostics.stageCount("context_claim_recovery_blocked"), 1)
+        let diagnosticLines = diagnostics.lines.joined()
+        XCTAssertFalse(diagnosticLines.contains("single-flight-claimed"))
+        XCTAssertFalse(diagnosticLines.contains("single-flight-dropped"))
+        XCTAssertFalse(diagnosticLines.contains(claim.claimedPrefixSHA256))
+
+        _ = try environmentStore.replaceGeneratedSection(with: expectedGenerated)
+        clock.advance(by: 60)
+        await sleeper.releaseNext()
+        try await waitUntil { (try? environmentStore.loadDigestClaim()) == nil }
+    }
+
+    func testSuccessfulPersistedClaimRecoveryReleasesWaitingRecordsToAppend() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        try await eventStore.append(
+            makeContextEvent(rawInput: "single-flight-success-claimed", committedText: "已提交")
+        )
+        let snapshot = try eventStore.pendingDigestSnapshot()
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: directory.appendingPathComponent("ENV.md"),
+            testProbe: environmentProbe
+        )
+        let generated = "## Global Style\n- committed before restart"
+        _ = try environmentStore.replaceGeneratedSection(with: generated)
+        try environmentStore.saveDigestClaim(
+            EnvironmentDigestClaim(
+                claimedPrefixSHA256: AIDocumentSnapshot.hash(snapshot.rawContent),
+                claimedPrefixByteCount: snapshot.rawData.count,
+                claimedEventCount: snapshot.claimedEventCount,
+                generatedSHA256: AIDocumentSnapshot.hash(generated),
+                providerGeneration: 0
+            )
+        )
+        let readsBeforeRecovery = environmentProbe.documentReadCount
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe(
+            pausesBeforeClaimRecoveryGatePreflight: true
+        )
+        let gateProbe = ProviderRequestGateTestProbe()
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 50,
+            minimumInterval: 600,
+            diagnosticSink: { _ in },
+            requestGate: ProviderRequestGate(testProbe: gateProbe),
+            testProbe: runtimeProbe
+        )
+
+        let owner = Task { await runtime.processIfNeeded() }
+        try await waitUntil { await runtimeProbe.claimRecoveryGatePreflightPauseCount == 1 }
+        let firstRecord = Task {
+            await runtime.record(
+                makeContextEvent(rawInput: "single-flight-appended-1", committedText: "追加一")
+            )
+        }
+        let secondRecord = Task {
+            await runtime.record(
+                makeContextEvent(rawInput: "single-flight-appended-2", committedText: "追加二")
+            )
+        }
+        let concurrentProcess = Task { await runtime.processIfNeeded() }
+        try await waitUntil { await runtime.claimRecoveryWaiterCountForTesting() == 3 }
+
+        let attemptsWhilePaused = await runtimeProbe.claimRecoveryAttemptCount
+        let claimLoadsWhilePaused = await runtimeProbe.claimRecoveryClaimLoadCount
+        XCTAssertEqual(attemptsWhilePaused, 1)
+        XCTAssertEqual(claimLoadsWhilePaused, 1)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 0)
+        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery)
+
+        await runtimeProbe.releaseClaimRecoveryGatePreflight()
+        await owner.value
+        await firstRecord.value
+        await secondRecord.value
+        await concurrentProcess.value
+
+        let pendingAfterRecovery = try await eventStore.pendingEvents()
+        let pendingInputs = pendingAfterRecovery.map(\.rawInput)
+        let attemptsAfterRecovery = await runtimeProbe.claimRecoveryAttemptCount
+        let claimLoadsAfterRecovery = await runtimeProbe.claimRecoveryClaimLoadCount
+        let retrySchedules = await runtimeProbe.claimRecoveryRetryScheduleCount
+        XCTAssertEqual(attemptsAfterRecovery, 1)
+        XCTAssertEqual(claimLoadsAfterRecovery, 1)
+        XCTAssertEqual(retrySchedules, 0)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 1)
+        XCTAssertEqual(environmentProbe.documentReadCount, readsBeforeRecovery + 1)
+        XCTAssertEqual(pendingInputs.count, 2)
+        XCTAssertEqual(
+            Set(pendingInputs),
+            Set(["single-flight-appended-1", "single-flight-appended-2"])
+        )
+        XCTAssertNil(try environmentStore.loadDigestClaim())
+        XCTAssertTrue((await provider.requests).isEmpty)
+    }
+
     func testBlockedClaimRecoveryCoalescesRecordsAndRetriesOncePerDeadline() async throws {
         let directory = makeTemporaryDirectory()
         let eventsDirectory = directory.appendingPathComponent("events")

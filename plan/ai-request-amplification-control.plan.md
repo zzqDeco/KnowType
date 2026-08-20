@@ -64,7 +64,10 @@ of already-started recommendations, and independent provider failure budgets.
   restarted runtime performs this local recovery before its first append can
   compact pending data. A blocked recovery uses one bounded 60-second actor
   deadline; records during backoff do not repeat recovery reads or append, and
-  each deadline permits one retry. ENV permissions are restricted before reads, structural
+  each deadline permits one retry. Initial recovery installs an actor-owned
+  single-flight token before any cross-actor await, so concurrent records and
+  process calls share one result and only the current owner can update cleanup,
+  latch, or retry state. ENV permissions are restricted before reads, structural
   User Notes must follow the unique managed pair, and existing hash-named
   backups are verified as matching regular non-symlink files. Registry-backed
   claim creation begins inside the final synchronous current-lease guard, so a

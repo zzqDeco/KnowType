@@ -790,7 +790,11 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   record after restart completes local claim recovery before append or
   compaction. A blocked claim recovery installs one bounded 60-second actor
   deadline; records before that deadline return without another recovery read,
-  append, or provider dispatch, and each deadline permits only one retry. ENV is
+  append, or provider dispatch, and each deadline permits only one retry. The
+  initial recovery registers an actor-owned single-flight token before any
+  cross-actor await; concurrent records and explicit process calls receive the
+  same result, while only that token's owner may update recovery latches,
+  cleanup, or retry scheduling. ENV is
   chmod 0600 before reads, User Notes must follow the unique
   managed pair, and existing deterministic backups are verified without
   following symlinks before repair proceeds
