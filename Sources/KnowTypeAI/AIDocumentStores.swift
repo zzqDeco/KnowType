@@ -235,15 +235,24 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         let lines = content.components(separatedBy: "\n")
         let starts = lines.indices.filter { lines[$0].trimmingCharacters(in: .whitespacesAndNewlines) == generatedStart }
         let ends = lines.indices.filter { lines[$0].trimmingCharacters(in: .whitespacesAndNewlines) == generatedEnd }
-        let titles = lines.filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) == documentTitle }.count
         let notes = lines.indices.filter { lines[$0].trimmingCharacters(in: .whitespacesAndNewlines) == userNotesTitle }
-        guard notes.count <= 1 else { throw EnvironmentDocumentError.ambiguousMigration }
+        let isMarkerless = starts.isEmpty && ends.isEmpty
+        let firstNotesIndex = notes.first
+        let titles = lines.indices.filter { index in
+            let isStructural = firstNotesIndex.map { index < $0 } ?? true
+            return isStructural && lines[index].trimmingCharacters(in: .whitespacesAndNewlines) == documentTitle
+        }.count
+        if !isMarkerless, notes.count > 1 {
+            throw EnvironmentDocumentError.ambiguousMigration
+        }
 
         let noteBody: String
-        if let noteIndex = notes.first {
+        if isMarkerless {
+            noteBody = markerlessUserNotesBody(in: content)
+        } else if let noteIndex = notes.first {
             noteBody = bodyAfterHeading(in: content, lineIndex: noteIndex)
         } else {
-            noteBody = starts.isEmpty && ends.isEmpty ? content : ""
+            noteBody = ""
         }
         try validateUserNotes(noteBody)
 
@@ -270,8 +279,7 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         }
 
         let canonical = try canonicalDocument(generated: generated, userNotes: noteBody)
-        let anomalous = requiresBackup || titles != 1 || notes.isEmpty || !hasValidPair
-        return CanonicalResult(content: canonical, requiresBackup: anomalous)
+        return CanonicalResult(content: canonical, requiresBackup: requiresBackup)
     }
 
     private static var defaultGeneratedMarkdown: String {
@@ -296,6 +304,13 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
 
     private static func validateUserNotes(_ notes: String) throws {
         guard Data(notes.utf8).count <= 4 * 1_024 else { throw EnvironmentDocumentError.userNotesTooLarge }
+    }
+
+    private static func markerlessUserNotesBody(in content: String) -> String {
+        content
+            .components(separatedBy: "\n")
+            .filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) != userNotesTitle }
+            .joined(separator: "\n")
     }
 
     private static func bodyAfterHeading(in content: String, lineIndex: Int) -> String {

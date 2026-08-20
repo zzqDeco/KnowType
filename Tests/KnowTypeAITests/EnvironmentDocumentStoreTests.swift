@@ -66,6 +66,23 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("backups").path))
     }
 
+    func testMarkerlessNotesHeadingsPreserveBothSidesAndRemainIdempotent() throws {
+        let directory = makeDirectory()
+        let url = directory.appendingPathComponent("ENV.md")
+        let markerless = "# Personal notes\n- before heading\n## User Notes\n- between headings\n## User Notes\n- after heading\n"
+        try Data(markerless.utf8).write(to: url)
+        let store = EnvironmentDocumentStore(fileURL: url)
+
+        let first = try store.loadSnapshot()
+        XCTAssertTrue(first.content.contains("- before heading"))
+        XCTAssertTrue(first.content.contains("- between headings"))
+        XCTAssertTrue(first.content.contains("- after heading"))
+        XCTAssertEqual(first.content.components(separatedBy: EnvironmentDocumentStore.userNotesTitle).count, 2)
+
+        let second = try store.loadSnapshot()
+        XCTAssertEqual(second, first)
+    }
+
     func testAmbiguousUserNotesFailsClosedAndLeavesBackup() throws {
         let directory = makeDirectory()
         let url = directory.appendingPathComponent("ENV.md")

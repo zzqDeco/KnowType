@@ -368,6 +368,54 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
     }
+
+    func testRequestGateSerializesSameIdentityButAllowsDifferentIdentity() async throws {
+        let gate = ProviderRequestGate()
+        let probe = RequestGateProbe()
+        let first = Task {
+            try await gate.execute(providerIdentity: "shared-provider", generation: 0) {
+                await probe.markStarted()
+                try await Task.sleep(nanoseconds: 200_000_000)
+                return 1
+            }
+        }
+
+        var started = false
+        let deadline = Date().addingTimeInterval(2)
+        while !started, Date() < deadline {
+            started = await probe.hasStarted
+            if !started { try await Task.sleep(nanoseconds: 10_000_000) }
+        }
+        XCTAssertTrue(started)
+
+        do {
+            _ = try await gate.execute(providerIdentity: "shared-provider", generation: 0) {
+                2
+            }
+            XCTFail("same identity must be single-flight")
+        } catch ProviderRequestGateError.busy {
+            // Expected.
+        }
+
+        let different = try await gate.execute(providerIdentity: "different-provider", generation: 0) {
+            3
+        }
+        XCTAssertEqual(different, 3)
+        let firstValue = try await first.value
+        XCTAssertEqual(firstValue, 1)
+    }
+}
+
+private actor RequestGateProbe {
+    private var started = false
+
+    func markStarted() {
+        started = true
+    }
+
+    var hasStarted: Bool {
+        started
+    }
 }
 
 final class ProviderRuntimeTestSource: @unchecked Sendable {

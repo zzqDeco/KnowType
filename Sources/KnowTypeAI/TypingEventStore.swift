@@ -77,6 +77,7 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     private var atomicRewrites = 0
     private var maximumBufferedReadBytes = 0
     private var failedArchiveDeletionsRemaining = 0
+    private var failedPendingArchivesRemaining = 0
 
     var inventoryScanCount: Int {
         lock.lock()
@@ -105,6 +106,12 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     func failNextArchiveDeletions(_ count: Int) {
         lock.lock()
         failedArchiveDeletionsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextPendingArchives(_ count: Int) {
+        lock.lock()
+        failedPendingArchivesRemaining = max(0, count)
         lock.unlock()
     }
 
@@ -139,6 +146,16 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
             return false
         }
         failedArchiveDeletionsRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailPendingArchive() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedPendingArchivesRemaining > 0 else {
+            return false
+        }
+        failedPendingArchivesRemaining -= 1
         return true
     }
 }
@@ -324,6 +341,52 @@ public final class TypingEventStore: @unchecked Sendable {
                 rawData,
                 requestByteLimit: retentionPolicy.maximumDigestByteCount
             )
+        }
+    }
+
+    func pendingDigestSnapshot(
+        prefixByteCount: Int,
+        eventCount: Int
+    ) throws -> TypingEventSnapshot {
+        guard prefixByteCount >= 0,
+              eventCount >= 0,
+              prefixByteCount <= retentionPolicy.maximumDigestByteCount else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        return try withTypingEventFileLock {
+            testProbe?.recordDigestSnapshotDecode()
+            guard prefixByteCount > 0 else {
+                guard eventCount == 0 else {
+                    throw TypingEventStoreError.pendingContentChanged
+                }
+                return TypingEventSnapshot(
+                    rawData: Data(),
+                    requestData: Data(),
+                    events: [],
+                    claimedEventCount: 0
+                )
+            }
+            guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+                throw TypingEventStoreError.pendingContentChanged
+            }
+            let handle = try FileHandle(forReadingFrom: eventsFileURL)
+            defer { try? handle.close() }
+            let rawData = try readBounded(
+                from: handle,
+                offset: 0,
+                byteCount: prefixByteCount
+            )
+            guard rawData.count == prefixByteCount else {
+                throw TypingEventStoreError.pendingContentChanged
+            }
+            let snapshot = decodeSnapshot(
+                rawData,
+                requestByteLimit: retentionPolicy.maximumDigestByteCount
+            )
+            guard snapshot.claimedEventCount == eventCount else {
+                throw TypingEventStoreError.pendingContentChanged
+            }
+            return snapshot
         }
     }
 
@@ -744,6 +807,9 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         let currentData = try Data(contentsOf: eventsFileURL)
         guard currentData.starts(with: rawData) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        if testProbe?.shouldFailPendingArchive() == true {
             throw TypingEventStoreError.pendingContentChanged
         }
         try beforeArchive()

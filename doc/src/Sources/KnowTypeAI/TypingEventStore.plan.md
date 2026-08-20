@@ -40,7 +40,9 @@
   archived locally and never included in provider request content. One oversized
   line is handled as a local archive unit so provider budgets are not bypassed.
 - Successful prefix archive uses exact raw-byte matching so events appended
-  during a digest remain pending.
+  during a digest remain pending. Claim recovery reads exactly the recorded
+  byte/event prefix rather than decoding the whole pending snapshot, and a
+  changed prefix returns `pendingContentChanged` for fail-closed recovery.
 
 ## Tests
 

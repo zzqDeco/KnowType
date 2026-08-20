@@ -41,6 +41,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private let minimumInterval: TimeInterval
     private let diagnosticSink: @Sendable ([InputDebugDiagnostics.Field]) -> Void
     private let requestGate: ProviderRequestGate
+    private let nowProvider: @Sendable () -> Date
     private var providerIdentity = "context-digest"
     private var lastDigestAt: Date?
     private var lastDigestFailureAt: Date?
@@ -56,7 +57,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         environmentStore: EnvironmentDocumentStore = EnvironmentDocumentStore(),
         batchSize: Int = 50,
         minimumInterval: TimeInterval = 600,
-        requestGate: ProviderRequestGate = .shared
+        requestGate: ProviderRequestGate = .shared,
+        nowProvider: @escaping @Sendable () -> Date = Date.init,
+        providerIdentity: String? = nil
     ) {
         self.provider = provider
         self.providerRegistry = nil
@@ -65,6 +68,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.batchSize = max(1, batchSize)
         self.minimumInterval = max(1, minimumInterval)
         self.requestGate = requestGate
+        self.nowProvider = nowProvider
+        self.providerIdentity = providerIdentity ?? provider?.providerName ?? "context-digest"
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
 
@@ -75,7 +80,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         batchSize: Int,
         minimumInterval: TimeInterval,
         diagnosticSink: @escaping @Sendable ([InputDebugDiagnostics.Field]) -> Void,
-        requestGate: ProviderRequestGate = .shared
+        requestGate: ProviderRequestGate = .shared,
+        nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.provider = provider
         self.providerRegistry = nil
@@ -84,6 +90,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.batchSize = max(1, batchSize)
         self.minimumInterval = max(1, minimumInterval)
         self.requestGate = requestGate
+        self.nowProvider = nowProvider
+        self.providerIdentity = provider?.providerName ?? "context-digest"
         self.diagnosticSink = diagnosticSink
     }
 
@@ -92,7 +100,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         eventStore: TypingEventStore = TypingEventStore(),
         environmentStore: EnvironmentDocumentStore = EnvironmentDocumentStore(),
         batchSize: Int = 50,
-        minimumInterval: TimeInterval = 600
+        minimumInterval: TimeInterval = 600,
+        nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.provider = nil
         self.providerRegistry = providerRegistry
@@ -101,6 +110,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.batchSize = max(1, batchSize)
         self.minimumInterval = max(1, minimumInterval)
         self.requestGate = providerRegistry.requestGate
+        self.nowProvider = nowProvider
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
 
@@ -120,7 +130,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 preservingClaimedPrefix: activeDigestClaimRawData
             )
             emitAppendDiagnostics(result)
-            await processIfNeeded(now: Date(), dispatchLease: lease)
+            await processIfNeeded(now: nowProvider(), dispatchLease: lease)
         } catch {
             return
         }
@@ -138,7 +148,12 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             digestInFlight = false
         }
 
-        if await recoverDigestClaim(now: now) { return }
+        switch await recoverDigestClaim(now: now) {
+        case .recovered, .blocked:
+            return
+        case .none:
+            break
+        }
 
         let inventory: TypingEventInventory
         do { inventory = try eventStore.inventory() } catch { return }
@@ -148,8 +163,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             do {
                 let snapshot = try eventStore.pendingFullSnapshot()
                 try eventStore.archivePendingEvents(matching: snapshot)
-                lastDigestAt = now
-                cancelDeadline()
+                recordDigestSuccess(at: now)
             } catch { return }
             return
         }
@@ -282,10 +296,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 result = try persist()
             }
             try environmentStore.clearDigestClaim()
-            lastDigestAt = now
-            lastDigestFailureAt = nil
-            deferredDiagnosticFailureAt = nil
-            cancelDeadline()
+            recordDigestSuccess(at: now)
             emitArchiveDiagnostic(result)
         } catch ProviderRequestBudgetError {
             scheduleDeadline(at: now.addingTimeInterval(minimumInterval))
@@ -318,27 +329,39 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
     }
 
-    private func recoverDigestClaim(now: Date) async -> Bool {
-        guard let loadedClaim = try? environmentStore.loadDigestClaim(), let claim = loadedClaim else { return false }
+    private enum DigestClaimRecovery {
+        case none
+        case recovered
+        case blocked
+    }
+
+    private func recoverDigestClaim(now: Date) async -> DigestClaimRecovery {
+        let claim: EnvironmentDigestClaim?
+        do {
+            claim = try environmentStore.loadDigestClaim()
+        } catch {
+            return .blocked
+        }
+        guard let claim else { return .none }
         do {
             let environment = try environmentStore.loadSnapshot()
             guard EnvironmentDocumentStore.generatedSectionHash(from: environment.content) == claim.generatedSHA256 else {
                 try environmentStore.clearDigestClaim()
-                return false
+                return .none
             }
-            let snapshot = try eventStore.pendingDigestSnapshot()
-            guard snapshot.rawData.count == claim.claimedPrefixByteCount,
-                  snapshot.claimedEventCount == claim.claimedEventCount,
-                  Self.sha256(snapshot.rawData) == claim.claimedPrefixSHA256 else {
-                return false
+            let snapshot = try eventStore.pendingDigestSnapshot(
+                prefixByteCount: claim.claimedPrefixByteCount,
+                eventCount: claim.claimedEventCount
+            )
+            guard Self.sha256(snapshot.rawData) == claim.claimedPrefixSHA256 else {
+                return .blocked
             }
             try eventStore.archivePendingEvents(matching: snapshot)
             try environmentStore.clearDigestClaim()
-            lastDigestAt = now
-            cancelDeadline()
-            return true
+            recordDigestSuccess(at: now)
+            return .recovered
         } catch {
-            return false
+            return .blocked
         }
     }
 
@@ -350,6 +373,23 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private func invalidateProviderRuntimeState() {
         providerGeneration = nil
         providerIdentity = "context-digest"
+    }
+
+    private func recordDigestSuccess(at now: Date) {
+        lastDigestAt = now
+        lastDigestFailureAt = nil
+        deferredDiagnosticFailureAt = nil
+        let hasPendingTail: Bool
+        do {
+            hasPendingTail = try eventStore.inventory().eventCount > 0
+        } catch {
+            hasPendingTail = true
+        }
+        if hasPendingTail {
+            scheduleDeadline(at: now.addingTimeInterval(minimumInterval))
+        } else {
+            cancelDeadline()
+        }
     }
 
     private func markDigestFailure(at now: Date) {
@@ -366,11 +406,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
     private func scheduleDeadline(at date: Date) {
         deadlineTask?.cancel()
-        let delay = max(0, date.timeIntervalSinceNow)
+        let delay = max(0, date.timeIntervalSince(nowProvider()))
         deadlineTask = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
             guard !Task.isCancelled, let self else { return }
-            await self.processIfNeeded(now: Date())
+            await self.processIfNeeded(now: self.nowProvider())
         }
     }
 

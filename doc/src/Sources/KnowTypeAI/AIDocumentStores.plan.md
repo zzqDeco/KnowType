@@ -12,7 +12,9 @@ Maintains bounded, canonical local AI context documents under `~/.knowtype`.
 - Canonical ENV contains one document title, one managed generated marker pair,
   and one User Notes section. Markerless input is user content; duplicate or
   recursively polluted known layouts are repaired after a 0600 hash-deduplicated
-  backup; unknown ambiguity fails closed.
+  backup; markerless User Notes headings are normalized away while text on both
+  sides is retained, and repeated loads are idempotent. Unknown ambiguity fails
+  closed.
 - Digest candidates are exactly one non-empty markdown value, at most 4 KiB and
   200 lines, and may not contain KnowType markers or document/User Notes titles.
   Invalid candidates do not write ENV or claim/archive events.

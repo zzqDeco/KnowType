@@ -36,6 +36,9 @@
 - Stale responses cannot write `ENV.md` or archive events. Shared gate cooldown
   and max-one-in-flight identity state apply equally to recommendation and
   digest.
+- Direct provider-injected runtimes derive their gate identity from
+  `provider.providerName` by default, matching direct recommendation runtimes;
+  registry-backed runtimes continue to use the generation fingerprint.
 - Final persistence holds both the provider-generation guard and the pending
   snapshot file claim. While transport is in flight, backlog compaction retains
   that exact claim plus the newest bounded tail. Events appended after the
@@ -59,7 +62,10 @@
   counts and durations only, never event or provider text.
 - A privacy-safe claim records only prefix hash, byte/event counts, generated
   section hash, and provider generation. ENV-success/archive-failure recovery
-  archives that exact prefix and leaves appended tail bytes pending.
+  reads and validates only the claimed byte/event prefix, archives that exact
+  prefix, and leaves appended tail bytes pending. A matching ENV with a changed
+  claim prefix fails closed without another provider request. Successful commits
+  rearm the one deadline task when a tail remains; an empty store cancels it.
 
 ## Tests
 

@@ -1319,6 +1319,36 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: oldArchive.path))
     }
 
+    func testArchiveFailureWithAppendedTailRecoversClaimPrefixWithoutProviderRetry() async throws {
+        let directory = makeTemporaryDirectory()
+        let probe = TypingEventStoreTestProbe()
+        probe.failNextPendingArchives(1)
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            testProbe: probe
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- recovered")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "claimed", committedText: "已 claim"))
+        let firstRequestCount = await provider.requests.count
+        XCTAssertEqual(firstRequestCount, 1)
+        try await eventStore.append(makeContextEvent(rawInput: "tail", committedText: "尾部"))
+
+        await runtime.processIfNeeded()
+
+        let recoveredRequestCount = await provider.requests.count
+        XCTAssertEqual(recoveredRequestCount, 1)
+        let pending = try await eventStore.pendingEvents()
+        XCTAssertEqual(pending.map(\.rawInput), ["tail"])
+    }
+
     func testTruncationDiagnosticContainsLengthsButNoOriginalText() async throws {
         let directory = makeTemporaryDirectory()
         let diagnostics = ContextMemoryDiagnosticProbe()
@@ -1359,6 +1389,142 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let requestCount = await provider.requests.count
         XCTAssertEqual(requestCount, 1)
         XCTAssertEqual(try eventStore.inventory().eventCount, 1)
+    }
+
+    func testSuccessfulDigestRearmsDeadlineForTailAndDrainsOnePrefixPerInterval() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let provider = DelayedDigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- interval",
+            delayNanoseconds: 100_000_000
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 1,
+            nowProvider: clock.now
+        )
+
+        let firstDigest = Task {
+            await runtime.record(makeContextEvent(rawInput: "first", committedText: "第一"))
+        }
+        var firstRequestSeen = false
+        let firstDeadline = Date().addingTimeInterval(2)
+        while !firstRequestSeen, Date() < firstDeadline {
+            firstRequestSeen = !(await provider.requests).isEmpty
+            if !firstRequestSeen { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        XCTAssertTrue(firstRequestSeen)
+        for index in 0..<60 {
+            try await eventStore.append(
+                makeContextEvent(rawInput: "tail-\(index)", committedText: "尾部\(index)")
+            )
+        }
+        await firstDigest.value
+
+        clock.advance(by: 2)
+        var secondRequestSeen = false
+        let secondDeadline = Date().addingTimeInterval(3)
+        while !secondRequestSeen, Date() < secondDeadline {
+            secondRequestSeen = (await provider.requests).count >= 2
+            if !secondRequestSeen { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        XCTAssertTrue(secondRequestSeen)
+
+        var tailAfterSecond = -1
+        let secondCompletionDeadline = Date().addingTimeInterval(3)
+        while Date() < secondCompletionDeadline {
+            let pending = try await eventStore.pendingEvents()
+            tailAfterSecond = pending.count
+            if tailAfterSecond == 10 { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(tailAfterSecond, 10)
+        XCTAssertEqual((await provider.requests).count, 2)
+
+        clock.advance(by: 2)
+        var thirdRequestSeen = false
+        let thirdDeadline = Date().addingTimeInterval(3)
+        while !thirdRequestSeen, Date() < thirdDeadline {
+            thirdRequestSeen = (await provider.requests).count >= 3
+            if !thirdRequestSeen { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        XCTAssertTrue(thirdRequestSeen)
+
+        var pendingAfterThird: [AITypingEvent] = []
+        let thirdCompletionDeadline = Date().addingTimeInterval(3)
+        while Date() < thirdCompletionDeadline {
+            pendingAfterThird = try await eventStore.pendingEvents()
+            if pendingAfterThird.isEmpty { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(pendingAfterThird.isEmpty)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual((await provider.requests).count, 3)
+    }
+
+    func testDirectContextAndRecommendationShareProviderIdentityGate() async throws {
+        let directory = makeTemporaryDirectory()
+        let provider = DelayedDigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- shared",
+            delayNanoseconds: 300_000_000
+        )
+        let gate = ProviderRequestGate()
+        let eventStore = TypingEventStore(eventsDirectoryURL: directory.appendingPathComponent("events"))
+        let environmentStore = EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md"))
+        let contextRuntime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: gate
+        )
+        let recommendationRuntime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: environmentStore,
+            correctionStore: CorrectionInstructionStore(fileURL: directory.appendingPathComponent("CORRECTION.md")),
+            debounceMilliseconds: 0,
+            requestGate: gate
+        )
+
+        let digestTask = Task {
+            await contextRuntime.record(makeContextEvent(rawInput: "digest", committedText: "摘要"))
+        }
+        var digestRequestSeen = false
+        let deadline = Date().addingTimeInterval(2)
+        while !digestRequestSeen, Date() < deadline {
+            digestRequestSeen = !(await provider.requests).isEmpty
+            if !digestRequestSeen { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        XCTAssertTrue(digestRequestSeen)
+
+        _ = await recommendationRuntime.recommendation(
+            for: AIRecommendationRequest(rawInput: "abc", compositionID: 1)
+        )
+        let requestCountWhileDigestInFlight = await provider.requests.count
+        XCTAssertEqual(requestCountWhileDigestInFlight, 1)
+        await digestTask.value
+    }
+}
+
+private final class ManualContextClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSince1970: 1_000_000)
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.lock()
+        current = current.addingTimeInterval(interval)
+        lock.unlock()
     }
 }
 

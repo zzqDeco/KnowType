@@ -196,23 +196,32 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         transportTask = nil
         let isCurrent = activeWork?.requestID == work.requestID && generation == work.generation
         if case .stale = result {
-            if activeWork?.requestID == work.requestID { activeWork = nil }
-            record(.staleResultDropped, requestID: work.requestID, context: work.context, elapsedMilliseconds: elapsedMilliseconds, reason: "provider_generation_changed")
-            dispatchTrailingIfNeeded()
+            finishStaleTransport(
+                work: work,
+                elapsedMilliseconds: elapsedMilliseconds,
+                reason: "provider_generation_changed",
+                publishIdle: true
+            )
             return
         }
         guard isCurrent, let snapshot = work.currentSnapshot() else {
-            if activeWork?.requestID == work.requestID { activeWork = nil }
-            record(.staleResultDropped, requestID: work.requestID, context: work.context, elapsedMilliseconds: elapsedMilliseconds, reason: activeWork == nil ? "coordinator_released" : "request_inactive")
-            dispatchTrailingIfNeeded()
+            finishStaleTransport(
+                work: work,
+                elapsedMilliseconds: elapsedMilliseconds,
+                reason: activeWork?.requestID == work.requestID ? "coordinator_released" : "request_inactive",
+                publishIdle: false
+            )
             return
         }
         guard snapshot.compositionID == work.context.compositionID,
               snapshot.rawRevision == work.context.rawRevision,
               snapshot.rawInput == work.context.rawInput else {
-            activeWork = nil
-            record(.staleResultDropped, requestID: work.requestID, context: work.context, elapsedMilliseconds: elapsedMilliseconds, reason: "snapshot_mismatch")
-            dispatchTrailingIfNeeded()
+            finishStaleTransport(
+                work: work,
+                elapsedMilliseconds: elapsedMilliseconds,
+                reason: "snapshot_mismatch",
+                publishIdle: false
+            )
             return
         }
         activeWork = nil
@@ -224,6 +233,34 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             work.onStateChange(result)
         }
         dispatchTrailingIfNeeded()
+    }
+
+    private func finishStaleTransport(
+        work: Work,
+        elapsedMilliseconds: Int,
+        reason: String,
+        publishIdle: Bool
+    ) {
+        let ownsActiveRequest = activeWork?.requestID == work.requestID
+        let hasTrailingWork = trailingWork != nil
+        if ownsActiveRequest {
+            activeWork = nil
+        }
+        record(
+            .staleResultDropped,
+            requestID: work.requestID,
+            context: work.context,
+            elapsedMilliseconds: elapsedMilliseconds,
+            reason: reason
+        )
+        if hasTrailingWork {
+            dispatchTrailingIfNeeded()
+        } else {
+            state = activeWork == nil ? .idle : state
+            if publishIdle, ownsActiveRequest, !work.context.isProviderAvailabilityProbe {
+                work.onStateChange(.idle)
+            }
+        }
     }
 
     private func dispatchTrailingIfNeeded() {

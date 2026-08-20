@@ -68,9 +68,12 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
   stale-dropped, or applied transport results report elapsed provider time.
 - Started transport remains a gate-owned provider operation; continued typing
   produces at most one trailing dispatch, and stale completion is dropped
-  without provider-failure accounting. `Reset` and `close` discard UI and
-  trailing state while the real transport remains tracked to completion or hard
-  timeout.
+  without provider-failure accounting. A provider-generation `.stale` result
+  clears its own pending UI slot to `.idle` only when it still owns the active
+  request, no trailing work is queued, and the request is not an availability
+  probe; a trailing request starts before any UI idle callback. `Reset` and
+  `close` discard UI and trailing state while the real transport remains tracked
+  to completion or hard timeout.
 
 ## Tests
 

@@ -305,9 +305,12 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
                 && $0.requestID == firstRequestID
                 && $0.reason == "new_schedule"
         })
-        XCTAssertFalse(diagnosticSink.events.contains {
-            $0.stage == .transportCancellationRequested && $0.requestID == firstRequestID
-        })
+        let firstTransportCompleted = await waitUntil {
+            diagnosticSink.events.contains {
+                $0.stage == .staleResultDropped && $0.requestID == firstRequestID
+            }
+        }
+        XCTAssertTrue(firstTransportCompleted, "\(diagnosticSink.events)")
         let trailingStarted = await waitUntilAsync {
             await provider.requests.count == 2
         }
@@ -349,6 +352,33 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         }
         XCTAssertTrue(staleDropped, "\(diagnosticSink.events)")
         XCTAssertEqual(states, [])
+    }
+
+    @MainActor
+    func testProviderGenerationStaleClearsOwnedPendingSlotToIdleWithoutTrailing() async {
+        let provider = RecordingRuntimeAIRecommendationProvider(response: .stale)
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        var states: [AIRecommendationState] = []
+
+        let pending = runtime.schedule(
+            context: context(rawInput: "abc"),
+            currentSnapshot: { snapshot(rawInput: "abc") },
+            onStateChange: { states.append($0) }
+        )
+
+        XCTAssertNotNil(pendingRequestID(pending))
+        let didPublishIdle = await waitUntil {
+            states == [.idle]
+        }
+        XCTAssertTrue(didPublishIdle, "\(diagnosticSink.events)")
+        XCTAssertEqual(states, [.idle])
     }
 
     @MainActor
