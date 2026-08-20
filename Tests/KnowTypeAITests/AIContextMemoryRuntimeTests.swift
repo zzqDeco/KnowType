@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import KnowTypeAI
@@ -1964,6 +1965,64 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             ),
             .indeterminate
         )
+
+        let validationForPendingAttributesError: (NSError) -> PendingClaimedPrefixValidation = { error in
+            TypingEventStore(
+                eventsDirectoryURL: eventsDirectory,
+                fileManager: PendingAttributesErrorFileManager(
+                    pendingURL: pendingURL,
+                    error: error
+                ),
+                retentionPolicy: .default
+            ).pendingClaimedPrefixValidation(
+                prefixSHA256: prefixSHA256,
+                byteCount: snapshot.rawData.count,
+                eventCount: snapshot.claimedEventCount
+            )
+        }
+        let nestedMissingError = NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileReadUnknownError,
+            userInfo: [
+                NSUnderlyingErrorKey: NSError(
+                    domain: NSPOSIXErrorDomain,
+                    code: Int(ENOENT)
+                )
+            ]
+        )
+        XCTAssertEqual(
+            validationForPendingAttributesError(nestedMissingError),
+            .missing
+        )
+
+        let nestedNonMissingErrors = [
+            NSError(
+                domain: NSCocoaErrorDomain,
+                code: NSFileReadNoPermissionError,
+                userInfo: [
+                    NSUnderlyingErrorKey: NSError(
+                        domain: NSPOSIXErrorDomain,
+                        code: Int(EACCES)
+                    )
+                ]
+            ),
+            NSError(
+                domain: NSCocoaErrorDomain,
+                code: NSFileReadUnknownError,
+                userInfo: [
+                    NSUnderlyingErrorKey: NSError(
+                        domain: "com.knowtype.tests.unknown-io",
+                        code: 1
+                    )
+                ]
+            )
+        ]
+        for error in nestedNonMissingErrors {
+            XCTAssertEqual(
+                validationForPendingAttributesError(error),
+                .indeterminate
+            )
+        }
     }
 
     func testProcessedArchiveRecoveryRetainsClaimWhenPendingPrefixReadFails() async throws {
@@ -3095,6 +3154,22 @@ private final class ContextMemoryDiagnosticProbe: @unchecked Sendable {
 
     func stageCount(_ stage: String) -> Int {
         lines.filter { $0.contains("stage=\(stage)") }.count
+    }
+}
+
+private final class PendingAttributesErrorFileManager: FileManager, @unchecked Sendable {
+    private let pendingPath: String
+    private let error: NSError
+
+    init(pendingURL: URL, error: NSError) {
+        self.pendingPath = pendingURL.path
+        self.error = error
+        super.init()
+    }
+
+    override func attributesOfItem(atPath path: String) throws -> [FileAttributeKey: Any] {
+        if path == pendingPath { throw error }
+        return try super.attributesOfItem(atPath: path)
     }
 }
 

@@ -1088,12 +1088,21 @@ public final class TypingEventStore: @unchecked Sendable {
     }
 
     private static func isExplicitMissingFileError(_ error: Error) -> Bool {
-        let error = error as NSError
-        if error.domain == NSCocoaErrorDomain {
-            return error.code == NSFileNoSuchFileError ||
-                error.code == NSFileReadNoSuchFileError
+        var current: NSError? = error as NSError
+        var visited: Set<ObjectIdentifier> = []
+        while let error = current {
+            guard visited.insert(ObjectIdentifier(error)).inserted else { return false }
+            if error.domain == NSCocoaErrorDomain {
+                if error.code == NSFileNoSuchFileError ||
+                    error.code == NSFileReadNoSuchFileError {
+                    return true
+                }
+            } else if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
+                return true
+            }
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
         }
-        return error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT)
+        return false
     }
 
     private func pruneProcessedArchivesSynchronously() throws -> TypingEventArchiveResult {
