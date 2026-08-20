@@ -69,9 +69,7 @@ private final class CountingModelDiscovery: ProviderModelDiscovering, @unchecked
     private var calls = 0
 
     func resolvedModel(for configuration: ProviderConfiguration) async throws -> String {
-        lock.lock()
-        calls += 1
-        lock.unlock()
+        lock.withLock { calls += 1 }
         return "model"
     }
 
