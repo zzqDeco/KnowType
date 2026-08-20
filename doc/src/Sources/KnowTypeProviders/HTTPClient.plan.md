@@ -17,10 +17,12 @@ tests.
 - Production request construction, headers, timeouts, response decoding, and
   encoded-body budget checks stay in the provider layer.
 - A 429 response becomes `ProviderRateLimitError` with only status, bounded
-  `Retry-After`, and body byte count. Retry hints are clamped to 15 seconds to
-  15 minutes; the shared AI gate applies 60-second exponential fallback when
-  absent, capped at 15 minutes. This provider-failure cooldown is distinct
-  from Context Digest's 600-second successful-commit interval.
+  `Retry-After`, and body byte count. Finite, non-negative delay-seconds and
+  IMF-fixdate, RFC 850 obsolete-date, or ANSI C asctime-date values normalize
+  to 15 seconds through 15 minutes; missing or invalid headers remain `nil` so
+  the shared AI gate uses its 60-second exponential fallback, capped at 15
+  minutes. This provider-failure cooldown is distinct from Context Digest's
+  600-second successful-commit interval.
 - Adapters validate the logical request before transport and the serialized HTTP
   body after encoding. OpenAI Chat and Responses run aggregate logical-payload
   preflight before model discovery, so local over-limit requests perform neither

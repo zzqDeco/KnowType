@@ -25,14 +25,22 @@ public struct ProviderRequestBudgetError: Error, Codable, Sendable, Equatable {
 }
 
 public struct ProviderRateLimitError: Error, Sendable, Equatable {
+    static let minimumRetryAfterSeconds: TimeInterval = 15
+    static let maximumRetryAfterSeconds: TimeInterval = 15 * 60
+
     public var statusCode: Int
-    public var retryAfterSeconds: TimeInterval?
+    public private(set) var retryAfterSeconds: TimeInterval?
     public var bodyByteCount: Int
 
     public init(statusCode: Int = 429, retryAfterSeconds: TimeInterval?, bodyByteCount: Int) {
         self.statusCode = statusCode
-        self.retryAfterSeconds = retryAfterSeconds
+        self.retryAfterSeconds = Self.normalizedRetryAfterSeconds(retryAfterSeconds)
         self.bodyByteCount = bodyByteCount
+    }
+
+    static func normalizedRetryAfterSeconds(_ value: TimeInterval?) -> TimeInterval? {
+        guard let value, value.isFinite, value >= 0 else { return nil }
+        return min(max(value, minimumRetryAfterSeconds), maximumRetryAfterSeconds)
     }
 }
 

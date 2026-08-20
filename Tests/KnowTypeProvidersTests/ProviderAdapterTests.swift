@@ -6,11 +6,13 @@ import KnowTypeCore
 private actor MockHTTPClient: HTTPClient {
     private let dataValue: Data
     private let statusCode: Int
+    private let headers: [String: String]
     private var captured: URLRequest?
 
-    init(json: String, statusCode: Int = 200) {
+    init(json: String, statusCode: Int = 200, headers: [String: String] = [:]) {
         self.dataValue = Data(json.utf8)
         self.statusCode = statusCode
+        self.headers = headers
     }
 
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -19,7 +21,7 @@ private actor MockHTTPClient: HTTPClient {
             url: request.url ?? URL(string: "https://example.com")!,
             statusCode: statusCode,
             httpVersion: nil,
-            headerFields: nil
+            headerFields: headers
         )!
         return (dataValue, response)
     }
@@ -98,6 +100,129 @@ final class ProviderAdapterTests: XCTestCase {
         maxCandidates: 3,
         lengthLevel: .medium
     )
+
+    func testProviderRateLimitErrorKeepsRetryAfterWithinItsPublicContract() {
+        for value in [Double.nan, Double.infinity, -Double.infinity, -1] {
+            let error = ProviderRateLimitError(retryAfterSeconds: value, bodyByteCount: 0)
+            XCTAssertNil(error.retryAfterSeconds)
+        }
+
+        XCTAssertNil(ProviderRateLimitError(retryAfterSeconds: nil, bodyByteCount: 0).retryAfterSeconds)
+        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 0, bodyByteCount: 0).retryAfterSeconds, 15)
+        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 14, bodyByteCount: 0).retryAfterSeconds, 15)
+        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 15, bodyByteCount: 0).retryAfterSeconds, 15)
+        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 900, bodyByteCount: 0).retryAfterSeconds, 900)
+        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 901, bodyByteCount: 0).retryAfterSeconds, 900)
+    }
+
+    func testRetryAfterDelaySecondsAcceptsFiniteNonNegativeValuesAndNormalizesBounds() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        XCTAssertEqual(retryAfterSeconds(from: "42", now: now), 42)
+        XCTAssertEqual(retryAfterSeconds(from: "0", now: now), 15)
+        XCTAssertEqual(retryAfterSeconds(from: "14.999", now: now), 15)
+        XCTAssertEqual(retryAfterSeconds(from: "15", now: now), 15)
+        XCTAssertEqual(retryAfterSeconds(from: "900", now: now), 900)
+        XCTAssertEqual(retryAfterSeconds(from: "900.001", now: now), 900)
+
+        for value in [
+            "-1",
+            String(Double.nan),
+            String(Double.infinity),
+            String(-Double.infinity),
+            "not-a-delay"
+        ] {
+            XCTAssertNil(retryAfterSeconds(from: value, now: now), "Expected invalid Retry-After value to be ignored: \(value)")
+        }
+    }
+
+    func testRetryAfterAcceptsAllHTTPDateFormatsWithFixedNow() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let values = [
+            "Tue, 14 Nov 2023 22:14:20 GMT",
+            "Tuesday, 14-Nov-23 22:14:20 GMT",
+            "Tue Nov 14 22:14:20 2023"
+        ]
+
+        for value in values {
+            XCTAssertEqual(retryAfterSeconds(from: value, now: now), 60, "Failed to parse HTTP-date: \(value)")
+        }
+    }
+
+    func testRetryAfterHTTPDatesNormalizePastNearAndFarValuesToBounds() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let cases = [
+            ("Tue, 14 Nov 2023 22:13:19 GMT", 15.0),
+            ("Tue, 14 Nov 2023 22:13:34 GMT", 15.0),
+            ("Tue, 14 Nov 2023 22:13:35 GMT", 15.0),
+            ("Tue, 14 Nov 2023 22:28:20 GMT", 900.0),
+            ("Tue, 14 Nov 2023 22:28:21 GMT", 900.0)
+        ]
+
+        for (value, expected) in cases {
+            XCTAssertEqual(retryAfterSeconds(from: value, now: now), expected, "Unexpected normalized delay for \(value)")
+        }
+    }
+
+    func test429PropagatesBoundedRetryAfterThroughProviderError() async throws {
+        let body = #"{"error":"rate limited"}"#
+        let client = MockHTTPClient(
+            json: body,
+            statusCode: 429,
+            headers: ["Retry-After": "42"]
+        )
+        let provider = OpenAIChatProvider(
+            configuration: ProviderConfiguration(
+                kind: .openAIChat,
+                baseURL: URL(string: "https://api.example.com")!,
+                model: "model"
+            ),
+            httpClient: client
+        )
+
+        do {
+            _ = try await provider.complete(llmRequest)
+            XCTFail("Expected a 429 response to throw ProviderRateLimitError")
+        } catch let error as ProviderRateLimitError {
+            XCTAssertEqual(error.statusCode, 429)
+            XCTAssertEqual(error.retryAfterSeconds, 42)
+            XCTAssertTrue(error.retryAfterSeconds?.isFinite == true)
+            XCTAssertEqual(error.bodyByteCount, Data(body.utf8).count)
+        } catch {
+            XCTFail("Expected ProviderRateLimitError, got \(error)")
+        }
+    }
+
+    func test429MissingOrInvalidRetryAfterKeepsNilForGateFallback() async throws {
+        let body = #"{"error":"rate limited"}"#
+        let headerCases: [[String: String]] = [
+            [:],
+            ["Retry-After": "-1"],
+            ["Retry-After": "NaN"],
+            ["Retry-After": "not-a-delay"]
+        ]
+
+        for headers in headerCases {
+            let client = MockHTTPClient(json: body, statusCode: 429, headers: headers)
+            let provider = OpenAIChatProvider(
+                configuration: ProviderConfiguration(
+                    kind: .openAIChat,
+                    baseURL: URL(string: "https://api.example.com")!,
+                    model: "model"
+                ),
+                httpClient: client
+            )
+
+            do {
+                _ = try await provider.complete(llmRequest)
+                XCTFail("Expected a 429 response to throw ProviderRateLimitError")
+            } catch let error as ProviderRateLimitError {
+                XCTAssertNil(error.retryAfterSeconds, "Expected no cooldown hint for headers: \(headers)")
+            } catch {
+                XCTFail("Expected ProviderRateLimitError, got \(error)")
+            }
+        }
+    }
 
     func testPromptBuilderUsesContinuationSpecificSuffixPrompt() {
         let continuation = PromptBuilder.systemPrompt(for: .continuation)
