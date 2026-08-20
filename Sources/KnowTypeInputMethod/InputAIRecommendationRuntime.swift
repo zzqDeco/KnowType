@@ -178,6 +178,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         }
     }
 
+    @MainActor
     private func beginTransport(work: Work, provider: any AIRecommendationProviding) {
         state = .inFlight
         diagnosticSink.record(AIRecommendationDiagnosticEvent(stage: .transportStarted, requestID: work.requestID, compositionID: work.context.compositionID, rawLength: work.context.rawInput.count, rawRevision: work.context.rawRevision, prefixLength: work.context.lockedPrefix?.count, appBundleID: work.context.appBundleID, elapsedMilliseconds: elapsedMilliseconds(since: work.scheduledAt)))
@@ -192,6 +193,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         }
     }
 
+    @MainActor
     private func finishTransport(work: Work, state result: AIRecommendationState, elapsedMilliseconds: Int) {
         transportTask = nil
         let isCurrent = activeWork?.requestID == work.requestID && generation == work.generation
@@ -235,6 +237,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         dispatchTrailingIfNeeded()
     }
 
+    @MainActor
     private func finishStaleTransport(
         work: Work,
         elapsedMilliseconds: Int,
@@ -264,6 +267,7 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         }
     }
 
+    @MainActor
     private func dispatchTrailingIfNeeded() {
         guard transportTask == nil, let next = trailingWork, let provider else {
             state = activeWork == nil ? .idle : state
@@ -318,7 +322,6 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
 
     private func markTransportStale(context: InputAIRecommendationRuntimeContext, requestID: UUID, reason: String) {
         record(.transportLeftStale, requestID: requestID, context: context, reason: reason)
-        activeWork = activeWork
     }
 
     private func record(
