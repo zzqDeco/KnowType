@@ -731,7 +731,7 @@ public actor ProviderRequestGate {
                 destinationExists = false
             }
             if destinationExists {
-                _ = try fileManager.replaceItem(at: persistenceURL, withItemAt: temporaryURL)
+                _ = try fileManager.replaceItemAt(persistenceURL, withItemAt: temporaryURL)
             } else {
                 try fileManager.moveItem(at: temporaryURL, to: persistenceURL)
             }

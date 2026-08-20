@@ -394,7 +394,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 fields: [
                     .init(.eventCount, inventory.eventCount),
                     .init(.byteCount, inventory.byteCount),
-                    .init(.deadline, Int(ceil(deferredDeadline.timeIntervalSince(now))))
+                    .init(.cooldownRemainingSeconds, Int(ceil(deferredDeadline.timeIntervalSince(now))))
                 ]
             )
             return
@@ -403,7 +403,12 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         let lease: ProviderRuntimeLease?
         let activeProvider: (any LLMProvider)?
         if let providerRegistry {
-            let loaded = dispatchLease ?? await providerRegistry.leaseForEligibleDispatch()
+            let loaded: ProviderRuntimeLease
+            if let dispatchLease {
+                loaded = dispatchLease
+            } else {
+                loaded = await providerRegistry.leaseForEligibleDispatch()
+            }
             guard let provider = loaded.provider else { return }
             applyProviderLease(loaded)
             lease = loaded
@@ -515,15 +520,15 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 providerGeneration: requestGeneration
             )
             let persistAfterClaim: @Sendable () throws -> TypingEventArchiveResult = {
-                _ = try environmentStore.replaceGeneratedSection(with: generated)
-                let result = try eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
-                guard eventStore.hasProcessedArchive(
+                _ = try self.environmentStore.replaceGeneratedSection(with: generated)
+                let result = try self.eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
+                guard self.eventStore.hasProcessedArchive(
                     prefixSHA256: Self.sha256(snapshot.rawData),
                     byteCount: snapshot.rawData.count
                 ) else {
                     throw TypingEventStoreError.pendingContentChanged
                 }
-                try environmentStore.saveDigestArchiveReceipt(
+                try self.environmentStore.saveDigestArchiveReceipt(
                     EnvironmentDigestArchiveReceipt(
                         claimedPrefixSHA256: Self.sha256(snapshot.rawData),
                         claimedPrefixByteCount: snapshot.rawData.count,
@@ -532,12 +537,12 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                         archivedByteCount: snapshot.rawData.count
                     )
                 )
-                let tailCount = try eventStore.inventory().eventCount
-                try environmentStore.saveDigestScheduleState(
+                let tailCount = try self.eventStore.inventory().eventCount
+                try self.environmentStore.saveDigestScheduleState(
                     EnvironmentDigestScheduleState(
                         pendingSince: nil,
                         lastSuccessfulDigestAt: now,
-                        nextEligibleAt: tailCount > 0 ? now.addingTimeInterval(minimumInterval) : nil,
+                        nextEligibleAt: tailCount > 0 ? now.addingTimeInterval(self.minimumInterval) : nil,
                         pendingEventCount: tailCount
                     )
                 )
@@ -560,7 +565,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             try? environmentStore.clearDigestArchiveReceipt()
             recordDigestSuccess(at: now)
             emitArchiveDiagnostic(result)
-        } catch ProviderRequestBudgetError {
+        } catch is ProviderRequestBudgetError {
             scheduleDeadline(at: now.addingTimeInterval(minimumInterval))
         } catch ProviderRuntimeRegistryError.staleGeneration {
             invalidateProviderRuntimeState()
