@@ -89,8 +89,11 @@ stale-generation, and persistence-blocked states without admitting a transport.
 Recommendation and Context Digest latch persistence-blocked before reading their
 context documents or decoding a digest snapshot. Cancellation after admission
 but before transport registration aborts only the matching attempt, wakes
-waiters, and records no failure; started transport retains ownership through
-its fenced completion.
+waiters, and records no failure. A timeout that wins before `beginTransport`
+atomically records cooldown, releases only that attempt, runs its completion,
+and prevents the late operation task from invoking the provider. A timeout
+after transport starts records once while retaining ownership through its
+fenced real completion.
 
 ## Input Client Compatibility
 

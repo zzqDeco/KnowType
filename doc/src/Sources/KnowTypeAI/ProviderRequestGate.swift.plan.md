@@ -9,12 +9,18 @@
 ## Boundaries
 
 - It never persists provider identity, configuration, credentials, input, or
-  output, and it does not release a lease at caller-visible timeout.
+  output, and it does not release a started-transport lease at caller-visible
+  timeout.
 
 ## Behavior Notes
 
 - Every admitted dispatch receives a non-reusable attempt id. Timeout failure is
   atomically recorded for that id before timeout is visible to the caller.
+- `beginTransport` succeeds only from the admitted phase. If timeout ownership
+  wins first, the gate records cooldown, releases that matching attempt, wakes
+  waiters, and runs attempt completion without starting the provider. If
+  transport already started, timeout records once while the lease remains until
+  the real operation completes.
 - Caller cancellation after admission but before transport registration aborts
   only that attempt, wakes availability waiters, and creates no failure or
   cooldown. Once transport starts, its attempt remains owned until the real
@@ -35,6 +41,6 @@
 ## Tests
 
 - `ProviderRuntimeRegistryTests` covers admission-to-transport cancellation,
-  timeout/completion interleaving, single-failure ownership, generation
-  invalidation, fail-closed persistence, value-only preflight, and waiter
-  release.
+  pre-transport timeout rejection, timeout/completion interleaving,
+  single-failure ownership, generation invalidation, fail-closed persistence,
+  value-only preflight, and waiter release.

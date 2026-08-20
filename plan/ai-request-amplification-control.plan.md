@@ -36,7 +36,10 @@ of already-started recommendations, and independent provider failure budgets.
   document projection or digest snapshot decoding; each runtime then latches it
   without repeated admission work. Cancellation between attempt admission and
   transport registration aborts the matching attempt without cooldown and
-  wakes waiters; once transport starts, only its fenced completion releases it.
+  wakes waiters. Timeout ownership before transport atomically records cooldown,
+  releases the matching attempt, completes its callback, and fences the late
+  operation task before provider invocation. Once transport starts, timeout
+  records once and only the real fenced completion releases its lease.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is

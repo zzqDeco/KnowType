@@ -37,6 +37,7 @@ final class ProviderRequestGateTestProbe: @unchecked Sendable {
     private var failedWritesRemaining = 0
     private var admittedAttempts = 0
     private var preflightChecks = 0
+    private var rejectedTransportStarts = 0
 
     var admittedAttemptCount: Int {
         lock.lock()
@@ -48,6 +49,12 @@ final class ProviderRequestGateTestProbe: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return preflightChecks
+    }
+
+    var rejectedTransportStartCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return rejectedTransportStarts
     }
 
     func failNextPermissionChanges(_ count: Int) {
@@ -80,6 +87,12 @@ final class ProviderRequestGateTestProbe: @unchecked Sendable {
         lock.unlock()
     }
 
+    fileprivate func recordRejectedTransportStart() {
+        lock.lock()
+        rejectedTransportStarts += 1
+        lock.unlock()
+    }
+
     fileprivate func shouldFailPermissionChange() -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -105,11 +118,17 @@ final class ProviderRequestGateTestProbe: @unchecked Sendable {
     }
 }
 
+private enum ProviderRequestTimeoutOwnership: Sendable {
+    case beforeTransport
+    case transportStarted
+}
+
 private final class ProviderRequestAttemptFence: @unchecked Sendable {
     private enum Phase: Equatable {
         case admitted
         case transportStarted
-        case timeoutOwned
+        case timeoutOwnedBeforeTransport
+        case timeoutOwnedTransport
         case aborted
     }
 
@@ -120,24 +139,32 @@ private final class ProviderRequestAttemptFence: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         switch phase {
-        case .admitted, .timeoutOwned:
+        case .admitted:
             phase = .transportStarted
             return true
-        case .transportStarted, .aborted:
+        case .transportStarted, .timeoutOwnedBeforeTransport,
+             .timeoutOwnedTransport, .aborted:
             return false
         }
     }
 
     func claimTimeoutOwnership(
         _ claimingTimeout: @Sendable () -> Bool
-    ) -> Bool {
+    ) -> ProviderRequestTimeoutOwnership? {
         lock.lock()
         defer { lock.unlock() }
-        guard phase != .aborted, claimingTimeout() else { return false }
-        if phase == .admitted {
-            phase = .timeoutOwned
+        switch phase {
+        case .admitted:
+            guard claimingTimeout() else { return nil }
+            phase = .timeoutOwnedBeforeTransport
+            return .beforeTransport
+        case .transportStarted:
+            guard claimingTimeout() else { return nil }
+            phase = .timeoutOwnedTransport
+            return .transportStarted
+        case .timeoutOwnedBeforeTransport, .timeoutOwnedTransport, .aborted:
+            return nil
         }
-        return true
     }
 
     func claimAbortBeforeTransport() -> Bool {
@@ -415,21 +442,30 @@ public actor ProviderRequestGate {
             throw error
         }
         let fence = ProviderRequestAttemptFence()
+        let afterAttemptAdmission = self.afterAttemptAdmission
+        let testProbe = self.testProbe
         return try await withTaskCancellationHandler {
             do {
-                await afterAttemptAdmission?()
                 try Task.checkCancellation()
                 return try await withTimeout(
                     nanoseconds: timeoutNanoseconds,
                     onTimeout: { claimTimeout in
-                        try await self.recordTimeout(
+                        guard let ownership = try await self.recordTimeout(
                             for: attempt,
                             fence: fence,
                             claimingTimeout: claimTimeout
-                        )
+                        ) else { return false }
+                        if case .beforeTransport = ownership {
+                            await completion.run()
+                        }
+                        return true
                     }
                 ) {
-                    guard fence.beginTransport() else { throw CancellationError() }
+                    await afterAttemptAdmission?()
+                    guard fence.beginTransport() else {
+                        testProbe?.recordRejectedTransportStart()
+                        throw CancellationError()
+                    }
                     do {
                         let value = try await self.perform(attempt: attempt, operation: operation)
                         await completion.run()
@@ -532,14 +568,14 @@ public actor ProviderRequestGate {
         for attempt: Attempt,
         fence: ProviderRequestAttemptFence,
         claimingTimeout: @Sendable () -> Bool
-    ) throws -> Bool {
+    ) throws -> ProviderRequestTimeoutOwnership? {
         var state = states[attempt.identityHash, default: State()]
         guard state.generation == attempt.generation else {
             throw ProviderRequestGateError.staleGeneration
         }
-        guard state.activeAttemptID == attempt.id else { return false }
+        guard state.activeAttemptID == attempt.id else { return nil }
         guard state.timedOutAttemptID != attempt.id,
-              fence.claimTimeoutOwnership(claimingTimeout) else { return false }
+              let ownership = fence.claimTimeoutOwnership(claimingTimeout) else { return nil }
 
         state.failureCount = min(16, state.failureCount + 1)
         state.failureClass = .timeout
@@ -550,10 +586,19 @@ public actor ProviderRequestGate {
                 retryAfter: nil
             )
         )
-        state.timedOutAttemptID = attempt.id
+        switch ownership {
+        case .beforeTransport:
+            state.activeAttemptID = nil
+            state.timedOutAttemptID = nil
+        case .transportStarted:
+            state.timedOutAttemptID = attempt.id
+        }
         states[attempt.identityHash] = state
         persist(state, for: attempt.identityHash)
-        return true
+        if case .beforeTransport = ownership {
+            resumeAvailabilityWaiters(for: attempt.identityHash)
+        }
+        return ownership
     }
 
     private func finishSuccess<T: Sendable>(_ value: T, attempt: Attempt) throws -> T {

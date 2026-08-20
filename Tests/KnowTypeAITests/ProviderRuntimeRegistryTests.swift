@@ -824,6 +824,99 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         }
     }
 
+    func testHardTimeoutBeforeTransportPreventsLateProviderStart() async throws {
+        let identity = "timeout-before-transport"
+        let clock = ProviderGateClock()
+        let testProbe = ProviderRequestGateTestProbe()
+        let admissionPause = GateAttemptAdmissionPause()
+        let operationProbe = RequestGateProbe()
+        let completionProbe = GateAttemptCompletionProbe()
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            testProbe: testProbe,
+            afterAttemptAdmission: {
+                await admissionPause.suspendIfNeeded()
+            }
+        )
+        let request = Task<Int, Error> {
+            try await gate.executeWithHardTimeout(
+                providerIdentity: identity,
+                generation: 0,
+                timeoutNanoseconds: 20_000_000,
+                onAttemptCompletion: {
+                    await completionProbe.recordCompletion()
+                }
+            ) {
+                await operationProbe.markStarted()
+                return 1
+            }
+        }
+
+        do {
+            try await waitUntil { await admissionPause.hasEntered }
+        } catch {
+            request.cancel()
+            await admissionPause.release()
+            _ = try? await request.value
+            throw error
+        }
+        let entered = await admissionPause.hasEntered
+        guard entered else {
+            request.cancel()
+            await admissionPause.release()
+            _ = try? await request.value
+            return
+        }
+
+        var observedTimeout = false
+        do {
+            _ = try await request.value
+            XCTFail("expected timeout before transport start")
+        } catch is TimeoutError {
+            observedTimeout = true
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        XCTAssertTrue(observedTimeout)
+
+        let startCountBeforeRelease = await operationProbe.startCount
+        let completionCountAtTimeout = await completionProbe.completionCount
+        XCTAssertEqual(startCountBeforeRelease, 0)
+        XCTAssertEqual(completionCountAtTimeout, 1)
+
+        let preflight = await gate.preflight(providerIdentity: identity, generation: 0)
+        switch preflight {
+        case .cooldown(let deadline, let failureClass):
+            XCTAssertEqual(failureClass, .timeout)
+            XCTAssertEqual(deadline.timeIntervalSince(clock.now()), 60, accuracy: 0.001)
+        default:
+            XCTFail("pre-transport timeout must release busy ownership into cooldown")
+        }
+
+        await admissionPause.release()
+        try await waitUntil { testProbe.rejectedTransportStartCount == 1 }
+        let rejectedStarts = testProbe.rejectedTransportStartCount
+        let providerStartsAfterRelease = await operationProbe.startCount
+        let finalCompletionCount = await completionProbe.completionCount
+        XCTAssertEqual(rejectedStarts, 1)
+        XCTAssertEqual(providerStartsAfterRelease, 0)
+        XCTAssertEqual(finalCompletionCount, 1)
+
+        clock.advance(by: 61)
+        let replacementProbe = RequestGateProbe()
+        let replacement = try await gate.execute(
+            providerIdentity: identity,
+            generation: 0
+        ) {
+            await replacementProbe.markStarted()
+            return 2
+        }
+        let replacementStartCount = await replacementProbe.startCount
+        XCTAssertEqual(replacement, 2)
+        XCTAssertEqual(replacementStartCount, 1)
+        XCTAssertEqual(testProbe.admittedAttemptCount, 2)
+    }
+
     func testHardTimeoutAttemptCallerCancellationBeforeDeadlineDoesNotRecordFailure() async throws {
         let gate = ProviderRequestGate()
         let operation = SuspendedFailingGateOperation()
@@ -1118,6 +1211,35 @@ private actor GateAttemptAdmissionPause {
         released = true
         continuation?.resume()
         continuation = nil
+    }
+}
+
+private actor GateAttemptCompletionProbe {
+    private var completions = 0
+
+    func recordCompletion() {
+        completions += 1
+    }
+
+    var completionCount: Int {
+        completions
+    }
+}
+
+private final class ProviderGateClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSince1970: 1_000_000)
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.lock()
+        current = current.addingTimeInterval(interval)
+        lock.unlock()
     }
 }
 
