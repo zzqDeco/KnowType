@@ -16,13 +16,19 @@ tests.
 - Mock clients keep adapter tests deterministic and offline.
 - Production request construction, headers, timeouts, response decoding, and
   encoded-body budget checks stay in the provider layer.
-- A 429 response becomes `ProviderRateLimitError` with only status, bounded
-  `Retry-After`, and body byte count. Finite, non-negative delay-seconds and
-  IMF-fixdate, RFC 850 obsolete-date, or ANSI C asctime-date values normalize
-  to 15 seconds through 15 minutes; missing or invalid headers remain `nil` so
-  the shared AI gate uses its 60-second exponential fallback, capped at 15
-  minutes. This provider-failure cooldown is distinct from Context Digest's
-  600-second successful-commit interval.
+- On a 429 response, the HTTP validation boundary parses finite, non-negative
+  delay-seconds plus IMF-fixdate, RFC 850 obsolete-date, and ANSI C asctime-date.
+  RFC 850 two-digit years use the injected current time: dates within 50 years
+  in the future keep that century, while later dates resolve to the most recent
+  past year with the same suffix. The boundary emits either `nil` or a finite
+  `Retry-After` hint from 15 seconds through 15 minutes; missing and invalid
+  headers remain `nil` for the shared AI gate's fallback.
+- `ProviderRateLimitError` remains a source-compatible carrier: its public
+  `retryAfterSeconds` property is writable and its initializer preserves the
+  supplied value verbatim. Manually constructed errors can therefore carry
+  arbitrary hints; the shared AI gate's defensive handling remains separate
+  and unchanged. This cooldown is distinct from Context Digest's 600-second
+  successful-commit interval.
 - Adapters validate the logical request before transport and the serialized HTTP
   body after encoding. OpenAI Chat and Responses run aggregate logical-payload
   preflight before model discovery, so local over-limit requests perform neither

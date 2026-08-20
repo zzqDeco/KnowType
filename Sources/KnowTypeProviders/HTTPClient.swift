@@ -48,33 +48,80 @@ func jsonData(_ object: Any, task: LLMTask? = nil) throws -> Data {
 func retryAfterSeconds(from value: String?, now: Date = Date()) -> TimeInterval? {
     guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
     if let seconds = TimeInterval(value) {
-        return ProviderRateLimitError.normalizedRetryAfterSeconds(seconds)
+        return normalizedRetryAfterHeaderSeconds(seconds)
     }
-    guard let date = HTTPDateFormatter.date(from: value) else { return nil }
+    guard let date = HTTPDateFormatter.date(from: value, now: now) else { return nil }
     let delay = date.timeIntervalSince(now)
     guard delay.isFinite else { return nil }
-    return ProviderRateLimitError.normalizedRetryAfterSeconds(max(0, delay))
+    return normalizedRetryAfterHeaderSeconds(max(0, delay))
+}
+
+private func normalizedRetryAfterHeaderSeconds(_ value: TimeInterval?) -> TimeInterval? {
+    guard let value, value.isFinite, value >= 0 else { return nil }
+    return min(max(value, 15), 15 * 60)
 }
 
 private enum HTTPDateFormatter {
-    private static let formats = [
-        "EEE, dd MMM yyyy HH:mm:ss z",
-        "EEEE, dd-MMM-yy HH:mm:ss z",
-        "EEE MMM d HH:mm:ss yyyy"
+    private static let rfc850Weekdays = [
+        "Monday,", "Tuesday,", "Wednesday,", "Thursday,", "Friday,", "Saturday,", "Sunday,"
     ]
 
-    static func date(from value: String) -> Date? {
-        for format in formats {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.calendar = Calendar(identifier: .gregorian)
-            formatter.timeZone = TimeZone(secondsFromGMT: 0)
-            formatter.dateFormat = format
-            formatter.isLenient = false
-            if let date = formatter.date(from: value) {
-                return date
-            }
+    static func date(from value: String, now: Date) -> Date? {
+        if let date = parse(value, format: "EEE, dd MMM yyyy HH:mm:ss z") {
+            return date
         }
-        return nil
+        if let date = rfc850Date(from: value, now: now) {
+            return date
+        }
+        return parse(value, format: "EEE MMM d HH:mm:ss yyyy")
+    }
+
+    private static func rfc850Date(from value: String, now: Date) -> Date? {
+        let fields = value.split(separator: " ", omittingEmptySubsequences: false)
+        guard fields.count == 4,
+              rfc850Weekdays.contains(String(fields[0])) else {
+            return nil
+        }
+        let dateFields = fields[1].split(separator: "-", omittingEmptySubsequences: false)
+        guard dateFields.count == 3,
+              dateFields[2].count == 2,
+              let yearSuffix = Int(dateFields[2]),
+              (0...99).contains(yearSuffix) else {
+            return nil
+        }
+
+        let calendar = utcGregorianCalendar()
+        let nowYear = calendar.component(.year, from: now)
+        let currentCentury = nowYear - nowYear % 100
+        let candidateYears = [currentCentury - 100, currentCentury, currentCentury + 100]
+            .map { $0 + yearSuffix }
+        let candidates = candidateYears.compactMap { year in
+            let expanded = "\(dateFields[0])-\(dateFields[1])-\(year) \(fields[2]) \(fields[3])"
+            return parse(expanded, format: "dd-MMM-yyyy HH:mm:ss z")
+        }
+        guard let futureLimit = calendar.date(byAdding: .year, value: 50, to: now) else {
+            return nil
+        }
+        if let future = candidates.filter({ $0 >= now }).min(), future <= futureLimit {
+            return future
+        }
+        return candidates.filter { $0 < now }.max()
+    }
+
+    private static func parse(_ value: String, format: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = utcGregorianCalendar()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = format
+        formatter.isLenient = false
+        return formatter.date(from: value)
+    }
+
+    private static func utcGregorianCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
     }
 }

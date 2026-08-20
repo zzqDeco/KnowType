@@ -91,6 +91,19 @@ private func requestBodyObject(
     return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any], file: file, line: line)
 }
 
+private func utcDate(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0, second: Int = 0) -> Date {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    var components = DateComponents()
+    components.year = year
+    components.month = month
+    components.day = day
+    components.hour = hour
+    components.minute = minute
+    components.second = second
+    return calendar.date(from: components)!
+}
+
 final class ProviderAdapterTests: XCTestCase {
     private let llmRequest = LLMRequest(
         task: .continuation,
@@ -101,18 +114,17 @@ final class ProviderAdapterTests: XCTestCase {
         lengthLevel: .medium
     )
 
-    func testProviderRateLimitErrorKeepsRetryAfterWithinItsPublicContract() {
-        for value in [Double.nan, Double.infinity, -Double.infinity, -1] {
-            let error = ProviderRateLimitError(retryAfterSeconds: value, bodyByteCount: 0)
-            XCTAssertNil(error.retryAfterSeconds)
-        }
+    func testProviderRateLimitErrorPreservesInitializerAndPublicVarSemantics() {
+        var error = ProviderRateLimitError(statusCode: 429, retryAfterSeconds: 901, bodyByteCount: 7)
 
-        XCTAssertNil(ProviderRateLimitError(retryAfterSeconds: nil, bodyByteCount: 0).retryAfterSeconds)
-        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 0, bodyByteCount: 0).retryAfterSeconds, 15)
-        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 14, bodyByteCount: 0).retryAfterSeconds, 15)
-        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 15, bodyByteCount: 0).retryAfterSeconds, 15)
-        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 900, bodyByteCount: 0).retryAfterSeconds, 900)
-        XCTAssertEqual(ProviderRateLimitError(retryAfterSeconds: 901, bodyByteCount: 0).retryAfterSeconds, 900)
+        XCTAssertEqual(error.retryAfterSeconds, 901)
+        error.retryAfterSeconds = -1
+        XCTAssertEqual(error.retryAfterSeconds, -1)
+        error.retryAfterSeconds = Double.infinity
+        XCTAssertEqual(error.retryAfterSeconds, Double.infinity)
+
+        let nanError = ProviderRateLimitError(retryAfterSeconds: Double.nan, bodyByteCount: 0)
+        XCTAssertTrue(nanError.retryAfterSeconds?.isNaN == true)
     }
 
     func testRetryAfterDelaySecondsAcceptsFiniteNonNegativeValuesAndNormalizesBounds() {
@@ -149,6 +161,32 @@ final class ProviderAdapterTests: XCTestCase {
         }
     }
 
+    func testRetryAfterRFC850UsesInjectedNowAtFiftyYearBoundary() {
+        let now = utcDate(year: 2020, month: 1, day: 1)
+
+        XCTAssertEqual(
+            retryAfterSeconds(from: "Wednesday, 01-Jan-70 00:00:00 GMT", now: now),
+            900
+        )
+        XCTAssertEqual(
+            retryAfterSeconds(from: "Thursday, 01-Jan-70 00:00:01 GMT", now: now),
+            15
+        )
+    }
+
+    func testRetryAfterRFC850Resolves99And00AcrossCenturyFromInjectedNow() {
+        let now = utcDate(year: 2098, month: 1, day: 1)
+
+        XCTAssertEqual(
+            retryAfterSeconds(from: "Thursday, 01-Jan-99 00:00:00 GMT", now: now),
+            900
+        )
+        XCTAssertEqual(
+            retryAfterSeconds(from: "Friday, 01-Jan-00 00:00:00 GMT", now: now),
+            900
+        )
+    }
+
     func testRetryAfterHTTPDatesNormalizePastNearAndFarValuesToBounds() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let cases = [
@@ -169,7 +207,7 @@ final class ProviderAdapterTests: XCTestCase {
         let client = MockHTTPClient(
             json: body,
             statusCode: 429,
-            headers: ["Retry-After": "42"]
+            headers: ["Retry-After": "901"]
         )
         let provider = OpenAIChatProvider(
             configuration: ProviderConfiguration(
@@ -185,7 +223,7 @@ final class ProviderAdapterTests: XCTestCase {
             XCTFail("Expected a 429 response to throw ProviderRateLimitError")
         } catch let error as ProviderRateLimitError {
             XCTAssertEqual(error.statusCode, 429)
-            XCTAssertEqual(error.retryAfterSeconds, 42)
+            XCTAssertEqual(error.retryAfterSeconds, 900)
             XCTAssertTrue(error.retryAfterSeconds?.isFinite == true)
             XCTAssertEqual(error.bodyByteCount, Data(body.utf8).count)
         } catch {
