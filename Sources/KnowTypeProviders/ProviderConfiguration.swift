@@ -105,11 +105,44 @@ public enum ProviderRequestBudget {
         let notesHeading = "## User Notes"
         if let start = value.range(of: startMarker),
            let end = value.range(of: endMarker, range: start.upperBound..<value.endIndex) {
-            try check(String(value[start.upperBound..<end.lowerBound]), component: "generated", limit: generated, task: task)
+            let body = environmentBody(
+                value[start.upperBound..<end.lowerBound],
+                dropLeadingSeparator: true,
+                dropTrailingSeparator: true
+            )
+            try check(body, component: "generated", limit: generated, task: task)
         }
         if let notes = value.range(of: notesHeading) {
-            try check(String(value[notes.upperBound...]), component: "user_notes", limit: userNotes, task: task)
+            let body = environmentBody(
+                value[notes.upperBound...],
+                dropLeadingSeparator: true,
+                dropTrailingSeparator: false
+            )
+            try check(body, component: "user_notes", limit: userNotes, task: task)
         }
+    }
+
+    private static func environmentBody(
+        _ value: Substring,
+        dropLeadingSeparator: Bool,
+        dropTrailingSeparator: Bool
+    ) -> String {
+        var body = String(value)
+        if dropLeadingSeparator {
+            if body.hasPrefix("\r\n") {
+                body.removeFirst(2)
+            } else if body.hasPrefix("\n") {
+                body.removeFirst()
+            }
+        }
+        if dropTrailingSeparator {
+            if body.hasSuffix("\r\n") {
+                body.removeLast(2)
+            } else if body.hasSuffix("\n") {
+                body.removeLast()
+            }
+        }
+        return body
     }
 }
 

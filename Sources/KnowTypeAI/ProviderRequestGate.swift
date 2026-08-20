@@ -180,7 +180,7 @@ public actor ProviderRequestGate {
         } catch {
             var failed = states[key, default: State()]
             failed.inFlight = false
-            if failed.generation != generation || Self.isCancellation(error) || Self.isStale(error) {
+            if failed.generation != generation || Task.isCancelled || Self.isCancellation(error) || Self.isStale(error) {
                 states[key] = failed
                 resumeAvailabilityWaiters(for: key)
                 throw failed.generation == generation ? error : ProviderRequestGateError.staleGeneration
@@ -191,7 +191,7 @@ public actor ProviderRequestGate {
                 throw error
             }
             let failureClass = Self.classify(error)
-            failed.failureCount += 1
+            failed.failureCount = min(16, failed.failureCount + 1)
             failed.failureClass = failureClass
             failed.cooldownUntil = now().addingTimeInterval(
                 Self.cooldownSeconds(
@@ -235,7 +235,7 @@ public actor ProviderRequestGate {
             clearPersistedEntry(for: key)
         }
         let failureClass = forcedClass ?? Self.classify(failure)
-        state.failureCount += 1
+        state.failureCount = min(16, state.failureCount + 1)
         state.failureClass = failureClass
         state.cooldownUntil = now().addingTimeInterval(
             Self.cooldownSeconds(

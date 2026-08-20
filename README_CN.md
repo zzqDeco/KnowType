@@ -218,7 +218,8 @@ Profile 文件使用带 revision 的事务格式，多个设置窗口不会静�
 query 和 fragment。
 运行中的输入法 host 会观察已提交的 profile revision。下一次满足条件的推荐或
 context digest 会直接使用新 provider，无需重启 host。旧结果会被 generation
-fence 丢弃；已经开始的 transport 由共享 provider gate 跟踪到完成或硬超时，
+fence 丢弃。caller-visible hard timeout 会立即返回，但若已经开始的 transport
+拒绝取消，同一 identity 的共享 provider gate lease 会保留到 transport 实际结束；
 普通按键热路径不会轮询 provider 文件。
 
 ```text

@@ -608,6 +608,7 @@ public struct CorrectionInstructionStore: @unchecked Sendable {
 
     public func loadSnapshot() throws -> AIDocumentSnapshot {
         try ensureExists()
+        try setSecurePermissions(of: fileURL)
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
         let limit = 4 * 1_024
@@ -627,8 +628,34 @@ public struct CorrectionInstructionStore: @unchecked Sendable {
     private func ensureExists() throws {
         let directory = fileURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard !fileManager.fileExists(atPath: fileURL.path) else { return }
-        try Data(Self.defaultContent.utf8).write(to: fileURL, options: .atomic)
-        try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        guard !fileManager.fileExists(atPath: fileURL.path) else {
+            try setSecurePermissions(of: fileURL)
+            return
+        }
+        try atomicWrite(Data(Self.defaultContent.utf8), to: fileURL)
+    }
+
+    private func atomicWrite(_ data: Data, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        let temporaryURL = directory.appendingPathComponent(
+            ".\(url.lastPathComponent).\(UUID().uuidString).tmp"
+        )
+        do {
+            try data.write(to: temporaryURL, options: .atomic)
+            try setSecurePermissions(of: temporaryURL)
+            if fileManager.fileExists(atPath: url.path) {
+                _ = try fileManager.replaceItemAt(url, withItemAt: temporaryURL)
+            } else {
+                try fileManager.moveItem(at: temporaryURL, to: url)
+            }
+            try setSecurePermissions(of: url)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
+    private func setSecurePermissions(of url: URL) throws {
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }

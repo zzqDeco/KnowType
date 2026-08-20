@@ -6,6 +6,9 @@ Current responsibilities:
 
 - `AIRecommendationRuntime` builds real-time provider requests from raw input, optional user-confirmed `lockedPrefix`, app context, `ENV.md`, `CORRECTION.md`, and optional `LEXICAL_PROFILE.md`.
 - `AIRecommendationRuntime` debounces for 350 ms by default for non-IMK direct callers, hard-times out after 10 seconds by default, caches, sanitizes returned continuations when a locked prefix exists, and reports ready/unavailable/ineligible state through `AIRecommendationState`.
+- Caller-visible timeout returns immediately, while cancellation-resistant
+  started transport keeps the shared identity lease until it actually ends;
+  only the single-flight owner records that timeout failure.
 - `AIRecommendationRuntime` treats `CancellationError` and URL-session
   cancellation as normal stale-control cancellation. These paths return idle,
   record cancellation diagnostics, and do not mark provider health failed or
@@ -36,7 +39,8 @@ Current responsibilities:
   only the generated section. A repair that requires backup or canonical
   write-back fails closed if either persistence step fails; no unpersisted
   repaired snapshot is returned.
-- `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; deterministic traditional input does not read this file.
+- `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md` with enforced
+  mode 0600; deterministic traditional input does not read this file.
 - `AIHealthMonitor` keeps transient provider failures from hammering the provider or blocking input.
 
 Testing concerns:

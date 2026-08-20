@@ -26,9 +26,13 @@ Maintains bounded, canonical local AI context documents under `~/.knowtype`.
   archive receipt contain only timestamps, counts, and hashes; all are bounded,
   atomically written with mode 0600, and used to recover cleanup without a
   second provider call.
+- Provider budgeting counts the structured generated and User Notes bodies
+  after removing only their canonical separator newlines, so 4,096 body bytes
+  are accepted and 4,097 are rejected without changing the 8 KiB ENV cap.
 - `CorrectionInstructionStore` owns `CORRECTION.md` creation and loading; reads
   use a file handle capped at 4 KiB plus one detection byte and reject excess
-  content without allocating the whole file.
+  content without allocating the whole file. Creation and existing-file loads
+  force mode 0600; temporary and final permission failures are fail-closed.
 - `AIUserDirectory` also exposes the readable accepted-learning mirror path
   `~/.knowtype/ACCEPTED_AI_LEARNING.md`; canonical accepted-learning JSON files
   live under Application Support.

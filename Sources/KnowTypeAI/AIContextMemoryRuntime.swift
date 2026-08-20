@@ -53,6 +53,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var pendingSince: Date?
     private var nextEligibleAt: Date?
     private var scheduleStateLoaded = false
+    private var scheduleStateBlocked = false
     private var lastDigestFailureAt: Date?
     private var deferredDiagnosticFailureAt: Date?
     private var digestInFlight = false
@@ -164,7 +165,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             digestInFlight = false
         }
 
-        loadScheduleStateIfNeeded()
+        loadScheduleStateIfNeeded(now: now)
+        guard !scheduleStateBlocked else { return }
 
         switch await recoverDigestClaim(now: now) {
         case .recovered, .blocked:
@@ -177,6 +179,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         do { inventory = try eventStore.inventory() } catch { return }
         guard inventory.eventCount > 0 else {
             pendingSince = nil
+            nextEligibleAt = nil
             try? persistScheduleState()
             cancelDeadline()
             return
@@ -186,14 +189,17 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             do {
                 let snapshot = try eventStore.pendingFullSnapshot()
                 try eventStore.archivePendingEvents(matching: snapshot)
-                recordDigestSuccess(at: now)
+                try scheduleAfterLocalArchive(now: now)
             } catch { return }
             return
         }
 
         let intervalElapsed: Bool
         let deferredDeadline: Date
-        if let lastDigestAt {
+        if let nextEligibleAt, nextEligibleAt > now {
+            intervalElapsed = false
+            deferredDeadline = nextEligibleAt
+        } else if let lastDigestAt {
             intervalElapsed = now.timeIntervalSince(lastDigestAt) >= minimumInterval
             deferredDeadline = nextEligibleAt ?? lastDigestAt.addingTimeInterval(minimumInterval)
         } else {
@@ -260,7 +266,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         if snapshot.events.allSatisfy(TypingEventStore.isProtectedOnlyEvent) {
             do {
                 try eventStore.archivePendingEvents(matching: snapshot)
-                recordDigestSuccess(at: now)
+                try scheduleAfterLocalArchive(now: now)
             } catch { return }
             return
         }
@@ -423,9 +429,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         do {
             let environment = try environmentStore.loadSnapshot()
             guard EnvironmentDocumentStore.generatedSectionHash(from: environment.content) == claim.generatedSHA256 else {
-                try environmentStore.clearDigestClaim()
-                try? environmentStore.clearDigestArchiveReceipt()
-                return .none
+                return .blocked
             }
 
             switch eventStore.processedArchiveValidation(
@@ -610,7 +614,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         scheduleDeadline(at: deadline)
     }
 
-    private func loadScheduleStateIfNeeded() {
+    private func loadScheduleStateIfNeeded(now: Date) {
         guard !scheduleStateLoaded else { return }
         scheduleStateLoaded = true
         do {
@@ -619,7 +623,23 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             lastDigestAt = state.lastSuccessfulDigestAt
             nextEligibleAt = state.nextEligibleAt
         } catch {
-            try? environmentStore.clearDigestScheduleState()
+            pendingSince = now
+            lastDigestAt = nil
+            let conservativeDeadline = now.addingTimeInterval(minimumInterval)
+            nextEligibleAt = conservativeDeadline
+            do {
+                try environmentStore.saveDigestScheduleState(
+                    EnvironmentDigestScheduleState(
+                        pendingSince: now,
+                        lastSuccessfulDigestAt: nil,
+                        nextEligibleAt: conservativeDeadline,
+                        pendingEventCount: 0
+                    )
+                )
+                scheduleDeadline(at: conservativeDeadline)
+            } catch {
+                scheduleStateBlocked = true
+            }
         }
     }
 

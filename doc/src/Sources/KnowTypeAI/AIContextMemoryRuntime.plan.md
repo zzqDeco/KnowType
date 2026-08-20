@@ -40,7 +40,8 @@
   and max-one-in-flight identity state apply equally to recommendation and
   digest. The caller-visible hard timeout wraps gate execution; it returns
   immediately while cancellation-resistant provider work keeps the identity
-  lease until actual completion.
+  lease until actual completion. The single-flight attempt owner records a hard
+  timeout once; cancellation-marked late failures only release that lease.
 - Direct provider-injected runtimes derive their gate identity from
   `provider.providerName` by default, matching direct recommendation runtimes;
   registry-backed runtimes continue to use the generation fingerprint.
@@ -53,6 +54,8 @@
   separate from the 600-second successful-commit interval. Protected-only pending batches
   archive locally without provider or provider-profile reads; a protected-only
   bounded prefix in a mixed backlog is also archived without a provider call.
+  Neither path advances the provider-success timestamp; any unprotected tail is
+  scheduled by the normal pending rules.
 - Raw input and locked prefix over 4 KiB skip AI without semantic truncation.
   Pending JSONL keeps at most 500 events or 1 MiB and compacts to the newest
   450 events/768 KiB after overflow. Existing oversized files are compacted
@@ -76,7 +79,10 @@
   SHA-256 distinguishes completed archive from cleanup failure; missing,
   oversized, or same-size corrupt archive evidence remains blocked. A matching
   ENV with a changed claim prefix still fails closed without another provider
-  request.
+  request. A claim written before ENV replacement also remains blocked when its
+  generated hash is absent, so restart cannot redispatch that prefix. Corrupt
+  schedule state is replaced with a conservative minimum-interval delay; if
+  that state cannot be persisted, processing stays blocked.
   Timestamp/count schedule state survives runtime or process rebuild and is
   written before claim cleanup. Successful commits rearm the one deadline task
   when a tail remains; an empty store cancels it.

@@ -1134,6 +1134,60 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(value, 3)
     }
 
+    func testSingleFlightTimeoutIsRecordedOnceByAttemptOwner() async throws {
+        let fixedNow = Date()
+        let provider = SlowCancellationResistantLLMProvider()
+        let gate = ProviderRequestGate(now: { fixedNow })
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 100,
+            requestGate: gate
+        )
+        let request = AIRecommendationRequest(
+            rawInput: "nihao",
+            traditionalCandidate: CorrectionCandidate(
+                text: "你好",
+                source: "traditional",
+                confidence: 1,
+                correctionLevel: .contextual
+            ),
+            compositionID: 1
+        )
+
+        let owner = Task { await runtime.recommendation(for: request) }
+        let startDeadline = Date().addingTimeInterval(2)
+        while Date() < startDeadline {
+            if await provider.requestCount > 0 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let startedRequestCount = await provider.requestCount
+        XCTAssertEqual(startedRequestCount, 1)
+        let waiter = Task { await runtime.recommendation(for: request) }
+        let ownerState = await owner.value
+        let waiterState = await waiter.value
+
+        XCTAssertEqual(ownerState, .unavailable(reason: "AI 请求超时"))
+        XCTAssertEqual(waiterState, .unavailable(reason: "AI 请求超时"))
+        let requestCount = await provider.requestCount
+        XCTAssertEqual(requestCount, 1)
+        let deadline = await gate.cooldownDeadline(
+            providerIdentity: provider.providerName,
+            generation: 0
+        )
+        XCTAssertEqual(deadline?.timeIntervalSince(fixedNow), 60, accuracy: 0.001)
+
+        let finishDeadline = Date().addingTimeInterval(2)
+        while !(await provider.isFinished), Date() < finishDeadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let providerFinished = await provider.isFinished
+        XCTAssertTrue(providerFinished)
+    }
+
     func testOversizedRawInputSkipsProviderWithoutRecordingFailure() async {
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
             LLMCandidate(text: "不应发送", confidence: 0.9)
@@ -1149,6 +1203,75 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(state, .ineligible(reason: "AI 输入过长"))
         let requests = await provider.requests
         XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testEnvironmentProjectionBudgetCountsBodiesWithoutCanonicalSeparators() throws {
+        func environment(generated: String, userNotes: String) -> String {
+            """
+            # KnowType Environment
+
+            <!-- KNOWTYPE:BEGIN GENERATED -->
+            \(generated)
+            <!-- KNOWTYPE:END GENERATED -->
+
+            ## User Notes
+            \(userNotes)
+            """
+        }
+
+        let exactGenerated = LLMRequest(
+            task: .continuation,
+            rawInput: "abc",
+            contextDocuments: [
+                "ENV.md": environment(
+                    generated: String(repeating: "g", count: 4 * 1_024),
+                    userNotes: ""
+                )
+            ]
+        )
+        XCTAssertNoThrow(try ProviderRequestBudget.validate(exactGenerated))
+
+        let oversizedGenerated = LLMRequest(
+            task: .continuation,
+            rawInput: "abc",
+            contextDocuments: [
+                "ENV.md": environment(
+                    generated: String(repeating: "g", count: 4 * 1_024 + 1),
+                    userNotes: ""
+                )
+            ]
+        )
+        XCTAssertThrowsError(try ProviderRequestBudget.validate(oversizedGenerated)) { error in
+            XCTAssertEqual((error as? ProviderRequestBudgetError)?.component, "generated")
+            XCTAssertEqual((error as? ProviderRequestBudgetError)?.byteCount, 4 * 1_024 + 1)
+        }
+
+        let exactUserNotes = LLMRequest(
+            task: .continuation,
+            rawInput: "abc",
+            contextDocuments: [
+                "ENV.md": environment(
+                    generated: "generated",
+                    userNotes: String(repeating: "u", count: 4 * 1_024)
+                )
+            ]
+        )
+        XCTAssertNoThrow(try ProviderRequestBudget.validate(exactUserNotes))
+
+        let oversizedUserNotes = LLMRequest(
+            task: .continuation,
+            rawInput: "abc",
+            contextDocuments: [
+                "ENV.md": environment(
+                    generated: "generated",
+                    userNotes: String(repeating: "u", count: 4 * 1_024 + 1)
+                )
+            ]
+        )
+        XCTAssertThrowsError(try ProviderRequestBudget.validate(oversizedUserNotes)) { error in
+            XCTAssertEqual((error as? ProviderRequestBudgetError)?.component, "user_notes")
+            XCTAssertEqual((error as? ProviderRequestBudgetError)?.byteCount, 4 * 1_024 + 1)
+        }
     }
 
     func testDocumentStoresCreateDefaultsAndPreserveUserNotes() throws {
@@ -1181,6 +1304,28 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try store.loadSnapshot()) { error in
             XCTAssertEqual(error as? EnvironmentDocumentError, .userNotesTooLarge)
         }
+    }
+
+    func testCorrectionStoreForcesPrivatePermissionsForCreatedAndExistingFile() throws {
+        let directory = temporaryDirectory()
+        let correctionURL = directory.appendingPathComponent("CORRECTION.md")
+        let store = CorrectionInstructionStore(fileURL: correctionURL)
+
+        _ = try store.loadSnapshot()
+        var permissions = try FileManager.default.attributesOfItem(
+            atPath: correctionURL.path
+        )[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o600)
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: correctionURL.path
+        )
+        _ = try store.loadSnapshot()
+        permissions = try FileManager.default.attributesOfItem(
+            atPath: correctionURL.path
+        )[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o600)
     }
 
     func testEnvironmentReplacementPreservesExistingContentWhenMarkersAreMissing() {
@@ -1297,7 +1442,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(snapshot.content.contains("- Keep user note."))
     }
 
-    func testEnvironmentLoadReturnsRepairedSnapshotWhenRepairWriteFails() throws {
+    func testEnvironmentLoadFailsClosedWhenCanonicalRepairWriteFails() throws {
         let fileManager = FileManager.default
         let directory = temporaryDirectory()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1307,16 +1452,9 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
         let environmentURL = directory.appendingPathComponent("ENV.md")
         let polluted = """
-        # KnowType Environment
-
         <!-- KNOWTYPE:BEGIN GENERATED -->
         ## Global Style
         - Keep generated.
-        <!-- KNOWTYPE:END GENERATED -->
-
-        <!-- KNOWTYPE:BEGIN GENERATED -->
-        ## Global Style
-        - Remove duplicate.
         <!-- KNOWTYPE:END GENERATED -->
 
         ## User Notes
@@ -1326,14 +1464,10 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         try fileManager.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
 
         let store = EnvironmentDocumentStore(fileURL: environmentURL)
-        let snapshot = try store.loadSnapshot()
+        XCTAssertThrowsError(try store.loadSnapshot())
         let diskContent = try String(contentsOf: environmentURL, encoding: .utf8)
 
         XCTAssertEqual(diskContent, polluted)
-        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedStart).count - 1, 1)
-        XCTAssertEqual(snapshot.content.components(separatedBy: EnvironmentDocumentStore.generatedEnd).count - 1, 1)
-        XCTAssertFalse(snapshot.content.contains("Remove duplicate"))
-        XCTAssertTrue(snapshot.content.contains("- Keep user note."))
     }
 }
 

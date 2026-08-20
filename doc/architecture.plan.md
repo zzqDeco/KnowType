@@ -123,6 +123,9 @@ completion. A caller-visible hard timeout returns immediately but does not
 release a shared-gate lease held by cancellation-resistant transport. Generation
 changes clear provider-dependent recommendation cache, health, and
 structured-output capability state without resetting digest success timing.
+Each real gate attempt records at most one failure: the single-flight owner
+records a hard timeout, while cancellation-marked late transport errors only
+release the lease. Failure counts clamp at 16 in memory and persisted state.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -151,7 +154,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
 - Context Digest success archives only its claimed prefix and then best-effort
   retains processed history for at most 7 days, 100 files, and 10 MiB. Existing
   history is not pruned during startup or installation. Protected-only eligible
-  data archives locally without reading provider configuration.
+  data archives locally without reading provider configuration and does not
+  advance the provider-success interval; any unprotected tail is scheduled by
+  the ordinary pending rules.
 - `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md` as one
   managed marker pair plus one canonical User Notes section. It treats
   markerless files as user content, backs up abnormal files by content hash with
@@ -160,9 +165,16 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   privacy-safe digest claim for recovery, plus bounded 0600 schedule state and
   archive receipt metadata containing only timestamps, counts, and hashes.
   Recovery bounded-reads the deterministic processed archive and verifies its
-  byte count and SHA-256 before treating a missing receipt as completed.
+  byte count and SHA-256 before treating a missing receipt as completed. A claim
+  whose generated hash is not yet present in ENV remains blocked, and corrupt
+  schedule state is replaced by a conservative minimum-interval delay or stays
+  fail-closed.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
-- `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
+- `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; it and
+  pending/processed typing-event files enforce mode 0600 on creation, rewrite,
+  and existing-file access. AI correction/recommendation prompts read
+  instructions from this file, while the traditional engine remains
+  deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 - Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction and context digest keep separate instructions.

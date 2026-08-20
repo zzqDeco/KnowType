@@ -52,6 +52,10 @@
   before reading at most the pending-file limit. Deterministic processed-archive
   recovery bounded-reads the expected byte count plus one and verifies SHA-256;
   filename or metadata size alone is never completion evidence.
+- Pending append, compaction, and tail rewrite paths plus deterministic
+  processed archives force mode 0600. Existing pending/archive files are
+  corrected before access, atomic writes protect both temporary and final
+  targets, and permission failures fail closed.
 
 ## Tests
 

@@ -26,6 +26,9 @@ tests.
   preflight before model discovery, so local over-limit requests perform neither
   discovery nor completion HTTP. Local budget failures are distinct from
   provider failures.
+- Caller timeout ownership belongs to the shared AI gate attempt owner. A
+  cancellation-marked operation that later returns a transport error releases
+  its lease without recording that late error as another provider failure.
 
 ## Tests
 

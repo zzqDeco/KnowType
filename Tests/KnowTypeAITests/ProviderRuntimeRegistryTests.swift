@@ -32,11 +32,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         )
         let signal = TestProviderRevisionSignal()
         let registry = makeRegistry(source: source, signal: signal)
-        let runtime = LazyDefaultAIRecommendationRuntime(
-            providerRegistry: registry,
-            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            debounceMilliseconds: 0
-        )
+        let runtime = makeLazyRecommendationRuntime(providerRegistry: registry)
         let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
 
         let first = await runtime.recommendation(for: request)
@@ -118,11 +114,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             source: source,
             capabilityReset: { await ProviderRuntimeCapabilityState.reset() }
         )
-        let runtime = LazyDefaultAIRecommendationRuntime(
-            providerRegistry: registry,
-            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            debounceMilliseconds: 0
-        )
+        let runtime = makeLazyRecommendationRuntime(providerRegistry: registry)
         let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
 
         for _ in 0..<3 {
@@ -154,11 +146,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         )
         let signal = TestProviderRevisionSignal()
         let registry = makeRegistry(source: source, signal: signal)
-        let runtime = LazyDefaultAIRecommendationRuntime(
-            providerRegistry: registry,
-            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            debounceMilliseconds: 0
-        )
+        let runtime = makeLazyRecommendationRuntime(providerRegistry: registry)
         let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
 
         let oldRequest = Task { await runtime.recommendation(for: request) }
@@ -188,10 +176,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             fingerprint: String(repeating: "a", count: 64),
             provider: providerA
         )
-        let runtime = LazyDefaultAIRecommendationRuntime(
-            providerRegistry: makeRegistry(source: source),
-            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            debounceMilliseconds: 0
+        let runtime = makeLazyRecommendationRuntime(
+            providerRegistry: makeRegistry(source: source)
         )
         let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
 
@@ -224,11 +210,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             provider: providerA
         )
         let registry = makeRegistry(source: source)
-        let runtime = LazyDefaultAIRecommendationRuntime(
-            providerRegistry: registry,
-            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            debounceMilliseconds: 0
-        )
+        let runtime = makeLazyRecommendationRuntime(providerRegistry: registry)
         let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
 
         let oldRequest = Task { await runtime.recommendation(for: request) }
@@ -255,11 +237,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             provider: providerA
         )
         let registry = makeRegistry(source: source)
-        let runtime = LazyDefaultAIRecommendationRuntime(
-            providerRegistry: registry,
-            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            debounceMilliseconds: 0
-        )
+        let runtime = makeLazyRecommendationRuntime(providerRegistry: registry)
         let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
 
         let oldRequest = Task { await runtime.recommendation(for: request) }
@@ -313,10 +291,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             fingerprint: String(repeating: "a", count: 64),
             provider: NamedLLMProvider(name: "provider-a", responseText: "unused")
         )
-        let runtime = LazyDefaultAIRecommendationRuntime(
-            providerRegistry: makeRegistry(source: source),
-            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
-            debounceMilliseconds: 0
+        let runtime = makeLazyRecommendationRuntime(
+            providerRegistry: makeRegistry(source: source)
         )
 
         let state = await runtime.recommendation(
@@ -569,6 +545,121 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         await waiter.value
     }
 
+    func testTimedOutGateAttemptRecordsOneFailureWhenCancelledOperationLaterFails() async throws {
+        let now = Date()
+        let identity = "timeout-owner"
+        let gate = ProviderRequestGate(now: { now })
+        let operation = SuspendedFailingGateOperation()
+        let owner = Task {
+            do {
+                let _: Int = try await withTimeout(nanoseconds: 20_000_000) {
+                    try await gate.execute(providerIdentity: identity, generation: 0) {
+                        try await operation.run()
+                    }
+                }
+                XCTFail("expected timeout")
+            } catch let error as TimeoutError {
+                await gate.recordFailure(
+                    providerIdentity: identity,
+                    generation: 0,
+                    failure: error
+                )
+            } catch {
+                XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        try await waitUntil { await operation.started }
+        await owner.value
+        let timeoutDeadline = await gate.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        XCTAssertEqual(timeoutDeadline?.timeIntervalSince(now), 60, accuracy: 0.001)
+
+        await operation.finish()
+        var releasedWithCooldown = false
+        let releaseDeadline = Date().addingTimeInterval(2)
+        while !releasedWithCooldown, Date() < releaseDeadline {
+            do {
+                _ = try await gate.execute(providerIdentity: identity, generation: 0) { 1 }
+                XCTFail("late provider error must preserve the timeout cooldown")
+                break
+            } catch ProviderRequestGateError.busy {
+                try await Task.sleep(nanoseconds: 10_000_000)
+            } catch ProviderRequestGateError.cooldown {
+                releasedWithCooldown = true
+            }
+        }
+        XCTAssertTrue(releasedWithCooldown)
+        let finalDeadline = await gate.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        XCTAssertEqual(finalDeadline?.timeIntervalSince(now), 60, accuracy: 0.001)
+    }
+
+    func testCallerCancellationDoesNotCountCancellationResistantLateFailure() async throws {
+        let gate = ProviderRequestGate()
+        let operation = SuspendedFailingGateOperation()
+        let request = Task {
+            try await gate.execute(providerIdentity: "caller-cancel", generation: 0) {
+                try await operation.run()
+            }
+        }
+
+        try await waitUntil { await operation.started }
+        request.cancel()
+        await operation.finish()
+        do {
+            _ = try await request.value
+            XCTFail("expected late provider failure")
+        } catch {
+            guard case ProviderError.httpStatus(let status, _) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(status, 503)
+        }
+
+        let cooldown = await gate.cooldownDeadline(
+            providerIdentity: "caller-cancel",
+            generation: 0
+        )
+        XCTAssertNil(cooldown)
+        let value = try await gate.execute(providerIdentity: "caller-cancel", generation: 0) { 2 }
+        XCTAssertEqual(value, 2)
+    }
+
+    func testFailureCountClampsAtSixteenAndPersistsMaximumCooldown() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let now = Date()
+        let identity = "clamped-provider"
+        let gate = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+
+        for _ in 0..<17 {
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: ProviderError.httpStatus(503, "unavailable")
+            )
+        }
+
+        let data = try Data(contentsOf: stateURL)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let entries = try XCTUnwrap(object["entries"] as? [[String: Any]])
+        let failureCount = try XCTUnwrap(entries.first?["failureCount"] as? NSNumber)
+        XCTAssertEqual(failureCount.intValue, 16)
+
+        let reloaded = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+        let deadline = await reloaded.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        XCTAssertEqual(deadline?.timeIntervalSince(now), 15 * 60, accuracy: 0.001)
+    }
+
     func testPersistentGateWriterTrimsDeterministicallyAndExpiresAcrossRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -618,6 +709,23 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
     }
+
+    private func makeLazyRecommendationRuntime(
+        providerRegistry: ProviderRuntimeRegistry
+    ) -> LazyDefaultAIRecommendationRuntime {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        return LazyDefaultAIRecommendationRuntime(
+            providerRegistry: providerRegistry,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: directory.appendingPathComponent("ENV.md")
+            ),
+            correctionStore: CorrectionInstructionStore(
+                fileURL: directory.appendingPathComponent("CORRECTION.md")
+            ),
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            debounceMilliseconds: 0
+        )
+    }
 }
 
 private actor RequestGateProbe {
@@ -650,6 +758,24 @@ private actor SuspendedGateOperation {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
         }
+    }
+
+    func finish() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor SuspendedFailingGateOperation {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var started = false
+
+    func run() async throws -> Int {
+        started = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        throw ProviderError.httpStatus(503, "late failure")
     }
 
     func finish() {

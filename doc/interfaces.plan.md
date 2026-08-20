@@ -70,13 +70,17 @@ Provider dispatch is bounded before adapter serialization. Recommendation reques
 32 KiB logical and 64 KiB HTTP-body limits; Context Digest uses 64 KiB logical and
 96 KiB HTTP-body limits, with a 48 KiB event claim and 8 KiB ENV projection.
 Generated notes, User Notes, correction, feedback, and lexical projections remain
-within their local 4/4/4/4/6 KiB UTF-8 limits. A local budget rejection is a
+within their local 4/4/4/4/6 KiB UTF-8 limits. Generated and User Notes limits
+count their structured bodies without canonical marker/heading separator
+newlines. A local budget rejection is a
 non-provider outcome and its budgeted payload fingerprint is the recommendation
 cache key. `ProviderRequestGate` hashes provider identity, permits one in-flight
 request per identity, fences generations, clamps `Retry-After` to 15 seconds to
 15 minutes, and applies privacy-safe cooldowns for missing retry hints. Persisted
 gate state contains only the identity hash, deadline, failure class, and a
 bounded count in atomic mode-0600 storage; it never persists in-flight state.
+One real gate attempt records at most one failure, and its in-memory and
+persisted failure count clamps at 16.
 
 ## Input Client Compatibility
 
@@ -184,7 +188,9 @@ The process-level runtime registry observes the signal and returns leases with
 `revision`, `generation`, opaque `fingerprint`, and optional `provider`. It uses
 the file revision only as an eligible-dispatch fallback. A generation change
 fences old lease results before UI, ENV, or archive writes; started transport
-remains tracked by the shared provider gate until completion or hard timeout.
+remains tracked by the shared provider gate until it actually finishes. A
+caller-visible hard timeout returns immediately without releasing a lease held
+by cancellation-resistant transport.
 Unmigrated legacy or missing post-migration canonical state fails closed. The
 install migration first publishes a recoverable provisional tombstone and only
 marks canonical metadata expected after the canonical file is durable.
@@ -730,6 +736,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   after a successful commit cannot be bypassed by the batch threshold
 - archives processed event files under `~/.knowtype/events/processed/` and,
   after successful digests only, keeps at most 7 days, 100 files, and 10 MiB
+- archives protected-only prefixes locally without advancing the 600-second
+  provider-success interval; an unprotected tail follows normal pending
+  scheduling
 - summarizes through one actor-owned deadline task for batch, interval,
   provider-cooldown, and shared-gate availability wakeups; a first below-batch
   pending event has an independent forced deadline; while gate availability is
@@ -757,7 +766,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   path is recoverable without repeating the provider call; appended tail events
   remain outside the old claim. Receipt-missing recovery bounded-reads the
   deterministic processed archive and requires both recorded byte count and
-  SHA-256; a same-size corrupt archive remains blocked
+  SHA-256; a same-size corrupt archive remains blocked. A pre-ENV claim whose
+  generated hash does not match ENV also remains blocked, and corrupt schedule
+  state cannot trigger an immediate fresh-runtime batch dispatch
 
 `LexicalProfileStore`:
 

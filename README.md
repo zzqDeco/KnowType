@@ -257,8 +257,10 @@ userinfo or fragments; diagnostics omit userinfo, query, and fragment.
 The running input-method host observes committed profile revisions. The next
 eligible recommendation or context digest uses the new provider without a host
 restart. Older results are generation-fenced; started transports remain tracked
-by the shared provider gate until completion or hard timeout, and the ordinary
-key path never polls provider files.
+by the shared provider gate until they actually finish. A caller-visible hard
+timeout returns immediately, but cancellation-resistant transport retains that
+identity's gate lease until its real completion; the ordinary key path never
+polls provider files.
 
 ```text
 ~/Library/Application Support/KnowType/providers.v2.json

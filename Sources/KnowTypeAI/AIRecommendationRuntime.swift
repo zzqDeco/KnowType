@@ -8,6 +8,8 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let providerAvailability: AIRecommendationProviderAvailabilityState
     private let debounceMilliseconds: Int
+    private let environmentStore: EnvironmentDocumentStore
+    private let correctionStore: CorrectionInstructionStore
     private var runtime: AIRecommendationRuntime?
     private var runtimeGeneration: UInt64?
 
@@ -22,6 +24,25 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = EnvironmentDocumentStore()
+        self.correctionStore = CorrectionInstructionStore()
+    }
+
+    init(
+        providerRegistry: ProviderRuntimeRegistry,
+        environmentStore: EnvironmentDocumentStore,
+        correctionStore: CorrectionInstructionStore,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds
+    ) {
+        self.providerRegistry = providerRegistry
+        self.providerLoader = nil
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = environmentStore
+        self.correctionStore = correctionStore
     }
 
     public init(
@@ -35,6 +56,8 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = EnvironmentDocumentStore()
+        self.correctionStore = CorrectionInstructionStore()
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
@@ -111,6 +134,8 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     ) -> AIRecommendationRuntime {
         AIRecommendationRuntime(
             provider: provider,
+            environmentStore: environmentStore,
+            correctionStore: correctionStore,
             debounceMilliseconds: debounceMilliseconds,
             diagnosticSink: diagnosticSink,
             requestGate: requestGate,
@@ -344,10 +369,19 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 let generation = providerGeneration
                 let timeout = hardTimeoutNanoseconds
                 let task = Task<LLMResponse, Error> {
-                    try await withTimeout(nanoseconds: timeout) {
-                        try await gate.execute(providerIdentity: identity, generation: generation) {
-                            try await provider.complete(llmRequest)
+                    do {
+                        return try await withTimeout(nanoseconds: timeout) {
+                            try await gate.execute(providerIdentity: identity, generation: generation) {
+                                try await provider.complete(llmRequest)
+                            }
                         }
+                    } catch let error as TimeoutError {
+                        await gate.recordFailure(
+                            providerIdentity: identity,
+                            generation: generation,
+                            failure: error
+                        )
+                        throw error
                     }
                 }
                 inFlight[payloadFingerprint] = task
@@ -471,11 +505,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             }
             await healthMonitor.recordFailure(error)
             if error is TimeoutError {
-                await requestGate.recordFailure(
-                    providerIdentity: providerIdentity,
-                    generation: providerGeneration,
-                    failure: error
-                )
                 record(
                     .timeout,
                     request: request,

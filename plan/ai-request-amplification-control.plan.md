@@ -25,7 +25,9 @@ of already-started recommendations, and independent provider failure budgets.
   Each identity has one in-flight request, generation fencing, bounded 429 or
   60-second exponential failure cooldown, and bounded 0600 privacy-safe state
   under the default `~/.knowtype` directory; local budget and cancellation do
-  not create provider failure state.
+  not create provider failure state. A single-flight attempt owner records a
+  timeout once, cancellation-marked late errors do not increment it again, and
+  failure count clamps at 16 across memory and restart.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is
@@ -38,12 +40,17 @@ of already-started recommendations, and independent provider failure budgets.
   one cancellable availability waiter rather than polling or repeated snapshot
   decode. Locally archived invalid prefixes rearm the unique deadline for any
   tail. Each claim is one precise prefix of at most 50 events and 48 KiB.
+  Protected-only local archive does not start the 600-second provider-success
+  interval. Corrupt schedule state imposes a fresh minimum-interval delay or
+  remains fail-closed.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
   avoids repeating the provider call. A durable archive receipt or bounded
   byte-count plus SHA-256 verification of the deterministic processed archive,
   together with timestamp/count schedule state, completes cleanup recovery
-  across runtime or process rebuild. Corrupt evidence remains fail-closed.
+  across runtime or process rebuild. Corrupt evidence remains fail-closed. A
+  claim saved before ENV replacement remains blocked while its generated hash
+  is absent from ENV, without persisting provider output or redispatching.
 
 ## Verification Boundary
 
