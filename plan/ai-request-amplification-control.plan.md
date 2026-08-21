@@ -46,8 +46,12 @@ of already-started recommendations, and independent provider failure budgets.
   started transport remains busy until its stale-fenced real completion. The
   registry assigns one explicit target generation before crossing to the gate;
   concurrent lease and revision paths coalesce behind that actor-owned
-  transition until gate linearization, capability reset, and generation
-  publication complete exactly once.
+  transition until gate linearization, capability reset, and generation,
+  provisional-lease, and monotonic-revision publication complete exactly once.
+  Same-revision signals cannot reopen the completed transition, while a higher
+  revision merges into a monotonic pending target and forms a later transition
+  before waiters are released. Awaited disk/runtime results are revalidated
+  against the transition token and published lease before they can be accepted.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is

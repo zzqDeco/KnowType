@@ -210,11 +210,17 @@ The process-level runtime registry observes the signal and returns leases with
 the file revision only as an eligible-dispatch fallback. A generation change
 has one actor-owned transition and explicit target generation; concurrent
 eligible-dispatch and revision observations merge behind that transition, so
-no lease is exposed between gate invalidation and registry publication. It
-fences old lease results before UI, ENV, or archive writes; started transport
-remains tracked by the shared provider gate until it actually finishes. A
-caller-visible hard timeout returns immediately without releasing a lease held
-by cancellation-resistant transport.
+the monotonic latest accepted/pending revision, generation, and current lease
+are published together before the transition clears or wakes waiters. The
+publication first installs a provider-less provisional lease for the target
+revision; a successful runtime load fills that lease without another
+generation transition. Repeated signals for the same revision are ignored,
+while a higher revision merges into a monotonic pending target and forms a
+later legal transition. Stale disk or runtime reads cannot lower the accepted
+revision or replace the newer lease. It fences old lease results before UI,
+ENV, or archive writes; started transport remains tracked by the shared
+provider gate until it actually finishes. A caller-visible hard timeout returns
+immediately without releasing a lease held by cancellation-resistant transport.
 Unmigrated legacy or missing post-migration canonical state fails closed. The
 install migration first publishes a recoverable provisional tombstone and only
 marks canonical metadata expected after the canonical file is durable.

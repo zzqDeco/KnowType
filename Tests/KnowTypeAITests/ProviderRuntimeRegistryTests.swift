@@ -204,6 +204,123 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertEqual(gateProbe.rejectedTransportStartCount, 1)
     }
 
+    func testSameRevisionSignalBeforeAndAfterTransitionClearsOnlyOnce() async throws {
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: NamedLLMProvider(name: "provider-a", responseText: "A")
+        )
+        let signal = TestProviderRevisionSignal()
+        let resetProbe = RegistryCapabilityResetPause()
+        let registry = makeRegistry(
+            source: source,
+            signal: signal,
+            capabilityReset: { await resetProbe.reset() }
+        )
+
+        _ = await registry.leaseForEligibleDispatch()
+        let revisionProbe = RegistryRevisionObservationProbe()
+        await registry.setRevisionObservationObserverForTesting {
+            revisionProbe.record($0)
+        }
+        await resetProbe.pauseNextReset()
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        signal.send(2)
+        try await waitUntil { await resetProbe.hasEntered }
+
+        signal.send(2)
+        try await waitUntil { revisionProbe.observedCount == 2 }
+        await resetProbe.release()
+        try await waitUntil { await registry.currentGeneration() == 2 }
+
+        let lease = await registry.leaseForEligibleDispatch()
+        XCTAssertEqual(lease.generation, 2)
+        XCTAssertEqual(lease.revision, 2)
+        XCTAssertEqual(lease.provider?.providerName, "provider-b")
+        let resetCountAfterFirstLease = await resetProbe.resetCount
+        XCTAssertEqual(resetCountAfterFirstLease, 2)
+
+        signal.send(2)
+        try await waitUntil { revisionProbe.observedCount == 3 }
+        _ = await registry.leaseForEligibleDispatch()
+        let resetCountAfterDuplicateSignal = await resetProbe.resetCount
+        XCTAssertEqual(resetCountAfterDuplicateSignal, 2)
+    }
+
+    func testHigherRevisionDuringDiskRefreshCannotPublishOldLease() async throws {
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
+        let providerC = NamedLLMProvider(name: "provider-c", responseText: "C")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: NamedLLMProvider(name: "provider-a", responseText: "A")
+        )
+        let signal = TestProviderRevisionSignal()
+        let resetProbe = RegistryCapabilityResetPause()
+        let registry = makeRegistry(
+            source: source,
+            signal: signal,
+            capabilityReset: { await resetProbe.reset() }
+        )
+        let oldLease = await registry.leaseForEligibleDispatch()
+        let revisionProbe = RegistryRevisionObservationProbe()
+        await registry.setRevisionObservationObserverForTesting {
+            revisionProbe.record($0)
+        }
+
+        source.set(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        source.setRuntimeOverride(
+            revision: 2,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: providerB
+        )
+        await resetProbe.pauseNextReset()
+        let refresh = Task { await registry.leaseForEligibleDispatch() }
+        try await waitUntil { await resetProbe.hasEntered }
+
+        source.set(
+            revision: 3,
+            fingerprint: String(repeating: "c", count: 64),
+            provider: providerC
+        )
+        signal.send(3)
+        try await waitUntil { revisionProbe.observedCount == 1 }
+        await resetProbe.release()
+
+        let unavailable = await refresh.value
+        XCTAssertEqual(unavailable.generation, 3)
+        XCTAssertEqual(unavailable.revision, 3)
+        XCTAssertNil(unavailable.provider)
+        let resetCountAfterStaleLoad = await resetProbe.resetCount
+        XCTAssertEqual(resetCountAfterStaleLoad, 3)
+
+        source.clearRuntimeOverride()
+        let current = await registry.leaseForEligibleDispatch()
+        XCTAssertEqual(current.generation, 3)
+        XCTAssertEqual(current.revision, 3)
+        XCTAssertEqual(current.provider?.providerName, "provider-c")
+        let resetCountAfterRecovery = await resetProbe.resetCount
+        XCTAssertEqual(resetCountAfterRecovery, 3)
+
+        do {
+            try await registry.commitIfCurrent(using: oldLease) {
+                XCTFail("old lease must not commit after a higher revision transition")
+            }
+            XCTFail("expected stale generation")
+        } catch ProviderRuntimeRegistryError.staleGeneration {
+            // Expected.
+        }
+    }
+
     func testNewDiskRevisionFailsClosedWhenRuntimeReloadIsTransientlyUnavailable() async {
         let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
         let source = ProviderRuntimeTestSource(
@@ -1526,6 +1643,49 @@ private actor GateAttemptCompletionPause {
     }
 }
 
+private actor RegistryCapabilityResetPause {
+    private var pausesNextReset = false
+    private var entered = false
+    private var released = false
+    private var resets = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    var hasEntered: Bool {
+        entered
+    }
+
+    var resetCount: Int {
+        resets
+    }
+
+    func pauseNextReset() {
+        pausesNextReset = true
+        entered = false
+        released = false
+    }
+
+    func reset() async {
+        resets += 1
+        guard pausesNextReset else { return }
+        pausesNextReset = false
+        entered = true
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            if released {
+                continuation.resume()
+            } else {
+                self.continuation = continuation
+            }
+        }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 private final class RegistryGenerationTransitionWaitProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var waits = 0
@@ -1539,6 +1699,23 @@ private final class RegistryGenerationTransitionWaitProbe: @unchecked Sendable {
     func recordWait() {
         lock.lock()
         waits += 1
+        lock.unlock()
+    }
+}
+
+private final class RegistryRevisionObservationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var revisions: [UInt64] = []
+
+    var observedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return revisions.count
+    }
+
+    func record(_ revision: UInt64) {
+        lock.lock()
+        revisions.append(revision)
         lock.unlock()
     }
 }
@@ -1612,6 +1789,7 @@ final class ProviderRuntimeTestSource: @unchecked Sendable {
     private var revision: UInt64
     private var fingerprint: String
     private var provider: (any LLMProvider)?
+    private var runtimeOverride: ProviderRuntimeLoadResult?
     private var runtimeLoadEnabled = true
     private var revisionReads = 0
     private var runtimeLoads = 0
@@ -1636,7 +1814,7 @@ final class ProviderRuntimeTestSource: @unchecked Sendable {
         guard runtimeLoadEnabled else {
             return nil
         }
-        return ProviderRuntimeLoadResult(
+        return runtimeOverride ?? ProviderRuntimeLoadResult(
             revision: revision,
             fingerprint: fingerprint,
             provider: provider
@@ -1654,6 +1832,26 @@ final class ProviderRuntimeTestSource: @unchecked Sendable {
     func setRuntimeLoadEnabled(_ enabled: Bool) {
         lock.lock()
         runtimeLoadEnabled = enabled
+        lock.unlock()
+    }
+
+    func setRuntimeOverride(
+        revision: UInt64,
+        fingerprint: String,
+        provider: (any LLMProvider)?
+    ) {
+        lock.lock()
+        runtimeOverride = ProviderRuntimeLoadResult(
+            revision: revision,
+            fingerprint: fingerprint,
+            provider: provider
+        )
+        lock.unlock()
+    }
+
+    func clearRuntimeOverride() {
+        lock.lock()
+        runtimeOverride = nil
         lock.unlock()
     }
 

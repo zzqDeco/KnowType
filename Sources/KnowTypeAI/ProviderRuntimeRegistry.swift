@@ -89,12 +89,21 @@ public actor ProviderRuntimeRegistry {
 
     public static let shared = ProviderRuntimeRegistry()
 
+    private static let unavailableFingerprint = String(repeating: "0", count: 64)
+
+    private struct GenerationTransitionTarget {
+        let revision: UInt64
+        let fingerprint: String
+        let providerConfigured: Bool
+    }
+
     private struct GenerationTransition {
         let id: UUID
         let newGeneration: UInt64
         var revision: UInt64
         var fingerprint: String
         var providerConfigured: Bool
+        var pendingTarget: GenerationTransitionTarget?
         var waiters: [CheckedContinuation<Void, Never>] = []
     }
 
@@ -107,10 +116,19 @@ public actor ProviderRuntimeRegistry {
     private var currentLease: ProviderRuntimeLease?
     private var generation: UInt64 = 0
     private var latestSignaledRevision: UInt64?
+    private var leasePublicationPending = false
     private var observationTask: Task<Void, Never>?
     private var activeOperations: [UUID: @Sendable () -> Void] = [:]
     private var generationTransition: GenerationTransition?
     private var generationTransitionWaitObserver: (@Sendable () -> Void)?
+    private var revisionObservationObserver: (@Sendable (UInt64) -> Void)?
+    private var lastCompletedGenerationTransitionID: UUID?
+
+    private struct GenerationTransitionResult {
+        let id: UUID
+        let generation: UInt64
+        let revision: UInt64
+    }
 
     public init(
         revisionLoader: @escaping RevisionLoader = {
@@ -142,59 +160,93 @@ public actor ProviderRuntimeRegistry {
     }
 
     public func leaseForEligibleDispatch() async -> ProviderRuntimeLease {
-        await waitForGenerationTransitionIfNeeded()
-        startObservationIfNeeded()
-        let diskRevision = await refreshDiskRevisionIfNeeded()
-        let expectedRevision = diskRevision ?? latestSignaledRevision
+        while true {
+            await waitForGenerationTransitionIfNeeded()
+            startObservationIfNeeded()
+            let diskRevision = await refreshDiskRevisionIfNeeded()
+            guard generationTransition == nil else { continue }
 
-        if let currentLease,
-           currentLease.generation == generation,
-           currentLease.provider != nil,
-           expectedRevision == nil || expectedRevision == currentLease.revision {
-            return currentLease
-        }
-
-        guard let loaded = runtimeLoader() else {
+            let expectedRevision = max(
+                diskRevision ?? 0,
+                latestSignaledRevision ?? 0
+            )
             if let currentLease,
                currentLease.generation == generation,
-               expectedRevision == nil || expectedRevision == currentLease.revision {
+               !leasePublicationPending,
+               currentLease.provider != nil,
+               currentLease.revision >= expectedRevision {
                 return currentLease
             }
-            if let currentLease, currentLease.generation == generation {
-                await advanceGeneration(
-                    revision: expectedRevision ?? currentLease.revision,
-                    fingerprint: String(repeating: "0", count: 64),
-                    providerConfigured: false
-                )
-            }
-            return installUnavailableLease(revision: diskRevision ?? expectedRevision ?? 0)
-        }
 
-        let providerPresenceChanged = (currentLease?.provider == nil) != (loaded.provider == nil)
-        let sourceChanged = currentLease.map {
-            $0.revision != loaded.revision || $0.fingerprint != loaded.fingerprint || providerPresenceChanged
-        } ?? true
-        if sourceChanged,
-           currentLease?.generation == generation || currentLease == nil {
-            await advanceGeneration(
-                revision: loaded.revision,
+            guard let loaded = runtimeLoader() else {
+                let unavailableRevision = max(
+                    expectedRevision,
+                    currentLease?.revision ?? 0
+                )
+                if let currentLease,
+                   currentLease.generation == generation,
+                   currentLease.revision >= unavailableRevision {
+                    return currentLease
+                }
+                if currentLease == nil, generation == 0 {
+                    return installUnavailableLease(revision: unavailableRevision)
+                }
+                if currentLease == nil || currentLease?.generation == generation {
+                    let transition = await advanceGeneration(
+                        revision: unavailableRevision,
+                        fingerprint: Self.unavailableFingerprint,
+                        providerConfigured: false
+                    )
+                    guard isStable(transition) else { continue }
+                    continue
+                }
+                return installUnavailableLease(revision: unavailableRevision)
+            }
+
+            let loadedRevision = loaded.revision
+            let acceptedRevision = max(
+                expectedRevision,
+                currentLease?.revision ?? 0
+            )
+            guard loadedRevision >= acceptedRevision else {
+                return installUnavailableLease(revision: acceptedRevision)
+            }
+            rememberRevision(loadedRevision)
+
+            if let currentLease,
+               currentLease.generation == generation {
+                if leasePublicationPending {
+                    if loadedRevision > currentLease.revision {
+                        let transition = await advanceGeneration(
+                            revision: loadedRevision,
+                            fingerprint: loaded.fingerprint,
+                            providerConfigured: loaded.provider != nil
+                        )
+                        guard isStable(transition) else { continue }
+                        continue
+                    }
+                    guard loadedRevision == currentLease.revision,
+                          currentLease.fingerprint == Self.unavailableFingerprint
+                            || currentLease.fingerprint == loaded.fingerprint else {
+                        return currentLease
+                    }
+                    return publishLoadedLease(loaded)
+                }
+
+                let providerPresenceChanged = (currentLease.provider == nil) != (loaded.provider == nil)
+                let sourceChanged = currentLease.revision != loadedRevision
+                    || currentLease.fingerprint != loaded.fingerprint
+                    || providerPresenceChanged
+                guard sourceChanged else { return currentLease }
+            }
+
+            let transition = await advanceGeneration(
+                revision: loadedRevision,
                 fingerprint: loaded.fingerprint,
                 providerConfigured: loaded.provider != nil
             )
+            guard isStable(transition) else { continue }
         }
-        if let latestSignaledRevision, latestSignaledRevision > loaded.revision {
-            return installUnavailableLease(revision: latestSignaledRevision)
-        }
-        let lease = ProviderRuntimeLease(
-            revision: loaded.revision,
-            generation: generation,
-            fingerprint: loaded.fingerprint,
-            provider: loaded.provider
-        )
-        currentLease = lease
-        latestSignaledRevision = loaded.revision
-        diagnosticSink.record(event(.loaded, lease: lease))
-        return lease
     }
 
     public func perform<T: Sendable>(
@@ -222,6 +274,7 @@ public actor ProviderRuntimeRegistry {
         } catch {
             activeOperations[operationID] = nil
             await refreshDiskRevisionIfNeeded()
+            await waitForGenerationTransitionIfNeeded()
             if !isCurrent(lease) {
                 diagnosticSink.record(event(.staleResultDropped, lease: lease))
                 throw ProviderRuntimeRegistryError.staleGeneration
@@ -230,6 +283,7 @@ public actor ProviderRuntimeRegistry {
         }
         activeOperations[operationID] = nil
         await refreshDiskRevisionIfNeeded()
+        await waitForGenerationTransitionIfNeeded()
         guard isCurrent(lease) else {
             diagnosticSink.record(event(.staleResultDropped, lease: lease))
             throw ProviderRuntimeRegistryError.staleGeneration
@@ -241,7 +295,9 @@ public actor ProviderRuntimeRegistry {
         using lease: ProviderRuntimeLease,
         operation: @Sendable () throws -> T
     ) async throws -> T {
+        await waitForGenerationTransitionIfNeeded()
         await refreshDiskRevisionIfNeeded()
+        await waitForGenerationTransitionIfNeeded()
         guard isCurrent(lease) else {
             diagnosticSink.record(event(.staleResultDropped, lease: lease))
             throw ProviderRuntimeRegistryError.staleGeneration
@@ -257,6 +313,12 @@ public actor ProviderRuntimeRegistry {
         _ observer: (@Sendable () -> Void)?
     ) {
         generationTransitionWaitObserver = observer
+    }
+
+    func setRevisionObservationObserverForTesting(
+        _ observer: (@Sendable (UInt64) -> Void)?
+    ) {
+        revisionObservationObserver = observer
     }
 
     private func startObservationIfNeeded() {
@@ -275,14 +337,15 @@ public actor ProviderRuntimeRegistry {
     }
 
     private func providerRevisionDidChange(_ revision: UInt64) async {
-        let knownRevision = max(latestSignaledRevision ?? 0, currentLease?.revision ?? 0)
+        revisionObservationObserver?(revision)
+        let knownRevision = highestKnownRevision()
         guard revision > knownRevision else {
             return
         }
-        latestSignaledRevision = revision
-        await advanceGeneration(
+        rememberRevision(revision)
+        _ = await advanceGeneration(
             revision: revision,
-            fingerprint: String(repeating: "0", count: 64),
+            fingerprint: Self.unavailableFingerprint,
             providerConfigured: false
         )
     }
@@ -293,67 +356,110 @@ public actor ProviderRuntimeRegistry {
         guard let diskRevision = revisionLoader() else {
             return nil
         }
-        guard let currentLease,
-              currentLease.generation == generation,
-              currentLease.revision != diskRevision else {
+        guard diskRevision > highestKnownRevision() else {
             return diskRevision
         }
-        latestSignaledRevision = max(latestSignaledRevision ?? 0, diskRevision)
-        await advanceGeneration(
+        rememberRevision(diskRevision)
+        let transition = await advanceGeneration(
             revision: diskRevision,
-            fingerprint: String(repeating: "0", count: 64),
+            fingerprint: Self.unavailableFingerprint,
             providerConfigured: false
         )
-        return diskRevision
+        if !isStable(transition) {
+            await waitForGenerationTransitionIfNeeded()
+        }
+        return highestKnownRevision(atLeast: diskRevision)
     }
 
     private func advanceGeneration(
         revision: UInt64,
         fingerprint: String,
         providerConfigured: Bool
-    ) async {
-        if let transitionID = generationTransition?.id {
+    ) async -> GenerationTransitionResult? {
+        rememberRevision(revision)
+        if let transition = generationTransition {
             mergeGenerationTransition(
                 revision: revision,
                 fingerprint: fingerprint,
                 providerConfigured: providerConfigured
             )
-            await waitForGenerationTransition(transitionID)
-            return
+            await waitForGenerationTransition(transition.id)
+            return GenerationTransitionResult(
+                id: lastCompletedGenerationTransitionID ?? transition.id,
+                generation: generation,
+                revision: highestKnownRevision(atLeast: transition.revision)
+            )
         }
 
         let oldGeneration = generation
         let newGeneration = oldGeneration &+ 1
-        let transitionID = UUID()
+        var transitionID = UUID()
         generationTransition = GenerationTransition(
             id: transitionID,
             newGeneration: newGeneration,
             revision: revision,
             fingerprint: fingerprint,
-            providerConfigured: providerConfigured
+            providerConfigured: providerConfigured,
+            pendingTarget: nil
         )
-        if let currentLease {
-            await requestGate.invalidate(
-                providerIdentity: currentLease.fingerprint,
-                expectedGeneration: oldGeneration,
-                newGeneration: newGeneration
-            )
-        }
-        guard generationTransition?.id == transitionID else { return }
-        generation = newGeneration
-        await capabilityReset()
-        guard let completedTransition = generationTransition,
-              completedTransition.id == transitionID else { return }
-        diagnosticSink.record(
-            ProviderRuntimeDiagnosticEvent(
-                stage: .generationChanged,
+
+        while true {
+            guard let activeTransition = generationTransition,
+                  activeTransition.id == transitionID else { return nil }
+            if let currentLease {
+                await requestGate.invalidate(
+                    providerIdentity: currentLease.fingerprint,
+                    expectedGeneration: generation,
+                    newGeneration: activeTransition.newGeneration
+                )
+            }
+            guard generationTransition?.id == transitionID else { return nil }
+            generation = activeTransition.newGeneration
+            await capabilityReset()
+            guard let completedTransition = generationTransition,
+                  completedTransition.id == transitionID else { return nil }
+
+            let lease = ProviderRuntimeLease(
                 revision: completedTransition.revision,
                 generation: completedTransition.newGeneration,
                 fingerprint: completedTransition.fingerprint,
-                providerConfigured: completedTransition.providerConfigured
+                provider: nil
             )
-        )
-        completeGenerationTransition(transitionID)
+            currentLease = lease
+            leasePublicationPending = true
+            rememberRevision(lease.revision)
+            diagnosticSink.record(
+                ProviderRuntimeDiagnosticEvent(
+                    stage: .generationChanged,
+                    revision: completedTransition.revision,
+                    generation: completedTransition.newGeneration,
+                    fingerprint: completedTransition.fingerprint,
+                    providerConfigured: completedTransition.providerConfigured
+                )
+            )
+
+            guard let pendingTarget = completedTransition.pendingTarget else {
+                completeGenerationTransition(transitionID)
+                return GenerationTransitionResult(
+                    id: transitionID,
+                    generation: lease.generation,
+                    revision: lease.revision
+                )
+            }
+
+            let nextTransitionID = UUID()
+            let nextGeneration = lease.generation &+ 1
+            generationTransition = GenerationTransition(
+                id: nextTransitionID,
+                newGeneration: nextGeneration,
+                revision: pendingTarget.revision,
+                fingerprint: pendingTarget.fingerprint,
+                providerConfigured: pendingTarget.providerConfigured,
+                pendingTarget: nil,
+                waiters: completedTransition.waiters
+            )
+            transitionID = nextTransitionID
+        }
     }
 
     private func mergeGenerationTransition(
@@ -363,15 +469,40 @@ public actor ProviderRuntimeRegistry {
     ) {
         guard var transition = generationTransition,
               revision >= transition.revision else { return }
-        transition.revision = revision
-        transition.fingerprint = fingerprint
-        transition.providerConfigured = providerConfigured
+        if revision == transition.revision {
+            guard transition.fingerprint == Self.unavailableFingerprint,
+                  fingerprint != Self.unavailableFingerprint else {
+                return
+            }
+            transition.fingerprint = fingerprint
+            transition.providerConfigured = providerConfigured
+            generationTransition = transition
+            return
+        }
+
+        let target = GenerationTransitionTarget(
+            revision: revision,
+            fingerprint: fingerprint,
+            providerConfigured: providerConfigured
+        )
+        if let pendingTarget = transition.pendingTarget,
+           pendingTarget.revision >= revision {
+            guard pendingTarget.revision == revision,
+                  pendingTarget.fingerprint == Self.unavailableFingerprint,
+                  fingerprint != Self.unavailableFingerprint else {
+                return
+            }
+            transition.pendingTarget = target
+        } else {
+            transition.pendingTarget = target
+        }
         generationTransition = transition
     }
 
     private func waitForGenerationTransitionIfNeeded() async {
-        guard let transitionID = generationTransition?.id else { return }
-        await waitForGenerationTransition(transitionID)
+        while let transitionID = generationTransition?.id {
+            await waitForGenerationTransition(transitionID)
+        }
     }
 
     private func waitForGenerationTransition(_ transitionID: UUID) async {
@@ -390,6 +521,7 @@ public actor ProviderRuntimeRegistry {
     private func completeGenerationTransition(_ transitionID: UUID) {
         guard let transition = generationTransition,
               transition.id == transitionID else { return }
+        lastCompletedGenerationTransitionID = transitionID
         generationTransition = nil
         transition.waiters.forEach { $0.resume() }
     }
@@ -398,21 +530,71 @@ public actor ProviderRuntimeRegistry {
         if generation == 0 {
             generation = 1
         }
+        let acceptedRevision = highestKnownRevision(atLeast: revision)
+        if let currentLease,
+           currentLease.generation == generation,
+           currentLease.provider == nil,
+           currentLease.revision >= acceptedRevision {
+            return currentLease
+        }
         let lease = ProviderRuntimeLease(
-            revision: revision,
+            revision: acceptedRevision,
             generation: generation,
-            fingerprint: String(repeating: "0", count: 64),
+            fingerprint: Self.unavailableFingerprint,
             provider: nil
         )
         currentLease = lease
+        leasePublicationPending = false
+        rememberRevision(lease.revision)
         return lease
     }
 
+    private func publishLoadedLease(
+        _ loaded: ProviderRuntimeLoadResult
+    ) -> ProviderRuntimeLease {
+        let lease = ProviderRuntimeLease(
+            revision: loaded.revision,
+            generation: generation,
+            fingerprint: loaded.fingerprint,
+            provider: loaded.provider
+        )
+        currentLease = lease
+        leasePublicationPending = false
+        rememberRevision(lease.revision)
+        diagnosticSink.record(event(.loaded, lease: lease))
+        return lease
+    }
+
+    private func highestKnownRevision(atLeast revision: UInt64 = 0) -> UInt64 {
+        max(
+            revision,
+            latestSignaledRevision ?? 0,
+            currentLease?.revision ?? 0
+        )
+    }
+
+    private func rememberRevision(_ revision: UInt64) {
+        latestSignaledRevision = max(latestSignaledRevision ?? 0, revision)
+    }
+
+    private func isStable(_ transition: GenerationTransitionResult?) -> Bool {
+        guard let transition else { return false }
+        return lastCompletedGenerationTransitionID == transition.id
+            && generationTransition == nil
+            && generation == transition.generation
+            && currentLease?.generation == transition.generation
+            && currentLease?.revision == transition.revision
+            && highestKnownRevision() == transition.revision
+    }
+
     private func isCurrent(_ lease: ProviderRuntimeLease) -> Bool {
-        generation == lease.generation
+        generationTransition == nil
+            && generation == lease.generation
             && currentLease?.generation == lease.generation
             && currentLease?.revision == lease.revision
             && currentLease?.fingerprint == lease.fingerprint
+            && (currentLease?.provider != nil) == (lease.provider != nil)
+            && highestKnownRevision() == lease.revision
     }
 
     private func event(
