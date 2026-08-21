@@ -348,7 +348,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
 
         let staleDropped = await waitUntil {
             diagnosticSink.events.contains {
-                $0.stage == .staleResultDropped && $0.reason == "ready"
+                $0.stage == .staleResultDropped && $0.reason == "snapshot_mismatch"
             }
         }
         XCTAssertTrue(staleDropped, "\(diagnosticSink.events)")
