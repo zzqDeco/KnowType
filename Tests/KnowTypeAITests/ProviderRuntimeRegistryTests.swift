@@ -705,9 +705,17 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
     func testNewGenerationWaiterWakesWhenOldOperationFinishesStale() async throws {
         let gate = ProviderRequestGate()
         let operation = SuspendedGateOperation()
+        let completionProbe = GateAttemptCompletionProbe()
         let oldRequest = Task {
             do {
-                _ = try await gate.execute(providerIdentity: "generation-provider", generation: 0) {
+                _ = try await gate.executeWithHardTimeout(
+                    providerIdentity: "generation-provider",
+                    generation: 0,
+                    timeoutNanoseconds: 5_000_000_000,
+                    onAttemptCompletion: {
+                        await completionProbe.recordCompletion()
+                    }
+                ) {
                     await operation.run()
                     return 1
                 }
@@ -721,6 +729,13 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         try await waitUntil { await operation.started }
 
         await gate.invalidate(providerIdentity: "generation-provider", generation: 0)
+        let preflightWhileOldTransportRuns = await gate.preflight(
+            providerIdentity: "generation-provider",
+            generation: 1
+        )
+        XCTAssertEqual(preflightWhileOldTransportRuns, .busy)
+        let completionCountBeforeOldTransportFinishes = await completionProbe.completionCount
+        XCTAssertEqual(completionCountBeforeOldTransportFinishes, 0)
         let waiterProbe = RequestGateProbe()
         let waiter = Task {
             await gate.waitForAvailability(providerIdentity: "generation-provider", generation: 1)
@@ -734,6 +749,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         await oldRequest.value
         try await waitUntil { await waiterProbe.availabilityFinished }
         await waiter.value
+        let finalCompletionCount = await completionProbe.completionCount
+        XCTAssertEqual(finalCompletionCount, 1)
     }
 
     func testTimedOutGateAttemptRecordsOneFailureWhenCancelledOperationLaterFails() async throws {
@@ -915,6 +932,127 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertEqual(replacement, 2)
         XCTAssertEqual(replacementStartCount, 1)
         XCTAssertEqual(testProbe.admittedAttemptCount, 2)
+    }
+
+    func testGenerationInvalidateBeforeTransportAbortsOnlyStaleAttempt() async throws {
+        let identity = "invalidate-before-transport"
+        let testProbe = ProviderRequestGateTestProbe()
+        let admissionPause = GateAttemptAdmissionPause()
+        let staleOperationProbe = RequestGateProbe()
+        let completionProbe = GateAttemptCompletionProbe()
+        let gate = ProviderRequestGate(
+            testProbe: testProbe,
+            afterAttemptAdmission: {
+                await admissionPause.suspendIfNeeded()
+            }
+        )
+        let staleRequest = Task<Int, Error> {
+            try await gate.executeWithHardTimeout(
+                providerIdentity: identity,
+                generation: 0,
+                timeoutNanoseconds: 1_000_000_000,
+                onAttemptCompletion: {
+                    await completionProbe.recordCompletion()
+                }
+            ) {
+                await staleOperationProbe.markStarted()
+                return 1
+            }
+        }
+
+        do {
+            try await waitUntil { await admissionPause.hasEntered }
+        } catch {
+            staleRequest.cancel()
+            await admissionPause.release()
+            _ = try? await staleRequest.value
+            throw error
+        }
+        let entered = await admissionPause.hasEntered
+        guard entered else {
+            staleRequest.cancel()
+            await admissionPause.release()
+            _ = try? await staleRequest.value
+            return
+        }
+
+        await gate.invalidate(providerIdentity: identity, generation: 0)
+        let completionCountAfterInvalidate = await completionProbe.completionCount
+        let staleStartsAfterInvalidate = await staleOperationProbe.startCount
+        XCTAssertEqual(completionCountAfterInvalidate, 1)
+        XCTAssertEqual(staleStartsAfterInvalidate, 0)
+
+        let replacementOperation = SuspendedGateOperation()
+        let replacement = Task<Int, Error> {
+            try await gate.execute(providerIdentity: identity, generation: 1) {
+                await replacementOperation.run()
+                return 2
+            }
+        }
+        do {
+            try await waitUntil { await replacementOperation.started }
+        } catch {
+            staleRequest.cancel()
+            replacement.cancel()
+            await admissionPause.release()
+            await replacementOperation.finish()
+            _ = try? await staleRequest.value
+            _ = try? await replacement.value
+            throw error
+        }
+        let replacementStarted = await replacementOperation.started
+        guard replacementStarted else {
+            staleRequest.cancel()
+            replacement.cancel()
+            await admissionPause.release()
+            await replacementOperation.finish()
+            _ = try? await staleRequest.value
+            _ = try? await replacement.value
+            return
+        }
+
+        var observedStaleGeneration = false
+        do {
+            _ = try await staleRequest.value
+            XCTFail("expected stale generation after pre-transport invalidation")
+        } catch ProviderRequestGateError.staleGeneration {
+            observedStaleGeneration = true
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        XCTAssertTrue(observedStaleGeneration)
+
+        let newAttemptStillBusy = await gate.preflight(
+            providerIdentity: identity,
+            generation: 1
+        )
+        XCTAssertEqual(newAttemptStillBusy, .busy)
+
+        await admissionPause.release()
+        do {
+            try await waitUntil { testProbe.rejectedTransportStartCount == 1 }
+        } catch {
+            replacement.cancel()
+            await replacementOperation.finish()
+            _ = try? await replacement.value
+            throw error
+        }
+        let rejectedStarts = testProbe.rejectedTransportStartCount
+        let staleProviderStarts = await staleOperationProbe.startCount
+        let finalCompletionCount = await completionProbe.completionCount
+        XCTAssertEqual(rejectedStarts, 1)
+        XCTAssertEqual(staleProviderStarts, 0)
+        XCTAssertEqual(finalCompletionCount, 1)
+
+        await replacementOperation.finish()
+        let replacementValue = try await replacement.value
+        XCTAssertEqual(replacementValue, 2)
+        XCTAssertEqual(testProbe.admittedAttemptCount, 2)
+        let cooldown = await gate.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 1
+        )
+        XCTAssertNil(cooldown)
     }
 
     func testHardTimeoutAttemptCallerCancellationBeforeDeadlineDoesNotRecordFailure() async throws {

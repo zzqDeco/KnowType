@@ -93,7 +93,11 @@ waiters, and records no failure. A timeout that wins before `beginTransport`
 atomically records cooldown, releases only that attempt, runs its completion,
 and prevents the late operation task from invoking the provider. A timeout
 after transport starts records once while retaining ownership through its
-fenced real completion.
+fenced real completion. The gate actor associates each active attempt with the
+same phase fence and exactly-once completion used by its operation task.
+Generation invalidation aborts and completes an admitted attempt without
+cooldown, allowing the new generation to admit immediately; an already-started
+transport remains busy until its real stale-fenced completion.
 
 ## Input Client Compatibility
 

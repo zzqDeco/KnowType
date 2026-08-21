@@ -39,7 +39,11 @@ of already-started recommendations, and independent provider failure budgets.
   wakes waiters. Timeout ownership before transport atomically records cooldown,
   releases the matching attempt, completes its callback, and fences the late
   operation task before provider invocation. Once transport starts, timeout
-  records once and only the real fenced completion releases its lease.
+  records once and only the real fenced completion releases its lease. The gate
+  actor binds each active id and generation to that same phase fence and
+  exactly-once completion. Generation invalidation aborts an admitted attempt
+  without cooldown and permits immediate new-generation admission, while a
+  started transport remains busy until its stale-fenced real completion.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is

@@ -16,6 +16,12 @@
 
 - Every admitted dispatch receives a non-reusable attempt id. Timeout failure is
   atomically recorded for that id before timeout is visible to the caller.
+- The actor associates each active attempt id and generation with the exact
+  phase fence and exactly-once completion callback used by its operation task.
+  Generation invalidation atomically aborts an admitted attempt, clears only
+  that id, wakes waiters, and runs completion without cooldown. A started or
+  started-timeout-owned transport retains the active lease until its real
+  stale-fenced completion.
 - `beginTransport` succeeds only from the admitted phase. If timeout ownership
   wins first, the gate records cooldown, releases that matching attempt, wakes
   waiters, and runs attempt completion without starting the provider. If
@@ -41,6 +47,7 @@
 ## Tests
 
 - `ProviderRuntimeRegistryTests` covers admission-to-transport cancellation,
-  pre-transport timeout rejection, timeout/completion interleaving,
-  single-failure ownership, generation invalidation, fail-closed persistence,
-  value-only preflight, and waiter release.
+  pre-transport timeout and generation-invalidation rejection,
+  timeout/completion interleaving, single-failure ownership, started-transport
+  generation fencing, fail-closed persistence, value-only preflight, and
+  waiter release.

@@ -167,18 +167,18 @@ private final class ProviderRequestAttemptFence: @unchecked Sendable {
         }
     }
 
-    func claimAbortBeforeTransport() -> Bool {
+    func abortBeforeTransportIfPossible() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard phase == .admitted else { return false }
-        phase = .aborted
-        return true
-    }
-
-    var wasAbortedBeforeTransport: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return phase == .aborted
+        switch phase {
+        case .admitted:
+            phase = .aborted
+            return true
+        case .timeoutOwnedBeforeTransport, .aborted:
+            return true
+        case .transportStarted, .timeoutOwnedTransport:
+            return false
+        }
     }
 }
 
@@ -214,6 +214,14 @@ public actor ProviderRequestGate {
     private static let maximumPersistenceByteCount = 64 * 1_024
     private static let maximumPersistedEntryCount = 256
 
+    private struct Attempt: Sendable {
+        let id: UUID
+        let identityHash: String
+        let generation: UInt64
+        let fence: ProviderRequestAttemptFence
+        let completion: ProviderRequestAttemptCompletion
+    }
+
     private struct State {
         var generation: UInt64 = 0
         var activeAttemptID: UUID?
@@ -223,12 +231,6 @@ public actor ProviderRequestGate {
         var failureClass: ProviderRequestFailureClass?
 
         var inFlight: Bool { activeAttemptID != nil }
-    }
-
-    private struct Attempt: Sendable {
-        var id: UUID
-        var identityHash: String
-        var generation: UInt64
     }
 
     private struct PersistedEntry: Codable {
@@ -248,6 +250,7 @@ public actor ProviderRequestGate {
     }
 
     private var states: [String: State] = [:]
+    private var activeAttempts: [String: Attempt] = [:]
     private let now: @Sendable () -> Date
     private let persistenceURL: URL?
     private let fileManager: FileManager
@@ -289,11 +292,20 @@ public actor ProviderRequestGate {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    public func invalidate(providerIdentity: String, generation: UInt64) {
+    public func invalidate(providerIdentity: String, generation: UInt64) async {
         loadPersistedStateIfNeeded()
         let key = Self.identityHash(providerIdentity)
         var state = state(for: key)
         guard generation >= state.generation else { return }
+        let abortedCompletion: ProviderRequestAttemptCompletion?
+        if let activeAttempt = activeAttempts[key] {
+            abortedCompletion = closePreTransportAttemptIfMatching(
+                activeAttempt,
+                state: &state
+            )
+        } else {
+            abortedCompletion = nil
+        }
         state.generation = generation &+ 1
         state.cooldownUntil = nil
         state.failureClass = nil
@@ -304,6 +316,7 @@ public actor ProviderRequestGate {
             clearPersistedEntry(for: key)
         }
         resumeAvailabilityWaiters(for: key)
+        await abortedCompletion?.run()
     }
 
     public func cooldownDeadline(providerIdentity: String, generation: UInt64) -> Date? {
@@ -397,28 +410,30 @@ public actor ProviderRequestGate {
         generation: UInt64,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
+        let fence = ProviderRequestAttemptFence()
+        let completion = ProviderRequestAttemptCompletion(callback: {})
         let attempt = try beginAttempt(
             providerIdentity: providerIdentity,
-            generation: generation
+            generation: generation,
+            fence: fence,
+            completion: completion
         )
-        let fence = ProviderRequestAttemptFence()
         return try await withTaskCancellationHandler {
             do {
                 await afterAttemptAdmission?()
                 try Task.checkCancellation()
-                guard fence.beginTransport() else { throw CancellationError() }
+                guard attempt.fence.beginTransport() else { throw CancellationError() }
                 return try await perform(attempt: attempt, operation: operation)
             } catch {
                 if Self.isCancellation(error) {
-                    _ = fence.claimAbortBeforeTransport()
-                    if fence.wasAbortedBeforeTransport {
+                    if attempt.fence.abortBeforeTransportIfPossible() {
                         abortAttempt(attempt)
                     }
                 }
                 throw error
             }
         } onCancel: {
-            guard fence.claimAbortBeforeTransport() else { return }
+            guard attempt.fence.abortBeforeTransportIfPossible() else { return }
             Task { await self.abortAttempt(attempt) }
         }
     }
@@ -431,17 +446,19 @@ public actor ProviderRequestGate {
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         let completion = ProviderRequestAttemptCompletion(callback: onAttemptCompletion)
+        let fence = ProviderRequestAttemptFence()
         let attempt: Attempt
         do {
             attempt = try beginAttempt(
                 providerIdentity: providerIdentity,
-                generation: generation
+                generation: generation,
+                fence: fence,
+                completion: completion
             )
         } catch {
             await completion.run()
             throw error
         }
-        let fence = ProviderRequestAttemptFence()
         let afterAttemptAdmission = self.afterAttemptAdmission
         let testProbe = self.testProbe
         return try await withTaskCancellationHandler {
@@ -452,7 +469,6 @@ public actor ProviderRequestGate {
                     onTimeout: { claimTimeout in
                         guard let ownership = try await self.recordTimeout(
                             for: attempt,
-                            fence: fence,
                             claimingTimeout: claimTimeout
                         ) else { return false }
                         if case .beforeTransport = ownership {
@@ -462,7 +478,7 @@ public actor ProviderRequestGate {
                     }
                 ) {
                     await afterAttemptAdmission?()
-                    guard fence.beginTransport() else {
+                    guard attempt.fence.beginTransport() else {
                         testProbe?.recordRejectedTransportStart()
                         throw CancellationError()
                     }
@@ -477,8 +493,7 @@ public actor ProviderRequestGate {
                 }
             } catch {
                 if Self.isCancellation(error) {
-                    _ = fence.claimAbortBeforeTransport()
-                    if fence.wasAbortedBeforeTransport {
+                    if attempt.fence.abortBeforeTransportIfPossible() {
                         abortAttempt(attempt)
                         await completion.run()
                     }
@@ -486,7 +501,7 @@ public actor ProviderRequestGate {
                 throw error
             }
         } onCancel: {
-            guard fence.claimAbortBeforeTransport() else { return }
+            guard attempt.fence.abortBeforeTransportIfPossible() else { return }
             Task {
                 await self.abortAttempt(attempt)
                 await completion.run()
@@ -496,7 +511,9 @@ public actor ProviderRequestGate {
 
     private func beginAttempt(
         providerIdentity: String,
-        generation: UInt64
+        generation: UInt64,
+        fence: ProviderRequestAttemptFence,
+        completion: ProviderRequestAttemptCompletion
     ) throws -> Attempt {
         loadPersistedStateIfNeeded()
         guard !persistenceBlocked else {
@@ -529,10 +546,17 @@ public actor ProviderRequestGate {
                 failureClass: state.failureClass ?? .transport
             )
         }
-        let attempt = Attempt(id: UUID(), identityHash: key, generation: generation)
+        let attempt = Attempt(
+            id: UUID(),
+            identityHash: key,
+            generation: generation,
+            fence: fence,
+            completion: completion
+        )
         state.activeAttemptID = attempt.id
         state.timedOutAttemptID = nil
         states[key] = state
+        activeAttempts[key] = attempt
         testProbe?.recordAttemptAdmission()
         return attempt
     }
@@ -555,27 +579,51 @@ public actor ProviderRequestGate {
         }
     }
 
+    private func closePreTransportAttemptIfMatching(
+        _ attempt: Attempt,
+        state: inout State
+    ) -> ProviderRequestAttemptCompletion? {
+        guard state.activeAttemptID == attempt.id,
+              activeAttempts[attempt.identityHash]?.id == attempt.id,
+              attempt.fence.abortBeforeTransportIfPossible() else { return nil }
+        state.activeAttemptID = nil
+        if state.timedOutAttemptID == attempt.id {
+            state.timedOutAttemptID = nil
+        }
+        activeAttempts[attempt.identityHash] = nil
+        return attempt.completion
+    }
+
+    private func removeActiveAttemptIfMatching(_ attempt: Attempt) {
+        guard activeAttempts[attempt.identityHash]?.id == attempt.id else { return }
+        activeAttempts[attempt.identityHash] = nil
+    }
+
     private func abortAttempt(_ attempt: Attempt) {
         var state = states[attempt.identityHash, default: State()]
-        guard state.activeAttemptID == attempt.id,
-              state.timedOutAttemptID != attempt.id else { return }
-        state.activeAttemptID = nil
+        guard state.timedOutAttemptID != attempt.id else { return }
+        guard closePreTransportAttemptIfMatching(attempt, state: &state) != nil else { return }
         states[attempt.identityHash] = state
         resumeAvailabilityWaiters(for: attempt.identityHash)
     }
 
     private func recordTimeout(
         for attempt: Attempt,
-        fence: ProviderRequestAttemptFence,
         claimingTimeout: @Sendable () -> Bool
-    ) throws -> ProviderRequestTimeoutOwnership? {
+    ) async throws -> ProviderRequestTimeoutOwnership? {
         var state = states[attempt.identityHash, default: State()]
         guard state.generation == attempt.generation else {
+            let completion = closePreTransportAttemptIfMatching(attempt, state: &state)
+            if completion != nil {
+                states[attempt.identityHash] = state
+                resumeAvailabilityWaiters(for: attempt.identityHash)
+            }
+            await completion?.run()
             throw ProviderRequestGateError.staleGeneration
         }
         guard state.activeAttemptID == attempt.id else { return nil }
         guard state.timedOutAttemptID != attempt.id,
-              let ownership = fence.claimTimeoutOwnership(claimingTimeout) else { return nil }
+              let ownership = attempt.fence.claimTimeoutOwnership(claimingTimeout) else { return nil }
 
         state.failureCount = min(16, state.failureCount + 1)
         state.failureClass = .timeout
@@ -590,6 +638,7 @@ public actor ProviderRequestGate {
         case .beforeTransport:
             state.activeAttemptID = nil
             state.timedOutAttemptID = nil
+            removeActiveAttemptIfMatching(attempt)
         case .transportStarted:
             state.timedOutAttemptID = attempt.id
         }
@@ -607,6 +656,7 @@ public actor ProviderRequestGate {
             throw ProviderRequestGateError.staleGeneration
         }
         state.activeAttemptID = nil
+        removeActiveAttemptIfMatching(attempt)
         let timedOut = state.timedOutAttemptID == attempt.id
         state.timedOutAttemptID = nil
         guard state.generation == attempt.generation else {
@@ -641,6 +691,7 @@ public actor ProviderRequestGate {
             return ProviderRequestGateError.staleGeneration
         }
         state.activeAttemptID = nil
+        removeActiveAttemptIfMatching(attempt)
         let timedOut = state.timedOutAttemptID == attempt.id
         state.timedOutAttemptID = nil
         if state.generation != attempt.generation {
