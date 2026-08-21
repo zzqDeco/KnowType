@@ -776,7 +776,11 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   while always allowing one event to make progress; the 600-second interval
   after a successful commit cannot be bypassed by the batch threshold
 - archives processed event files under `~/.knowtype/events/processed/` and,
-  after successful digests only, keeps at most 7 days, 100 files, and 10 MiB
+  after every successful local archive, best-effort keeps at most 7 days, 100
+  files, and 10 MiB in the same existing file-lock critical section
+- protected-only, blank, malformed, unsendable, oversized, and persisted claim
+  recovery archives use that same retention path; startup or initialization
+  without an archive does not scan or rewrite `processed/`
 - archives protected-only prefixes locally without advancing the 600-second
   provider-success interval; an unprotected tail follows normal pending
   scheduling

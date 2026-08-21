@@ -1582,6 +1582,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         policy.processedMaximumFileCount = 1
         let probe = TypingEventStoreTestProbe()
         probe.failNextArchiveDeletions(10)
+        probe.failNextPermissionChanges(7)
         let eventStore = TypingEventStore(
             eventsDirectoryURL: eventsDirectory,
             retentionPolicy: policy,
@@ -1589,10 +1590,12 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             now: { fixedNow }
         )
         let environmentURL = directory.appendingPathComponent("ENV.md")
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- Completed.")
         let runtime = AIContextMemoryRuntime(
-            provider: DigestLLMProvider(generatedMarkdown: "## Global Style\n- Completed."),
+            provider: provider,
             eventStore: eventStore,
-            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            environmentStore: environmentStore,
             batchSize: 1,
             minimumInterval: 600,
             requestGate: ProviderRequestGate()
@@ -1603,6 +1606,163 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(try eventStore.inventory().eventCount, 0)
         XCTAssertTrue(try String(contentsOf: environmentURL, encoding: .utf8).contains("Completed"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: oldArchive.path))
+        let providerRequests = await provider.requests
+        XCTAssertEqual(providerRequests.count, 1)
+        XCTAssertNil(try environmentStore.loadDigestClaim())
+    }
+
+    func testProtectedOnlyLocalArchivesApplyRetentionWithoutProviderParticipation() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let processedDirectory = eventsDirectory.appendingPathComponent("processed")
+        let fixedNow = Date()
+        var policy = TypingEventRetentionPolicy.default
+        policy.processedMaximumFileCount = 3
+        policy.processedMaximumByteCount = 768
+        let seededArchives = try seedProcessedRetentionArchives(
+            at: processedDirectory,
+            now: fixedNow
+        )
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            now: { fixedNow }
+        )
+        let provider = FailingDigestLLMProvider()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: { fixedNow }
+        )
+
+        for index in 0..<8 {
+            await runtime.record(
+                AITypingEvent(
+                    rawInput: "protected:item-\(index)",
+                    committedText: "protected:item-\(index)",
+                    commitKind: .raw,
+                    candidateSource: "protected"
+                )
+            )
+        }
+
+        let archives = try FileManager.default.contentsOfDirectory(
+            at: processedDirectory,
+            includingPropertiesForKeys: [.fileSizeKey]
+        ).filter { $0.lastPathComponent.hasPrefix("typing-events-") }
+        let totalBytes = try archives.reduce(0) { partial, url in
+            partial + (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        }
+        let pendingEvents = try await eventStore.pendingEvents()
+        let providerRequestCount = await provider.requestCount
+
+        XCTAssertEqual(providerRequestCount, 0)
+        XCTAssertTrue(pendingEvents.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: seededArchives.expired.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: seededArchives.oldestRecent.path))
+        XCTAssertGreaterThan(archives.count, 0)
+        XCTAssertLessThanOrEqual(archives.count, policy.processedMaximumFileCount)
+        XCTAssertLessThanOrEqual(totalBytes, policy.processedMaximumByteCount)
+    }
+
+    func testInvalidAndOversizedLocalArchiveRoutesApplyRetention() async throws {
+        let routes = ["blank", "undecodable", "unsendable", "empty request content", "oversized"]
+
+        for route in routes {
+            let directory = makeTemporaryDirectory()
+            let eventsDirectory = directory.appendingPathComponent("events")
+            let processedDirectory = eventsDirectory.appendingPathComponent("processed")
+            let fixedNow = Date()
+            var policy = TypingEventRetentionPolicy.default
+            policy.processedMaximumFileCount = 2
+            policy.processedMaximumByteCount = route == "oversized" ? 400_000 : 4_096
+            policy.maximumDigestEventCount = 2
+            let seededArchives = try seedProcessedRetentionArchives(
+                at: processedDirectory,
+                now: fixedNow
+            )
+            let eventStore = TypingEventStore(
+                eventsDirectoryURL: eventsDirectory,
+                retentionPolicy: policy,
+                now: { fixedNow }
+            )
+
+            if route == "empty request content" {
+                try await eventStore.append(
+                    makeContextEvent(rawInput: "empty-request", committedText: "空请求")
+                )
+            } else {
+                let pendingData: Data
+                switch route {
+                case "blank":
+                    pendingData = Data(repeating: 0x0A, count: 2)
+                case "undecodable":
+                    pendingData = Data("{\"incomplete\":\n".utf8)
+                case "unsendable":
+                    pendingData = Data([0xFF, 0xFE, 0xFD, 0x0A])
+                case "oversized":
+                    var line = try JSONEncoder().encode(
+                        makeContextEvent(
+                            rawInput: String(repeating: "x", count: 300_000),
+                            committedText: "legacy"
+                        )
+                    )
+                    line.append(0x0A)
+                    pendingData = line
+                default:
+                    XCTFail("unhandled local archive route: \(route)")
+                    continue
+                }
+                try pendingData.write(
+                    to: eventsDirectory.appendingPathComponent("typing-events.jsonl")
+                )
+                TypingEventStore.resetInventoryCacheForTesting(eventsDirectoryURL: eventsDirectory)
+            }
+
+            let decodedSnapshot = try eventStore.pendingDigestSnapshot()
+            let snapshot: TypingEventSnapshot
+            if route == "empty request content" {
+                snapshot = TypingEventSnapshot(
+                    rawData: decodedSnapshot.rawData,
+                    requestData: Data(),
+                    events: decodedSnapshot.events,
+                    claimedEventCount: decodedSnapshot.claimedEventCount
+                )
+            } else {
+                snapshot = decodedSnapshot
+            }
+            XCTAssertTrue(
+                snapshot.requestContent.isEmpty == (route == "empty request content"),
+                route
+            )
+
+            try eventStore.archivePendingEvents(matching: snapshot)
+
+            let archives = try FileManager.default.contentsOfDirectory(
+                at: processedDirectory,
+                includingPropertiesForKeys: [.fileSizeKey]
+            ).filter { $0.lastPathComponent.hasPrefix("typing-events-") }
+            let totalBytes = try archives.reduce(0) { partial, url in
+                partial + (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+            }
+            let pendingEvents = try await eventStore.pendingEvents()
+
+            XCTAssertTrue(pendingEvents.isEmpty, route)
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: seededArchives.expired.path),
+                route
+            )
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: seededArchives.oldestRecent.path),
+                route
+            )
+            XCTAssertLessThanOrEqual(archives.count, policy.processedMaximumFileCount, route)
+            XCTAssertLessThanOrEqual(totalBytes, policy.processedMaximumByteCount, route)
+        }
     }
 
     func testArchiveFailureWithAppendedTailRecoversClaimPrefixWithoutProviderRetry() async throws {
@@ -2590,7 +2750,15 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let directory = makeTemporaryDirectory()
         let eventsDirectory = directory.appendingPathComponent("events")
         let environmentURL = directory.appendingPathComponent("ENV.md")
-        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let fixedNow = Date()
+        var policy = TypingEventRetentionPolicy.default
+        policy.processedMaximumFileCount = 2
+        policy.processedMaximumByteCount = 1_000_000
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            now: { fixedNow }
+        )
         let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
         let generated = "## Global Style\n- committed before restart"
 
@@ -2614,15 +2782,24 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             )
         }
         XCTAssertEqual(try eventStore.inventory().eventCount, 500)
+        let seededArchives = try seedProcessedRetentionArchives(
+            at: eventsDirectory.appendingPathComponent("processed"),
+            now: fixedNow
+        )
 
         let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
         let runtime = AIContextMemoryRuntime(
             provider: provider,
-            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            eventStore: TypingEventStore(
+                eventsDirectoryURL: eventsDirectory,
+                retentionPolicy: policy,
+                now: { fixedNow }
+            ),
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
             minimumInterval: 600,
-            requestGate: ProviderRequestGate()
+            requestGate: ProviderRequestGate(),
+            nowProvider: { fixedNow }
         )
 
         await runtime.record(
@@ -2648,6 +2825,17 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 byteCount: claimedSnapshot.rawData.count
             )
         )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: seededArchives.expired.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: seededArchives.oldestRecent.path))
+        let processedArchives = try FileManager.default.contentsOfDirectory(
+            at: eventsDirectory.appendingPathComponent("processed"),
+            includingPropertiesForKeys: [.fileSizeKey]
+        ).filter { $0.lastPathComponent.hasPrefix("typing-events-") }
+        let processedBytes = try processedArchives.reduce(0) { partial, url in
+            partial + (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        }
+        XCTAssertLessThanOrEqual(processedArchives.count, policy.processedMaximumFileCount)
+        XCTAssertLessThanOrEqual(processedBytes, policy.processedMaximumByteCount)
     }
 
     func testCorruptScheduleStateDefersBatchAcrossRestart() async throws {
@@ -3418,6 +3606,43 @@ private final class PendingAttributesErrorFileManager: FileManager, @unchecked S
         if path == pendingPath { throw error }
         return try super.attributesOfItem(atPath: path)
     }
+}
+
+private func seedProcessedRetentionArchives(
+    at processedDirectory: URL,
+    now: Date,
+    byteCount: Int = 100
+) throws -> (expired: URL, oldestRecent: URL, newestRecent: URL) {
+    try FileManager.default.createDirectory(
+        at: processedDirectory,
+        withIntermediateDirectories: true
+    )
+    let archives = [
+        (
+            processedDirectory.appendingPathComponent("typing-events-seed-expired.jsonl"),
+            now.addingTimeInterval(-8 * 24 * 60 * 60)
+        ),
+        (
+            processedDirectory.appendingPathComponent("typing-events-seed-oldest.jsonl"),
+            now.addingTimeInterval(-2)
+        ),
+        (
+            processedDirectory.appendingPathComponent("typing-events-seed-newest.jsonl"),
+            now.addingTimeInterval(-1)
+        )
+    ]
+    for (url, modificationDate) in archives {
+        try Data(repeating: 0x61, count: byteCount).write(to: url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: modificationDate],
+            ofItemAtPath: url.path
+        )
+    }
+    return (
+        expired: archives[0].0,
+        oldestRecent: archives[1].0,
+        newestRecent: archives[2].0
+    )
 }
 
 private func makeTemporaryDirectory() -> URL {

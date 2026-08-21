@@ -15,8 +15,11 @@
   updates belong to `AIContextMemoryRuntime`.
 - The JSONL persistence shape remains `AITypingEvent`; this store does not add a
   sidecar or migrate existing files.
-- Processed archives are pruned only after a successful provider digest. Startup
-  and installation do not rewrite user data.
+- Every successful write to `events/processed/` invokes best-effort retention
+  pruning in the same process-local file-lock critical section, including local
+  protected, invalid, oversized, and claim-recovery archives. Startup,
+  initialization, and installation do not scan or rewrite user data when no
+  archive is written.
 
 ## Behavior Notes
 
@@ -40,6 +43,10 @@
 - Pending data is compacted atomically to the newest 450 events and at most
   768 KiB after crossing 500 events or 1 MiB. While a digest is in flight, its
   claimed prefix is retained ahead of the newest bounded tail.
+- Every processed archive write applies the 7-day, 100-file, and 10 MiB
+  retention policy immediately while the existing file lock is held. Permission
+  and deletion failures are best-effort cleanup failures: they do not undo the
+  completed archive or make the provider call eligible for repetition.
 - Digest claims contain the oldest 50 lines and at most 48 KiB, including a
   malformed record without a newline. Blank or undecodable claimed prefixes are
   archived locally and never included in provider request content. One oversized

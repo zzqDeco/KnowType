@@ -65,9 +65,12 @@
   recovered locally instead of being sent. If a local archive leaves a tail,
   inventory is rechecked and the single eligible deadline is rearmed without
   waiting for another input event.
-- A successful digest prunes `processed/` best-effort to 7 days, 100 files, and
-  10 MiB. Startup, install, protected-only archive, and failed digests do not
-  trigger historical cleanup.
+- Every successful local archive, whether produced by a provider commit,
+  protected-only handling, an invalid/unsendable prefix, an oversized line, or
+  persisted claim recovery, invokes the store's best-effort `processed/`
+  retention prune while the existing file lock is held. The policy is 7 days,
+  100 files, and 10 MiB. Startup, initialization, installation, and provider
+  failures that produce no archive do not scan or rewrite historical archives.
 - `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, and `context_archive_pruned` diagnostics contain
   counts and durations only, never event or provider text.

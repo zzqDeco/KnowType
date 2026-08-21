@@ -450,8 +450,7 @@ public final class TypingEventStore: @unchecked Sendable {
         try withTypingEventFileLock {
             let rawData = try fullSnapshotSynchronously().rawData
             _ = try archivePendingEventsSynchronously(
-                matchingRawData: rawData,
-                pruneProcessedArchives: false
+                matchingRawData: rawData
             )
         }
     }
@@ -459,8 +458,7 @@ public final class TypingEventStore: @unchecked Sendable {
     public func archivePendingEvents(matchingRawContent rawContent: String) async throws {
         try withTypingEventFileLock {
             _ = try archivePendingEventsSynchronously(
-                matchingRawData: Data(rawContent.utf8),
-                pruneProcessedArchives: false
+                matchingRawData: Data(rawContent.utf8)
             )
         }
     }
@@ -472,7 +470,6 @@ public final class TypingEventStore: @unchecked Sendable {
         try withTypingEventFileLock {
             _ = try archivePendingEventsSynchronously(
                 matchingRawData: Data(rawContent.utf8),
-                pruneProcessedArchives: true,
                 beforeArchive: beforeArchive
             )
         }
@@ -485,7 +482,6 @@ public final class TypingEventStore: @unchecked Sendable {
         try withTypingEventFileLock {
             try archivePendingEventsSynchronously(
                 matchingRawData: snapshot.rawData,
-                pruneProcessedArchives: true,
                 beforeArchive: beforeArchive
             )
         }
@@ -500,8 +496,7 @@ public final class TypingEventStore: @unchecked Sendable {
                 return
             }
             _ = try archivePendingEventsSynchronously(
-                matchingRawData: snapshot.rawData,
-                pruneProcessedArchives: false
+                matchingRawData: snapshot.rawData
             )
         }
     }
@@ -1005,7 +1000,6 @@ public final class TypingEventStore: @unchecked Sendable {
 
     private func archivePendingEventsSynchronously(
         matchingRawData rawData: Data,
-        pruneProcessedArchives: Bool,
         beforeArchive: @Sendable () throws -> Void = {}
     ) throws -> TypingEventArchiveResult {
         guard !rawData.isEmpty,
@@ -1031,6 +1025,7 @@ public final class TypingEventStore: @unchecked Sendable {
         let filename = archiveFilename(for: rawData)
         let destination = processedDirectoryURL.appendingPathComponent(filename)
         try secureAtomicWrite(rawData, to: destination)
+        let pruneResult = pruneProcessedArchivesSynchronously()
 
         let remainingData = Data(currentData.dropFirst(rawData.count))
         if remainingData.isEmpty {
@@ -1040,10 +1035,7 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         testProbe?.recordAtomicRewrite()
         cacheInventory(inventory(for: remainingData))
-        if pruneProcessedArchives {
-            return try pruneProcessedArchivesSynchronously()
-        }
-        return .empty
+        return pruneResult
     }
 
     private func archiveOversizedDigestLineSynchronously(expectedRawData: Data) throws -> TypingEventArchiveResult {
@@ -1067,6 +1059,7 @@ public final class TypingEventStore: @unchecked Sendable {
             line,
             to: processedDirectoryURL.appendingPathComponent(archiveFilename(for: line))
         )
+        let pruneResult = pruneProcessedArchivesSynchronously()
         let remainingData = Data(currentData[lineEnd...])
         if remainingData.isEmpty {
             try fileManager.removeItem(at: eventsFileURL)
@@ -1075,7 +1068,7 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         testProbe?.recordAtomicRewrite()
         cacheInventory(inventory(for: remainingData))
-        return .empty
+        return pruneResult
     }
 
     private func archiveFilename(for data: Data) -> String {
@@ -1105,7 +1098,7 @@ public final class TypingEventStore: @unchecked Sendable {
         return false
     }
 
-    private func pruneProcessedArchivesSynchronously() throws -> TypingEventArchiveResult {
+    private func pruneProcessedArchivesSynchronously() -> TypingEventArchiveResult {
         guard let urls = try? fileManager.contentsOfDirectory(
             at: processedDirectoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
@@ -1123,7 +1116,7 @@ public final class TypingEventStore: @unchecked Sendable {
                   values.isRegularFile != false else {
                 continue
             }
-            try setSecurePermissions(of: url)
+            try? setSecurePermissions(of: url)
         }
         var archives = urls.compactMap { url -> Archive? in
             guard url.lastPathComponent.hasPrefix("typing-events-"),

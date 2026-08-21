@@ -82,6 +82,12 @@ of already-started recommendations, and independent provider failure budgets.
   finish. If pending events remain, one actor-owned full re-evaluation then
   reapplies interval, cooldown, gate, and generation checks; no blocked wake
   produces no late-completion rerun.
+- Every successful local write to `processed/` invokes the existing 7-day,
+  100-file, 10 MiB retention prune before leaving the same file-lock critical
+  section, including protected-only, invalid/unsendable, oversized, and claim
+  recovery paths. Prune is best-effort and cannot revoke the archive or cause a
+  provider retry. Startup or provider failure with no archive does not scan or
+  rewrite historical processed files.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
   avoids repeating the provider call. A durable archive receipt or bounded
