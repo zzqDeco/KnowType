@@ -213,11 +213,17 @@ eligible-dispatch and revision observations merge behind that transition, so
 the monotonic latest accepted/pending revision, generation, and current lease
 are published together before the transition clears or wakes waiters. The
 publication first installs a provider-less provisional lease for the target
-revision; a successful runtime load fills that lease without another
-generation transition. Repeated signals for the same revision are ignored,
-while a higher revision merges into a monotonic pending target and forms a
-later legal transition. Stale disk or runtime reads cannot lower the accepted
-revision or replace the newer lease. It fences old lease results before UI,
+revision. A runtime load fills that lease in the same generation only when
+its fingerprint is unchanged or the provisional fingerprint is unavailable;
+a different real fingerprint at the same revision uses a bounded new
+generation transition to fence the old identity instead of remaining
+permanently pending. One eligible-dispatch lookup attempts at most one such
+replacement and returns the current provider-less provisional lease when
+fingerprints oscillate, so a later lookup can retry. Repeated signals for
+the same revision are ignored, while a higher revision merges into a
+monotonic pending target and forms a later legal transition. Stale disk or
+runtime reads cannot lower the accepted revision or replace the newer lease.
+It fences old lease results before UI,
 ENV, or archive writes; started transport remains tracked by the shared
 provider gate until it actually finishes. A caller-visible hard timeout returns
 immediately without releasing a lease held by cancellation-resistant transport.

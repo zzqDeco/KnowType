@@ -90,6 +90,7 @@ public actor ProviderRuntimeRegistry {
     public static let shared = ProviderRuntimeRegistry()
 
     private static let unavailableFingerprint = String(repeating: "0", count: 64)
+    private static let maxSameRevisionFingerprintReplacementsPerLookup = 1
 
     private struct GenerationTransitionTarget {
         let revision: UInt64
@@ -160,6 +161,7 @@ public actor ProviderRuntimeRegistry {
     }
 
     public func leaseForEligibleDispatch() async -> ProviderRuntimeLease {
+        var sameRevisionFingerprintReplacements = 0
         while true {
             await waitForGenerationTransitionIfNeeded()
             startObservationIfNeeded()
@@ -225,10 +227,23 @@ public actor ProviderRuntimeRegistry {
                         guard isStable(transition) else { continue }
                         continue
                     }
-                    guard loadedRevision == currentLease.revision,
-                          currentLease.fingerprint == Self.unavailableFingerprint
-                            || currentLease.fingerprint == loaded.fingerprint else {
+                    guard loadedRevision == currentLease.revision else {
                         return currentLease
+                    }
+                    if currentLease.fingerprint != Self.unavailableFingerprint,
+                       currentLease.fingerprint != loaded.fingerprint {
+                        guard sameRevisionFingerprintReplacements
+                            < Self.maxSameRevisionFingerprintReplacementsPerLookup else {
+                            return currentLease
+                        }
+                        sameRevisionFingerprintReplacements += 1
+                        let transition = await advanceGeneration(
+                            revision: loadedRevision,
+                            fingerprint: loaded.fingerprint,
+                            providerConfigured: loaded.provider != nil
+                        )
+                        guard isStable(transition) else { continue }
+                        continue
                     }
                     return publishLoadedLease(loaded)
                 }

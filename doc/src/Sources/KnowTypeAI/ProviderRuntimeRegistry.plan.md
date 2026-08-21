@@ -32,9 +32,15 @@
   invalidation. It keeps the latest accepted/pending revision monotonic and
   publishes the target generation, a provider-less provisional lease, and that
   revision before clearing the transition or waking waiters. A runtime load can
-  fill that provisional lease in the same generation. Repeated signals for one
-  revision are ignored; higher revisions merge into a monotonic pending target
-  while a transition is active and then form a later transition. Every await
+  fill that provisional lease in the same generation when its fingerprint is
+  unchanged or the provisional fingerprint is unavailable. A different real
+  fingerprint at the same revision starts a bounded new generation transition;
+  one eligible-dispatch lookup attempts at most one such replacement and
+  returns the current provider-less lease on fingerprint oscillation, allowing
+  a later lookup to retry instead of remaining permanently pending. Repeated
+  signals for one revision are ignored; higher revisions merge into a monotonic
+  pending target while a transition is active and then form a later transition.
+  Every await
   return rechecks the transition token and the generation, revision, and lease
   before accepting state, so stale disk reads cannot overwrite a newer signal. Started
   provider operations are not cancelled by a revision change; explicit caller

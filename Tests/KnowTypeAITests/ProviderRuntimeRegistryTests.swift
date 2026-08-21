@@ -252,6 +252,164 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertEqual(resetCountAfterDuplicateSignal, 2)
     }
 
+    func testSameRevisionFingerprintReplacementRecoversFromProvisionalLease() async {
+        let fingerprintF1 = String(repeating: "b", count: 64)
+        let fingerprintF2 = String(repeating: "c", count: 64)
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
+        let source = ProviderRuntimeTestSource(
+            revision: 0,
+            fingerprint: fingerprintF2,
+            provider: providerB
+        )
+        source.setRuntimeOverride(
+            revision: 2,
+            fingerprint: fingerprintF2,
+            provider: providerB
+        )
+        source.setRuntimeSequence([
+            ProviderRuntimeLoadResult(
+                revision: 2,
+                fingerprint: fingerprintF1,
+                provider: nil
+            ),
+            ProviderRuntimeLoadResult(
+                revision: 2,
+                fingerprint: fingerprintF2,
+                provider: providerB
+            )
+        ])
+        let resetProbe = RegistryCapabilityResetPause()
+        let registry = makeRegistry(
+            source: source,
+            capabilityReset: { await resetProbe.reset() }
+        )
+
+        let lease = await registry.leaseForEligibleDispatch()
+
+        XCTAssertEqual(lease.revision, 2)
+        XCTAssertEqual(lease.generation, 2)
+        XCTAssertEqual(lease.fingerprint, fingerprintF2)
+        XCTAssertEqual(lease.provider?.providerName, "provider-b")
+        let resetCount = await resetProbe.resetCount
+        XCTAssertEqual(resetCount, 2)
+        XCTAssertEqual(source.runtimeLoadCount, 3)
+    }
+
+    func testSameRevisionFingerprintReplacementFencesOldLease() async throws {
+        let fingerprintF1 = String(repeating: "b", count: 64)
+        let fingerprintF2 = String(repeating: "c", count: 64)
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
+        let source = ProviderRuntimeTestSource(
+            revision: 0,
+            fingerprint: fingerprintF1,
+            provider: nil
+        )
+        source.setRuntimeSequence([
+            ProviderRuntimeLoadResult(
+                revision: 2,
+                fingerprint: fingerprintF1,
+                provider: nil
+            ),
+            ProviderRuntimeLoadResult(
+                revision: 2,
+                fingerprint: fingerprintF1,
+                provider: nil
+            )
+        ])
+        let registry = makeRegistry(source: source)
+        let oldLease = await registry.leaseForEligibleDispatch()
+
+        source.setRuntimeOverride(
+            revision: 2,
+            fingerprint: fingerprintF2,
+            provider: providerB
+        )
+        let currentLease = await registry.leaseForEligibleDispatch()
+
+        XCTAssertEqual(oldLease.revision, 2)
+        XCTAssertEqual(oldLease.generation, 1)
+        XCTAssertEqual(oldLease.fingerprint, fingerprintF1)
+        XCTAssertNil(oldLease.provider)
+        XCTAssertEqual(currentLease.generation, 2)
+        XCTAssertEqual(currentLease.fingerprint, fingerprintF2)
+        XCTAssertEqual(currentLease.provider?.providerName, "provider-b")
+
+        do {
+            try await registry.commitIfCurrent(using: oldLease) {
+                XCTFail("old same-revision fingerprint lease must not commit")
+            }
+            XCTFail("expected stale generation")
+        } catch ProviderRuntimeRegistryError.staleGeneration {
+            // Expected.
+        }
+    }
+
+    func testSameRevisionFingerprintOscillationIsBoundedAndFailsClosed() async throws {
+        let fingerprintF1 = String(repeating: "b", count: 64)
+        let fingerprintF2 = String(repeating: "c", count: 64)
+        let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
+        let source = ProviderRuntimeTestSource(
+            revision: 0,
+            fingerprint: fingerprintF1,
+            provider: nil
+        )
+        source.setRuntimeOverride(
+            revision: 2,
+            fingerprint: fingerprintF2,
+            provider: providerB
+        )
+        source.setRuntimeSequence([
+            ProviderRuntimeLoadResult(
+                revision: 2,
+                fingerprint: fingerprintF1,
+                provider: nil
+            ),
+            ProviderRuntimeLoadResult(
+                revision: 2,
+                fingerprint: fingerprintF2,
+                provider: providerB
+            ),
+            ProviderRuntimeLoadResult(
+                revision: 2,
+                fingerprint: fingerprintF1,
+                provider: nil
+            )
+        ])
+        let resetProbe = RegistryCapabilityResetPause()
+        let registry = makeRegistry(
+            source: source,
+            capabilityReset: { await resetProbe.reset() }
+        )
+
+        let provisionalLease = await registry.leaseForEligibleDispatch()
+
+        XCTAssertEqual(provisionalLease.revision, 2)
+        XCTAssertEqual(provisionalLease.generation, 2)
+        XCTAssertEqual(provisionalLease.fingerprint, fingerprintF2)
+        XCTAssertNil(provisionalLease.provider)
+        let resetCountAfterOscillation = await resetProbe.resetCount
+        XCTAssertEqual(resetCountAfterOscillation, 2)
+        XCTAssertEqual(source.runtimeLoadCount, 3)
+
+        let recoveredLease = await registry.leaseForEligibleDispatch()
+
+        XCTAssertEqual(recoveredLease.generation, 2)
+        XCTAssertEqual(recoveredLease.fingerprint, fingerprintF2)
+        XCTAssertEqual(recoveredLease.provider?.providerName, "provider-b")
+        let resetCountAfterRecovery = await resetProbe.resetCount
+        XCTAssertEqual(resetCountAfterRecovery, 2)
+        XCTAssertEqual(source.runtimeLoadCount, 4)
+
+        do {
+            try await registry.commitIfCurrent(using: provisionalLease) {
+                XCTFail("provider-less oscillation lease must become stale on recovery")
+            }
+            XCTFail("expected stale generation")
+        } catch ProviderRuntimeRegistryError.staleGeneration {
+            // Expected.
+        }
+    }
+
     func testHigherRevisionDuringDiskRefreshCannotPublishOldLease() async throws {
         let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
         let providerC = NamedLLMProvider(name: "provider-c", responseText: "C")
@@ -1790,6 +1948,7 @@ final class ProviderRuntimeTestSource: @unchecked Sendable {
     private var fingerprint: String
     private var provider: (any LLMProvider)?
     private var runtimeOverride: ProviderRuntimeLoadResult?
+    private var runtimeSequence: [ProviderRuntimeLoadResult?] = []
     private var runtimeLoadEnabled = true
     private var revisionReads = 0
     private var runtimeLoads = 0
@@ -1813,6 +1972,9 @@ final class ProviderRuntimeTestSource: @unchecked Sendable {
         runtimeLoads += 1
         guard runtimeLoadEnabled else {
             return nil
+        }
+        if !runtimeSequence.isEmpty {
+            return runtimeSequence.removeFirst()
         }
         return runtimeOverride ?? ProviderRuntimeLoadResult(
             revision: revision,
@@ -1852,6 +2014,12 @@ final class ProviderRuntimeTestSource: @unchecked Sendable {
     func clearRuntimeOverride() {
         lock.lock()
         runtimeOverride = nil
+        lock.unlock()
+    }
+
+    func setRuntimeSequence(_ results: [ProviderRuntimeLoadResult?]) {
+        lock.lock()
+        runtimeSequence = results
         lock.unlock()
     }
 

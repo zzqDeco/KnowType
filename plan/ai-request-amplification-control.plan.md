@@ -50,8 +50,14 @@ of already-started recommendations, and independent provider failure budgets.
   provisional-lease, and monotonic-revision publication complete exactly once.
   Same-revision signals cannot reopen the completed transition, while a higher
   revision merges into a monotonic pending target and forms a later transition
-  before waiters are released. Awaited disk/runtime results are revalidated
-  against the transition token and published lease before they can be accepted.
+  before waiters are released. If a provider-less provisional lease carries a
+  real fingerprint and the same revision loads a different fingerprint, the
+  registry performs a bounded new generation transition to fence the old gate
+  and capability identity. One eligible-dispatch lookup permits one such
+  replacement; fingerprint oscillation returns the current provider-less lease
+  for a later retry instead of looping indefinitely. Awaited disk/runtime
+  results are revalidated against the transition token and published lease
+  before they can be accepted.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is
