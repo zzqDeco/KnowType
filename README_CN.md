@@ -286,9 +286,10 @@ CORRECTION 数据。
 最旧的 50 条或 48 KiB，且成功提交后 600 秒 minimumInterval 不能被 batch
 阈值绕过。`ENV.md` 最多有一个 managed generated marker pair 和一个 canonical
 User Notes；非法 digest candidate 会在写入或 claim 前拒绝。成功 claim 会移入
-`events/processed/`，该目录最多保留 7 天、100 个文件和 10 MiB；每次成功的本地
+`events/processed/`；该目录的保留目标为 7 天、100 个文件和 10 MiB。每次成功的本地
 归档后都会执行 best-effort 清理，包括 provider digest claim 后的归档和 provider
-digest 前的本地归档；启动和安装时不会清理或写入历史数据。Recommendation 与 digest
+digest 前的本地归档。清理会排除当前归档，删除失败时目录可暂时超出这些目标；启动和
+安装时不会清理或写入历史数据。Recommendation 与 digest
 使用各自的逻辑/HTTP 预算，但共享 privacy-safe provider identity gate，每个
 identity 最多一个 in-flight 请求，并共享 429 冷却。Context 诊断仅包含计数、
 字节数和冷却时长，不包含输入原文、notes、candidate、provider 输出、配置或 Key。

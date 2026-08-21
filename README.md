@@ -336,10 +336,12 @@ the oldest derived events after overflow. Each provider digest claims at most th
 48 KiB and cannot bypass the 600-second interval after a successful commit.
 `ENV.md` has one managed generated pair and one canonical User Notes section;
 invalid digest candidates are rejected before any write or archive claim.
-Successful claims move to `events/processed/`, which is retained for at most 7
-days, 100 files, and 10 MiB; every successful local archive is followed by
+Successful claims move to `events/processed/`; its retention targets are 7 days,
+100 files, and 10 MiB. Every successful local archive is followed by
 best-effort cleanup, including archives made by a provider digest claim or
-before a provider digest; startup and install never clean up or write history.
+before a provider digest. Cleanup excludes the current archive, and deletion
+failures may temporarily leave the directory above those targets; startup and
+install never clean up or write history.
 Recommendation and digest requests use separate
 logical/body budgets but share one hashed provider gate, max one in-flight
 request per identity, and privacy-safe cooldown diagnostics. Context diagnostics
