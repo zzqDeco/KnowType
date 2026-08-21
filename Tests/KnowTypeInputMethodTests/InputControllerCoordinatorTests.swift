@@ -1153,7 +1153,12 @@ final class InputControllerCoordinatorTests: XCTestCase {
     func testAIRecommendationDiagnosticsRecordReleasedCoordinatorStaleDrop() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
-        let aiProvider = DelayedAIRecommendationProvider(delayNanoseconds: 20_000_000)
+        let startSignal = RecommendationReturnSignal()
+        let completionSignal = RecommendationReturnSignal()
+        let aiProvider = SignaledAIRecommendationProvider(
+            returnSignal: startSignal,
+            completionSignal: completionSignal
+        )
         let diagnosticSink = RecordingDiagnosticSink()
         var coordinator: InputControllerCoordinator? = makeCoordinator(
             client: client,
@@ -1162,23 +1167,49 @@ final class InputControllerCoordinatorTests: XCTestCase {
             aiDiagnosticSink: diagnosticSink,
             enablesAsyncSuggestionRefresh: true
         ).0
+        weak var weakCoordinator: InputControllerCoordinator?
+        weakCoordinator = coordinator
 
         for character in "zhegeapi" {
             XCTAssertTrue(coordinator?.handleText(String(character), client: client) == true)
         }
-        let hasScheduled = await waitUntilOnMainActor {
-            diagnosticSink.events.contains { $0.stage == .scheduled }
+        let hasTransportStarted = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .transportStarted }
+                && startSignal.isSignaled
         }
-        XCTAssertTrue(hasScheduled)
+        XCTAssertTrue(hasTransportStarted)
+        guard let requestID = diagnosticSink.events.last(where: {
+            $0.stage == .transportStarted
+        })?.requestID else {
+            XCTFail("missing transportStarted request ID")
+            return
+        }
 
         coordinator = nil
+        XCTAssertNil(weakCoordinator)
+        completionSignal.signal()
         let hasStaleDrop = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
-                $0.stage == .staleResultDropped && $0.reason == "coordinator_released"
+                $0.stage == .staleResultDropped
+                    && $0.requestID == requestID
+                    && $0.reason == "coordinator_released"
             }
         }
 
         XCTAssertTrue(hasStaleDrop, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertEqual(
+            diagnosticSink.events.filter {
+                $0.stage == .staleResultDropped && $0.requestID == requestID
+            }.count,
+            1,
+            "\(diagnosticSink.events)"
+        )
+        XCTAssertFalse(
+            diagnosticSink.events.contains {
+                $0.stage == .stateApplied && $0.requestID == requestID
+            },
+            "\(diagnosticSink.events)"
+        )
     }
 
     @MainActor
@@ -1338,7 +1369,11 @@ final class InputControllerCoordinatorTests: XCTestCase {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
         let returnSignal = RecommendationReturnSignal()
-        let aiProvider = SignaledAIRecommendationProvider(returnSignal: returnSignal)
+        let completionSignal = RecommendationReturnSignal()
+        let aiProvider = SignaledAIRecommendationProvider(
+            returnSignal: returnSignal,
+            completionSignal: completionSignal
+        )
         let diagnosticSink = RecordingDiagnosticSink()
         let (coordinator, host, _) = makeCoordinator(
             client: client,
@@ -1351,35 +1386,42 @@ final class InputControllerCoordinatorTests: XCTestCase {
         for character in "zhegeapi" {
             XCTAssertTrue(coordinator.handleText(String(character), client: client))
         }
-        let hasScheduled = await waitUntilOnMainActor {
-            diagnosticSink.events.contains { $0.stage == .scheduled }
+        let hasTransportStarted = await waitUntilOnMainActor {
+            diagnosticSink.events.contains { $0.stage == .transportStarted }
+                && returnSignal.isSignaled
         }
-        XCTAssertTrue(hasScheduled)
-        let cancelledRequestID = diagnosticSink.events.last { $0.stage == .scheduled }?.requestID
+        XCTAssertTrue(hasTransportStarted)
+        guard let requestID = diagnosticSink.events.last(where: {
+            $0.stage == .transportStarted
+        })?.requestID else {
+            XCTFail("missing transportStarted request ID")
+            return
+        }
 
-        let didStartReturning = await waitUntilOnMainActor {
-            returnSignal.isSignaled
-        }
-        XCTAssertTrue(didStartReturning)
-        usleep(20_000)
         coordinator.inputControllerWillClose()
         let panelUpdatesAfterClose = host.panelStates.count
+        completionSignal.signal()
 
         let hasTerminalEvent = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
-                $0.stage == .cancelled && $0.requestID == cancelledRequestID
-            } || diagnosticSink.events.contains {
                 $0.stage == .staleResultDropped
-                    && $0.requestID == cancelledRequestID
-                    && $0.reason == "request_inactive"
+                    && $0.requestID == requestID
+                    && $0.reason == "coordinator_released"
             }
         }
 
         XCTAssertTrue(hasTerminalEvent, "\(diagnosticSink.events)")
         XCTAssertFalse(
             diagnosticSink.events.contains {
-                $0.stage == .stateApplied && $0.requestID == cancelledRequestID
+                $0.stage == .stateApplied && $0.requestID == requestID
             },
+            "\(diagnosticSink.events)"
+        )
+        XCTAssertEqual(
+            diagnosticSink.events.filter {
+                $0.stage == .staleResultDropped && $0.requestID == requestID
+            }.count,
+            1,
             "\(diagnosticSink.events)"
         )
         XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)

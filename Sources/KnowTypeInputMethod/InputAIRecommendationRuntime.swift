@@ -186,10 +186,23 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         transportTask = Task.detached(priority: .utility) { [weak self, provider, diagnosticSink] in
             let result = await provider.recommendation(for: work.request)
             let elapsed = Self.elapsedMilliseconds(since: transportStartedAt)
-            await MainActor.run { [weak self] in
-                self?.finishTransport(work: work, state: result, elapsedMilliseconds: elapsed)
+            await MainActor.run { [weak self, diagnosticSink] in
+                guard let self else {
+                    diagnosticSink.record(AIRecommendationDiagnosticEvent(
+                        stage: .staleResultDropped,
+                        requestID: work.requestID,
+                        compositionID: work.context.compositionID,
+                        rawLength: work.context.rawInput.count,
+                        rawRevision: work.context.rawRevision,
+                        prefixLength: work.context.lockedPrefix?.count,
+                        appBundleID: work.context.appBundleID,
+                        elapsedMilliseconds: elapsed,
+                        reason: "coordinator_released"
+                    ))
+                    return
+                }
+                self.finishTransport(work: work, state: result, elapsedMilliseconds: elapsed)
             }
-            _ = diagnosticSink
         }
     }
 

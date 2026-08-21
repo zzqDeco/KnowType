@@ -703,7 +703,7 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
             currentSnapshot: { snapshot(rawInput: "ab", rawRevision: 2) },
             onStateChange: { publishedStates.append($0) }
         )
-        XCTAssertEqual(skipped, .ineligible(reason: "AI 无推荐"))
+        XCTAssertEqual(skipped, .idle)
 
         await provider.finish(rawInput: "abc", state: .stale)
         let staleDropped = await waitUntil {

@@ -74,6 +74,11 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
   probe; a trailing request starts before any UI idle callback. `Reset` and
   `close` discard UI and trailing state while the real transport remains tracked
   to completion or hard timeout.
+- A detached transport completion never retains the runtime. If the runtime is
+  still alive, `finishTransport` exclusively owns terminal diagnostics and UI
+  publication; if it has been released, the detached task records exactly one
+  `stale_result_dropped` event with `reason=coordinator_released` through its
+  independently captured diagnostic sink and applies no UI state.
 
 ## Tests
 
