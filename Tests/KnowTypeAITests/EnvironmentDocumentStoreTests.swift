@@ -62,6 +62,8 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         let markerless = "# Personal notes\n- keep markerless content\n"
         try Data(markerless.utf8).write(to: url)
         let snapshot = try EnvironmentDocumentStore(fileURL: url).loadSnapshot()
+        let persistedData = try Data(contentsOf: url)
+        XCTAssertEqual(persistedData, Data(snapshot.content.utf8))
         let userNotesSections = snapshot.content.components(
             separatedBy: EnvironmentDocumentStore.userNotesTitle
         )
