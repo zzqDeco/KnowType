@@ -1582,7 +1582,6 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         policy.processedMaximumFileCount = 1
         let probe = TypingEventStoreTestProbe()
         probe.failNextArchiveDeletions(10)
-        probe.failNextPermissionChanges(7)
         let eventStore = TypingEventStore(
             eventsDirectoryURL: eventsDirectory,
             retentionPolicy: policy,
@@ -1609,6 +1608,108 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let providerRequests = await provider.requests
         XCTAssertEqual(providerRequests.count, 1)
         XCTAssertNil(try environmentStore.loadDigestClaim())
+    }
+
+    func testProcessedPruneFailurePreservesCurrentClaimRecoveryArchive() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let processedDirectory = eventsDirectory.appendingPathComponent("processed")
+        try FileManager.default.createDirectory(at: processedDirectory, withIntermediateDirectories: true)
+        let tiedModificationDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let fixedNow = tiedModificationDate.addingTimeInterval(1)
+        let oldArchives = (0..<2).map { index in
+            processedDirectory.appendingPathComponent("typing-events-!!old-\(index).jsonl")
+        }
+        for (index, url) in oldArchives.enumerated() {
+            try Data(repeating: UInt8(0x61 + index), count: 100).write(to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: tiedModificationDate],
+                ofItemAtPath: url.path
+            )
+        }
+
+        var policy = TypingEventRetentionPolicy.default
+        policy.processedMaximumAge = 0
+        policy.processedMaximumFileCount = 1
+        policy.processedMaximumByteCount = 1
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            testProbe: probe,
+            now: { fixedNow }
+        )
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+        let generated = "## Global Style\n- committed before recovery"
+        try await eventStore.append(
+            makeContextEvent(rawInput: "claimed", committedText: "已声明")
+        )
+        let claimedSnapshot = try eventStore.pendingDigestSnapshot()
+        let claimedPrefixSHA256 = AIDocumentSnapshot.hash(claimedSnapshot.rawContent)
+        let destination = processedDirectory.appendingPathComponent(
+            "typing-events-\(claimedPrefixSHA256).jsonl"
+        )
+        _ = try environmentStore.replaceGeneratedSection(with: generated)
+        try environmentStore.saveDigestClaim(
+            EnvironmentDigestClaim(
+                claimedPrefixSHA256: claimedPrefixSHA256,
+                claimedPrefixByteCount: claimedSnapshot.rawData.count,
+                claimedEventCount: claimedSnapshot.claimedEventCount,
+                generatedSHA256: AIDocumentSnapshot.hash(generated),
+                providerGeneration: 0
+            )
+        )
+        try await eventStore.append(
+            makeContextEvent(rawInput: "tail", committedText: "尾部")
+        )
+        probe.forceNextProcessedArchiveModificationDate(tiedModificationDate)
+        probe.failNextArchiveDeletions(oldArchives.count)
+
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: { fixedNow }
+        )
+
+        await runtime.processIfNeeded(now: fixedNow)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(
+            eventStore.processedArchiveValidation(
+                prefixSHA256: claimedPrefixSHA256,
+                byteCount: claimedSnapshot.rawData.count
+            ),
+            .valid
+        )
+        XCTAssertTrue(oldArchives.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+        let pending = try await eventStore.pendingEvents()
+        XCTAssertEqual(pending.map(\.rawInput), ["tail"])
+        XCTAssertNil(try environmentStore.loadDigestClaim())
+        let providerRequests = await provider.requests
+        XCTAssertTrue(providerRequests.isEmpty)
+
+        let retainedArchives = try FileManager.default.contentsOfDirectory(
+            at: processedDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
+        ).filter { $0.lastPathComponent.hasPrefix("typing-events-") }
+        let retainedBytes = try retainedArchives.reduce(0) { partial, url in
+            partial + (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        }
+        let retainedModificationDates = try retainedArchives.map { url in
+            try XCTUnwrap(
+                url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            )
+        }
+        XCTAssertEqual(retainedArchives.count, 3)
+        XCTAssertGreaterThan(retainedArchives.count, policy.processedMaximumFileCount)
+        XCTAssertGreaterThan(retainedBytes, policy.processedMaximumByteCount)
+        XCTAssertTrue(retainedModificationDates.allSatisfy { $0 == tiedModificationDate })
     }
 
     func testProtectedOnlyLocalArchivesApplyRetentionWithoutProviderParticipation() async throws {

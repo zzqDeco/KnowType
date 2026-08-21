@@ -68,9 +68,12 @@
 - Every successful local archive, whether produced by a provider commit,
   protected-only handling, an invalid/unsendable prefix, an oversized line, or
   persisted claim recovery, invokes the store's best-effort `processed/`
-  retention prune while the existing file lock is held. The policy is 7 days,
-  100 files, and 10 MiB. Startup, initialization, installation, and provider
-  failures that produce no archive do not scan or rewrite historical archives.
+  retention prune while the existing file lock is held. The targets remain 7
+  days, 100 files, and 10 MiB, but the current archive is protected from every
+  deletion criterion; failed older-file cleanup may therefore leave the
+  directory temporarily over target. Startup, initialization, installation,
+  and provider failures that produce no archive do not scan or rewrite
+  historical archives.
 - `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, and `context_archive_pruned` diagnostics contain
   counts and durations only, never event or provider text.

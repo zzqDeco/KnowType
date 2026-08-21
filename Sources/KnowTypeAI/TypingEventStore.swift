@@ -95,6 +95,7 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     private var failedPendingArchivesRemaining = 0
     private var failedPermissionChangesRemaining = 0
     private var failedClaimedPrefixReadsRemaining = 0
+    private var nextProcessedArchiveModificationDate: Date?
 
     var inventoryScanCount: Int {
         lock.lock()
@@ -141,6 +142,12 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     func failNextClaimedPrefixReads(_ count: Int) {
         lock.lock()
         failedClaimedPrefixReadsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func forceNextProcessedArchiveModificationDate(_ date: Date) {
+        lock.lock()
+        nextProcessedArchiveModificationDate = date
         lock.unlock()
     }
 
@@ -206,6 +213,14 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
         }
         failedClaimedPrefixReadsRemaining -= 1
         return true
+    }
+
+    fileprivate func takeNextProcessedArchiveModificationDate() -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        let date = nextProcessedArchiveModificationDate
+        nextProcessedArchiveModificationDate = nil
+        return date
     }
 }
 
@@ -1025,7 +1040,10 @@ public final class TypingEventStore: @unchecked Sendable {
         let filename = archiveFilename(for: rawData)
         let destination = processedDirectoryURL.appendingPathComponent(filename)
         try secureAtomicWrite(rawData, to: destination)
-        let pruneResult = pruneProcessedArchivesSynchronously()
+        applyTestProcessedArchiveModificationDate(to: destination)
+        let pruneResult = pruneProcessedArchivesSynchronously(
+            protecting: destination
+        )
 
         let remainingData = Data(currentData.dropFirst(rawData.count))
         if remainingData.isEmpty {
@@ -1055,11 +1073,14 @@ public final class TypingEventStore: @unchecked Sendable {
         let lineEnd = currentData.firstIndex(of: 0x0A).map { currentData.index(after: $0) } ?? currentData.endIndex
         let line = Data(currentData[..<lineEnd])
         try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
-        try secureAtomicWrite(
-            line,
-            to: processedDirectoryURL.appendingPathComponent(archiveFilename(for: line))
+        let destination = processedDirectoryURL.appendingPathComponent(
+            archiveFilename(for: line)
         )
-        let pruneResult = pruneProcessedArchivesSynchronously()
+        try secureAtomicWrite(line, to: destination)
+        applyTestProcessedArchiveModificationDate(to: destination)
+        let pruneResult = pruneProcessedArchivesSynchronously(
+            protecting: destination
+        )
         let remainingData = Data(currentData[lineEnd...])
         if remainingData.isEmpty {
             try fileManager.removeItem(at: eventsFileURL)
@@ -1098,7 +1119,17 @@ public final class TypingEventStore: @unchecked Sendable {
         return false
     }
 
-    private func pruneProcessedArchivesSynchronously() -> TypingEventArchiveResult {
+    private func applyTestProcessedArchiveModificationDate(to url: URL) {
+        guard let date = testProbe?.takeNextProcessedArchiveModificationDate() else {
+            return
+        }
+        try? fileManager.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+    }
+
+    private func pruneProcessedArchivesSynchronously(
+        protecting protectedArchiveURL: URL
+    ) -> TypingEventArchiveResult {
+        let protectedArchivePath = Self.normalizedPath(for: protectedArchiveURL)
         guard let urls = try? fileManager.contentsOfDirectory(
             at: processedDirectoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
@@ -1149,6 +1180,9 @@ public final class TypingEventStore: @unchecked Sendable {
         var deletedCount = 0
         var deletedBytes = 0
         for archive in archives {
+            guard Self.normalizedPath(for: archive.url) != protectedArchivePath else {
+                continue
+            }
             let expired = archive.date < cutoff
             let overCount = remainingCount > retentionPolicy.processedMaximumFileCount
             let overBytes = remainingBytes > retentionPolicy.processedMaximumByteCount

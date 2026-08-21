@@ -6,8 +6,8 @@
   `events/typing-events.jsonl`.
 - Maintain the process-local inventory used to make append, threshold, privacy,
   and failure-cooldown decisions without repeatedly decoding the backlog.
-- Enforce pending, digest-claim, event-string, and processed-archive retention
-  bounds.
+- Enforce pending, digest-claim, and event-string bounds plus best-effort
+  processed-archive retention targets.
 
 ## Boundaries
 
@@ -44,9 +44,12 @@
   768 KiB after crossing 500 events or 1 MiB. While a digest is in flight, its
   claimed prefix is retained ahead of the newest bounded tail.
 - Every processed archive write applies the 7-day, 100-file, and 10 MiB
-  retention policy immediately while the existing file lock is held. Permission
-  and deletion failures are best-effort cleanup failures: they do not undo the
-  completed archive or make the provider call eligible for repetition.
+  retention policy immediately while the existing file lock is held. The
+  destination written by the current operation is protected from all three
+  deletion criteria. Permission and older-file deletion failures are
+  best-effort cleanup failures: current archive integrity takes priority, so
+  `processed/` may temporarily exceed a target without undoing the archive or
+  making the provider call eligible for repetition.
 - Digest claims contain the oldest 50 lines and at most 48 KiB, including a
   malformed record without a newline. Blank or undecodable claimed prefixes are
   archived locally and never included in provider request content. One oversized

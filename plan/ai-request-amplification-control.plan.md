@@ -85,9 +85,11 @@ of already-started recommendations, and independent provider failure budgets.
 - Every successful local write to `processed/` invokes the existing 7-day,
   100-file, 10 MiB retention prune before leaving the same file-lock critical
   section, including protected-only, invalid/unsendable, oversized, and claim
-  recovery paths. Prune is best-effort and cannot revoke the archive or cause a
-  provider retry. Startup or provider failure with no archive does not scan or
-  rewrite historical processed files.
+  recovery paths. The current destination is protected from age, file-count,
+  and byte-count deletion. Prune remains best-effort: failed older-file cleanup
+  may temporarily leave the directory over target, but cannot revoke the
+  current archive or cause a provider retry. Startup or provider failure with
+  no archive does not scan or rewrite historical processed files.
 - ENV success is paired with a privacy-safe claim before archive. Recovery
   archives only the claimed prefix, keeps appended tail events pending, and
   avoids repeating the provider call. A durable archive receipt or bounded
