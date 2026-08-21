@@ -75,6 +75,7 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         )
 
         let canonicalLines = snapshot.content.components(separatedBy: "\n")
+        XCTAssertEqual(canonicalLines[0], EnvironmentDocumentStore.documentTitle)
         XCTAssertEqual(
             canonicalLines.filter { $0 == EnvironmentDocumentStore.generatedStart }.count,
             1
@@ -90,7 +91,13 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
             canonicalLines.firstIndex(of: EnvironmentDocumentStore.generatedEnd)
         )
         XCTAssertLessThan(generatedStartIndex, generatedEndIndex)
-        XCTAssertNotNil(EnvironmentDocumentStore.generatedSection(from: snapshot.content))
+        let generatedSection = try XCTUnwrap(
+            EnvironmentDocumentStore.generatedSection(from: snapshot.content)
+        )
+        let defaultGeneratedSection = try XCTUnwrap(
+            EnvironmentDocumentStore.generatedSection(from: EnvironmentDocumentStore.defaultContent)
+        )
+        XCTAssertEqual(generatedSection, defaultGeneratedSection)
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("backups").path))
     }
 
