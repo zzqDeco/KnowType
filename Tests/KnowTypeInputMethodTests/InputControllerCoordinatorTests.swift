@@ -1082,10 +1082,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testAIRecommendationDiagnosticsRecordTransportCancellationOnNewInput() async {
+    func testStartedAIRecommendationLeavesTransportStaleAndDropsResultOnNewInput() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
-        let aiProvider = PendingAIRecommendationProvider()
+        let startSignal = RecommendationReturnSignal()
+        let completionSignal = RecommendationReturnSignal()
+        let aiProvider = SignaledAIRecommendationProvider(
+            returnSignal: startSignal,
+            completionSignal: completionSignal
+        )
         let diagnosticSink = RecordingDiagnosticSink()
         let (coordinator, _, _) = makeCoordinator(
             client: client,
@@ -1100,9 +1105,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let hasTransportStarted = await waitUntilOnMainActor {
             diagnosticSink.events.contains { $0.stage == .transportStarted }
+                && startSignal.isSignaled
         }
         XCTAssertTrue(hasTransportStarted)
-        let staleRequestID = diagnosticSink.events.last { $0.stage == .transportStarted }?.requestID
+        guard let staleRequestID = diagnosticSink.events.last(where: {
+            $0.stage == .transportStarted
+        })?.requestID else {
+            XCTFail("missing transportStarted request ID")
+            return
+        }
 
         XCTAssertTrue(coordinator.handleText("x", client: client))
         let hasStaleTransport = await waitUntilOnMainActor {
@@ -1110,20 +1121,32 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 $0.stage == .cancelPrevious && $0.requestID == staleRequestID
             } && diagnosticSink.events.contains {
                 $0.stage == .transportLeftStale && $0.requestID == staleRequestID
-            } && diagnosticSink.events.contains {
-                $0.stage == .transportCancellationRequested && $0.requestID == staleRequestID
-            } && diagnosticSink.events.contains {
-                $0.stage == .transportCancelledByNewInput && $0.requestID == staleRequestID
             }
         }
 
         XCTAssertTrue(hasStaleTransport, "\(diagnosticSink.events.map(\.stage))")
-        let hasCancelledTransport = await waitUntilOnMainActor {
+        completionSignal.signal()
+        let hasStaleDrop = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
-                $0.stage == .cancelled && $0.requestID == staleRequestID
+                $0.stage == .staleResultDropped && $0.requestID == staleRequestID
             }
         }
-        XCTAssertTrue(hasCancelledTransport, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertTrue(hasStaleDrop, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertFalse(
+            diagnosticSink.events.contains {
+                $0.stage == .stateApplied && $0.requestID == staleRequestID
+            },
+            "\(diagnosticSink.events)"
+        )
+        XCTAssertFalse(
+            diagnosticSink.events.contains {
+                $0.requestID == staleRequestID
+                    && ($0.stage == .transportCancellationRequested
+                        || $0.stage == .transportCancelledByNewInput
+                        || $0.stage == .cancelled)
+            },
+            "\(diagnosticSink.events)"
+        )
     }
 
     @MainActor
@@ -1236,10 +1259,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
     }
 
     @MainActor
-    func testStartedAIRecommendationDoesNotApplyAfterInputControllerWillClose() async {
+    func testStartedAIRecommendationLeavesTransportStaleAndDropsResultAfterInputControllerWillClose() async {
         let client = FakeInputControllerClient()
         let provider = RecordingContinuationProvider()
-        let aiProvider = PendingAIRecommendationProvider()
+        let startSignal = RecommendationReturnSignal()
+        let completionSignal = RecommendationReturnSignal()
+        let aiProvider = SignaledAIRecommendationProvider(
+            returnSignal: startSignal,
+            completionSignal: completionSignal
+        )
         let diagnosticSink = RecordingDiagnosticSink()
         let (coordinator, host, _) = makeCoordinator(
             client: client,
@@ -1254,9 +1282,15 @@ final class InputControllerCoordinatorTests: XCTestCase {
         }
         let hasTransportStarted = await waitUntilOnMainActor {
             diagnosticSink.events.contains { $0.stage == .transportStarted }
+                && startSignal.isSignaled
         }
         XCTAssertTrue(hasTransportStarted)
-        let staleRequestID = diagnosticSink.events.last { $0.stage == .transportStarted }?.requestID
+        guard let staleRequestID = diagnosticSink.events.last(where: {
+            $0.stage == .transportStarted
+        })?.requestID else {
+            XCTFail("missing transportStarted request ID")
+            return
+        }
 
         coordinator.inputControllerWillClose()
         let panelUpdatesAfterClose = host.panelStates.count
@@ -1269,20 +1303,32 @@ final class InputControllerCoordinatorTests: XCTestCase {
                 $0.stage == .transportLeftStale
                     && $0.requestID == staleRequestID
                     && $0.reason == "input_controller_will_close"
-            } && diagnosticSink.events.contains {
-                $0.stage == .transportCancellationRequested
-                    && $0.requestID == staleRequestID
-                    && $0.reason == "input_controller_will_close"
             }
         }
 
         XCTAssertTrue(hasStaleTransportBeforeApply, "\(diagnosticSink.events.map(\.stage))")
-        let hasCancelledTransport = await waitUntilOnMainActor {
+        completionSignal.signal()
+        let hasStaleDrop = await waitUntilOnMainActor {
             diagnosticSink.events.contains {
-                $0.stage == .cancelled && $0.requestID == staleRequestID
+                $0.stage == .staleResultDropped && $0.requestID == staleRequestID
             }
         }
-        XCTAssertTrue(hasCancelledTransport, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertTrue(hasStaleDrop, "\(diagnosticSink.events.map(\.stage))")
+        XCTAssertFalse(
+            diagnosticSink.events.contains {
+                $0.stage == .stateApplied && $0.requestID == staleRequestID
+            },
+            "\(diagnosticSink.events)"
+        )
+        XCTAssertFalse(
+            diagnosticSink.events.contains {
+                $0.requestID == staleRequestID
+                    && ($0.stage == .transportCancellationRequested
+                        || $0.stage == .transportCancelledByNewInput
+                        || $0.stage == .cancelled)
+            },
+            "\(diagnosticSink.events)"
+        )
         XCTAssertEqual(host.panelStates.count, panelUpdatesAfterClose)
         XCTAssertEqual(host.hideCandidatePanelCount, 1)
     }
@@ -6591,12 +6637,19 @@ private final class RecommendationReturnSignal: @unchecked Sendable {
 
 private actor SignaledAIRecommendationProvider: AIRecommendationProviding {
     private let returnSignal: RecommendationReturnSignal
+    private let completionSignal: RecommendationReturnSignal?
+    private var requestCount = 0
 
-    init(returnSignal: RecommendationReturnSignal) {
+    init(
+        returnSignal: RecommendationReturnSignal,
+        completionSignal: RecommendationReturnSignal? = nil
+    ) {
         self.returnSignal = returnSignal
+        self.completionSignal = completionSignal
     }
 
     func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        requestCount += 1
         let displayText = request.lockedPrefix.map { $0 + "继续推进" } ?? "继续推进"
         let candidate = AIRecommendationCandidate(
             prefixText: request.lockedPrefix ?? "",
@@ -6607,7 +6660,11 @@ private actor SignaledAIRecommendationProvider: AIRecommendationProviding {
             contextVersion: "test"
         )
         returnSignal.signal()
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        if requestCount == 1, let completionSignal {
+            _ = completionSignal.wait(timeout: .distantFuture)
+        } else if completionSignal == nil {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
         return .ready(candidate)
     }
 }
