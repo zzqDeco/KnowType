@@ -76,6 +76,134 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertEqual(second.provider?.providerName, "provider-b")
     }
 
+    func testConcurrentRefreshCoalescesLinearizedGenerationInvalidation() async throws {
+        let fingerprintA = String(repeating: "a", count: 64)
+        let fingerprintB = String(repeating: "b", count: 64)
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: fingerprintA,
+            provider: NamedLLMProvider(name: "provider-a", responseText: "A")
+        )
+        let gateProbe = ProviderRequestGateTestProbe()
+        let admissionPause = GateAttemptAdmissionPause()
+        let completionPause = GateAttemptCompletionPause()
+        let staleOperationProbe = RequestGateProbe()
+        let resetProbe = RequestGateProbe()
+        let gate = ProviderRequestGate(
+            testProbe: gateProbe,
+            afterAttemptAdmission: {
+                await admissionPause.suspendIfNeeded()
+            }
+        )
+        let registry = makeRegistry(
+            source: source,
+            capabilityReset: { await resetProbe.markStarted() },
+            requestGate: gate
+        )
+        let initialLease = await registry.leaseForEligibleDispatch()
+        let initialResetCount = await resetProbe.startCount
+        XCTAssertEqual(initialLease.generation, 1)
+        XCTAssertEqual(initialResetCount, 1)
+
+        let staleAttempt = Task<Int, Error> {
+            try await gate.executeWithHardTimeout(
+                providerIdentity: fingerprintA,
+                generation: initialLease.generation,
+                timeoutNanoseconds: 60_000_000_000,
+                onAttemptCompletion: {
+                    await completionPause.suspendAndRecord()
+                }
+            ) {
+                await staleOperationProbe.markStarted()
+                return 1
+            }
+        }
+        do {
+            try await waitUntil { await admissionPause.hasEntered }
+        } catch {
+            staleAttempt.cancel()
+            await admissionPause.release()
+            await completionPause.release()
+            _ = try? await staleAttempt.value
+            throw error
+        }
+
+        source.set(
+            revision: 2,
+            fingerprint: fingerprintB,
+            provider: NamedLLMProvider(name: "provider-b", responseText: "B")
+        )
+        let firstRefresh = Task { await registry.leaseForEligibleDispatch() }
+        do {
+            try await waitUntil { await completionPause.hasEntered }
+        } catch {
+            staleAttempt.cancel()
+            firstRefresh.cancel()
+            await admissionPause.release()
+            await completionPause.release()
+            _ = try? await staleAttempt.value
+            _ = await firstRefresh.value
+            throw error
+        }
+
+        let transitionWaitProbe = RegistryGenerationTransitionWaitProbe()
+        await registry.setGenerationTransitionWaitObserverForTesting {
+            transitionWaitProbe.recordWait()
+        }
+        let secondRefresh = Task { await registry.leaseForEligibleDispatch() }
+        do {
+            try await waitUntil { transitionWaitProbe.waitCount == 1 }
+        } catch {
+            staleAttempt.cancel()
+            firstRefresh.cancel()
+            secondRefresh.cancel()
+            await admissionPause.release()
+            await completionPause.release()
+            _ = try? await staleAttempt.value
+            _ = await firstRefresh.value
+            _ = await secondRefresh.value
+            throw error
+        }
+
+        let generationBeforeLinearizedOwnerCompletes = await registry.currentGeneration()
+        XCTAssertEqual(generationBeforeLinearizedOwnerCompletes, 1)
+        await completionPause.release()
+
+        let firstLease = await firstRefresh.value
+        let secondLease = await secondRefresh.value
+        let currentGeneration = await registry.currentGeneration()
+        let resetCount = await resetProbe.startCount
+        let completionCount = await completionPause.completionCount
+        XCTAssertEqual(currentGeneration, 2)
+        XCTAssertEqual(firstLease.generation, 2)
+        XCTAssertEqual(secondLease.generation, 2)
+        XCTAssertEqual(firstLease.revision, 2)
+        XCTAssertEqual(secondLease.revision, 2)
+        XCTAssertEqual(resetCount, 2)
+        XCTAssertEqual(completionCount, 1)
+        let secondLeaseIsCurrent = try await registry.commitIfCurrent(
+            using: secondLease
+        ) { true }
+        XCTAssertTrue(secondLeaseIsCurrent)
+
+        await admissionPause.release()
+        do {
+            _ = try await staleAttempt.value
+            XCTFail("invalidated pre-transport work must not start")
+        } catch is CancellationError {
+            // The invalidated attempt observes its closed phase after the pause.
+        } catch ProviderRequestGateError.staleGeneration {
+            // A stale fence is also valid if generation observation wins first.
+        } catch {
+            XCTFail("unexpected invalidated-attempt error: \(error)")
+        }
+        let staleProviderStarts = await staleOperationProbe.startCount
+        let finalCompletionCount = await completionPause.completionCount
+        XCTAssertEqual(staleProviderStarts, 0)
+        XCTAssertEqual(finalCompletionCount, 1)
+        XCTAssertEqual(gateProbe.rejectedTransportStartCount, 1)
+    }
+
     func testNewDiskRevisionFailsClosedWhenRuntimeReloadIsTransientlyUnavailable() async {
         let providerB = NamedLLMProvider(name: "provider-b", responseText: "B")
         let source = ProviderRuntimeTestSource(
@@ -1361,6 +1489,57 @@ private actor GateAttemptCompletionProbe {
 
     var completionCount: Int {
         completions
+    }
+}
+
+private actor GateAttemptCompletionPause {
+    private var entered = false
+    private var released = false
+    private var completions = 0
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    var hasEntered: Bool {
+        entered
+    }
+
+    var completionCount: Int {
+        completions
+    }
+
+    func suspendAndRecord() async {
+        completions += 1
+        entered = true
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            if released {
+                continuation.resume()
+            } else {
+                self.continuation = continuation
+            }
+        }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private final class RegistryGenerationTransitionWaitProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waits = 0
+
+    var waitCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return waits
+    }
+
+    func recordWait() {
+        lock.lock()
+        waits += 1
+        lock.unlock()
     }
 }
 

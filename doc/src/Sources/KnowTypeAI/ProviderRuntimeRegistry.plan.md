@@ -27,13 +27,18 @@
 - A generation change invalidates the old gate generation, clears structured-
   output capability state, and fences late results. It does not reset the
   digest's last successful commit time. Per-generation recommendation runtimes
-  supply fresh cache and health state. Started provider operations are not
-  cancelled by a revision change; explicit caller cancellation and hard timeout
-  may request cancellation, while the gate remains leased until resistant work
-  actually ends. A caller timeout records the timeout cooldown immediately, and
-  a late transport success does not erase that failure state. Only the task
-  owning a real gate attempt records its timeout; a cancellation-marked late
-  error releases the lease without recording a second provider failure.
+  supply fresh cache and health state. The registry creates one actor-owned
+  transition with an explicit target generation before awaiting gate
+  invalidation. Concurrent lease, disk-revision, and notification paths merge
+  behind that transition; only its owner publishes the target generation,
+  clears capability state, records diagnostics, and resumes waiters. Started
+  provider operations are not cancelled by a revision change; explicit caller
+  cancellation and hard timeout may request cancellation, while the gate
+  remains leased until resistant work actually ends. A caller timeout records
+  the timeout cooldown immediately, and a late transport success does not erase
+  that failure state. Only the task owning a real gate attempt records its
+  timeout; a cancellation-marked late error releases the lease without recording
+  a second provider failure.
 - `perform(using:)` refreshes disk revision and checks generation before
   accepting either success or failure. `commitIfCurrent(using:)` repeats the
   refresh before persistence, so missed notifications still produce only a

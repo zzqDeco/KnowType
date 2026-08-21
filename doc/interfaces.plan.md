@@ -97,7 +97,11 @@ fenced real completion. The gate actor associates each active attempt with the
 same phase fence and exactly-once completion used by its operation task.
 Generation invalidation aborts and completes an admitted attempt without
 cooldown, allowing the new generation to admit immediately; an already-started
-transport remains busy until its real stale-fenced completion.
+transport remains busy until its real stale-fenced completion. Registry-driven
+invalidation supplies one explicit target generation: the gate linearizes its
+phase/state change and waiter wake first, while concurrent registry lease or
+revision paths coalesce behind that transition until its exactly-once cleanup
+and capability reset finish.
 
 ## Input Client Compatibility
 
@@ -204,6 +208,9 @@ create `Application Support/KnowType` merely because the IMK host was launched.
 The process-level runtime registry observes the signal and returns leases with
 `revision`, `generation`, opaque `fingerprint`, and optional `provider`. It uses
 the file revision only as an eligible-dispatch fallback. A generation change
+has one actor-owned transition and explicit target generation; concurrent
+eligible-dispatch and revision observations merge behind that transition, so
+no lease is exposed between gate invalidation and registry publication. It
 fences old lease results before UI, ENV, or archive writes; started transport
 remains tracked by the shared provider gate until it actually finishes. A
 caller-visible hard timeout returns immediately without releasing a lease held

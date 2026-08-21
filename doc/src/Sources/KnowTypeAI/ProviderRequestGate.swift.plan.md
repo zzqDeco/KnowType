@@ -21,7 +21,9 @@
   Generation invalidation atomically aborts an admitted attempt, clears only
   that id, wakes waiters, and runs completion without cooldown. A started or
   started-timeout-owned transport retains the active lease until its real
-  stale-fenced completion.
+  stale-fenced completion. Registry invalidation supplies an explicit target
+  generation; phase/state mutation and waiter wake are linearized before an
+  aborted attempt's asynchronous completion callback runs.
 - `beginTransport` succeeds only from the admitted phase. If timeout ownership
   wins first, the gate records cooldown, releases that matching attempt, wakes
   waiters, and runs attempt completion without starting the provider. If

@@ -89,6 +89,15 @@ public actor ProviderRuntimeRegistry {
 
     public static let shared = ProviderRuntimeRegistry()
 
+    private struct GenerationTransition {
+        let id: UUID
+        let newGeneration: UInt64
+        var revision: UInt64
+        var fingerprint: String
+        var providerConfigured: Bool
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+
     private let revisionLoader: RevisionLoader
     private let runtimeLoader: RuntimeLoader
     private let revisionUpdates: RevisionUpdates
@@ -100,6 +109,8 @@ public actor ProviderRuntimeRegistry {
     private var latestSignaledRevision: UInt64?
     private var observationTask: Task<Void, Never>?
     private var activeOperations: [UUID: @Sendable () -> Void] = [:]
+    private var generationTransition: GenerationTransition?
+    private var generationTransitionWaitObserver: (@Sendable () -> Void)?
 
     public init(
         revisionLoader: @escaping RevisionLoader = {
@@ -131,6 +142,7 @@ public actor ProviderRuntimeRegistry {
     }
 
     public func leaseForEligibleDispatch() async -> ProviderRuntimeLease {
+        await waitForGenerationTransitionIfNeeded()
         startObservationIfNeeded()
         let diskRevision = await refreshDiskRevisionIfNeeded()
         let expectedRevision = diskRevision ?? latestSignaledRevision
@@ -189,6 +201,7 @@ public actor ProviderRuntimeRegistry {
         using lease: ProviderRuntimeLease,
         operation: @escaping @Sendable (any LLMProvider) async throws -> T
     ) async throws -> T {
+        await waitForGenerationTransitionIfNeeded()
         guard isCurrent(lease), let provider = lease.provider else {
             throw lease.provider == nil
                 ? ProviderRuntimeRegistryError.providerUnavailable
@@ -240,6 +253,12 @@ public actor ProviderRuntimeRegistry {
         generation
     }
 
+    func setGenerationTransitionWaitObserverForTesting(
+        _ observer: (@Sendable () -> Void)?
+    ) {
+        generationTransitionWaitObserver = observer
+    }
+
     private func startObservationIfNeeded() {
         guard observationTask == nil else {
             return
@@ -270,6 +289,7 @@ public actor ProviderRuntimeRegistry {
 
     @discardableResult
     private func refreshDiskRevisionIfNeeded() async -> UInt64? {
+        await waitForGenerationTransitionIfNeeded()
         guard let diskRevision = revisionLoader() else {
             return nil
         }
@@ -292,24 +312,86 @@ public actor ProviderRuntimeRegistry {
         fingerprint: String,
         providerConfigured: Bool
     ) async {
-        let oldGeneration = generation
-        if let currentLease {
-            await requestGate.invalidate(
-                providerIdentity: currentLease.fingerprint,
-                generation: oldGeneration
-            )
-        }
-        generation &+= 1
-        await capabilityReset()
-        diagnosticSink.record(
-            ProviderRuntimeDiagnosticEvent(
-                stage: .generationChanged,
+        if let transitionID = generationTransition?.id {
+            mergeGenerationTransition(
                 revision: revision,
-                generation: generation,
                 fingerprint: fingerprint,
                 providerConfigured: providerConfigured
             )
+            await waitForGenerationTransition(transitionID)
+            return
+        }
+
+        let oldGeneration = generation
+        let newGeneration = oldGeneration &+ 1
+        let transitionID = UUID()
+        generationTransition = GenerationTransition(
+            id: transitionID,
+            newGeneration: newGeneration,
+            revision: revision,
+            fingerprint: fingerprint,
+            providerConfigured: providerConfigured
         )
+        if let currentLease {
+            await requestGate.invalidate(
+                providerIdentity: currentLease.fingerprint,
+                expectedGeneration: oldGeneration,
+                newGeneration: newGeneration
+            )
+        }
+        guard generationTransition?.id == transitionID else { return }
+        generation = newGeneration
+        await capabilityReset()
+        guard let completedTransition = generationTransition,
+              completedTransition.id == transitionID else { return }
+        diagnosticSink.record(
+            ProviderRuntimeDiagnosticEvent(
+                stage: .generationChanged,
+                revision: completedTransition.revision,
+                generation: completedTransition.newGeneration,
+                fingerprint: completedTransition.fingerprint,
+                providerConfigured: completedTransition.providerConfigured
+            )
+        )
+        completeGenerationTransition(transitionID)
+    }
+
+    private func mergeGenerationTransition(
+        revision: UInt64,
+        fingerprint: String,
+        providerConfigured: Bool
+    ) {
+        guard var transition = generationTransition,
+              revision >= transition.revision else { return }
+        transition.revision = revision
+        transition.fingerprint = fingerprint
+        transition.providerConfigured = providerConfigured
+        generationTransition = transition
+    }
+
+    private func waitForGenerationTransitionIfNeeded() async {
+        guard let transitionID = generationTransition?.id else { return }
+        await waitForGenerationTransition(transitionID)
+    }
+
+    private func waitForGenerationTransition(_ transitionID: UUID) async {
+        generationTransitionWaitObserver?()
+        await withCheckedContinuation { continuation in
+            guard var transition = generationTransition,
+                  transition.id == transitionID else {
+                continuation.resume()
+                return
+            }
+            transition.waiters.append(continuation)
+            generationTransition = transition
+        }
+    }
+
+    private func completeGenerationTransition(_ transitionID: UUID) {
+        guard let transition = generationTransition,
+              transition.id == transitionID else { return }
+        generationTransition = nil
+        transition.waiters.forEach { $0.resume() }
     }
 
     private func installUnavailableLease(revision: UInt64) -> ProviderRuntimeLease {

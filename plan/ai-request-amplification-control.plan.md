@@ -43,7 +43,11 @@ of already-started recommendations, and independent provider failure budgets.
   actor binds each active id and generation to that same phase fence and
   exactly-once completion. Generation invalidation aborts an admitted attempt
   without cooldown and permits immediate new-generation admission, while a
-  started transport remains busy until its stale-fenced real completion.
+  started transport remains busy until its stale-fenced real completion. The
+  registry assigns one explicit target generation before crossing to the gate;
+  concurrent lease and revision paths coalesce behind that actor-owned
+  transition until gate linearization, capability reset, and generation
+  publication complete exactly once.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is

@@ -293,10 +293,22 @@ public actor ProviderRequestGate {
     }
 
     public func invalidate(providerIdentity: String, generation: UInt64) async {
+        await invalidate(
+            providerIdentity: providerIdentity,
+            expectedGeneration: generation,
+            newGeneration: generation &+ 1
+        )
+    }
+
+    func invalidate(
+        providerIdentity: String,
+        expectedGeneration: UInt64,
+        newGeneration: UInt64
+    ) async {
         loadPersistedStateIfNeeded()
         let key = Self.identityHash(providerIdentity)
         var state = state(for: key)
-        guard generation >= state.generation else { return }
+        guard expectedGeneration >= state.generation else { return }
         let abortedCompletion: ProviderRequestAttemptCompletion?
         if let activeAttempt = activeAttempts[key] {
             abortedCompletion = closePreTransportAttemptIfMatching(
@@ -306,7 +318,7 @@ public actor ProviderRequestGate {
         } else {
             abortedCompletion = nil
         }
-        state.generation = generation &+ 1
+        state.generation = newGeneration
         state.cooldownUntil = nil
         state.failureClass = nil
         state.failureCount = 0
