@@ -38,6 +38,10 @@
   second failure or mutate a newer attempt.
 - Generation invalidation wakes waiters while stale transport remains fenced
   until its actual completion.
+- A missing persistence file is treated as an empty gate state on first load;
+  Cocoa no-such-file errors, POSIX `ENOENT`, and nested underlying `ENOENT`
+  are accepted, while other read, permission, corrupt, or write failures stay
+  fail-closed.
 - With persistence enabled, permission, bounded-read, decode, encoding,
   atomic-write, replacement, or final-permission failure enters an actor-owned
   blocked state. New attempts remain blocked across generation invalidation;

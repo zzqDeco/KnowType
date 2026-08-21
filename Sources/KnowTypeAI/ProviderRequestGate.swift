@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import KnowTypeProviders
 
@@ -1013,8 +1014,21 @@ public actor ProviderRequestGate {
     }
 
     private static func isExplicitMissingFileError(_ error: Error) -> Bool {
-        let error = error as NSError
-        return error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError
+        var current: NSError? = error as NSError
+        var visited: Set<ObjectIdentifier> = []
+        while let error = current {
+            guard visited.insert(ObjectIdentifier(error)).inserted else { return false }
+            if error.domain == NSCocoaErrorDomain {
+                if error.code == NSFileNoSuchFileError ||
+                    error.code == NSFileReadNoSuchFileError {
+                    return true
+                }
+            } else if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
+                return true
+            }
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 
     private func boundedData(at url: URL, limit: Int) throws -> Data {

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import KnowTypeAI
@@ -234,8 +235,8 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         try await waitUntil { await resetProbe.hasEntered }
 
         signal.send(2)
-        try await waitUntil { revisionProbe.observedCount == 2 }
         await resetProbe.release()
+        try await waitUntil { revisionProbe.observedCount == 2 }
         try await waitUntil { await registry.currentGeneration() == 2 }
 
         let lease = await registry.leaseForEligibleDispatch()
@@ -843,6 +844,49 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertNotNil(reloadedDeadline)
         await reloaded.invalidate(providerIdentity: identity, generation: 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
+    }
+
+    func testPersistentGateTreatsMissingFileErrorVariantsAsEmptyState() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let errors: [NSError] = [
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError),
+            NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT)),
+            NSError(
+                domain: NSCocoaErrorDomain,
+                code: NSFileReadUnknownError,
+                userInfo: [
+                    NSUnderlyingErrorKey: NSError(
+                        domain: NSPOSIXErrorDomain,
+                        code: Int(ENOENT)
+                    )
+                ]
+            )
+        ]
+
+        for (index, error) in errors.enumerated() {
+            let stateURL = directory.appendingPathComponent("gate-\(index).json")
+            let fileManager = ProviderGateAttributesErrorFileManager(
+                targetURL: stateURL,
+                error: error
+            )
+            let gate = ProviderRequestGate(
+                persistenceURL: stateURL,
+                fileManager: fileManager
+            )
+
+            let preflight = await gate.persistencePreflight()
+            XCTAssertEqual(
+                preflight,
+                .available,
+                "missing file error must be treated as empty state: \(error)"
+            )
+            let value = try await gate.execute(
+                providerIdentity: "missing-file-provider-\(index)",
+                generation: 0
+            ) { 1 }
+            XCTAssertEqual(value, 1)
+        }
     }
 
     func testPersistentGatePermissionFailureBlocksProviderDispatch() async throws {
@@ -2173,5 +2217,21 @@ private extension AIRecommendationState {
             return nil
         }
         return candidate.displayText
+    }
+}
+
+private final class ProviderGateAttributesErrorFileManager: FileManager, @unchecked Sendable {
+    private let targetPath: String
+    private let error: NSError
+
+    init(targetURL: URL, error: NSError) {
+        self.targetPath = targetURL.path
+        self.error = error
+        super.init()
+    }
+
+    override func attributesOfItem(atPath path: String) throws -> [FileAttributeKey: Any] {
+        if path == targetPath { throw error }
+        return try super.attributesOfItem(atPath: path)
     }
 }
