@@ -36,6 +36,11 @@ construction, cache interaction, health reporting, and the final
 - Cache keys use the actual budgeted request payload fingerprint. The shared
   `ProviderRequestGate` enforces one in-flight request per hashed provider
   identity and applies generation fencing and bounded cooldowns.
+- The shared payload task owns provider-health observation for its physical
+  attempt: it records one successful result or one qualifying failure. Awaiting
+  callers only consume that result and do not repeat health observation or
+  create another gate attempt; local budget, cancellation, gate admission, and
+  persistence branches remain non-health outcomes.
 - Registry generation changes fence the old runtime operation. A provider that
   ignores cancellation can finish, but its result is `.stale` and is dropped
   before candidate UI publication.

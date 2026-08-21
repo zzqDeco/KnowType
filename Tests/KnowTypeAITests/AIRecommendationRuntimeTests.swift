@@ -1158,6 +1158,108 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
     }
 
+    func testSharedProviderFailureHealthIsRecordedOnceAcrossThreeConcurrentCallers() async {
+        let clock = RecommendationGateClock()
+        let provider = BlockingFailureLLMProvider(failures: [
+            ProviderError.httpStatus(503, "first failure"),
+            ProviderError.httpStatus(500, "second failure")
+        ])
+        let healthMonitor = AIHealthMonitor(failureThreshold: 2, cooldownSeconds: 60)
+        let diagnosticSink = AwaitableRecommendationDiagnosticSink()
+        let gate = ProviderRequestGate(now: clock.now)
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            healthMonitor: healthMonitor,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink,
+            requestGate: gate
+        )
+        let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
+
+        let callers = (0..<3).map { _ in
+            Task { await runtime.recommendation(for: request) }
+        }
+        await waitForProviderRequestStarts(
+            diagnosticSink.providerRequestStarts,
+            count: callers.count
+        )
+        await provider.releaseFirstRequest()
+
+        var states: [AIRecommendationState] = []
+        for caller in callers {
+            states.append(await caller.value)
+        }
+
+        XCTAssertTrue(
+            states.allSatisfy { $0 == .unavailable(reason: "AI 暂不可用") }
+        )
+        let firstAttemptRequestCount = await provider.requestCount
+        XCTAssertEqual(firstAttemptRequestCount, 1)
+        let firstHealthReason = await healthMonitor.unavailableReason(now: .distantPast)
+        XCTAssertNil(firstHealthReason)
+
+        clock.advance(by: 61)
+        let second = await runtime.recommendation(
+            for: AIRecommendationRequest(rawInput: "nihaomore", compositionID: 2)
+        )
+
+        XCTAssertEqual(second, .unavailable(reason: "AI 暂不可用"))
+        let finalRequestCount = await provider.requestCount
+        XCTAssertEqual(finalRequestCount, 2)
+        let finalHealthReason = await healthMonitor.unavailableReason(now: .distantPast)
+        XCTAssertEqual(finalHealthReason, "AI 暂不可用")
+    }
+
+    func testSharedRateLimitFailureKeepsShortGateRetryAfterWithoutHealthCooldown() async throws {
+        let clock = RecommendationGateClock()
+        let initialNow = clock.date
+        let provider = BlockingFailureLLMProvider(failures: [
+            ProviderRateLimitError(retryAfterSeconds: 1, bodyByteCount: 1)
+        ])
+        let healthMonitor = AIHealthMonitor(failureThreshold: 2, cooldownSeconds: 60)
+        let diagnosticSink = AwaitableRecommendationDiagnosticSink()
+        let gate = ProviderRequestGate(now: clock.now)
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            healthMonitor: healthMonitor,
+            debounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink,
+            requestGate: gate
+        )
+        let request = AIRecommendationRequest(rawInput: "nihao", compositionID: 1)
+
+        let callers = (0..<3).map { _ in
+            Task { await runtime.recommendation(for: request) }
+        }
+        await waitForProviderRequestStarts(
+            diagnosticSink.providerRequestStarts,
+            count: callers.count
+        )
+        await provider.releaseFirstRequest()
+
+        for caller in callers {
+            let state = await caller.value
+            XCTAssertEqual(state, .unavailable(reason: "AI 暂不可用"))
+        }
+
+        let requestCount = await provider.requestCount
+        XCTAssertEqual(requestCount, 1)
+        let healthReason = await healthMonitor.unavailableReason(now: .distantPast)
+        XCTAssertNil(healthReason)
+        let deadline = await gate.cooldownDeadline(
+            providerIdentity: provider.providerName,
+            generation: 0
+        )
+        let gateDeadline = try XCTUnwrap(deadline)
+        XCTAssertEqual(gateDeadline.timeIntervalSince(initialNow), 15, accuracy: 0.001)
+    }
+
     func testEmptyRecommendationDoesNotEnterCooldown() async {
         let diagnosticSink = RecordingDiagnosticSink()
         let provider = QueuedLLMProvider(responses: [
@@ -1833,6 +1935,40 @@ private actor FailingLLMProvider: LLMProvider {
     }
 }
 
+private actor BlockingFailureLLMProvider: LLMProvider {
+    nonisolated let providerName = "blocking-failure"
+    private var failures: [Error]
+    private var recordedRequestCount = 0
+    private var firstRequestReleaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstRequestReleased = false
+
+    init(failures: [Error]) {
+        self.failures = failures
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequestCount += 1
+        let failure = failures.removeFirst()
+        if recordedRequestCount == 1, !firstRequestReleased {
+            await withCheckedContinuation { continuation in
+                firstRequestReleaseWaiters.append(continuation)
+            }
+        }
+        throw failure
+    }
+
+    func releaseFirstRequest() {
+        firstRequestReleased = true
+        let waiters = firstRequestReleaseWaiters
+        firstRequestReleaseWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    var requestCount: Int {
+        recordedRequestCount
+    }
+}
+
 private actor QueuedLLMProvider: LLMProvider {
     nonisolated let providerName = "queued"
     private var responses: [LLMResponse]
@@ -1900,6 +2036,57 @@ private final class RecordingDiagnosticSink: AIRecommendationDiagnosticSink, @un
         let events = recordedEvents
         lock.unlock()
         return events
+    }
+}
+
+private final class AwaitableRecommendationDiagnosticSink: AIRecommendationDiagnosticSink, @unchecked Sendable {
+    let providerRequestStarts: AsyncStream<Void>
+    private let continuation: AsyncStream<Void>.Continuation
+
+    init() {
+        let stream = AsyncStream<Void>.makeStream(bufferingPolicy: .unbounded)
+        providerRequestStarts = stream.stream
+        continuation = stream.continuation
+    }
+
+    func record(_ event: AIRecommendationDiagnosticEvent) {
+        guard event.stage == .providerRequestStart else { return }
+        continuation.yield(())
+    }
+}
+
+private final class RecommendationGateClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+
+    init() {
+        current = Date(timeIntervalSince1970: 1_000_000)
+    }
+
+    var date: Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return current
+    }
+
+    func now() -> Date {
+        date
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.lock()
+        current = current.addingTimeInterval(interval)
+        lock.unlock()
+    }
+}
+
+private func waitForProviderRequestStarts(
+    _ stream: AsyncStream<Void>,
+    count: Int
+) async {
+    var iterator = stream.makeAsyncIterator()
+    for _ in 0..<count {
+        _ = await iterator.next()
     }
 }
 

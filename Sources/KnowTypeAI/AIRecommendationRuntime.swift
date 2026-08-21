@@ -452,19 +452,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             if let pending = inFlight[payloadFingerprint] {
                 response = try await pending.value
             } else {
-                let gate = requestGate
-                let identity = providerIdentity
-                let generation = providerGeneration
-                let timeout = hardTimeoutNanoseconds
-                let task = Task<LLMResponse, Error> {
-                    try await gate.executeWithHardTimeout(
-                        providerIdentity: identity,
-                        generation: generation,
-                        timeoutNanoseconds: timeout
-                    ) {
-                        try await provider.complete(llmRequest)
-                    }
-                }
+                let task = makeProviderAttemptTask(
+                    provider: provider,
+                    request: llmRequest
+                )
                 inFlight[payloadFingerprint] = task
                 defer { inFlight[payloadFingerprint] = nil }
                 response = try await task.value
@@ -531,11 +522,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     acceptedCount: 0,
                     reason: rejectionReason
                 )
-                await healthMonitor.recordSuccess()
                 return .ineligible(reason: "AI 无推荐")
             }
             cache[key] = CacheEntry(candidate: candidate, expiresAt: Date().addingTimeInterval(cacheTTL))
-            await healthMonitor.recordSuccess()
             record(
                 .ready,
                 request: request,
@@ -594,7 +583,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     return .stale
                 }
             }
-            await healthMonitor.recordFailure(error)
             if error is TimeoutError {
                 record(
                     .timeout,
@@ -623,6 +611,45 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: "AI 暂不可用")
         }
+    }
+
+    private func makeProviderAttemptTask(
+        provider: any LLMProvider,
+        request: LLMRequest
+    ) -> Task<LLMResponse, Error> {
+        let gate = requestGate
+        let identity = providerIdentity
+        let generation = providerGeneration
+        let timeout = hardTimeoutNanoseconds
+        let healthMonitor = self.healthMonitor
+        return Task<LLMResponse, Error> {
+            do {
+                let response = try await gate.executeWithHardTimeout(
+                    providerIdentity: identity,
+                    generation: generation,
+                    timeoutNanoseconds: timeout
+                ) {
+                    try await provider.complete(request)
+                }
+                await healthMonitor.recordSuccess()
+                return response
+            } catch {
+                if Self.shouldRecordProviderHealthFailure(error) {
+                    await healthMonitor.recordFailure(error)
+                }
+                throw error
+            }
+        }
+    }
+
+    private static func shouldRecordProviderHealthFailure(_ error: Error) -> Bool {
+        guard !(error is ProviderRequestBudgetError),
+              !(error is ProviderRequestGatePersistenceError),
+              !(error is ProviderRequestGateError),
+              !isCancellation(error) else {
+            return false
+        }
+        return true
     }
 
     static func isEligibleForProviderDispatch(_ request: AIRecommendationRequest) -> Bool {

@@ -14,6 +14,9 @@
 
 - The single-flight owner uses the gate's hard-timeout execution seam. Waiters
   share that attempt and cannot multiply timeout failures.
+- The shared attempt task owns `AIHealthMonitor` observation, so one physical
+  provider success or qualifying failure is observed once; waiters only consume
+  the shared result.
 - A hard timeout returns to recommendation callers immediately while a
   cancellation-resistant transport keeps its gate lease until actual
   completion.

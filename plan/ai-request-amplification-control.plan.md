@@ -58,6 +58,9 @@ of already-started recommendations, and independent provider failure budgets.
   for a later retry instead of looping indefinitely. Awaited disk/runtime
   results are revalidated against the transition token and published lease
   before they can be accepted.
+- The shared recommendation attempt task owns `AIHealthMonitor` observation:
+  one physical provider success or qualifying failure is recorded once, while
+  waiters consume the same result without repeating health observation.
 - Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
   450 ms, new input replaces debounce work, and started transport keeps running
   while only the latest trailing revision may dispatch. Caller hard timeout is
