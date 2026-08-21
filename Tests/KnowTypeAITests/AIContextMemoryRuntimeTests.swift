@@ -1872,6 +1872,12 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             )
             XCTAssertTrue(pendingEvents.isEmpty, route)
             XCTAssertFalse(
+                FileManager.default.fileExists(
+                    atPath: eventsDirectory.appendingPathComponent("typing-events.jsonl").path
+                ),
+                route
+            )
+            XCTAssertFalse(
                 FileManager.default.fileExists(atPath: seededArchives.expired.path),
                 route
             )
