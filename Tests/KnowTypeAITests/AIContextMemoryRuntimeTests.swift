@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import XCTest
@@ -1792,10 +1793,12 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 now: { fixedNow }
             )
 
+            let writtenPendingData: Data?
             if route == "empty request content" {
                 try await eventStore.append(
                     makeContextEvent(rawInput: "empty-request", committedText: "空请求")
                 )
+                writtenPendingData = nil
             } else {
                 let pendingData: Data
                 switch route {
@@ -1822,6 +1825,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                     to: eventsDirectory.appendingPathComponent("typing-events.jsonl")
                 )
                 TypingEventStore.resetInventoryCacheForTesting(eventsDirectoryURL: eventsDirectory)
+                writtenPendingData = pendingData
             }
 
             let decodedSnapshot = try eventStore.pendingDigestSnapshot()
@@ -1840,6 +1844,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 snapshot.requestContent.isEmpty == (route == "empty request content"),
                 route
             )
+            let expectedArchiveData = writtenPendingData ?? snapshot.rawData
+            let expectedArchiveSHA256 = rawDataSHA256(expectedArchiveData)
 
             try eventStore.archivePendingEvents(matching: snapshot)
 
@@ -1851,7 +1857,19 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 partial + (try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
             }
             let pendingEvents = try await eventStore.pendingEvents()
+            let archiveURL = processedDirectory.appendingPathComponent(
+                "typing-events-\(expectedArchiveSHA256).jsonl"
+            )
 
+            XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL.path), route)
+            XCTAssertEqual(try Data(contentsOf: archiveURL), expectedArchiveData, route)
+            XCTAssertTrue(
+                eventStore.hasProcessedArchive(
+                    prefixSHA256: expectedArchiveSHA256,
+                    byteCount: expectedArchiveData.count
+                ),
+                route
+            )
             XCTAssertTrue(pendingEvents.isEmpty, route)
             XCTAssertFalse(
                 FileManager.default.fileExists(atPath: seededArchives.expired.path),
@@ -3484,6 +3502,12 @@ private func makeContextEvent(rawInput: String, committedText: String) -> AITypi
         commitKind: .traditional,
         candidateSource: "traditional"
     )
+}
+
+private func rawDataSHA256(_ data: Data) -> String {
+    SHA256.hash(data: data)
+        .map { String(format: "%02x", $0) }
+        .joined()
 }
 
 private actor DigestLLMProvider: LLMProvider {

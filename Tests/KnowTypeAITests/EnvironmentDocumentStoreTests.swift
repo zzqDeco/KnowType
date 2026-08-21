@@ -62,7 +62,13 @@ final class EnvironmentDocumentStoreTests: XCTestCase {
         let markerless = "# Personal notes\n- keep markerless content\n"
         try Data(markerless.utf8).write(to: url)
         let snapshot = try EnvironmentDocumentStore(fileURL: url).loadSnapshot()
-        XCTAssertTrue(snapshot.content.contains("## User Notes\n\(markerless)"))
+        let canonicalNotes = try XCTUnwrap(
+            snapshot.content.components(separatedBy: EnvironmentDocumentStore.userNotesTitle).last
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(
+            canonicalNotes,
+            markerless.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("backups").path))
     }
 
