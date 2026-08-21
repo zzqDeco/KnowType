@@ -1840,10 +1840,13 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             } else {
                 snapshot = decodedSnapshot
             }
-            XCTAssertTrue(
-                snapshot.requestContent.isEmpty == (route == "empty request content"),
-                route
-            )
+            XCTAssertTrue(snapshot.requestContent.isEmpty, route)
+            if route == "empty request content" {
+                XCTAssertEqual(snapshot.events, decodedSnapshot.events, route)
+                XCTAssertEqual(snapshot.events.count, 1, route)
+            } else {
+                XCTAssertTrue(snapshot.events.isEmpty, route)
+            }
             let expectedArchiveData = writtenPendingData ?? snapshot.rawData
             let expectedArchiveSHA256 = rawDataSHA256(expectedArchiveData)
 
