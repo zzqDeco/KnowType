@@ -3318,8 +3318,11 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             fileURL: directory.appendingPathComponent("ENV.md")
         )
         let provider = CancellationResistantDigestLLMProvider()
-        let gate = ProviderRequestGate(now: clock.now)
-        let runtimeProbe = AIContextMemoryRuntimeTestProbe()
+        let gateProbe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(now: clock.now, testProbe: gateProbe)
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe(
+            pausesAfterGateWaiterInstall: true
+        )
         try await eventStore.append(
             makeContextEvent(rawInput: "claimed", committedText: "受保护前缀")
         )
@@ -3410,30 +3413,176 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
 
         clock.advance(by: 61)
-        let retry = Task {
+        let blockerProbe = ContextGateProbe()
+        let blocker = Task {
+            try await gate.execute(
+                providerIdentity: provider.providerName,
+                generation: 0
+            ) {
+                await blockerProbe.markStarted()
+                await blockerProbe.waitForRelease()
+            }
+        }
+        do {
+            try await waitUntil { await blockerProbe.started }
+        } catch {
+            blocker.cancel()
+            await blockerProbe.release()
+            _ = try? await blocker.value
+            throw error
+        }
+        let blockerStarted = await blockerProbe.started
+        guard blockerStarted else {
+            blocker.cancel()
+            await blockerProbe.release()
+            _ = try? await blocker.value
+            return
+        }
+
+        let deadlineDrain = Task {
             await runtime.processIfNeeded(now: clock.now())
         }
         do {
-            try await waitUntil { await provider.continuationInstallationCount == 2 }
+            try await waitUntil { await runtimeProbe.gateWaiterPauseCount == 1 }
+        } catch {
+            let preflightCountBeforeFailureDrain = gateProbe.preflightCheckCount
+            await gate.invalidate(providerIdentity: provider.providerName, generation: 0)
+            await runtimeProbe.releaseGateWaiterInstall()
+            await blockerProbe.release()
+            await deadlineDrain.value
+            _ = try? await blocker.value
+            try? await waitUntil {
+                gateProbe.preflightCheckCount >= preflightCountBeforeFailureDrain + 1
+            }
+            let drainedPreflightCount = gateProbe.preflightCheckCount
+            XCTAssertGreaterThanOrEqual(
+                drainedPreflightCount,
+                preflightCountBeforeFailureDrain + 1
+            )
+            guard drainedPreflightCount >= preflightCountBeforeFailureDrain + 1 else {
+                throw error
+            }
+            throw error
+        }
+        let gateWaiterPauseCount = await runtimeProbe.gateWaiterPauseCount
+        guard gateWaiterPauseCount == 1 else {
+            let preflightCountBeforeFailureDrain = gateProbe.preflightCheckCount
+            await gate.invalidate(providerIdentity: provider.providerName, generation: 0)
+            await runtimeProbe.releaseGateWaiterInstall()
+            await blockerProbe.release()
+            await deadlineDrain.value
+            _ = try? await blocker.value
+            try? await waitUntil {
+                gateProbe.preflightCheckCount >= preflightCountBeforeFailureDrain + 1
+            }
+            let drainedPreflightCount = gateProbe.preflightCheckCount
+            XCTAssertGreaterThanOrEqual(
+                drainedPreflightCount,
+                preflightCountBeforeFailureDrain + 1
+            )
+            guard drainedPreflightCount >= preflightCountBeforeFailureDrain + 1 else {
+                return
+            }
+            return
+        }
+        XCTAssertEqual(gateWaiterPauseCount, 1)
+
+        let preflightCountBeforeDrain = gateProbe.preflightCheckCount
+        await gate.invalidate(providerIdentity: provider.providerName, generation: 0)
+        await runtimeProbe.releaseGateWaiterInstall()
+        await deadlineDrain.value
+        do {
+            try await waitUntil {
+                gateProbe.preflightCheckCount >= preflightCountBeforeDrain + 1
+            }
+        } catch {
+            await blockerProbe.release()
+            _ = try? await blocker.value
+            throw error
+        }
+        let drainedPreflightCount = gateProbe.preflightCheckCount
+        guard drainedPreflightCount >= preflightCountBeforeDrain + 1 else {
+            await blockerProbe.release()
+            _ = try? await blocker.value
+            return
+        }
+
+        await blockerProbe.release()
+        var blockerFinishedStale = false
+        do {
+            try await blocker.value
+            XCTFail("invalidated deadline blocker must finish stale")
+        } catch ProviderRequestGateError.staleGeneration {
+            blockerFinishedStale = true
+        } catch {
+            XCTFail("unexpected deadline blocker error: \(error)")
+        }
+        XCTAssertTrue(blockerFinishedStale)
+        guard blockerFinishedStale else { return }
+        let requestCountAfterDeadlineDrain = await provider.requestCount
+        XCTAssertEqual(requestCountAfterDeadlineDrain, 1)
+        guard requestCountAfterDeadlineDrain == 1 else {
+            let completedResponseCountBeforeCleanup = await provider.completedResponseCount
+            let finishedCleanupTransport = await provider.finish(
+                generatedMarkdown: "## Global Style\n- cleanup"
+            )
+            if finishedCleanupTransport || requestCountAfterDeadlineDrain > 1 {
+                let expectedCompletedResponseCount = max(
+                    requestCountAfterDeadlineDrain,
+                    completedResponseCountBeforeCleanup + (finishedCleanupTransport ? 1 : 0)
+                )
+                try? await waitUntil {
+                    await provider.completedResponseCount >= expectedCompletedResponseCount
+                }
+                let completedResponseCountAfterCleanup = await provider.completedResponseCount
+                XCTAssertGreaterThanOrEqual(
+                    completedResponseCountAfterCleanup,
+                    expectedCompletedResponseCount
+                )
+            }
+            return
+        }
+
+        let retryProvider = CancellationResistantDigestLLMProvider()
+        await retryProvider.queueResponse(generatedMarkdown: "## Global Style\n- retry")
+        let retryGate = ProviderRequestGate(now: clock.now)
+        let retryRuntime = AIContextMemoryRuntime(
+            provider: retryProvider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            hardTimeoutMilliseconds: 5_000,
+            diagnosticSink: { _ in },
+            requestGate: retryGate,
+            nowProvider: clock.now
+        )
+        let retry = Task {
+            await retryRuntime.processIfNeeded(now: clock.now())
+        }
+        do {
+            try await waitUntil { await retryProvider.completedResponseCount == 1 }
         } catch {
             retry.cancel()
-            _ = await provider.finish(generatedMarkdown: "## Global Style\n- cleanup")
+            _ = await retryProvider.finish(generatedMarkdown: "## Global Style\n- cleanup")
             await retry.value
             throw error
         }
-        let retryContinuationCount = await provider.continuationInstallationCount
-        guard retryContinuationCount == 2 else {
+        let retryResponseCompletionCount = await retryProvider.completedResponseCount
+        guard retryResponseCompletionCount == 1 else {
             retry.cancel()
-            _ = await provider.finish(generatedMarkdown: "## Global Style\n- retry")
+            _ = await retryProvider.finish(generatedMarkdown: "## Global Style\n- cleanup")
             await retry.value
             return
         }
-        let finishedRetryTransport = await provider.finish(
-            generatedMarkdown: "## Global Style\n- retry"
-        )
-        XCTAssertTrue(finishedRetryTransport)
+        XCTAssertEqual(retryResponseCompletionCount, 1)
         await retry.value
 
+        let originalProviderRequestCountAfterRetry = await provider.requestCount
+        XCTAssertEqual(originalProviderRequestCountAfterRetry, 1)
+        let retrySchedule = try XCTUnwrap(environmentStore.loadDigestScheduleState())
+        XCTAssertEqual(retrySchedule.lastSuccessfulDigestAt, clock.now())
+        XCTAssertEqual(retrySchedule.pendingEventCount, 2)
         let finalEnvironment = try environmentStore.loadSnapshot().content
         let finalPending = try await eventStore.pendingEvents()
         XCTAssertTrue(finalEnvironment.contains("- retry"))
@@ -3569,19 +3718,32 @@ private actor SuspendedDigestLLMProvider: LLMProvider {
 private actor CancellationResistantDigestLLMProvider: LLMProvider {
     nonisolated let providerName = "cancellation-resistant-digest"
     private var count = 0
+    private var completedCount = 0
     private var installedContinuationCount = 0
     private var continuation: CheckedContinuation<LLMResponse, Never>?
     private var queuedResponses: [LLMResponse] = []
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         count += 1
+        let response: LLMResponse
         if !queuedResponses.isEmpty {
-            return queuedResponses.removeFirst()
+            response = queuedResponses.removeFirst()
+        } else {
+            response = await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                installedContinuationCount += 1
+            }
         }
-        return await withCheckedContinuation { continuation in
-            self.continuation = continuation
-            installedContinuationCount += 1
-        }
+        completedCount += 1
+        return response
+    }
+
+    func queueResponse(generatedMarkdown: String) {
+        queuedResponses.append(
+            LLMResponse(candidates: [
+                LLMCandidate(text: generatedMarkdown, confidence: 0.9)
+            ])
+        )
     }
 
     @discardableResult
@@ -3590,7 +3752,7 @@ private actor CancellationResistantDigestLLMProvider: LLMProvider {
             LLMCandidate(text: generatedMarkdown, confidence: 0.9)
         ])
         guard let continuation else {
-            queuedResponses.append(response)
+            queueResponse(generatedMarkdown: generatedMarkdown)
             return false
         }
         self.continuation = nil
@@ -3604,6 +3766,10 @@ private actor CancellationResistantDigestLLMProvider: LLMProvider {
 
     var continuationInstallationCount: Int {
         installedContinuationCount
+    }
+
+    var completedResponseCount: Int {
+        completedCount
     }
 }
 
