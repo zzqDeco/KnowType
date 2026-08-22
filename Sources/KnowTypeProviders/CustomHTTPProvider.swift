@@ -12,6 +12,7 @@ public struct CustomHTTPProvider: LLMProvider {
     }
 
     public func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        try ProviderRequestBudget.validate(request)
         var urlRequest = URLRequest(url: configuration.baseURL)
         applyCommonHeaders(&urlRequest, configuration: configuration)
         if let apiKey = configuration.apiKey, !apiKey.isEmpty, urlRequest.value(forHTTPHeaderField: "Authorization") == nil {
@@ -23,9 +24,12 @@ public struct CustomHTTPProvider: LLMProvider {
             guard let body = rendered.data(using: .utf8) else {
                 throw ProviderError.invalidTemplate("template is not UTF-8")
             }
+            try ProviderRequestBudget.validateHTTPBody(body, task: request.task)
             urlRequest.httpBody = body
         } else {
-            urlRequest.httpBody = try JSONEncoder().encode(request)
+            let body = try ProviderRequestBudget.encodedPayload(for: request)
+            try ProviderRequestBudget.validateHTTPBody(body, task: request.task)
+            urlRequest.httpBody = body
         }
 
         let (data, response) = try await httpClient.data(for: urlRequest)
@@ -45,9 +49,7 @@ public struct CustomHTTPProvider: LLMProvider {
     }
 
     private func render(template: String, request: LLMRequest) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let requestData = try encoder.encode(request)
+        let requestData = try ProviderRequestBudget.encodedPayload(for: request)
         let requestJSON = String(data: requestData, encoding: .utf8) ?? "{}"
         let replacements: [String: String] = [
             "task": request.task.rawValue,

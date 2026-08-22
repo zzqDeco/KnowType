@@ -34,7 +34,7 @@ enum LLMOutputContract {
                 "properties": [
                     "markdown": [
                         "type": "string",
-                        "description": "The complete ENV.md generated section in markdown."
+                        "description": "Exactly one markdown candidate for the ENV.md generated section, without document title, markers, or User Notes."
                     ]
                 ],
                 "required": ["markdown"]

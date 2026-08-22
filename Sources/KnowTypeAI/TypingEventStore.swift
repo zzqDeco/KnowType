@@ -1,3 +1,5 @@
+import CryptoKit
+import Darwin
 import Foundation
 
 public enum TypingEventStoreError: Error, Equatable {
@@ -47,7 +49,7 @@ struct TypingEventRetentionPolicy: Sendable, Equatable {
     var compactedPendingEventCount: Int = 450
     var compactedPendingByteCount: Int = 786_432
     var maximumDigestEventCount: Int = 50
-    var maximumDigestByteCount: Int = 262_144
+    var maximumDigestByteCount: Int = 48 * 1_024
     var maximumTextScalarCount: Int = 2_048
     var processedMaximumAge: TimeInterval = 7 * 24 * 60 * 60
     var processedMaximumFileCount: Int = 100
@@ -70,6 +72,19 @@ struct TypingEventArchiveResult: Sendable, Equatable {
     static let empty = TypingEventArchiveResult(deletedFileCount: 0, deletedByteCount: 0)
 }
 
+enum ProcessedArchiveValidation: Sendable, Equatable {
+    case missing
+    case valid
+    case invalid
+}
+
+enum PendingClaimedPrefixValidation: Sendable, Equatable {
+    case missing
+    case notMatching
+    case matching(TypingEventSnapshot)
+    case indeterminate
+}
+
 final class TypingEventStoreTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var inventoryScans = 0
@@ -77,6 +92,10 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     private var atomicRewrites = 0
     private var maximumBufferedReadBytes = 0
     private var failedArchiveDeletionsRemaining = 0
+    private var failedPendingArchivesRemaining = 0
+    private var failedPermissionChangesRemaining = 0
+    private var failedClaimedPrefixReadsRemaining = 0
+    private var nextProcessedArchiveModificationDate: Date?
 
     var inventoryScanCount: Int {
         lock.lock()
@@ -105,6 +124,30 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
     func failNextArchiveDeletions(_ count: Int) {
         lock.lock()
         failedArchiveDeletionsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextPendingArchives(_ count: Int) {
+        lock.lock()
+        failedPendingArchivesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextPermissionChanges(_ count: Int) {
+        lock.lock()
+        failedPermissionChangesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextClaimedPrefixReads(_ count: Int) {
+        lock.lock()
+        failedClaimedPrefixReadsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func forceNextProcessedArchiveModificationDate(_ date: Date) {
+        lock.lock()
+        nextProcessedArchiveModificationDate = date
         lock.unlock()
     }
 
@@ -140,6 +183,44 @@ final class TypingEventStoreTestProbe: @unchecked Sendable {
         }
         failedArchiveDeletionsRemaining -= 1
         return true
+    }
+
+    fileprivate func shouldFailPendingArchive() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedPendingArchivesRemaining > 0 else {
+            return false
+        }
+        failedPendingArchivesRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailPermissionChange() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedPermissionChangesRemaining > 0 else {
+            return false
+        }
+        failedPermissionChangesRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailClaimedPrefixRead() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedClaimedPrefixReadsRemaining > 0 else {
+            return false
+        }
+        failedClaimedPrefixReadsRemaining -= 1
+        return true
+    }
+
+    fileprivate func takeNextProcessedArchiveModificationDate() -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        let date = nextProcessedArchiveModificationDate
+        nextProcessedArchiveModificationDate = nil
+        return date
     }
 }
 
@@ -239,12 +320,13 @@ public final class TypingEventStore: @unchecked Sendable {
             var line = try encoder.encode(boundedEvent)
             line.append(0x0A)
             if fileManager.fileExists(atPath: eventsFileURL.path) {
-                let handle = try FileHandle(forWritingTo: eventsFileURL)
+                let handle = try secureFileHandleForWriting(at: eventsFileURL)
                 defer { try? handle.close() }
                 try handle.seekToEnd()
                 try handle.write(contentsOf: line)
+                try setSecurePermissions(of: eventsFileURL)
             } else {
-                try line.write(to: eventsFileURL, options: .atomic)
+                try secureAtomicWrite(line, to: eventsFileURL)
             }
 
             var inventory = existingInventory
@@ -327,6 +409,52 @@ public final class TypingEventStore: @unchecked Sendable {
         }
     }
 
+    func pendingDigestSnapshot(
+        prefixByteCount: Int,
+        eventCount: Int
+    ) throws -> TypingEventSnapshot {
+        guard prefixByteCount >= 0,
+              eventCount >= 0,
+              prefixByteCount <= retentionPolicy.maximumDigestByteCount else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        return try withTypingEventFileLock {
+            testProbe?.recordDigestSnapshotDecode()
+            guard prefixByteCount > 0 else {
+                guard eventCount == 0 else {
+                    throw TypingEventStoreError.pendingContentChanged
+                }
+                return TypingEventSnapshot(
+                    rawData: Data(),
+                    requestData: Data(),
+                    events: [],
+                    claimedEventCount: 0
+                )
+            }
+            guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+                throw TypingEventStoreError.pendingContentChanged
+            }
+            let handle = try secureFileHandleForReading(at: eventsFileURL)
+            defer { try? handle.close() }
+            let rawData = try readBounded(
+                from: handle,
+                offset: 0,
+                byteCount: prefixByteCount
+            )
+            guard rawData.count == prefixByteCount else {
+                throw TypingEventStoreError.pendingContentChanged
+            }
+            let snapshot = decodeSnapshot(
+                rawData,
+                requestByteLimit: retentionPolicy.maximumDigestByteCount
+            )
+            guard snapshot.claimedEventCount == eventCount else {
+                throw TypingEventStoreError.pendingContentChanged
+            }
+            return snapshot
+        }
+    }
+
     func pendingFullSnapshot() throws -> TypingEventSnapshot {
         try withTypingEventFileLock {
             try fullSnapshotSynchronously()
@@ -337,8 +465,7 @@ public final class TypingEventStore: @unchecked Sendable {
         try withTypingEventFileLock {
             let rawData = try fullSnapshotSynchronously().rawData
             _ = try archivePendingEventsSynchronously(
-                matchingRawData: rawData,
-                pruneProcessedArchives: false
+                matchingRawData: rawData
             )
         }
     }
@@ -346,8 +473,7 @@ public final class TypingEventStore: @unchecked Sendable {
     public func archivePendingEvents(matchingRawContent rawContent: String) async throws {
         try withTypingEventFileLock {
             _ = try archivePendingEventsSynchronously(
-                matchingRawData: Data(rawContent.utf8),
-                pruneProcessedArchives: false
+                matchingRawData: Data(rawContent.utf8)
             )
         }
     }
@@ -359,7 +485,6 @@ public final class TypingEventStore: @unchecked Sendable {
         try withTypingEventFileLock {
             _ = try archivePendingEventsSynchronously(
                 matchingRawData: Data(rawContent.utf8),
-                pruneProcessedArchives: true,
                 beforeArchive: beforeArchive
             )
         }
@@ -372,7 +497,6 @@ public final class TypingEventStore: @unchecked Sendable {
         try withTypingEventFileLock {
             try archivePendingEventsSynchronously(
                 matchingRawData: snapshot.rawData,
-                pruneProcessedArchives: true,
                 beforeArchive: beforeArchive
             )
         }
@@ -380,9 +504,14 @@ public final class TypingEventStore: @unchecked Sendable {
 
     func archivePendingEvents(matching snapshot: TypingEventSnapshot) throws {
         try withTypingEventFileLock {
+            if snapshot.events.isEmpty,
+               snapshot.claimedEventCount > 0,
+               snapshot.rawData.count >= retentionPolicy.maximumDigestByteCount {
+                _ = try archiveOversizedDigestLineSynchronously(expectedRawData: snapshot.rawData)
+                return
+            }
             _ = try archivePendingEventsSynchronously(
-                matchingRawData: snapshot.rawData,
-                pruneProcessedArchives: false
+                matchingRawData: snapshot.rawData
             )
         }
     }
@@ -391,6 +520,120 @@ public final class TypingEventStore: @unchecked Sendable {
         let eventsFileURL = eventsDirectoryURL.appendingPathComponent("typing-events.jsonl")
         _ = withTypingEventFileLock {
             typingEventInventoryCache.removeValue(forKey: normalizedPath(for: eventsFileURL))
+        }
+    }
+
+    func hasProcessedArchive(prefixSHA256: String, byteCount: Int) -> Bool {
+        processedArchiveValidation(prefixSHA256: prefixSHA256, byteCount: byteCount) == .valid
+    }
+
+    func processedArchiveValidation(
+        prefixSHA256: String,
+        byteCount: Int
+    ) -> ProcessedArchiveValidation {
+        guard prefixSHA256.count == 64,
+              prefixSHA256.allSatisfy(\.isHexDigit),
+              byteCount >= 0,
+              byteCount <= retentionPolicy.maximumPendingByteCount else { return .invalid }
+        let url = processedDirectoryURL.appendingPathComponent("typing-events-\(prefixSHA256).jsonl")
+        guard fileManager.fileExists(atPath: url.path) else { return .missing }
+        do {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile != false else { return .invalid }
+            let handle = try secureFileHandleForReading(at: url)
+            defer { try? handle.close() }
+            let data = try readBounded(from: handle, offset: 0, byteCount: byteCount + 1)
+            guard data.count == byteCount else { return .invalid }
+            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            return digest == prefixSHA256.lowercased() ? .valid : .invalid
+        } catch {
+            return .invalid
+        }
+    }
+
+    func pendingClaimedPrefixValidation(
+        prefixSHA256: String,
+        byteCount: Int,
+        eventCount: Int
+    ) -> PendingClaimedPrefixValidation {
+        guard prefixSHA256.count == 64,
+              prefixSHA256.allSatisfy(\.isHexDigit),
+              byteCount > 0,
+              byteCount <= retentionPolicy.maximumDigestByteCount,
+              eventCount > 0,
+              eventCount <= retentionPolicy.maximumDigestEventCount else {
+            return .indeterminate
+        }
+        return withTypingEventFileLock {
+            let archiveURL = processedDirectoryURL.appendingPathComponent(
+                "typing-events-\(prefixSHA256).jsonl"
+            )
+            do {
+                let archiveAttributes = try fileManager.attributesOfItem(atPath: archiveURL.path)
+                guard (archiveAttributes[.type] as? FileAttributeType) == .typeRegular else {
+                    return .indeterminate
+                }
+                let archiveHandle = try secureFileHandleForReading(at: archiveURL)
+                defer { try? archiveHandle.close() }
+                let expectedData = try readBounded(
+                    from: archiveHandle,
+                    offset: 0,
+                    byteCount: byteCount + 1
+                )
+                guard expectedData.count == byteCount,
+                      Self.sha256(expectedData) == prefixSHA256.lowercased() else {
+                    return .indeterminate
+                }
+
+                do {
+                    let pendingAttributes = try fileManager.attributesOfItem(
+                        atPath: eventsFileURL.path
+                    )
+                    guard (pendingAttributes[.type] as? FileAttributeType) == .typeRegular else {
+                        return .indeterminate
+                    }
+                } catch {
+                    return Self.isExplicitMissingFileError(error) ? .missing : .indeterminate
+                }
+                if testProbe?.shouldFailClaimedPrefixRead() == true {
+                    return .indeterminate
+                }
+                let pendingHandle: FileHandle
+                do {
+                    pendingHandle = try secureFileHandleForReading(at: eventsFileURL)
+                } catch {
+                    return Self.isExplicitMissingFileError(error) ? .missing : .indeterminate
+                }
+                defer { try? pendingHandle.close() }
+                let pendingPrefix: Data
+                do {
+                    pendingPrefix = try readBounded(
+                        from: pendingHandle,
+                        offset: 0,
+                        byteCount: byteCount
+                    )
+                } catch {
+                    return Self.isExplicitMissingFileError(error) ? .missing : .indeterminate
+                }
+                if pendingPrefix.count < byteCount {
+                    return expectedData.starts(with: pendingPrefix)
+                        ? .indeterminate
+                        : .notMatching
+                }
+                guard pendingPrefix == expectedData else {
+                    return .notMatching
+                }
+                let snapshot = decodeSnapshot(
+                    pendingPrefix,
+                    requestByteLimit: retentionPolicy.maximumDigestByteCount
+                )
+                guard snapshot.claimedEventCount == eventCount else {
+                    return .indeterminate
+                }
+                return .matching(snapshot)
+            } catch {
+                return .indeterminate
+            }
         }
     }
 
@@ -415,12 +658,15 @@ public final class TypingEventStore: @unchecked Sendable {
         preservingClaimedPrefix claimedPrefix: Data? = nil
     ) throws -> TypingEventInventory {
         let key = Self.normalizedPath(for: eventsFileURL)
-        let metadata = fileMetadata()
-        if let cached = typingEventInventoryCache[key], cached.metadata == metadata {
-            return cached.inventory
+        guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+            typingEventInventoryCache[key] = TypingEventInventoryCacheEntry(
+                metadata: nil,
+                inventory: .empty
+            )
+            testProbe?.recordInventoryScan()
+            return .empty
         }
-        if let metadata,
-           metadata.byteCount > retentionPolicy.maximumPendingByteCount {
+        if try pendingFileExceedsHardLimit() {
             let compaction = try compactPendingSynchronously(
                 preservingClaimedPrefix: claimedPrefix,
                 originalEventCount: nil
@@ -428,18 +674,23 @@ public final class TypingEventStore: @unchecked Sendable {
             testProbe?.recordInventoryScan()
             return compaction.inventory
         }
-        let data: Data
-        if fileManager.fileExists(atPath: eventsFileURL.path) {
-            data = try Data(contentsOf: eventsFileURL)
-            testProbe?.recordBufferedRead(byteCount: data.count)
-        } else {
-            data = Data()
+        let metadata = fileMetadata()
+        if let cached = typingEventInventoryCache[key], cached.metadata == metadata {
+            return cached.inventory
+        }
+        let data = try readPendingFileBounded()
+        if data.count > retentionPolicy.maximumPendingByteCount {
+            let compaction = try compactPendingSynchronously(
+                preservingClaimedPrefix: claimedPrefix,
+                originalEventCount: nil
+            )
+            testProbe?.recordInventoryScan()
+            return compaction.inventory
         }
         let lines = Self.lines(in: data)
         let inventory = inventory(for: lines, byteCount: data.count)
         if inventory.eventCount > retentionPolicy.maximumPendingEventCount
-            || inventory.byteCount > retentionPolicy.maximumPendingByteCount
-            || lines.contains(where: { $0.count > retentionPolicy.maximumDigestByteCount }) {
+            || inventory.byteCount > retentionPolicy.maximumPendingByteCount {
             let compaction = try compactPendingSynchronously(
                 preservingClaimedPrefix: claimedPrefix,
                 originalEventCount: inventory.eventCount
@@ -470,9 +721,13 @@ public final class TypingEventStore: @unchecked Sendable {
         droppedEventCount: Int,
         droppedByteCount: Int
     ) {
-        let originalByteCount = fileMetadata()?.byteCount ?? 0
-        let handle = try FileHandle(forReadingFrom: eventsFileURL)
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
         defer { try? handle.close() }
+        let fileLength = try handle.seekToEnd()
+        guard fileLength <= UInt64(Int.max) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        let originalByteCount = Int(fileLength)
         let retainedPrefix: Data
         if let claimedPrefix,
            !claimedPrefix.isEmpty,
@@ -537,7 +792,7 @@ public final class TypingEventStore: @unchecked Sendable {
         var retainedData = Data(capacity: retainedPrefix.count + retainedByteCount)
         retainedData.append(retainedPrefix)
         retainedLines.forEach { retainedData.append($0) }
-        try retainedData.write(to: eventsFileURL, options: .atomic)
+        try secureAtomicWrite(retainedData, to: eventsFileURL)
         testProbe?.recordAtomicRewrite()
         let retainedInventory = inventory(for: retainedData)
         cacheInventory(retainedInventory)
@@ -581,11 +836,42 @@ public final class TypingEventStore: @unchecked Sendable {
                 claimedEventCount: 0
             )
         }
-        return decodeSnapshot(try Data(contentsOf: eventsFileURL))
+        var data = try readPendingFileBounded()
+        if data.count > retentionPolicy.maximumPendingByteCount {
+            _ = try compactPendingSynchronously(
+                preservingClaimedPrefix: nil,
+                originalEventCount: nil
+            )
+            data = try readPendingFileBounded()
+        }
+        guard data.count <= retentionPolicy.maximumPendingByteCount else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        return decodeSnapshot(data)
+    }
+
+    private func pendingFileExceedsHardLimit() throws -> Bool {
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
+        defer { try? handle.close() }
+        return !(try readBounded(
+            from: handle,
+            offset: retentionPolicy.maximumPendingByteCount,
+            byteCount: 1
+        )).isEmpty
+    }
+
+    private func readPendingFileBounded() throws -> Data {
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
+        defer { try? handle.close() }
+        return try readBounded(
+            from: handle,
+            offset: 0,
+            byteCount: retentionPolicy.maximumPendingByteCount + 1
+        )
     }
 
     private func readDigestPrefixSynchronously() throws -> Data {
-        let handle = try FileHandle(forReadingFrom: eventsFileURL)
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
         defer { try? handle.close() }
         var buffer = Data()
         let chunkSize = 64 * 1_024
@@ -729,36 +1015,121 @@ public final class TypingEventStore: @unchecked Sendable {
 
     private func archivePendingEventsSynchronously(
         matchingRawData rawData: Data,
-        pruneProcessedArchives: Bool,
         beforeArchive: @Sendable () throws -> Void = {}
     ) throws -> TypingEventArchiveResult {
         guard !rawData.isEmpty,
               fileManager.fileExists(atPath: eventsFileURL.path) else {
             return .empty
         }
-        let currentData = try Data(contentsOf: eventsFileURL)
-        guard currentData.starts(with: rawData) else {
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
+        defer { try? handle.close() }
+        let currentData = try readBounded(
+            from: handle,
+            offset: 0,
+            byteCount: retentionPolicy.maximumPendingByteCount + 1
+        )
+        guard currentData.count <= retentionPolicy.maximumPendingByteCount,
+              currentData.starts(with: rawData) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        if testProbe?.shouldFailPendingArchive() == true {
             throw TypingEventStoreError.pendingContentChanged
         }
         try beforeArchive()
         try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
-        let formatter = ISO8601DateFormatter()
-        let filename = "typing-events-\(formatter.string(from: now()).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString).jsonl"
+        let filename = archiveFilename(for: rawData)
         let destination = processedDirectoryURL.appendingPathComponent(filename)
-        try rawData.write(to: destination, options: .atomic)
+        try secureAtomicWrite(rawData, to: destination)
+        applyTestProcessedArchiveModificationDate(to: destination)
+        let pruneResult = pruneProcessedArchivesSynchronously(
+            protecting: destination
+        )
 
         let remainingData = Data(currentData.dropFirst(rawData.count))
         if remainingData.isEmpty {
             try fileManager.removeItem(at: eventsFileURL)
         } else {
-            try remainingData.write(to: eventsFileURL, options: .atomic)
+            try secureAtomicWrite(remainingData, to: eventsFileURL)
         }
         testProbe?.recordAtomicRewrite()
         cacheInventory(inventory(for: remainingData))
-        return pruneProcessedArchives ? pruneProcessedArchivesSynchronously() : .empty
+        return pruneResult
     }
 
-    private func pruneProcessedArchivesSynchronously() -> TypingEventArchiveResult {
+    private func archiveOversizedDigestLineSynchronously(expectedRawData: Data) throws -> TypingEventArchiveResult {
+        guard fileManager.fileExists(atPath: eventsFileURL.path) else { return .empty }
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
+        defer { try? handle.close() }
+        let currentData = try readBounded(
+            from: handle,
+            offset: 0,
+            byteCount: retentionPolicy.maximumPendingByteCount + 1
+        )
+        guard currentData.count <= retentionPolicy.maximumPendingByteCount,
+              currentData.starts(with: expectedRawData) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        guard !currentData.isEmpty else { return .empty }
+        let lineEnd = currentData.firstIndex(of: 0x0A).map { currentData.index(after: $0) } ?? currentData.endIndex
+        let line = Data(currentData[..<lineEnd])
+        try fileManager.createDirectory(at: processedDirectoryURL, withIntermediateDirectories: true)
+        let destination = processedDirectoryURL.appendingPathComponent(
+            archiveFilename(for: line)
+        )
+        try secureAtomicWrite(line, to: destination)
+        applyTestProcessedArchiveModificationDate(to: destination)
+        let pruneResult = pruneProcessedArchivesSynchronously(
+            protecting: destination
+        )
+        let remainingData = Data(currentData[lineEnd...])
+        if remainingData.isEmpty {
+            try fileManager.removeItem(at: eventsFileURL)
+        } else {
+            try secureAtomicWrite(remainingData, to: eventsFileURL)
+        }
+        testProbe?.recordAtomicRewrite()
+        cacheInventory(inventory(for: remainingData))
+        return pruneResult
+    }
+
+    private func archiveFilename(for data: Data) -> String {
+        let digest = Self.sha256(data)
+        return "typing-events-\(digest).jsonl"
+    }
+
+    private static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func isExplicitMissingFileError(_ error: Error) -> Bool {
+        var current: NSError? = error as NSError
+        var visited: Set<ObjectIdentifier> = []
+        while let error = current {
+            guard visited.insert(ObjectIdentifier(error)).inserted else { return false }
+            if error.domain == NSCocoaErrorDomain {
+                if error.code == NSFileNoSuchFileError ||
+                    error.code == NSFileReadNoSuchFileError {
+                    return true
+                }
+            } else if error.domain == NSPOSIXErrorDomain, error.code == Int(ENOENT) {
+                return true
+            }
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
+    }
+
+    private func applyTestProcessedArchiveModificationDate(to url: URL) {
+        guard let date = testProbe?.takeNextProcessedArchiveModificationDate() else {
+            return
+        }
+        try? fileManager.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+    }
+
+    private func pruneProcessedArchivesSynchronously(
+        protecting protectedArchiveURL: URL
+    ) -> TypingEventArchiveResult {
+        let protectedArchivePath = Self.normalizedPath(for: protectedArchiveURL)
         guard let urls = try? fileManager.contentsOfDirectory(
             at: processedDirectoryURL,
             includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
@@ -770,6 +1141,13 @@ public final class TypingEventStore: @unchecked Sendable {
             var url: URL
             var date: Date
             var byteCount: Int
+        }
+        for url in urls where url.lastPathComponent.hasPrefix("typing-events-") && url.pathExtension == "jsonl" {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile != false else {
+                continue
+            }
+            try? setSecurePermissions(of: url)
         }
         var archives = urls.compactMap { url -> Archive? in
             guard url.lastPathComponent.hasPrefix("typing-events-"),
@@ -802,6 +1180,9 @@ public final class TypingEventStore: @unchecked Sendable {
         var deletedCount = 0
         var deletedBytes = 0
         for archive in archives {
+            guard Self.normalizedPath(for: archive.url) != protectedArchivePath else {
+                continue
+            }
             let expired = archive.date < cutoff
             let overCount = remainingCount > retentionPolicy.processedMaximumFileCount
             let overBytes = remainingBytes > retentionPolicy.processedMaximumByteCount
@@ -825,6 +1206,44 @@ public final class TypingEventStore: @unchecked Sendable {
             deletedFileCount: deletedCount,
             deletedByteCount: deletedBytes
         )
+    }
+
+    private func secureFileHandleForReading(at url: URL) throws -> FileHandle {
+        try setSecurePermissions(of: url)
+        return try FileHandle(forReadingFrom: url)
+    }
+
+    private func secureFileHandleForWriting(at url: URL) throws -> FileHandle {
+        try setSecurePermissions(of: url)
+        return try FileHandle(forWritingTo: url)
+    }
+
+    private func secureAtomicWrite(_ data: Data, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporaryURL = directory.appendingPathComponent(
+            ".\(url.lastPathComponent).\(UUID().uuidString).tmp"
+        )
+        do {
+            try data.write(to: temporaryURL, options: .atomic)
+            try setSecurePermissions(of: temporaryURL)
+            if fileManager.fileExists(atPath: url.path) {
+                _ = try fileManager.replaceItemAt(url, withItemAt: temporaryURL)
+            } else {
+                try fileManager.moveItem(at: temporaryURL, to: url)
+            }
+            try setSecurePermissions(of: url)
+        } catch {
+            try? fileManager.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
+    private func setSecurePermissions(of url: URL) throws {
+        if testProbe?.shouldFailPermissionChange() == true {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     private func fileMetadata() -> TypingEventFileMetadata? {

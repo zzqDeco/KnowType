@@ -43,6 +43,12 @@ public actor AIHealthMonitor {
         if error is TimeoutError {
             return true
         }
+        if error is ProviderRateLimitError {
+            return true
+        }
+        if error is ProviderRequestBudgetError {
+            return false
+        }
         if case ProviderError.httpStatus(let status, _) = error,
            status == 429 || (500...599).contains(status) {
             return true

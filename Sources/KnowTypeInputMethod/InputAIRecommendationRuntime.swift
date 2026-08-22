@@ -33,9 +33,21 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         static let dispatchDebounceMilliseconds = 450
     }
 
-    private enum ActiveRequestPhase: Equatable {
-        case dispatchDeferred
-        case transportStarted
+    private enum FSMState: Equatable {
+        case idle
+        case debouncing
+        case inFlight
+        case trailing
+    }
+
+    private struct Work: @unchecked Sendable {
+        var context: InputAIRecommendationRuntimeContext
+        var request: AIRecommendationRequest
+        var currentSnapshot: SnapshotProvider
+        var onStateChange: StateChangeHandler
+        var requestID: UUID
+        var generation: Int
+        var scheduledAt: Date
     }
 
     private let provider: (any AIRecommendationProviding)?
@@ -44,10 +56,12 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let hasEagerProvider: Bool
     private let dispatchDebounceNanoseconds: UInt64
-    private var activeTask: Task<Void, Never>?
-    private var activeRequestID: UUID?
-    private var activeRequestPhase: ActiveRequestPhase?
+    private var state: FSMState = .idle
     private var generation = 0
+    private var activeWork: Work?
+    private var trailingWork: Work?
+    private var deferredTask: Task<Void, Never>?
+    private var transportTask: Task<Void, Never>?
 
     init(
         provider: (any AIRecommendationProviding)?,
@@ -65,31 +79,16 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         self.diagnosticSink = diagnosticSink
     }
 
-    var hasKnownProvider: Bool {
-        hasEagerProvider || providerAvailability?.providerAvailability == .available
-    }
+    var hasKnownProvider: Bool { hasEagerProvider || providerAvailability?.providerAvailability == .available }
 
     var shouldBuildRecommendationContext: Bool {
-        guard provider != nil else {
-            return false
-        }
-        if hasEagerProvider {
-            return true
-        }
-        guard let providerAvailability else {
-            return true
-        }
-        switch providerAvailability.providerAvailability {
-        case .unknown, .available:
-            return true
-        case .unavailable:
-            return false
-        }
+        guard provider != nil else { return false }
+        if hasEagerProvider { return true }
+        guard let providerAvailability else { return true }
+        return providerAvailability.providerAvailability != .unavailable
     }
 
-    var shouldScheduleRecommendationRequest: Bool {
-        provider != nil
-    }
+    var shouldScheduleRecommendationRequest: Bool { provider != nil }
 
     @discardableResult
     func schedule(
@@ -97,71 +96,8 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         currentSnapshot: @escaping SnapshotProvider,
         onStateChange: @escaping StateChangeHandler
     ) -> AIRecommendationState {
-        if let cancelledRequestID = activeRequestID {
-            record(
-                .cancelPrevious,
-                requestID: cancelledRequestID,
-                compositionID: context.compositionID,
-                rawLength: context.rawInput.count,
-                rawRevision: context.rawRevision,
-                appBundleID: context.appBundleID,
-                reason: "new_schedule"
-            )
-            switch activeRequestPhase {
-            case .dispatchDeferred:
-                activeTask?.cancel()
-                record(
-                    .dispatchCancelledByNewInput,
-                    requestID: cancelledRequestID,
-                    compositionID: context.compositionID,
-                    rawLength: context.rawInput.count,
-                    rawRevision: context.rawRevision,
-                    appBundleID: context.appBundleID,
-                    reason: "new_schedule"
-                )
-            case .transportStarted:
-                record(
-                    .transportLeftStale,
-                    requestID: cancelledRequestID,
-                    compositionID: context.compositionID,
-                    rawLength: context.rawInput.count,
-                    rawRevision: context.rawRevision,
-                    appBundleID: context.appBundleID,
-                    reason: "new_schedule"
-                )
-                record(
-                    .transportCancellationRequested,
-                    requestID: cancelledRequestID,
-                    compositionID: context.compositionID,
-                    rawLength: context.rawInput.count,
-                    rawRevision: context.rawRevision,
-                    appBundleID: context.appBundleID,
-                    reason: "new_schedule"
-                )
-                record(
-                    .transportCancelledByNewInput,
-                    requestID: cancelledRequestID,
-                    compositionID: context.compositionID,
-                    rawLength: context.rawInput.count,
-                    rawRevision: context.rawRevision,
-                    appBundleID: context.appBundleID,
-                    reason: "new_schedule"
-                )
-                activeTask?.cancel()
-            case nil:
-                activeTask?.cancel()
-            }
-        } else {
-            activeTask?.cancel()
-        }
-        activeTask = nil
-        activeRequestID = nil
-        activeRequestPhase = nil
-        generation += 1
-        let currentGeneration = generation
         let requestID = UUID()
-
-        let scheduleDecision = schedulePolicy.decision(
+        let decision = schedulePolicy.decision(
             for: InputAIRecommendationScheduleContext(
                 rawInput: context.rawInput,
                 hasResolvedSegments: context.hasResolvedSegments,
@@ -172,354 +108,239 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
                 hasRecommendationProvider: context.hasRecommendationProvider
             )
         )
-        if case .skip(let skip) = scheduleDecision {
-            record(
-                skip.diagnosticStage,
-                requestID: requestID,
-                compositionID: context.compositionID,
-                rawLength: context.rawInput.count,
-                rawRevision: context.rawRevision,
-                prefixLength: context.lockedPrefix?.count,
-                appBundleID: context.appBundleID,
-                reason: skip.reason
-            )
+        if case .skip(let skip) = decision {
+            cancelDeferredOnly(context: context, reason: "new_schedule")
+            trailingWork = nil
+            generation += 1
+            record(skip.diagnosticStage, requestID: requestID, context: context, reason: skip.reason)
             return skip.state
         }
-
         guard let provider else {
-            record(
-                .skippedNoProvider,
-                requestID: requestID,
-                compositionID: context.compositionID,
-                rawLength: context.rawInput.count,
-                rawRevision: context.rawRevision,
-                prefixLength: context.lockedPrefix?.count,
-                appBundleID: context.appBundleID,
-                reason: "recommendation_provider_missing"
-            )
+            record(.skippedNoProvider, requestID: requestID, context: context, reason: "recommendation_provider_missing")
             return .idle
         }
 
-        let request = AIRecommendationRequest(
-            rawInput: context.rawInput,
-            lockedPrefix: context.lockedPrefix,
-            candidateHints: [],
-            appBundleID: context.appBundleID,
-            appName: context.appBundleID,
-            locale: context.locale,
-            compositionID: context.compositionID,
-            requestID: requestID,
-            lexicalContext: context.lexicalContext,
-            feedbackContext: context.feedbackContext
-        )
-        record(
-            .scheduled,
-            requestID: requestID,
-            compositionID: context.compositionID,
-            rawLength: context.rawInput.count,
-            rawRevision: context.rawRevision,
-            prefixLength: context.lockedPrefix?.count,
-            appBundleID: context.appBundleID
-        )
-        activeRequestID = requestID
-        activeRequestPhase = .dispatchDeferred
-        if !context.isProviderAvailabilityProbe {
-            record(
-                .pendingPlaceholder,
-                requestID: requestID,
-                compositionID: context.compositionID,
-                rawLength: context.rawInput.count,
-                rawRevision: context.rawRevision,
-                prefixLength: context.lockedPrefix?.count,
-                appBundleID: context.appBundleID,
-                reason: "waiting_for_stable_input"
-            )
-        }
-        let scheduledAt = Date()
-        let task = Task.detached(priority: .utility) { [weak self, provider, diagnosticSink] in
-            guard let self else {
-                return
-            }
-            if self.dispatchDebounceNanoseconds > 0 {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .dispatchDeferred,
-                        requestID: requestID,
-                        compositionID: context.compositionID,
-                        rawLength: context.rawInput.count,
-                        rawRevision: context.rawRevision,
-                        prefixLength: context.lockedPrefix?.count,
-                        appBundleID: context.appBundleID,
-                        reason: "waiting_for_stable_input"
-                    )
-                )
-                do {
-                    try await Task.sleep(nanoseconds: self.dispatchDebounceNanoseconds)
-                } catch {
-                    diagnosticSink.record(
-                        AIRecommendationDiagnosticEvent(
-                            stage: .dispatchCancelledByNewInput,
-                            requestID: requestID,
-                            compositionID: context.compositionID,
-                            rawLength: context.rawInput.count,
-                            rawRevision: context.rawRevision,
-                            prefixLength: context.lockedPrefix?.count,
-                            appBundleID: context.appBundleID,
-                            elapsedMilliseconds: Self.elapsedMilliseconds(since: scheduledAt),
-                            reason: "debounce_cancelled_by_new_input"
-                        )
-                    )
-                    return
-                }
-            }
-            let shouldDispatch = await MainActor.run { [weak self] in
-                guard let self,
-                      self.activeRequestID == requestID,
-                      self.generation == currentGeneration else {
-                    return false
-                }
-                self.activeRequestPhase = .transportStarted
-                return true
-            }
-            guard shouldDispatch else {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .dispatchCancelledByNewInput,
-                        requestID: requestID,
-                        compositionID: context.compositionID,
-                        rawLength: context.rawInput.count,
-                        rawRevision: context.rawRevision,
-                        prefixLength: context.lockedPrefix?.count,
-                        appBundleID: context.appBundleID,
-                        elapsedMilliseconds: Self.elapsedMilliseconds(since: scheduledAt),
-                        reason: "request_inactive_before_transport"
-                    )
-                )
-                return
-            }
-            diagnosticSink.record(
-                AIRecommendationDiagnosticEvent(
-                    stage: .transportStarted,
-                    requestID: requestID,
-                    compositionID: context.compositionID,
-                rawLength: context.rawInput.count,
-                rawRevision: context.rawRevision,
-                prefixLength: context.lockedPrefix?.count,
-                appBundleID: context.appBundleID,
-                elapsedMilliseconds: Self.elapsedMilliseconds(since: scheduledAt)
-            )
-            )
-            let transportStartedAt = Date()
-            let state = await provider.recommendation(for: request)
-            let transportElapsedMilliseconds = Self.elapsedMilliseconds(since: transportStartedAt)
-            if case .stale = state {
-                await MainActor.run { [weak self] in
-                    guard let self, self.activeRequestID == requestID else {
-                        return
-                    }
-                    self.activeRequestID = nil
-                    self.activeTask = nil
-                    self.activeRequestPhase = nil
-                    if !context.isProviderAvailabilityProbe {
-                        onStateChange(.idle)
-                    }
-                }
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .staleResultDropped,
-                        requestID: requestID,
-                        compositionID: context.compositionID,
-                        rawLength: context.rawInput.count,
-                        rawRevision: context.rawRevision,
-                        prefixLength: context.lockedPrefix?.count,
-                        appBundleID: context.appBundleID,
-                        elapsedMilliseconds: transportElapsedMilliseconds,
-                        reason: "provider_generation_changed"
-                    )
-                )
-                return
-            }
-            let patch = AIRecommendationPatch(
-                requestID: requestID,
-                generation: currentGeneration,
-                compositionID: context.compositionID,
-                rawRevision: context.rawRevision,
+        cancelDeferredOnly(context: context, reason: "new_schedule")
+        generation += 1
+        let work = Work(
+            context: context,
+            request: AIRecommendationRequest(
                 rawInput: context.rawInput,
-                state: state
-            )
-            guard !Task.isCancelled else {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .cancelled,
-                        requestID: requestID,
-                        compositionID: context.compositionID,
-                        rawLength: context.rawInput.count,
-                        rawRevision: context.rawRevision,
-                        prefixLength: context.lockedPrefix?.count,
-                        appBundleID: context.appBundleID,
-                        elapsedMilliseconds: transportElapsedMilliseconds,
-                        reason: "task_cancelled_before_apply"
-                    )
-                )
-                return
+                lockedPrefix: context.lockedPrefix,
+                candidateHints: [],
+                appBundleID: context.appBundleID,
+                appName: context.appBundleID,
+                locale: context.locale,
+                compositionID: context.compositionID,
+                requestID: requestID,
+                lexicalContext: context.lexicalContext,
+                feedbackContext: context.feedbackContext
+            ),
+            currentSnapshot: currentSnapshot,
+            onStateChange: onStateChange,
+            requestID: requestID,
+            generation: generation,
+            scheduledAt: Date()
+        )
+        record(.scheduled, requestID: requestID, context: context)
+        if !context.isProviderAvailabilityProbe {
+            record(.pendingPlaceholder, requestID: requestID, context: context, reason: "waiting_for_stable_input")
+        }
+
+        if transportTask != nil, activeWork != nil {
+            markTransportStale(context: context, requestID: activeWork!.requestID, reason: "new_schedule")
+            trailingWork = work
+            state = .trailing
+            return context.isProviderAvailabilityProbe ? .idle : .pending(requestID: requestID)
+        }
+
+        activeWork = work
+        state = .debouncing
+        startDeferred(work: work, provider: provider)
+        return context.isProviderAvailabilityProbe ? .idle : .pending(requestID: requestID)
+    }
+
+    private func startDeferred(work: Work, provider: any AIRecommendationProviding) {
+        let delay = dispatchDebounceNanoseconds
+        deferredTask = Task.detached(priority: .utility) { [weak self, diagnosticSink] in
+            if delay > 0 {
+                diagnosticSink.record(AIRecommendationDiagnosticEvent(stage: .dispatchDeferred, requestID: work.requestID, compositionID: work.context.compositionID, rawLength: work.context.rawInput.count, rawRevision: work.context.rawRevision, prefixLength: work.context.lockedPrefix?.count, appBundleID: work.context.appBundleID, reason: "waiting_for_stable_input"))
+                do { try await Task.sleep(nanoseconds: delay) } catch { return }
             }
-            Task { @MainActor [weak self, currentSnapshot, onStateChange, diagnosticSink] in
+            guard let self else { return }
+            await MainActor.run { [weak self] in
                 guard let self,
-                      let snapshot = currentSnapshot() else {
-                    diagnosticSink.record(
-                        AIRecommendationDiagnosticEvent(
-                            stage: .staleResultDropped,
-                            requestID: requestID,
-                            compositionID: context.compositionID,
-                            rawLength: context.rawInput.count,
-                            rawRevision: context.rawRevision,
-                            prefixLength: context.lockedPrefix?.count,
-                            appBundleID: context.appBundleID,
-                            elapsedMilliseconds: transportElapsedMilliseconds,
-                            reason: "coordinator_released"
-                        )
-                    )
-                    return
-                }
-                guard patch.matches(
-                    requestID: self.activeRequestID,
-                    generation: self.generation,
-                    compositionID: snapshot.compositionID,
-                    rawRevision: snapshot.rawRevision,
-                    rawInput: snapshot.rawInput
-                ) else {
-                    let reason = self.activeRequestID == requestID
-                        ? Self.diagnosticReason(for: state)
-                        : "request_inactive"
-                    if self.activeRequestID == requestID {
-                        self.activeRequestID = nil
-                        self.activeTask = nil
-                        self.activeRequestPhase = nil
-                    }
-                    diagnosticSink.record(
-                        AIRecommendationDiagnosticEvent(
-                            stage: .staleResultDropped,
-                            requestID: requestID,
-                            compositionID: context.compositionID,
-                            rawLength: context.rawInput.count,
-                            rawRevision: context.rawRevision,
-                            prefixLength: context.lockedPrefix?.count,
-                            appBundleID: context.appBundleID,
-                            elapsedMilliseconds: transportElapsedMilliseconds,
-                            reason: reason
-                        )
-                    )
-                    return
-                }
-                if self.activeRequestID == requestID {
-                    self.activeRequestID = nil
-                    self.activeTask = nil
-                    self.activeRequestPhase = nil
-                }
-                if context.isProviderAvailabilityProbe,
-                   !Self.shouldApplyProviderAvailabilityProbeState(patch.state) {
-                    diagnosticSink.record(
-                        AIRecommendationDiagnosticEvent(
-                            stage: .stateApplied,
-                            requestID: requestID,
-                            compositionID: context.compositionID,
-                            rawLength: context.rawInput.count,
-                            rawRevision: context.rawRevision,
-                            prefixLength: context.lockedPrefix?.count,
-                            appBundleID: context.appBundleID,
-                            elapsedMilliseconds: transportElapsedMilliseconds,
-                            reason: "availability_probe_suppressed_\(Self.diagnosticReason(for: patch.state))"
-                        )
-                    )
-                    return
-                }
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .stateApplied,
-                        requestID: requestID,
-                        compositionID: context.compositionID,
-                        rawLength: context.rawInput.count,
-                        rawRevision: context.rawRevision,
-                        prefixLength: context.lockedPrefix?.count,
-                        appBundleID: context.appBundleID,
-                        elapsedMilliseconds: transportElapsedMilliseconds,
-                        reason: Self.diagnosticReason(for: patch.state)
-                    )
-                )
-                onStateChange(patch.state)
+                      self.activeWork?.requestID == work.requestID,
+                      self.generation == work.generation else { return }
+                self.deferredTask = nil
+                self.beginTransport(work: work, provider: provider)
             }
         }
-        activeTask = task
-        if context.isProviderAvailabilityProbe {
-            return .idle
+    }
+
+    @MainActor
+    private func beginTransport(work: Work, provider: any AIRecommendationProviding) {
+        state = .inFlight
+        diagnosticSink.record(AIRecommendationDiagnosticEvent(stage: .transportStarted, requestID: work.requestID, compositionID: work.context.compositionID, rawLength: work.context.rawInput.count, rawRevision: work.context.rawRevision, prefixLength: work.context.lockedPrefix?.count, appBundleID: work.context.appBundleID, elapsedMilliseconds: elapsedMilliseconds(since: work.scheduledAt)))
+        let transportStartedAt = Date()
+        transportTask = Task.detached(priority: .utility) { [weak self, provider, diagnosticSink] in
+            let result = await provider.recommendation(for: work.request)
+            let elapsed = Self.elapsedMilliseconds(since: transportStartedAt)
+            await MainActor.run { [weak self, diagnosticSink] in
+                guard let self else {
+                    diagnosticSink.record(AIRecommendationDiagnosticEvent(
+                        stage: .staleResultDropped,
+                        requestID: work.requestID,
+                        compositionID: work.context.compositionID,
+                        rawLength: work.context.rawInput.count,
+                        rawRevision: work.context.rawRevision,
+                        prefixLength: work.context.lockedPrefix?.count,
+                        appBundleID: work.context.appBundleID,
+                        elapsedMilliseconds: elapsed,
+                        reason: "coordinator_released"
+                    ))
+                    return
+                }
+                self.finishTransport(work: work, state: result, elapsedMilliseconds: elapsed)
+            }
         }
-        return .pending(requestID: requestID)
+    }
+
+    @MainActor
+    private func finishTransport(work: Work, state result: AIRecommendationState, elapsedMilliseconds: Int) {
+        transportTask = nil
+        let isCurrent = activeWork?.requestID == work.requestID && generation == work.generation
+        if case .stale = result {
+            finishStaleTransport(
+                work: work,
+                elapsedMilliseconds: elapsedMilliseconds,
+                reason: "provider_generation_changed",
+                publishIdle: true
+            )
+            return
+        }
+        guard isCurrent, let snapshot = work.currentSnapshot() else {
+            finishStaleTransport(
+                work: work,
+                elapsedMilliseconds: elapsedMilliseconds,
+                reason: activeWork?.requestID == work.requestID ? "coordinator_released" : "request_inactive",
+                publishIdle: false
+            )
+            return
+        }
+        guard snapshot.compositionID == work.context.compositionID,
+              snapshot.rawRevision == work.context.rawRevision,
+              snapshot.rawInput == work.context.rawInput else {
+            finishStaleTransport(
+                work: work,
+                elapsedMilliseconds: elapsedMilliseconds,
+                reason: "snapshot_mismatch",
+                publishIdle: false
+            )
+            return
+        }
+        activeWork = nil
+        if work.context.isProviderAvailabilityProbe,
+           !Self.shouldApplyProviderAvailabilityProbeState(result) {
+            record(.stateApplied, requestID: work.requestID, context: work.context, elapsedMilliseconds: elapsedMilliseconds, reason: "availability_probe_suppressed_\(Self.diagnosticReason(for: result))")
+        } else {
+            record(.stateApplied, requestID: work.requestID, context: work.context, elapsedMilliseconds: elapsedMilliseconds, reason: Self.diagnosticReason(for: result))
+            work.onStateChange(result)
+        }
+        dispatchTrailingIfNeeded()
+    }
+
+    @MainActor
+    private func finishStaleTransport(
+        work: Work,
+        elapsedMilliseconds: Int,
+        reason: String,
+        publishIdle: Bool
+    ) {
+        let ownsActiveRequest = activeWork?.requestID == work.requestID
+        let ownsCurrentPublishSlot = ownsActiveRequest && generation == work.generation
+        let hasTrailingWork = trailingWork != nil
+        if ownsActiveRequest {
+            activeWork = nil
+        }
+        record(
+            .staleResultDropped,
+            requestID: work.requestID,
+            context: work.context,
+            elapsedMilliseconds: elapsedMilliseconds,
+            reason: reason
+        )
+        if hasTrailingWork {
+            dispatchTrailingIfNeeded()
+        } else {
+            state = activeWork == nil ? .idle : state
+            if publishIdle, ownsCurrentPublishSlot, !work.context.isProviderAvailabilityProbe {
+                work.onStateChange(.idle)
+            }
+        }
+    }
+
+    @MainActor
+    private func dispatchTrailingIfNeeded() {
+        guard transportTask == nil, let next = trailingWork, let provider else {
+            state = activeWork == nil ? .idle : state
+            return
+        }
+        trailingWork = nil
+        activeWork = next
+        state = .trailing
+        beginTransport(work: next, provider: provider)
     }
 
     @discardableResult
     func reset(compositionID: Int?, rawLength: Int?, reason: String) -> AIRecommendationState {
-        let phase = activeRequestPhase
-        cancelActiveForDiagnostics(
-            compositionID: compositionID,
-            rawLength: rawLength,
-            reason: reason
-        )
+        cancelActiveForDiagnostics(compositionID: compositionID, rawLength: rawLength, reason: reason)
         generation += 1
-        if phase == .dispatchDeferred || phase == .transportStarted {
-            activeTask?.cancel()
-        }
-        activeTask = nil
-        activeRequestPhase = nil
+        deferredTask?.cancel()
+        deferredTask = nil
+        trailingWork = nil
+        if transportTask == nil { activeWork = nil; state = .idle }
         return .idle
     }
 
-    func cancelActiveForDiagnostics(
-        compositionID: Int?,
-        rawLength: Int?,
-        reason: String
-    ) {
-        guard let requestID = activeRequestID else {
+    func cancelActiveForDiagnostics(compositionID: Int?, rawLength: Int?, reason: String) {
+        guard let work = activeWork else {
+            deferredTask?.cancel()
+            deferredTask = nil
+            trailingWork = nil
             return
         }
-        record(
-            .cancelPrevious,
-            requestID: requestID,
-            compositionID: compositionID,
-            rawLength: rawLength,
-            reason: reason
-        )
-        if activeRequestPhase == .transportStarted {
-            record(
-                .transportLeftStale,
-                requestID: requestID,
-                compositionID: compositionID,
-                rawLength: rawLength,
-                reason: reason
-            )
-            record(
-                .transportCancellationRequested,
-                requestID: requestID,
-                compositionID: compositionID,
-                rawLength: rawLength,
-                reason: reason
-            )
-            if reason == "input_changed" {
-                record(
-                    .transportCancelledByNewInput,
-                    requestID: requestID,
-                    compositionID: compositionID,
-                    rawLength: rawLength,
-                    reason: reason
-                )
-            }
+        record(.cancelPrevious, requestID: work.requestID, compositionID: compositionID, rawLength: rawLength, reason: reason)
+        if transportTask != nil {
+            markTransportStale(context: work.context, requestID: work.requestID, reason: reason)
+            generation += 1
+        } else {
+            deferredTask?.cancel()
+            deferredTask = nil
+            record(.dispatchCancelledByNewInput, requestID: work.requestID, compositionID: compositionID, rawLength: rawLength, reason: "debounce_cancelled_by_new_input")
+            activeWork = nil
+            state = .idle
         }
-        activeRequestID = nil
-        activeRequestPhase = nil
+        trailingWork = nil
+    }
+
+    private func cancelDeferredOnly(context: InputAIRecommendationRuntimeContext, reason: String) {
+        guard transportTask == nil, let work = activeWork else { return }
+        deferredTask?.cancel()
+        deferredTask = nil
+        record(.dispatchCancelledByNewInput, requestID: work.requestID, context: context, reason: reason)
+        activeWork = nil
+        state = .idle
+    }
+
+    private func markTransportStale(context: InputAIRecommendationRuntimeContext, requestID: UUID, reason: String) {
+        record(.transportLeftStale, requestID: requestID, context: context, reason: reason)
     }
 
     private func record(
         _ stage: AIRecommendationDiagnosticStage,
         requestID: UUID? = nil,
+        context: InputAIRecommendationRuntimeContext? = nil,
         compositionID: Int? = nil,
         rawLength: Int? = nil,
         rawRevision: Int? = nil,
@@ -528,46 +349,37 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
         elapsedMilliseconds: Int? = nil,
         reason: String? = nil
     ) {
-        diagnosticSink.record(
-            AIRecommendationDiagnosticEvent(
-                stage: stage,
-                requestID: requestID,
-                compositionID: compositionID,
-                rawLength: rawLength,
-                rawRevision: rawRevision,
-                prefixLength: prefixLength,
-                appBundleID: appBundleID,
-                elapsedMilliseconds: elapsedMilliseconds,
-                reason: reason
-            )
-        )
+        let context = context
+        diagnosticSink.record(AIRecommendationDiagnosticEvent(
+            stage: stage,
+            requestID: requestID,
+            compositionID: compositionID ?? context?.compositionID,
+            rawLength: rawLength ?? context?.rawInput.count,
+            rawRevision: rawRevision ?? context?.rawRevision,
+            prefixLength: prefixLength ?? context?.lockedPrefix?.count,
+            appBundleID: appBundleID ?? context?.appBundleID,
+            elapsedMilliseconds: elapsedMilliseconds,
+            reason: reason
+        ))
     }
 
-    private static func elapsedMilliseconds(since start: Date) -> Int {
-        max(0, Int(Date().timeIntervalSince(start) * 1_000))
-    }
+    private func elapsedMilliseconds(since start: Date) -> Int { max(0, Int(Date().timeIntervalSince(start) * 1_000)) }
+
+    private static func elapsedMilliseconds(since start: Date) -> Int { max(0, Int(Date().timeIntervalSince(start) * 1_000)) }
 
     private static func diagnosticReason(for state: AIRecommendationState) -> String {
         switch state {
-        case .idle:
-            return "idle"
-        case .stale:
-            return "provider_generation_changed"
-        case .pending:
-            return "pending"
-        case .ready:
-            return "ready"
-        case .ineligible(let reason):
-            return "ineligible:\(reason)"
-        case .unavailable(let reason):
-            return "unavailable:\(reason)"
+        case .idle: return "idle"
+        case .stale: return "provider_generation_changed"
+        case .pending: return "pending"
+        case .ready: return "ready"
+        case .ineligible(let reason): return "ineligible:\(reason)"
+        case .unavailable(let reason): return "unavailable:\(reason)"
         }
     }
 
     private static func shouldApplyProviderAvailabilityProbeState(_ state: AIRecommendationState) -> Bool {
-        if case .ready = state {
-            return true
-        }
+        if case .ready = state { return true }
         return false
     }
 }
