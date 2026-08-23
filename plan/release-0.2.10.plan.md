@@ -17,8 +17,10 @@ local MVP zip, both unsigned and not notarized.
   examples from `v0.2.9` to `v0.2.10`.
 - Carry the accepted issue `#212` implementation from PR `#213` and the test
   stability changes from PR `#214` already present in the exact `dev` base.
-- Keep `.github/workflows/release.yml`, build templates, packaging logic, and
-  all product, provider, input-method, and test implementation unchanged.
+- Strengthen only the existing release validation step so the annotated tag's
+  release commit must equal the fetched `origin/main` tip.
+- Keep the tag trigger, build templates, packaging logic, asset publication,
+  and all product, provider, input-method, and test implementation unchanged.
 - Release through a `release/0.2.10` to `main` release PR based on exact
   `main` base `e7a27adcdd59c3b50e042a038635af8541091752` (`main@e7a27ad`).
 
@@ -34,18 +36,24 @@ local MVP zip, both unsigned and not notarized.
 ## Implementation
 
 - Release branch: `release/0.2.10` at exact `dev@903777c`.
-- Candidate commit message: `chore(release): prepare 0.2.10 developer preview`.
-- Create exactly one release-only candidate commit containing only the two
-  plist version updates, the two README example updates, this plan, and the
-  plan-index transition.
+- Release metadata commit:
+  `8de68b13cc59a409137914b1cfd359c01525f2e5`
+  (`chore(release): prepare 0.2.10 developer preview`).
+- Add one independent provenance follow-up commit with message
+  `fix(ci): require release tag at main tip`; do not amend the metadata commit.
+- Limit the follow-up to `.github/workflows/release.yml` and this plan.
 - Merge the release PR into `main` with a merge commit, not squash, so the exact
   accepted `dev` base and previous `main` release history remain ancestors.
 - Create the annotated `v0.2.10` tag only after the release merge. The tag must
   resolve exactly to that `main` merge commit, not to the release branch
   candidate commit; verify `git rev-parse v0.2.10^{commit}` equals the merged
   `main` SHA.
-- The tag-triggered workflow remains the existing publisher. Do not change its
-  tag-tip enforcement as part of this release preparation.
+- In the existing tag validation step, fetch `origin/main`, resolve
+  `refs/remotes/origin/main`, and require its tip SHA to equal the annotated
+  tag's `release_commit` exactly.
+- Fail closed on any mismatch and include both the release commit and fetched
+  main tip in the error. The existing tag shape, annotated-tag, plist-version,
+  build, package, asset, and publish gates remain unchanged.
 
 ## Assets and Validation Gates
 
@@ -55,6 +63,10 @@ local MVP zip, both unsigned and not notarized.
 - Workflow metadata: `release-manifest.json` accompanying the published
   assets.
 - Require release PR CI to pass on the exact candidate head.
+- Require tag validation to reject an annotated tag resolving to an older main
+  ancestor or the release candidate instead of the fetched `origin/main` tip.
+- Require a valid annotated `v0.2.10` tag at the fetched main tip to continue
+  through the existing plist-version and downstream workflow gates.
 - Require the tag workflow to run the release build, full Swift tests, both
   install smoke variants, release packaging, and asset upload.
 - After publication, verify the DMG, zip, checksum files, manifest, and that the
@@ -65,9 +77,13 @@ local MVP zip, both unsigned and not notarized.
 - Reuse the accepted exact-head evidence for issue `#212` / PR `#213` and test
   stability PR `#214`; do not repeat host typing or product behavior testing
   during release-only metadata preparation.
-- Locally run only `git diff --check` and necessary version/file-format checks.
-  Do not run `swift build`, `swift test`, performance tests, installation,
-  packaging, asset generation, or publication locally.
+- Locally run only static YAML parsing, `bash -n` for the embedded validation
+  shell, and `git diff --check`. Do not run `swift build`, `swift test`,
+  performance tests, installation, packaging, asset generation, or publication.
+- In the remote tag workflow, verify that an annotated tag at the fetched main
+  tip passes provenance, while a tag at an older ancestor or release candidate
+  fails with both SHAs in the error. Malformed, lightweight, and plist-mismatched
+  tags must remain rejected by the existing gates.
 - Leave functional, release-build, packaging, install-smoke, and asset checks
   to the GitHub Pipeline gates above.
 
@@ -84,6 +100,8 @@ local MVP zip, both unsigned and not notarized.
 - `CFBundleVersion` remains a build number supplied by release packaging, while
   `CFBundleShortVersionString` carries the semantic release version.
 - No issue `#206` update or historical changelog is included in this candidate.
+- Main-tip equality is point-in-time provenance validation; version monotonicity
+  and historical tag reuse remain outside this release slice.
 - If a remote gate fails before publication, repair the release process in a
   follow-up candidate; do not generate local assets or bypass the exact tag-tip
   and main-merge validation gates.
