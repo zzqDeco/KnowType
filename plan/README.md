@@ -24,7 +24,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
-| [release-0.2.9.plan.md](release-0.2.9.plan.md) | Prepare and publish the KnowType v0.2.9 Developer Preview release | Active |
+| [release-0.2.10.plan.md](release-0.2.10.plan.md) | Prepare and publish the KnowType v0.2.10 Developer Preview release | Active |
 | [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and workflow | Active |
 | [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active |
 | [chinese-lexicon-index.plan.md](chinese-lexicon-index.plan.md) | Larger-lexicon indexing path for `TraditionalInputEngine` | Active |
@@ -152,6 +152,7 @@ when converting a shipped plan into a short record.
 |---|---|---|
 | [context-digest-backlog-performance.plan.md](context-digest-backlog-performance.plan.md) | Earlier backlog bounds now absorbed by the Issue #212 request-amplification contract | Absorbed |
 | [option-r-polish-removal.plan.md](option-r-polish-removal.plan.md) | Remove the Option+R rewrite workflow and make locked-prefix rewriting unsupported | Delivered |
+| [release-0.2.9.plan.md](release-0.2.9.plan.md) | Prepare and publish the KnowType v0.2.9 Developer Preview release | Delivered |
 | [release-0.2.8.plan.md](release-0.2.8.plan.md) | Prepare and publish the KnowType v0.2.8 Developer Preview release | Delivered |
 | [release-0.2.7.plan.md](release-0.2.7.plan.md) | Prepare and publish the KnowType v0.2.7 Developer Preview release | Delivered |
 | [release-0.2.6.plan.md](release-0.2.6.plan.md) | Prepare and publish the KnowType v0.2.6 Developer Preview release | Delivered |
