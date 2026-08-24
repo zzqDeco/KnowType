@@ -26,7 +26,7 @@ public struct OllamaNativeProvider: LLMProvider {
                 "temperature": 0.2,
                 "num_predict": 256
             ]
-        ])
+        ], task: request.task)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)

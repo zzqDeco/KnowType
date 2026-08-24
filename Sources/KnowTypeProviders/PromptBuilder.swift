@@ -42,14 +42,14 @@ enum PromptBuilder {
     private static let contextDigestPrompt = """
     You are KnowType, a macOS Chinese/English AI input method.
     Return JSON only with this shape: {"markdown":"..."}.
-    Summarize typing events into a concise ENV.md generated section.
-    Preserve user notes and do not invent private facts.
+    Return exactly one markdown candidate for the generated ENV.md section.
+    Do not return the document title, generated markers, or User Notes heading.
+    Summarize typing events into a concise generated section, preserve user notes,
+    and do not invent private facts.
     """
 
     static func userPayload(for request: LLMRequest) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(request)
+        let data = try ProviderRequestBudget.encodedPayload(for: request)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 }

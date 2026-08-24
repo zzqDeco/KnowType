@@ -66,6 +66,43 @@ Provider prompts are task-specific. Continuation requests distinguish confirmed 
 
 When a non-empty `lockedPrefix` exists, cloud eligibility is gated by that locked prefix alone; otherwise it is gated by raw input length. Runtime output must preserve the original locked-prefix text, including intentional leading or trailing whitespace, and may only use trimmed text for emptiness and sanitizer comparisons. `AI 已禁用` is reserved for secret-like raw input or confirmed locked prefixes. Correction and context digest requests keep separate prompts so continuation examples cannot leak into those tasks. The local prefix-lock sanitizer remains authoritative whenever a locked prefix exists, even when a provider follows the prompt.
 
+Provider dispatch is bounded before adapter serialization. Recommendation requests use
+32 KiB logical and 64 KiB HTTP-body limits; Context Digest uses 64 KiB logical and
+96 KiB HTTP-body limits, with a 48 KiB event claim and 8 KiB ENV projection.
+Generated notes, User Notes, correction, feedback, and lexical projections remain
+within their local 4/4/4/4/6 KiB UTF-8 limits. Generated and User Notes limits
+count their structured bodies without canonical marker/heading separator
+newlines. A local budget rejection is a
+non-provider outcome and its budgeted payload fingerprint is the recommendation
+cache key. `ProviderRequestGate` hashes provider identity, permits one in-flight
+request per identity, fences generations, clamps `Retry-After` to 15 seconds to
+15 minutes, and applies privacy-safe cooldowns for missing retry hints. Persisted
+gate state contains only the identity hash, deadline, failure class, and a
+bounded count in atomic mode-0600 storage; it never persists in-flight state.
+One real gate attempt receives a non-reusable gate attempt id and records at
+most one failure before caller-visible timeout release, and its in-memory and
+persisted failure count clamps at 16. Existing-state permission, bounded-read,
+decode, atomic-write, replace, or final-permission failure blocks subsequent
+attempts; generation invalidation does not reinterpret that failure as empty
+state. An internal value-only preflight distinguishes available, busy, cooldown,
+stale-generation, and persistence-blocked states without admitting a transport.
+Recommendation and Context Digest latch persistence-blocked before reading their
+context documents or decoding a digest snapshot. Cancellation after admission
+but before transport registration aborts only the matching attempt, wakes
+waiters, and records no failure. A timeout that wins before `beginTransport`
+atomically records cooldown, releases only that attempt, runs its completion,
+and prevents the late operation task from invoking the provider. A timeout
+after transport starts records once while retaining ownership through its
+fenced real completion. The gate actor associates each active attempt with the
+same phase fence and exactly-once completion used by its operation task.
+Generation invalidation aborts and completes an admitted attempt without
+cooldown, allowing the new generation to admit immediately; an already-started
+transport remains busy until its real stale-fenced completion. Registry-driven
+invalidation supplies one explicit target generation: the gate linearizes its
+phase/state change and waiter wake first, while concurrent registry lease or
+revision paths coalesce behind that transition until its exactly-once cleanup
+and capability reset finish.
+
 ## Input Client Compatibility
 
 Host write behavior is selected before each key write:
@@ -171,8 +208,25 @@ create `Application Support/KnowType` merely because the IMK host was launched.
 The process-level runtime registry observes the signal and returns leases with
 `revision`, `generation`, opaque `fingerprint`, and optional `provider`. It uses
 the file revision only as an eligible-dispatch fallback. A generation change
-cancels old lease operations and rejects late results before UI, ENV, or archive
-writes.
+has one actor-owned transition and explicit target generation; concurrent
+eligible-dispatch and revision observations merge behind that transition, so
+the monotonic latest accepted/pending revision, generation, and current lease
+are published together before the transition clears or wakes waiters. The
+publication first installs a provider-less provisional lease for the target
+revision. A runtime load fills that lease in the same generation only when
+its fingerprint is unchanged or the provisional fingerprint is unavailable;
+a different real fingerprint at the same revision uses a bounded new
+generation transition to fence the old identity instead of remaining
+permanently pending. One eligible-dispatch lookup attempts at most one such
+replacement and returns the current provider-less provisional lease when
+fingerprints oscillate, so a later lookup can retry. Repeated signals for
+the same revision are ignored, while a higher revision merges into a
+monotonic pending target and forms a later legal transition. Stale disk or
+runtime reads cannot lower the accepted revision or replace the newer lease.
+It fences old lease results before UI,
+ENV, or archive writes; started transport remains tracked by the shared
+provider gate until it actually finishes. A caller-visible hard timeout returns
+immediately without releasing a lease held by cancellation-resistant transport.
 Unmigrated legacy or missing post-migration canonical state fails closed. The
 install migration first publishes a recoverable provisional tombstone and only
 marks canonical metadata expected after the canonical file is durable.
@@ -675,15 +729,25 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 `AIRecommendationRuntime`:
 
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
+- checks the shared gate's value-only persistence state before either document
+  read; a blocked gate instance returns unavailable without repeated preflight
+  or context projection
 - includes `LEXICAL_PROFILE.md` when the coordinator provides a lexical snapshot
 - creates default documents when missing
-- debounces for 350 ms by default before provider calls
-- hard-times out provider requests after 10 seconds by default, independent of the provider profile's network timeout
-- caches by raw input, locked prefix, app bundle, locale, ENV hash, CORRECTION hash, and lexical hash
+- uses one 450 ms debounce before provider calls; newer input replaces the
+  debounce request and leaves at most one trailing revision after transport
+  starts
+- returns a caller-visible hard timeout after 10 seconds by default, independent
+  of the provider profile's network timeout; the shared-gate lease remains held
+  until cancellation-resistant provider transport actually finishes, and the
+  late completion does not erase the recorded timeout cooldown
+- caches by the actual budgeted provider payload fingerprint plus generation,
+  rather than by unbounded source strings
 - rejects stale results at the coordinator boundary
 - rebuilds cache and health state for each provider generation; an internal
   stale-generation state clears its own normal pending slot to `.idle`, while an
-  older stale request cannot clear a newer request
+  older stale request cannot clear a newer request or overwrite a newer skip
+  state
 - skips cloud requests for too-short context: with a confirmed locked prefix, fewer than two Han characters or fewer than six visible mixed/Latin characters; without a locked prefix, fewer than three visible raw-input characters
 - hard-blocks cloud requests only for secret-like raw input or locked prefixes, with diagnostic reason `secret_like_text`
 - rejects provider output that repeats or rewrites the locked prefix through local sanitization
@@ -702,25 +766,82 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - requires a usable provider lease before a registry-backed event is appended,
   so text entered without an available provider is not retained for later upload
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
-- limits `rawInput` and `committedText` to 2,048 Unicode scalars before writing
+- limits AI raw input and locked prefix to 4 KiB UTF-8 before dispatch; event
+  text fields are bounded to 2,048 Unicode scalars before JSONL append
 - caps pending data at 500 events or 1 MiB; overflow atomically keeps the newest
-  data within a 450-event/768 KiB compaction target
-- claims no more than the oldest 50 events or 256 KiB for one provider digest,
-  while always allowing one event to make progress
+  data within a 450-event/768 KiB compaction target, except that an active exact
+  digest prefix remains protected until both its actor flow and real gate
+  attempt have finished
+- claims no more than the oldest 50 events or 48 KiB for one provider digest,
+  while always allowing one event to make progress; the 600-second interval
+  after a successful commit cannot be bypassed by the batch threshold
 - archives processed event files under `~/.knowtype/events/processed/` and,
-  after successful digests only, keeps at most 7 days, 100 files, and 10 MiB
-- summarizes after a batch threshold or interval
-- updates only the generated section in `ENV.md`
-- normalizes duplicate generated-section markers in loaded snapshots and writes the repaired content back atomically on a best-effort basis; read-only or transient write failures still return the repaired in-memory snapshot
+  after every successful local archive, best-effort targets 7 days, 100 files,
+  and 10 MiB in the same existing file-lock critical section; the current
+  destination is excluded from age, file-count, and byte-count deletion, so a
+  failed older-file deletion may leave `processed/` temporarily over target
+- protected-only, blank, malformed, unsendable, oversized, and persisted claim
+  recovery archives use that same retention path; startup or initialization
+  without an archive does not scan or rewrite `processed/`
+- archives protected-only prefixes locally without advancing the 600-second
+  provider-success interval; an unprotected tail follows normal pending
+  scheduling
+- summarizes through one actor-owned deadline task for batch, interval,
+  provider-cooldown, and shared-gate availability wakeups; a first below-batch
+  pending event has an independent forced deadline; while gate availability is
+  pending, appended records return before another snapshot decode, and locally
+  archived blank, malformed, or oversized prefixes rearm the deadline for tail
+  data; calls arriving during a digest coalesce into one post-completion
+  re-evaluation rather than a concurrent digest, except that an already
+  installed gate waiter remains the sole wake source for its contention
+  episode. If such a record, manual, or deadline wake reaches a live-claim
+  guard, one signal is retained until both the actor flow and real gate attempt
+  finish; one actor-owned `processIfNeeded` pass then rechecks pending data,
+  interval, cooldown, gate, and generation eligibility. No blocked wake or
+  pending data causes no post-completion rerun
+- updates only the generated section in canonical `ENV.md`, with one managed
+  marker pair and one User Notes section; markerless documents remain user
+  content, only exact marker lines define managed boundaries, and ambiguous
+  migrations fail closed
+- accepts exactly one non-empty generated markdown candidate within 4 KiB and
+  200 lines; multipart, titled, marked, or empty output fails without ENV or
+  pending-prefix commit
 - sanitizes Level 0 protected content before writing logs
 - is shared across all controllers in the process, so one pending snapshot
   starts at most one digest request
-- updates ENV and archives a pending prefix only while both its provider lease
-  and snapshot claim remain current; later appended events stay pending
+- creates a registry-backed claim and then updates ENV and archives a pending
+  prefix inside one synchronous current-lease guard; stale work before that
+  guard creates no claim, and later appended events stay pending
 - uses a path-shared process inventory for count/byte/protection gates, so
   below-threshold and unchanged-generation cooldown paths do not decode JSONL
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
-  `context_digest_deferred`, and `context_archive_pruned` diagnostics
+  `context_digest_deferred`, `context_archive_pruned`,
+  `context_gate_persistence_blocked`, and
+  `context_claim_recovery_blocked` diagnostics
+- persists only privacy-safe claim metadata plus bounded timestamp/count schedule
+  state and a deterministic archive receipt, so an ENV-success/archive-failure
+  path is recoverable without repeating the provider call; appended tail events
+  remain outside the old claim. Receipt-missing recovery bounded-reads the
+  deterministic processed archive and requires both recorded byte count and
+  SHA-256. Recovery archives an exact pending prefix, accepts an explicitly
+  missing or different prefix as already archived, and blocks on truncated,
+  unreadable, or otherwise indeterminate pending evidence; a same-size corrupt
+  archive remains blocked. A pre-ENV claim whose
+  generated hash does not match ENV also remains blocked, and corrupt schedule
+  state cannot trigger an immediate fresh-runtime batch dispatch. In
+  particular, a positive pending count with no persisted time anchor is
+  conservatively delayed by the minimum interval. The first
+  record after restart completes local claim recovery before append or
+  compaction. A blocked claim recovery installs one bounded 60-second actor
+  deadline; records before that deadline return without another recovery read,
+  append, or provider dispatch, and each deadline permits only one retry. The
+  initial recovery registers an actor-owned single-flight token before any
+  cross-actor await; concurrent records and explicit process calls receive the
+  same result, while only that token's owner may update recovery latches,
+  cleanup, or retry scheduling. ENV is
+  chmod 0600 before reads, User Notes must follow the unique
+  managed pair, and existing deterministic backups are verified without
+  following symlinks before repair proceeds
 
 `LexicalProfileStore`:
 

@@ -117,9 +117,23 @@ MVP docs warn users not to place bearer tokens directly in headers.
 revision, generation, opaque configuration fingerprint, and provider. A missed
 signal is recovered by checking the file revision before eligible AI work and
 again before accepting provider completion or guarded persistence; ordinary key
-handling never polls provider storage. Generation changes cancel old transports
-and clear provider-dependent recommendation cache, health, and structured-output
-capability state.
+handling never polls provider storage. Generation changes invalidate old results
+and gate generations while started transports remain tracked until their actual
+completion. A caller-visible hard timeout returns immediately but does not
+release a shared-gate lease held by cancellation-resistant transport. Generation
+changes clear provider-dependent recommendation cache, health, and
+structured-output capability state without resetting digest success timing.
+Each real gate attempt records at most one failure: the single-flight owner
+records a hard timeout against a gate-issued attempt id before the timeout is
+visible to its caller, while cancellation-marked late transport errors only
+release that same attempt's lease. Failure counts clamp at 16 in memory and
+persisted state.
+Unreadable, undecodable, or unwritable persistent gate state blocks new provider
+attempts until the state is verifiably repaired; generation invalidation never
+turns that persistence failure into an empty cooldown state. A value-only gate
+preflight exposes that state before recommendation context projection or digest
+snapshot decoding, and each runtime latches it for the lifetime of that gate
+instance.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -132,31 +146,76 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   periodically summarizes them into the generated section of
   `~/.knowtype/ENV.md`. Its snapshot claim, ENV update, and archive commit are
   serialized so later appends remain pending and stale provider generations
-  cannot persist results. Registry-backed recording requires a usable provider
+  cannot persist results; registry-backed claim creation starts inside the same
+  final current-lease guard as ENV and archive persistence. Registry-backed
+  recording requires a usable provider
   lease before appending, so events entered while no provider is available are
   not retained for a later provider. A path-shared inventory makes ordinary
   append and scheduling decisions constant-cost after the first scan. Pending
-  data is capped at 500 events/1 MiB, digest claims at 50 events/256 KiB, and a
-  same-generation failure cooldown returns before reading pending JSONL.
+  data is capped at 500 events/1 MiB, digest claims at 50 events/48 KiB, and a
+  same-generation failure cooldown or latched gate-persistence failure returns
+  before reading pending JSONL. A
+  successful digest also owns a 600-second minimum interval that the batch
+  threshold cannot bypass; a single actor-owned deadline task wakes batch,
+  interval, provider-cooldown, and shared-gate availability work. The first
+  below-batch pending event receives its own forced deadline. While the actor is
+  waiting for a busy gate, new records append only and return before another
+  digest snapshot decode; malformed or oversized local prefixes rearm the same
+  deadline when a tail remains. Calls received during an active digest set one
+  coalesced rerun signal, which re-evaluates pending work once after the current
+  success, failure, or stale-generation completion. An installed gate
+  availability waiter takes precedence over that signal and wakes exactly one
+  backlog re-evaluation after the gate becomes available.
 - Context Digest success archives only its claimed prefix and then best-effort
   retains processed history for at most 7 days, 100 files, and 10 MiB. Existing
   history is not pruned during startup or installation. Protected-only eligible
-  data archives locally without reading provider configuration.
-- `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md`, preserving the user's notes outside the generated section and repairing duplicate generated-section markers.
+  data archives locally without reading provider configuration and does not
+  advance the provider-success interval; any unprotected tail is scheduled by
+  the ordinary pending rules.
+- `EnvironmentDocumentStore` creates and updates `~/.knowtype/ENV.md` as one
+  managed marker pair plus one canonical User Notes section. It treats
+  markerless files as user content, backs up abnormal files by content hash with
+  mode 0600, recognizes managed boundaries only on exact marker lines, rejects
+  invalid digest candidates before writes, and exposes a
+  privacy-safe digest claim for recovery, plus bounded 0600 schedule state and
+  archive receipt metadata containing only timestamps, counts, and hashes.
+  Recovery bounded-reads the deterministic processed archive and verifies its
+  byte count and SHA-256 before treating a missing receipt as completed. It then
+  distinguishes a missing or provably different pending prefix from an exact
+  prefix; truncated or unreadable pending evidence remains blocked. A claim
+  whose generated hash is not yet present in ENV remains blocked, and corrupt
+  claim evidence is retried at most once per bounded 60-second actor deadline;
+  intervening records are rejected without another recovery read or append. A
+  first recovery establishes an actor-owned single-flight before its first
+  cross-actor await, so concurrent record and process calls share one claim,
+  gate, ENV, archive, and pending validation result. Only the current flight
+  owner updates recovery latches or retry scheduling; a generation reset
+  supersedes the old token without allowing it to clear newer state. A
+  successful or claim-missing retry clears that local latch. Corrupt
+  schedule state, including impossible date ordering or excessive future
+  deadlines, is replaced by a conservative minimum-interval delay or stays
+  fail-closed. Existing ENV content is chmod 0600 before any read; User Notes
+  headings overlapping or preceding the managed pair are ambiguous, and an
+  existing deterministic backup must be a matching regular non-symlink file.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
-- `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; AI correction/recommendation prompts read instructions from this file, while the traditional engine remains deterministic.
+- `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; it and
+  pending/processed typing-event files enforce mode 0600 on creation, rewrite,
+  and existing-file access. AI correction/recommendation prompts read
+  instructions from this file, while the traditional engine remains
+  deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 - Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction and context digest keep separate instructions.
 
-The input-method keydown path never awaits this layer. It publishes raw marked text and current-page Rime candidates first, then receives AI slot updates asynchronously. `InputAIRecommendationRuntime` owns request ids, generations, task cancellation, stale-result diagnostics, and `AIRecommendationPatch` validation for the IMK side of the real-time recommendation flow. Matching AI results update only the coordinator's fixed AI slot after request id, generation, composition id, raw revision, and raw input all still match. They cannot change Rime selection, marked text, base candidates, or panel visibility. `InputAIAcceptanceRuntime` owns post-commit AI acceptance side effects: accepted-learning records, typing-context events, accepted-feedback tracking orchestration, and protected/secret gates. It does not write host text or refresh candidate UI. `InputLexicalCommitRuntime` owns local lexical commit/selection side effects: bounded recent commits, protected selection-history recording, lexical profile refresh scheduling, and commit/selection event payload construction. `InputCompositionLifecycleRuntime` owns composition begin/finish lifecycle plans and first-begin trace-once state. `InputCommitDecisionRuntime` owns Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions as value plans. `InputCommitApplicationRuntime` owns commit-result plan and context construction only; the coordinator still performs Rime processing, segment mutation, host insertion, marked-text cleanup, Rime reset, candidate-panel hide, anchor reset, AI/lexical runtime calls, and lifecycle event publication in order. Rime userdb sync is a maintenance action and is not part of commit. Commit/selection profile refresh is executed by `LexicalProfileRuntime` and reads only an already exported userdb snapshot; explicit `sync_user_data` is owned by `RimeMaintenanceService` for manual or idle maintenance paths. Keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime debounces for 350 ms by default and has a 10-second hard timeout; continuing to type still cancels older requests immediately.
-Provider-generation stale results clear their own normal pending slot to idle;
-an older stale request cannot clear a newer request or reach the panel callback.
+The input-method keydown path never awaits this layer. It publishes raw marked text and current-page Rime candidates first, then receives AI slot updates asynchronously. `InputAIRecommendationRuntime` owns request ids, generations, task cancellation, stale-result diagnostics, and `AIRecommendationPatch` validation for the IMK side of the real-time recommendation flow. Matching AI results update only the coordinator's fixed AI slot after request id, generation, composition id, raw revision, and raw input all still match. They cannot change Rime selection, marked text, base candidates, or panel visibility. `InputAIAcceptanceRuntime` owns post-commit AI acceptance side effects: accepted-learning records, typing-context events, accepted-feedback tracking orchestration, and protected/secret gates. It does not write host text or refresh candidate UI. `InputLexicalCommitRuntime` owns local lexical commit/selection side effects: bounded recent commits, protected selection-history recording, lexical profile refresh scheduling, and commit/selection event payload construction. `InputCompositionLifecycleRuntime` owns composition begin/finish lifecycle plans and first-begin trace-once state. `InputCommitDecisionRuntime` owns Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions as value plans. `InputCommitApplicationRuntime` owns commit-result plan and context construction only; the coordinator still performs Rime processing, segment mutation, host insertion, marked-text cleanup, Rime reset, candidate-panel hide, anchor reset, AI/lexical runtime calls, and lifecycle event publication in order. Rime userdb sync is a maintenance action and is not part of commit. Commit/selection profile refresh is executed by `LexicalProfileRuntime` and reads only an already exported userdb snapshot; explicit `sync_user_data` is owned by `RimeMaintenanceService` for manual or idle maintenance paths. Keydown, Space, number selection, paging, and panel refresh do not read the userdb or touch disk for profile generation. Stale AI results are dropped by composition id and raw input before they can update the panel. The real-time recommendation runtime uses one 450 ms debounce, keeps only the newest trailing revision after transport starts, and generation-fences late results. Its logical and HTTP budgets are 32 KiB and 64 KiB; digest uses 64 KiB and 96 KiB, and local over-limit input is skipped without provider failure accounting. OpenAI-compatible adapters perform aggregate logical-payload preflight before model discovery and serialized-body preflight before completion transport.
+Provider-generation stale results clear their own normal pending slot to idle only
+while they still own the current publish slot; an older stale request cannot
+clear a newer request, overwrite a newer skip state, or reach the panel callback.
 Before a provider request starts, `InputAIRecommendationSchedulePolicy` makes the
 pure schedule/skip decision for input stability, trigger length, secret-like
 text, cloud-continuation preference, and provider availability. The coordinator
 constructs the current input context and applies the returned AI state to the
-candidate panel; request construction, async task cancellation, stale-result
+candidate panel; request construction, deferred-dispatch cancellation, stale-result
 checks, and lifecycle diagnostics live in `InputAIRecommendationRuntime`.
 Current suggestion state is owned separately by
 `InputSuggestionStateRuntime`. It stores the latest Rime-facing

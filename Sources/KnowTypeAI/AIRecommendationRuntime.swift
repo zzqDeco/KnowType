@@ -3,11 +3,16 @@ import KnowTypeCore
 import KnowTypeProviders
 
 public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
+    private static let sharedLegacyRequestGate = ProviderRequestGate.shared
+
     private let providerRegistry: ProviderRuntimeRegistry?
     private let providerLoader: (@Sendable () -> (any LLMProvider)?)?
+    private let legacyRequestGate: ProviderRequestGate?
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let providerAvailability: AIRecommendationProviderAvailabilityState
     private let debounceMilliseconds: Int
+    private let environmentStore: EnvironmentDocumentStore
+    private let correctionStore: CorrectionInstructionStore
     private var runtime: AIRecommendationRuntime?
     private var runtimeGeneration: UInt64?
 
@@ -19,9 +24,30 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     ) {
         self.providerRegistry = providerRegistry
         self.providerLoader = nil
+        self.legacyRequestGate = nil
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = EnvironmentDocumentStore()
+        self.correctionStore = CorrectionInstructionStore()
+    }
+
+    init(
+        providerRegistry: ProviderRuntimeRegistry,
+        environmentStore: EnvironmentDocumentStore,
+        correctionStore: CorrectionInstructionStore,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds
+    ) {
+        self.providerRegistry = providerRegistry
+        self.providerLoader = nil
+        self.legacyRequestGate = nil
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = environmentStore
+        self.correctionStore = correctionStore
     }
 
     public init(
@@ -32,9 +58,47 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     ) {
         self.providerRegistry = nil
         self.providerLoader = providerLoader
+        self.legacyRequestGate = Self.sharedLegacyRequestGate
         self.diagnosticSink = diagnosticSink
         self.providerAvailability = providerAvailability
         self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = EnvironmentDocumentStore()
+        self.correctionStore = CorrectionInstructionStore()
+    }
+
+    init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)?,
+        environmentStore: EnvironmentDocumentStore,
+        correctionStore: CorrectionInstructionStore,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds
+    ) {
+        self.providerRegistry = nil
+        self.providerLoader = providerLoader
+        self.legacyRequestGate = Self.sharedLegacyRequestGate
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = environmentStore
+        self.correctionStore = correctionStore
+    }
+
+    init(
+        providerLoader: @escaping @Sendable () -> (any LLMProvider)?,
+        diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
+        providerAvailability: AIRecommendationProviderAvailabilityState = AIRecommendationProviderAvailabilityState(),
+        debounceMilliseconds: Int = AIRecommendationRuntime.Defaults.debounceMilliseconds,
+        requestGate: ProviderRequestGate
+    ) {
+        self.providerRegistry = nil
+        self.providerLoader = providerLoader
+        self.legacyRequestGate = requestGate
+        self.diagnosticSink = diagnosticSink
+        self.providerAvailability = providerAvailability
+        self.debounceMilliseconds = debounceMilliseconds
+        self.environmentStore = EnvironmentDocumentStore()
+        self.correctionStore = CorrectionInstructionStore()
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
@@ -63,7 +127,12 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         if let cached = self.runtime, runtimeGeneration == lease.generation {
             runtime = cached
         } else {
-            runtime = makeRuntime(provider: provider)
+            runtime = makeRuntime(
+                provider: provider,
+                providerIdentity: lease.fingerprint,
+                providerGeneration: lease.generation,
+                requestGate: registry.requestGate
+            )
             self.runtime = runtime
             runtimeGeneration = lease.generation
         }
@@ -72,9 +141,11 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
                 await runtime.recommendation(for: request)
             }
         } catch ProviderRuntimeRegistryError.staleGeneration {
-            self.runtime = nil
-            runtimeGeneration = nil
-            providerAvailability.update(.unknown)
+            if self.runtime === runtime, runtimeGeneration == lease.generation {
+                self.runtime = nil
+                runtimeGeneration = nil
+                providerAvailability.update(.unknown)
+            }
             return .stale
         } catch {
             return .idle
@@ -85,22 +156,33 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
         if let runtime {
             return await runtime.recommendation(for: request)
         }
+        let requestGate = legacyRequestGate ?? Self.sharedLegacyRequestGate
         let provider = providerLoader?()
         guard provider != nil else {
             providerAvailability.update(.unavailable)
-            return await makeRuntime(provider: nil).recommendation(for: request)
+            return await makeRuntime(provider: nil, requestGate: requestGate).recommendation(for: request)
         }
         providerAvailability.update(.available)
-        let runtime = makeRuntime(provider: provider)
+        let runtime = makeRuntime(provider: provider, requestGate: requestGate)
         self.runtime = runtime
         return await runtime.recommendation(for: request)
     }
 
-    private func makeRuntime(provider: (any LLMProvider)?) -> AIRecommendationRuntime {
+    private func makeRuntime(
+        provider: (any LLMProvider)?,
+        providerIdentity: String? = nil,
+        providerGeneration: UInt64 = 0,
+        requestGate: ProviderRequestGate = .shared
+    ) -> AIRecommendationRuntime {
         AIRecommendationRuntime(
             provider: provider,
+            environmentStore: environmentStore,
+            correctionStore: correctionStore,
             debounceMilliseconds: debounceMilliseconds,
-            diagnosticSink: diagnosticSink
+            diagnosticSink: diagnosticSink,
+            requestGate: requestGate,
+            providerIdentity: providerIdentity,
+            providerGeneration: providerGeneration
         )
     }
 }
@@ -120,6 +202,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         var correctionHash: String
         var lexicalHash: String
         var feedbackHash: String
+        var payloadFingerprint: String
     }
 
     private struct CacheEntry {
@@ -135,7 +218,12 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     private let hardTimeoutNanoseconds: UInt64
     private let diagnosticSink: any AIRecommendationDiagnosticSink
     private let cacheTTL: TimeInterval
+    private let requestGate: ProviderRequestGate
+    private let providerIdentity: String
+    private let providerGeneration: UInt64
     private var cache: [CacheKey: CacheEntry] = [:]
+    private var inFlight: [String: Task<LLMResponse, Error>] = [:]
+    private var gatePersistenceBlocked = false
 
     public init(
         provider: (any LLMProvider)?,
@@ -145,7 +233,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         debounceMilliseconds: Int = Defaults.debounceMilliseconds,
         hardTimeoutMilliseconds: Int = Defaults.hardTimeoutMilliseconds,
         diagnosticSink: any AIRecommendationDiagnosticSink = OSLogAIRecommendationDiagnosticSink(),
-        cacheTTL: TimeInterval = 300
+        cacheTTL: TimeInterval = 300,
+        requestGate: ProviderRequestGate = .shared,
+        providerIdentity: String? = nil,
+        providerGeneration: UInt64 = 0
     ) {
         self.provider = provider
         self.environmentStore = environmentStore
@@ -155,6 +246,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         self.hardTimeoutNanoseconds = UInt64(max(1, hardTimeoutMilliseconds)) * 1_000_000
         self.diagnosticSink = diagnosticSink
         self.cacheTTL = max(1, cacheTTL)
+        self.requestGate = requestGate
+        self.providerIdentity = providerIdentity ?? provider?.providerName ?? "knowtype-provider"
+        self.providerGeneration = providerGeneration
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
@@ -171,6 +265,17 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 reason: "empty_raw_or_context"
             )
             return .ineligible(reason: "AI 不适用")
+        }
+        guard Data(request.rawInput.utf8).count <= ProviderRequestBudget.rawInput,
+              request.lockedPrefix.map({ Data($0.utf8).count <= ProviderRequestBudget.lockedPrefix }) ?? true else {
+            record(
+                .skippedIneligible,
+                request: request,
+                providerName: provider?.providerName,
+                elapsedSince: startedAt,
+                reason: "request_budget_exceeded"
+            )
+            return .ineligible(reason: "AI 输入过长")
         }
         if Self.containsSecretLikeRecommendationText(request) {
             record(
@@ -205,6 +310,16 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: "AI 未配置")
         }
+        if gatePersistenceBlocked {
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "gate_persistence_blocked"
+            )
+            return .unavailable(reason: "AI 暂不可用")
+        }
         if let reason = await healthMonitor.unavailableReason() {
             record(
                 .cooldownActive,
@@ -214,6 +329,41 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 reason: reason
             )
             return .unavailable(reason: reason)
+        }
+        switch await requestGate.preflight(
+            providerIdentity: providerIdentity,
+            generation: providerGeneration
+        ) {
+        case .available, .busy:
+            break
+        case .cooldown:
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "provider_cooldown"
+            )
+            return .unavailable(reason: "AI 暂不可用")
+        case .staleGeneration:
+            record(
+                .cancelled,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "stale_generation"
+            )
+            return .stale
+        case .persistenceBlocked:
+            gatePersistenceBlocked = true
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "gate_persistence_blocked"
+            )
+            return .unavailable(reason: "AI 暂不可用")
         }
 
         var waitingForIdle = false
@@ -245,34 +395,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 providerName: provider.providerName,
                 elapsedSince: startedAt
             )
-            let key = CacheKey(
-                lockedPrefix: request.lockedPrefix,
-                rawInput: request.rawInput,
-                appBundleID: request.appBundleID ?? "",
-                localeRawValue: request.locale.rawValue,
-                environmentHash: environment.sha256,
-                correctionHash: correction.sha256,
-                lexicalHash: request.lexicalContext?.sha256 ?? "",
-                feedbackHash: request.feedbackContext?.sha256 ?? ""
-            )
-            if let cached = cache[key], cached.expiresAt > Date() {
-                record(
-                    .cacheHit,
-                    request: request,
-                    providerName: provider.providerName,
-                    elapsedSince: startedAt,
-                    candidateCount: 1,
-                    acceptedCount: 1
-                )
-                return .ready(cached.candidate)
-            }
-            record(
-                .cacheMiss,
-                request: request,
-                providerName: provider.providerName,
-                elapsedSince: startedAt
-            )
-
             var contextDocuments = [
                 "ENV.md": environment.content,
                 "CORRECTION.md": correction.content
@@ -295,6 +417,23 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 lengthLevel: .medium,
                 contextDocuments: contextDocuments
             )
+            let payloadFingerprint = try AIRequestBudget.fingerprint(for: llmRequest)
+            let key = CacheKey(
+                lockedPrefix: request.lockedPrefix,
+                rawInput: request.rawInput,
+                appBundleID: request.appBundleID ?? "",
+                localeRawValue: request.locale.rawValue,
+                environmentHash: environment.sha256,
+                correctionHash: correction.sha256,
+                lexicalHash: request.lexicalContext?.sha256 ?? "",
+                feedbackHash: request.feedbackContext?.sha256 ?? "",
+                payloadFingerprint: payloadFingerprint
+            )
+            if let cached = cache[key], cached.expiresAt > Date() {
+                record(.cacheHit, request: request, providerName: provider.providerName, elapsedSince: startedAt, candidateCount: 1, acceptedCount: 1)
+                return .ready(cached.candidate)
+            }
+            record(.cacheMiss, request: request, providerName: provider.providerName, elapsedSince: startedAt)
             record(
                 .structuredSchemaRequest,
                 request: request,
@@ -309,8 +448,17 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 elapsedSince: startedAt
             )
             let providerStartedAt = Date()
-            let response = try await withTimeout(nanoseconds: hardTimeoutNanoseconds) {
-                try await provider.complete(llmRequest)
+            let response: LLMResponse
+            if let pending = inFlight[payloadFingerprint] {
+                response = try await pending.value
+            } else {
+                let task = makeProviderAttemptTask(
+                    provider: provider,
+                    request: llmRequest
+                )
+                inFlight[payloadFingerprint] = task
+                defer { inFlight[payloadFingerprint] = nil }
+                response = try await task.value
             }
             record(
                 .providerResponse,
@@ -374,11 +522,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     acceptedCount: 0,
                     reason: rejectionReason
                 )
-                await healthMonitor.recordSuccess()
                 return .ineligible(reason: "AI 无推荐")
             }
             cache[key] = CacheEntry(candidate: candidate, expiresAt: Date().addingTimeInterval(cacheTTL))
-            await healthMonitor.recordSuccess()
             record(
                 .ready,
                 request: request,
@@ -388,6 +534,22 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 acceptedCount: result.acceptedCount
             )
             return .ready(candidate)
+        } catch let error as ProviderRequestBudgetError {
+            record(.skippedIneligible, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "request_budget_\(error.component)")
+            return .ineligible(reason: "AI 请求过大")
+        } catch ProviderRequestGateError.staleGeneration {
+            record(.cancelled, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "stale_generation")
+            return .stale
+        } catch ProviderRequestGatePersistenceError.blocked {
+            gatePersistenceBlocked = true
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "gate_persistence_blocked"
+            )
+            return .unavailable(reason: "AI 暂不可用")
         } catch is CancellationError {
             record(
                 .cancelled,
@@ -408,7 +570,19 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 )
                 return .idle
             }
-            await healthMonitor.recordFailure(error)
+            if let gateError = error as? ProviderRequestGateError {
+                switch gateError {
+                case .cooldown:
+                    record(.cooldownActive, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "provider_cooldown")
+                    return .unavailable(reason: "AI 暂不可用")
+                case .busy:
+                    record(.cooldownActive, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "provider_busy")
+                    return .idle
+                case .staleGeneration:
+                    record(.cancelled, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "stale_generation")
+                    return .stale
+                }
+            }
             if error is TimeoutError {
                 record(
                     .timeout,
@@ -437,6 +611,45 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: "AI 暂不可用")
         }
+    }
+
+    private func makeProviderAttemptTask(
+        provider: any LLMProvider,
+        request: LLMRequest
+    ) -> Task<LLMResponse, Error> {
+        let gate = requestGate
+        let identity = providerIdentity
+        let generation = providerGeneration
+        let timeout = hardTimeoutNanoseconds
+        let healthMonitor = self.healthMonitor
+        return Task<LLMResponse, Error> {
+            do {
+                let response = try await gate.executeWithHardTimeout(
+                    providerIdentity: identity,
+                    generation: generation,
+                    timeoutNanoseconds: timeout
+                ) {
+                    try await provider.complete(request)
+                }
+                await healthMonitor.recordSuccess()
+                return response
+            } catch {
+                if Self.shouldRecordProviderHealthFailure(error) {
+                    await healthMonitor.recordFailure(error)
+                }
+                throw error
+            }
+        }
+    }
+
+    private static func shouldRecordProviderHealthFailure(_ error: Error) -> Bool {
+        guard !(error is ProviderRequestBudgetError),
+              !(error is ProviderRequestGatePersistenceError),
+              !(error is ProviderRequestGateError),
+              !isCancellation(error) else {
+            return false
+        }
+        return true
     }
 
     static func isEligibleForProviderDispatch(_ request: AIRecommendationRequest) -> Bool {
@@ -629,8 +842,9 @@ private struct CandidateBuildResult {
     var repairedCount: Int
 }
 
-private func withTimeout<T: Sendable>(
+func withTimeout<T: Sendable>(
     nanoseconds: UInt64,
+    onTimeout: @escaping @Sendable (@escaping @Sendable () -> Bool) async throws -> Bool,
     operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
     let race = TimeoutRace<T>()
@@ -650,9 +864,12 @@ private func withTimeout<T: Sendable>(
             let timeoutTask = Task {
                 do {
                     try await Task.sleep(nanoseconds: nanoseconds)
-                    race.complete(.failure(TimeoutError()))
+                    guard try await onTimeout(race.claimTimeout) else { return }
+                    race.completeClaimedTimeout(.failure(TimeoutError()))
                 } catch {
-                    return
+                    if !(error is CancellationError) {
+                        race.complete(.failure(error))
+                    }
                 }
             }
             race.setTasks([operationTask, timeoutTask])
@@ -667,6 +884,7 @@ private final class TimeoutRace<T: Sendable>: @unchecked Sendable {
     private var continuation: CheckedContinuation<T, Error>?
     private var tasks: [Task<Void, Never>] = []
     private var completed = false
+    private var timeoutClaimed = false
 
     func setContinuation(_ continuation: CheckedContinuation<T, Error>) -> Bool {
         lock.lock()
@@ -693,7 +911,32 @@ private final class TimeoutRace<T: Sendable>: @unchecked Sendable {
 
     func complete(_ result: Result<T, Error>) {
         lock.lock()
-        guard !completed else {
+        guard !completed, !timeoutClaimed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        let tasks = tasks
+        self.tasks = []
+        lock.unlock()
+
+        tasks.forEach { $0.cancel() }
+        continuation?.resume(with: result)
+    }
+
+    func claimTimeout() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !completed, !timeoutClaimed else { return false }
+        timeoutClaimed = true
+        return true
+    }
+
+    func completeClaimedTimeout(_ result: Result<T, Error>) {
+        lock.lock()
+        guard !completed, timeoutClaimed else {
             lock.unlock()
             return
         }

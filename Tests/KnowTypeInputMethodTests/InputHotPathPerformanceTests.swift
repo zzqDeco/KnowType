@@ -105,11 +105,16 @@ final class InputHotPathPerformanceTests: XCTestCase {
         XCTAssertTrue(aiRecommendationRuntime.contains("dispatchDebounceMilliseconds"))
         XCTAssertTrue(aiRecommendationRuntime.contains("static let dispatchDebounceMilliseconds = 450"))
         XCTAssertTrue(aiRecommendationRuntime.contains(".pendingPlaceholder"))
-        XCTAssertTrue(aiRecommendationRuntime.contains("case .transportStarted:"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("private enum FSMState"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("case debouncing"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("case inFlight"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("case trailing"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("stage: .transportStarted"))
         XCTAssertTrue(aiRecommendationRuntime.contains(".transportLeftStale"))
-        XCTAssertTrue(aiRecommendationRuntime.contains(".transportCancellationRequested"))
-        XCTAssertTrue(aiRecommendationRuntime.contains(".transportCancelledByNewInput"))
-        XCTAssertTrue(aiRecommendationRuntime.contains("if phase == .dispatchDeferred || phase == .transportStarted"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("trailingWork = work"))
+        XCTAssertTrue(aiRecommendationRuntime.contains("dispatchTrailingIfNeeded()"))
+        XCTAssertFalse(aiRecommendationRuntime.contains(".transportCancellationRequested"))
+        XCTAssertFalse(aiRecommendationRuntime.contains(".transportCancelledByNewInput"))
         XCTAssertFalse(coordinator.contains("fputs("))
         XCTAssertFalse(aiRecommendationDiagnostics.contains("fputs("))
         XCTAssertFalse(candidateAnchorResolver.contains("fputs("))
@@ -170,7 +175,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(
             environment: ProcessInfo.processInfo.environment.merging(["KNOWTYPE_RIME_ENABLED": "1"]) { current, _ in current }
         ) else {
-            throw XCTSkip("Pinned librime artifacts are not prepared in Vendor/Rime")
+            XCTFail("Strict input perf requires pinned librime artifacts and a valid native Rime configuration")
+            return
         }
         let sandbox = FileManager.default.temporaryDirectory
             .appendingPathComponent("knowtype-hotpath-perf-\(UUID().uuidString)", isDirectory: true)
@@ -183,7 +189,8 @@ final class InputHotPathPerformanceTests: XCTestCase {
         var rimeEngine = RimeConversionEngine(configuration: configuration)
         XCTAssertTrue(rimeEngine.process(.text("w")).handled)
         guard rimeEngine.isNativeActive else {
-            throw XCTSkip("librime could not create a native session")
+            XCTFail("Strict input perf requires librime to create a native session")
+            return
         }
         XCTAssertTrue(rimeEngine.process(.text("o")).handled)
         _ = rimeEngine.process(.space)

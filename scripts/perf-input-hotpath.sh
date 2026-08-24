@@ -55,10 +55,27 @@ if [[ -d "$xctest_bundle" ]] && command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign "$sign_identity" "$xctest_bundle" >/dev/null
 fi
 
+perf_test_selector='KnowTypeInputMethodTests.InputHotPathPerformanceTests/testStrictRimeOnlyHotPathBudgetsWhenEnabled'
+if ! test_list="$(
+  swift test list \
+    --package-path "$ROOT_DIR" \
+    --configuration release \
+    --skip-build
+)"; then
+  echo "error: failed to enumerate tests before running strict input perf selector $perf_test_selector" >&2
+  exit 1
+fi
+
+selector_count="$(printf '%s\n' "$test_list" | awk -v selector="$perf_test_selector" '$0 == selector { count += 1 } END { print count + 0 }')"
+if [[ "$selector_count" != "1" ]]; then
+  echo "error: expected exactly one test selector $perf_test_selector, found $selector_count" >&2
+  exit 1
+fi
+
 KNOWTYPE_RIME_ENABLED=1 \
 KNOWTYPE_STRICT_INPUT_PERF=1 \
 swift test \
   --package-path "$ROOT_DIR" \
   --configuration release \
   --skip-build \
-  --filter InputHotPathPerformanceTests
+  --filter "$perf_test_selector"

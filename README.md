@@ -230,7 +230,7 @@ For a GitHub Release DMG, verify the downloaded image with the published
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.9-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.10-macos-dev-preview.dmg.sha256
 ```
 
 Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
@@ -244,7 +244,7 @@ sidebar entry unless the matching pane is installed.
 The older local MVP zip can still be installed for developer debugging:
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.9-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.10-macos-local-mvp.zip
 ```
 
 ## Configuration
@@ -256,8 +256,11 @@ Keychain references. Base URLs may contain runtime query parameters, but not
 userinfo or fragments; diagnostics omit userinfo, query, and fragment.
 The running input-method host observes committed profile revisions. The next
 eligible recommendation or context digest uses the new provider without a host
-restart, cancels older in-flight provider work, and never polls provider files
-from the ordinary key path.
+restart. Older results are generation-fenced; started transports remain tracked
+by the shared provider gate until they actually finish. A caller-visible hard
+timeout returns immediately, but cancellation-resistant transport retains that
+identity's gate lease until its real completion; the ordinary key path never
+polls provider files.
 
 ```text
 ~/Library/Application Support/KnowType/providers.v2.json
@@ -326,13 +329,24 @@ data. Clear removes accepted-learning/feedback history, summary, and mirror
 files and scrubs accepted-AI context from the lexical profile without deleting
 Rime, provider, Keychain, ENV, or CORRECTION data.
 Committed Context Digest events are queued locally as JSONL under
-`~/.knowtype/events/`. Text fields are limited to 2,048 Unicode scalars, and
-pending data keeps at most 500 events or 1 MiB by dropping the oldest derived
-events after overflow. Each provider digest sends at most the oldest 50 events
-or 256 KiB. Successful claims move to `events/processed/`, which is retained
-for at most 7 days, 100 files, and 10 MiB; cleanup runs only after a successful
-digest, never during startup or install. Context diagnostics contain counts,
-bytes, and cooldown durations only, not typed text, provider output, or keys.
+`~/.knowtype/events/`. Event text fields are limited to 2,048 Unicode scalars;
+raw input and locked prefixes over 4 KiB UTF-8 skip an AI request without
+semantic truncation. Pending data keeps at most 500 events or 1 MiB by dropping
+the oldest derived events after overflow. Each provider digest claims at most the oldest 50 events or
+48 KiB and cannot bypass the 600-second interval after a successful commit.
+`ENV.md` has one managed generated pair and one canonical User Notes section;
+invalid digest candidates are rejected before any write or archive claim.
+Successful claims move to `events/processed/`; its retention targets are 7 days,
+100 files, and 10 MiB. Every successful local archive is followed by
+best-effort cleanup, including archives made by a provider digest claim or
+before a provider digest. Cleanup excludes the current archive, and deletion
+failures may temporarily leave the directory above those targets; startup and
+install never clean up or write history.
+Recommendation and digest requests use separate
+logical/body budgets but share one hashed provider gate, max one in-flight
+request per identity, and privacy-safe cooldown diagnostics. Context diagnostics
+contain counts, bytes, and cooldown durations only, not typed text, provider
+output, configuration, or keys.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS

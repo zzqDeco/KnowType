@@ -18,6 +18,7 @@ public struct OpenAIResponsesProvider: LLMProvider {
     }
 
     public func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        _ = try ProviderRequestBudget.encodedPayload(for: request)
         let model = try await modelDiscovery.resolvedModel(for: configuration)
         let cacheKey = StructuredOutputFallback.capabilityKey(
             providerName: providerName,
@@ -97,7 +98,7 @@ public struct OpenAIResponsesProvider: LLMProvider {
         case .promptOnly:
             break
         }
-        urlRequest.httpBody = try jsonData(body)
+        urlRequest.httpBody = try jsonData(body, task: request.task)
 
         let (data, response) = try await httpClient.data(for: urlRequest)
         try validateHTTPResponse(response, data: data)

@@ -11,7 +11,9 @@
 
 ## Boundaries
 
-- Provider generation and cancellation belong to `ProviderRuntimeRegistry`.
+- Provider generation and shared request gating belong to
+  `ProviderRuntimeRegistry` and `ProviderRequestGate`; started transports are
+  tracked rather than cancelled by new input.
 - Provider request mapping and response normalization stay in
   `KnowTypeProviders`.
 - The runtime does not record marked text and does not send protected-only
@@ -28,30 +30,68 @@
   event, applies generation changes before append, and reuses that lease for an
   immediately eligible digest. Batch, interval, protected-only, and unchanged
   generation cooldown gates use inventory before any digest snapshot decode.
-- Generation changes cancel old transport and reset provider-dependent interval
-  state before failure cooldown is applied. Stale responses cannot write
-  `ENV.md` or archive events.
+- One actor-owned deadline task wakes batch, interval, provider-cooldown, and
+  shared-gate availability events. The first below-batch pending event records
+  a forced deadline. A successful commit starts a 600-second minimum interval
+  that a batch of 50 cannot bypass; provider generation changes do not reset
+  it. Gate-busy state suppresses additional snapshot decode until the one
+  cancellable availability waiter wakes, is invalidated, or is cancelled.
+- Stale responses cannot write `ENV.md` or archive events. Shared gate cooldown
+  and max-one-in-flight identity state apply equally to recommendation and
+  digest. The caller-visible hard timeout wraps gate execution; it returns
+  immediately while cancellation-resistant provider work keeps the identity
+  lease until actual completion. The single-flight attempt owner records a hard
+  timeout once; cancellation-marked late failures only release that lease.
+- Direct provider-injected runtimes derive their gate identity from
+  `provider.providerName` by default, matching direct recommendation runtimes;
+  registry-backed runtimes continue to use the generation fingerprint.
 - Final persistence holds both the provider-generation guard and the pending
   snapshot file claim. While transport is in flight, backlog compaction retains
   that exact claim plus the newest bounded tail. Events appended after the
   claimed prefix remain pending.
-- Failed and empty digests retain the minimum retry interval while still
-  checking for a changed provider revision. Protected-only pending batches
+- Failed and empty digests use the shared gate's 60-second exponential retry
+  (429 `Retry-After` is clamped to 15 seconds through 15 minutes), which is
+  separate from the 600-second successful-commit interval. Protected-only pending batches
   archive locally without provider or provider-profile reads; a protected-only
   bounded prefix in a mixed backlog is also archived without a provider call.
-- Event string fields are limited to 2,048 Unicode scalars. Pending JSONL keeps at
-  most 500 events or 1 MiB and compacts to the newest 450 events/768 KiB after
-  overflow. Existing oversized files are compacted through a bounded suffix read
-  before inventory decoding. A provider request contains at most 50 oldest
-  events or 256 KiB; blank, malformed, and oversized legacy prefixes are
-  recovered locally instead of being sent, and corrupt-prefix cleanup does not
-  start the provider failure cooldown.
-- A successful digest prunes `processed/` best-effort to 7 days, 100 files, and
-  10 MiB. Startup, install, protected-only archive, and failed digests do not
-  trigger historical cleanup.
+  Neither path advances the provider-success timestamp; any unprotected tail is
+  scheduled by the normal pending rules.
+- Raw input and locked prefix over 4 KiB skip AI without semantic truncation.
+  Pending JSONL keeps at most 500 events or 1 MiB and compacts to the newest
+  450 events/768 KiB after overflow. Existing oversized files are compacted
+  through a bounded suffix read before inventory decoding. A provider request
+  contains at most 50 oldest events or 48 KiB, plus 64 KiB logical and 96 KiB
+  HTTP-body limits; blank, malformed, and oversized legacy prefixes are
+  recovered locally instead of being sent. If a local archive leaves a tail,
+  inventory is rechecked and the single eligible deadline is rearmed without
+  waiting for another input event.
+- Every successful local archive, whether produced by a provider commit,
+  protected-only handling, an invalid/unsendable prefix, an oversized line, or
+  persisted claim recovery, invokes the store's best-effort `processed/`
+  retention prune while the existing file lock is held. The targets remain 7
+  days, 100 files, and 10 MiB, but the current archive is protected from every
+  deletion criterion; failed older-file cleanup may therefore leave the
+  directory temporarily over target. Startup, initialization, installation,
+  and provider failures that produce no archive do not scan or rewrite
+  historical archives.
 - `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, and `context_archive_pruned` diagnostics contain
   counts and durations only, never event or provider text.
+- A privacy-safe claim records only prefix hash, byte/event counts, generated
+  section hash, and provider generation. ENV-success/archive-failure recovery
+  reads and validates only the claimed byte/event prefix, archives that exact
+  prefix, and leaves appended tail bytes pending. A durable archive receipt or
+  a bounded deterministic processed-archive read with matching byte count and
+  SHA-256 distinguishes completed archive from cleanup failure; missing,
+  oversized, or same-size corrupt archive evidence remains blocked. A matching
+  ENV with a changed claim prefix still fails closed without another provider
+  request. A claim written before ENV replacement also remains blocked when its
+  generated hash is absent, so restart cannot redispatch that prefix. Corrupt
+  schedule state is replaced with a conservative minimum-interval delay; if
+  that state cannot be persisted, processing stays blocked.
+  Timestamp/count schedule state survives runtime or process rebuild and is
+  written before claim cleanup. Successful commits rearm the one deadline task
+  when a tail remains; an empty store cancels it.
 
 ## Tests
 

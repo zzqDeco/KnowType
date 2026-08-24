@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - dev
+      - "release/**"
   pull_request:
     branches:
       - main
@@ -29,3 +30,5 @@ jobs:
         run: ./scripts/smoke-inputmethod-install.sh
       - name: Compatibility PreferencePane script smoke
         run: ./scripts/smoke-inputmethod-install.sh --with-prefpane
+      - name: Input hot path performance smoke
+        run: ./scripts/perf-input-hotpath.sh
