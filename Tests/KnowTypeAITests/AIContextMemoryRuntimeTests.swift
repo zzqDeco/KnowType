@@ -711,7 +711,13 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(cancellationCount, 0)
         await providerA.finish(responseText: "## Global Style\n- Provider A stale digest.")
         await oldDigest.value
-        try await waitUntil { await providerB.requestCount == 1 }
+        try await waitUntil {
+            guard await providerB.requestCount == 1 else { return false }
+            let pending = try? await eventStore.pendingEvents()
+            guard pending?.isEmpty == true else { return false }
+            let environment = try? String(contentsOf: environmentURL, encoding: .utf8)
+            return environment?.contains("Provider B digest") == true
+        }
 
         let pendingAfterRetry = try await eventStore.pendingEvents()
         let currentEnvironment = try String(contentsOf: environmentURL, encoding: .utf8)
