@@ -1713,13 +1713,15 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(diskContent, polluted)
     }
 
-    func testPersistenceBlockedGateLatchesBeforeRecommendationDocumentReads() async throws {
+    func testPersistenceBlockedGateRecoversWithoutRebuildingRecommendationRuntime() async throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let gateStateURL = directory.appendingPathComponent("gate.json")
         try Data("corrupt-gate-state".utf8).write(to: gateStateURL)
+        let clock = RecommendationGateClock()
         let gateProbe = ProviderRequestGateTestProbe()
         let gate = ProviderRequestGate(
+            now: clock.now,
             persistenceURL: gateStateURL,
             testProbe: gateProbe
         )
@@ -1727,7 +1729,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let correctionURL = directory.appendingPathComponent("CORRECTION.md")
         let environmentProbe = EnvironmentDocumentStoreTestProbe()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
-            LLMCandidate(text: "must not run", confidence: 0.9)
+            LLMCandidate(text: "恢复成功", confidence: 0.9)
         ]))
         let diagnostics = RecordingDiagnosticSink()
         let runtime = AIRecommendationRuntime(
@@ -1750,18 +1752,37 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
 
         for state in states {
-            guard case .unavailable = state else {
+            guard state == .unavailable(reason: "AI 状态异常，正在重试") else {
                 return XCTFail("persistence-blocked recommendation must be unavailable")
             }
         }
         let providerRequests = await provider.requests
         XCTAssertTrue(providerRequests.isEmpty)
-        XCTAssertEqual(gateProbe.preflightCheckCount, 1)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 10)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
+        XCTAssertEqual(gateProbe.persistenceRecoveryProbeCount, 0)
         XCTAssertEqual(environmentProbe.environmentDocumentReadCount, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: environmentURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: correctionURL.path))
         XCTAssertTrue(diagnostics.events.allSatisfy { $0.reason == "gate_persistence_blocked" })
+        XCTAssertFalse(String(describing: diagnostics.events).contains(sensitiveInput))
+
+        try Data(#"{"entries":[]}"#.utf8).write(to: gateStateURL, options: .atomic)
+        clock.advance(by: 5)
+        let recoveredState = await runtime.recommendation(for: request)
+
+        guard case .ready(let candidate) = recoveredState else {
+            return XCTFail("same recommendation runtime must recover after bounded gate retry")
+        }
+        XCTAssertEqual(candidate.displayText, "恢复成功")
+        let recoveredProviderRequests = await provider.requests
+        XCTAssertEqual(recoveredProviderRequests.count, 1)
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 1)
+        XCTAssertEqual(gateProbe.persistenceRecoveryProbeCount, 1)
+        XCTAssertEqual(gateProbe.persistenceRecoveryCount, 1)
+        XCTAssertGreaterThan(environmentProbe.environmentDocumentReadCount, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: environmentURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: correctionURL.path))
         XCTAssertFalse(String(describing: diagnostics.events).contains(sensitiveInput))
     }
 }

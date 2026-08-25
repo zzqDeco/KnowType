@@ -44,16 +44,27 @@
   fail-closed.
 - With persistence enabled, permission, bounded-read, decode, encoding,
   atomic-write, replacement, or final-permission failure enters an actor-owned
-  blocked state. New attempts remain blocked across generation invalidation;
-  non-persistent gate instances are unaffected.
+  blocked state. New attempts remain fail-closed while a 5-to-60-second retry
+  deadline is active; preflight performs no persistence I/O during that window.
+- Recovery reloads state after read/decode failures or rewrites the desired
+  in-memory state after mutation failures. The first new Provider generation
+  may force one probe, while stale invalidations cannot bypass the deadline.
+  Neither path can erase an active cooldown or started transport. A started
+  transport that finishes during backoff updates the desired in-memory rewrite
+  without touching disk. In-memory clear tombstones prevent invalidated
+  persisted cooldowns from being resurrected after a later recovery.
+  Non-persistent gate instances are unaffected.
 - An internal value-only preflight reports available, busy, cooldown,
   stale-generation, or persistence-blocked without acquiring an attempt. It
   lets callers stop before document projection or digest snapshot decoding.
+- Blocked, probing, and recovered transitions use privacy-safe unified logs with
+  no provider endpoint, model, input, output, or credential content.
 
 ## Tests
 
 - `ProviderRuntimeRegistryTests` covers admission-to-transport cancellation,
   pre-transport timeout and generation-invalidation rejection,
   timeout/completion interleaving, single-failure ownership, started-transport
-  generation fencing, fail-closed persistence, value-only preflight, and
-  waiter release.
+  generation fencing, fail-closed persistence, disk-free recovery backoff,
+  deadline and generation recovery, cooldown retention, stale-state
+  non-resurrection, value-only preflight, and waiter release.

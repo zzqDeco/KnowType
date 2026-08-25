@@ -2119,7 +2119,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(gateProbe.admittedAttemptCount, 2)
     }
 
-    func testPersistenceBlockedGateLatchesBeforeDigestSnapshotAndEnvironmentRead() async throws {
+    func testPersistenceBlockedGateDefersClaimRecoveryWithoutRepeatedSensitiveReads() async throws {
         let directory = makeTemporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let gateStateURL = directory.appendingPathComponent("gate.json")
@@ -2178,13 +2178,95 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
 
         let blockedProviderRequests = await provider.requests
         XCTAssertTrue(blockedProviderRequests.isEmpty)
-        XCTAssertEqual(gateProbe.preflightCheckCount, 1)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 10)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
+        XCTAssertEqual(gateProbe.persistenceRecoveryProbeCount, 0)
         XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, digestDecodesBeforeRuntime)
         XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRuntime)
         XCTAssertEqual(diagnostics.stageCount("context_gate_persistence_blocked"), 1)
         XCTAssertFalse(diagnostics.lines.joined().contains("blocked-digest-private-input"))
         XCTAssertFalse(diagnostics.lines.joined().contains("阻断内容"))
+    }
+
+    func testPersistenceBlockedGateRecoversDigestWithoutRuntimeRebuildOrEventLoss() async throws {
+        let directory = makeTemporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let gateStateURL = directory.appendingPathComponent("gate.json")
+        try Data("corrupt-gate-state".utf8).write(to: gateStateURL)
+        let clock = ManualContextClock()
+        let gateProbe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: gateStateURL,
+            testProbe: gateProbe
+        )
+        let eventStoreProbe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: .default,
+            testProbe: eventStoreProbe
+        )
+        try await eventStore.append(
+            makeContextEvent(
+                rawInput: "recover-digest-private-input",
+                committedText: "待恢复内容"
+            )
+        )
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- Recovered digest."
+        )
+        let diagnostics = ContextMemoryDiagnosticProbe()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: environmentURL,
+                testProbe: environmentProbe
+            ),
+            batchSize: 1,
+            minimumInterval: 600,
+            diagnosticSink: { diagnostics.record($0) },
+            requestGate: gate,
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+        await runtime.record(
+            makeContextEvent(
+                rawInput: "recover-digest-tail-private-input",
+                committedText: "恢复期间追加"
+            )
+        )
+
+        let blockedRequests = await provider.requests
+        let blockedInventory = try eventStore.inventory()
+        XCTAssertTrue(blockedRequests.isEmpty)
+        XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 0)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, 0)
+        XCTAssertEqual(blockedInventory.eventCount, 2)
+        XCTAssertEqual(diagnostics.stageCount("context_gate_persistence_blocked"), 1)
+
+        try Data(#"{"entries":[]}"#.utf8).write(to: gateStateURL, options: .atomic)
+        clock.advance(by: 5)
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 1)
+        XCTAssertEqual(gateProbe.persistenceRecoveryProbeCount, 1)
+        XCTAssertEqual(gateProbe.persistenceRecoveryCount, 1)
+        XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 1)
+        XCTAssertGreaterThan(environmentProbe.environmentDocumentReadCount, 0)
+        let recoveredInventory = try eventStore.inventory()
+        XCTAssertEqual(recoveredInventory.eventCount, 0)
+        let environment = try String(contentsOf: environmentURL, encoding: .utf8)
+        XCTAssertTrue(environment.contains("Recovered digest."))
+        XCTAssertFalse(diagnostics.lines.joined().contains("recover-digest-private-input"))
+        XCTAssertFalse(diagnostics.lines.joined().contains("recover-digest-tail-private-input"))
+        XCTAssertFalse(diagnostics.lines.joined().contains("待恢复内容"))
+        XCTAssertFalse(diagnostics.lines.joined().contains("恢复期间追加"))
     }
 
     func testProcessedArchivePendingPrefixValidationIsExactAndFailClosed() async throws {

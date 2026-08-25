@@ -889,13 +889,13 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         }
     }
 
-    func testPersistentGatePermissionFailureBlocksProviderDispatch() async throws {
+    func testPersistentGatePermissionFailureRecoversOnGenerationChange() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stateURL = directory.appendingPathComponent("gate.json")
-        let now = Date()
+        let clock = ProviderGateClock()
         let identity = "permission-secret-provider"
-        let seed = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+        let seed = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
         await seed.recordFailure(
             providerIdentity: identity,
             generation: 0,
@@ -904,7 +904,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         let probe = ProviderRequestGateTestProbe()
         probe.failNextPermissionChanges(1)
         let gate = ProviderRequestGate(
-            now: { now },
+            now: clock.now,
             persistenceURL: stateURL,
             testProbe: probe
         )
@@ -921,29 +921,32 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         }
 
         await gate.invalidate(providerIdentity: identity, generation: 0)
-        do {
-            _ = try await gate.execute(providerIdentity: identity, generation: 1) {
-                await operation.markStarted()
-                return 2
-            }
-            XCTFail("generation invalidation must not clear persistence failure")
-        } catch ProviderRequestGatePersistenceError.blocked {
-            // Expected.
+        let value = try await gate.execute(providerIdentity: identity, generation: 1) {
+            await operation.markStarted()
+            return 2
         }
 
-        let operationStarted = await operation.hasStarted
-        XCTAssertFalse(operationStarted)
-        let persisted = try Data(contentsOf: stateURL)
-        XCTAssertFalse(String(decoding: persisted, as: UTF8.self).contains(identity))
+        XCTAssertEqual(value, 2)
+        let operationStartCount = await operation.startCount
+        XCTAssertEqual(operationStartCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
     }
 
-    func testPersistentGateCorruptStateBlocksProviderDispatch() async throws {
+    func testPersistentGateCorruptStateRecoversAfterAtomicReplacement() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stateURL = directory.appendingPathComponent("gate.json")
         let identity = "corrupt-secret-provider"
+        let clock = ProviderGateClock()
         try Data("corrupt".utf8).write(to: stateURL)
-        let gate = ProviderRequestGate(persistenceURL: stateURL)
+        let probe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
         let operation = RequestGateProbe()
 
         do {
@@ -961,6 +964,182 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         XCTAssertFalse(
             String(decoding: try Data(contentsOf: stateURL), as: UTF8.self).contains(identity)
         )
+
+        try Data(#"{"entries":[]}"#.utf8).write(to: stateURL, options: .atomic)
+        guard case .persistenceBlocked = await gate.preflight(
+            providerIdentity: identity,
+            generation: 0
+        ) else {
+            return XCTFail("recovery must honor the initial retry deadline")
+        }
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 0)
+
+        clock.advance(by: 5)
+        let recovered = await gate.preflight(providerIdentity: identity, generation: 0)
+        XCTAssertEqual(recovered, .available)
+        let value = try await gate.execute(providerIdentity: identity, generation: 0) {
+            await operation.markStarted()
+            return 2
+        }
+
+        XCTAssertEqual(value, 2)
+        let operationStartCount = await operation.startCount
+        XCTAssertEqual(operationStartCount, 1)
+        XCTAssertEqual(probe.persistenceBlockCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
+    }
+
+    func testPersistentGateCorruptStateRecoversAfterSafeRemoval() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let clock = ProviderGateClock()
+        let identity = "removed-corrupt-provider"
+        try Data("corrupt".utf8).write(to: stateURL)
+        let probe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+
+        guard case .persistenceBlocked = await gate.preflight(
+            providerIdentity: identity,
+            generation: 0
+        ) else {
+            return XCTFail("corrupt state must fail closed")
+        }
+        try FileManager.default.removeItem(at: stateURL)
+        clock.advance(by: 5)
+
+        let value = try await gate.execute(providerIdentity: identity, generation: 0) { 3 }
+        XCTAssertEqual(value, 3)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
+    }
+
+    func testPersistentGateRecoveryBackoffGrowsAndCapsWithoutExtraIO() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        try Data("corrupt".utf8).write(to: stateURL)
+        let clock = ProviderGateClock()
+        let probe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        let expectedDelays: [TimeInterval] = [5, 10, 20, 40, 60, 60]
+
+        for expectedDelay in expectedDelays {
+            guard case .persistenceBlocked(let retryAt) = await gate.preflight(
+                providerIdentity: "backoff-provider",
+                generation: 0
+            ) else {
+                return XCTFail("corrupt persistence must remain fail-closed")
+            }
+            XCTAssertEqual(retryAt.timeIntervalSince(clock.now()), expectedDelay, accuracy: 0.001)
+
+            let probeCount = probe.persistenceRecoveryProbeCount
+            guard case .persistenceBlocked(let repeatedRetryAt) = await gate.preflight(
+                providerIdentity: "backoff-provider",
+                generation: 0
+            ) else {
+                return XCTFail("preflight before the deadline must stay blocked")
+            }
+            XCTAssertEqual(repeatedRetryAt, retryAt)
+            XCTAssertEqual(probe.persistenceRecoveryProbeCount, probeCount)
+            clock.advance(by: expectedDelay)
+        }
+
+        XCTAssertEqual(probe.persistenceBlockCount, expectedDelays.count)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, expectedDelays.count - 1)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 0)
+    }
+
+    func testGenerationInvalidationDoesNotResurrectCooldownAfterRecoveryRetry() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let identity = "stale-cooldown-provider"
+        let clock = ProviderGateClock()
+        let seed = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
+        await seed.recordFailure(
+            providerIdentity: identity,
+            generation: 0,
+            failure: ProviderError.httpStatus(503, "unavailable")
+        )
+
+        let probe = ProviderRequestGateTestProbe()
+        probe.failNextPermissionChanges(2)
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        guard case .persistenceBlocked = await gate.preflight(
+            providerIdentity: identity,
+            generation: 0
+        ) else {
+            return XCTFail("initial permission failure must block dispatch")
+        }
+
+        await gate.invalidate(providerIdentity: identity, generation: 0)
+        guard case .persistenceBlocked(let retryAt) = await gate.preflight(
+            providerIdentity: identity,
+            generation: 1
+        ) else {
+            return XCTFail("failed generation recovery must remain blocked")
+        }
+        XCTAssertEqual(retryAt.timeIntervalSince(clock.now()), 10, accuracy: 0.001)
+
+        clock.advance(by: 10)
+        let recovered = await gate.preflight(providerIdentity: identity, generation: 1)
+        XCTAssertEqual(recovered, .available)
+        let value = try await gate.execute(providerIdentity: identity, generation: 1) { 4 }
+
+        XCTAssertEqual(value, 4)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 2)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stateURL.path))
+    }
+
+    func testStaleGenerationInvalidationDoesNotForcePersistenceRecovery() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let clock = ProviderGateClock()
+        let probe = ProviderRequestGateTestProbe()
+        probe.failNextWrites(1)
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        await gate.recordFailure(
+            providerIdentity: "stale-invalidation-provider",
+            generation: 5,
+            failure: ProviderError.httpStatus(503, "unavailable")
+        )
+        XCTAssertEqual(probe.persistenceBlockCount, 1)
+
+        await gate.invalidate(
+            providerIdentity: "stale-invalidation-provider",
+            expectedGeneration: 0,
+            newGeneration: 1
+        )
+        guard case .persistenceBlocked(let retryAt) = await gate.preflight(
+            providerIdentity: "stale-invalidation-provider",
+            generation: 5
+        ) else {
+            return XCTFail("stale invalidation must leave persistence backoff intact")
+        }
+
+        XCTAssertEqual(retryAt.timeIntervalSince(clock.now()), 5, accuracy: 0.001)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 0)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 0)
     }
 
     func testGatePreflightDistinguishesCooldownStaleAndPersistenceBlockedWithoutAdmission() async throws {
@@ -998,11 +1177,14 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
                 providerIdentity: identity,
                 generation: 0
             )
-            XCTAssertEqual(blocked, .persistenceBlocked)
+            guard case .persistenceBlocked = blocked else {
+                return XCTFail("expected persistence-blocked preflight")
+            }
         }
 
         XCTAssertEqual(probe.preflightCheckCount, 10)
         XCTAssertEqual(probe.admittedAttemptCount, 0)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 0)
         let persisted = String(decoding: try Data(contentsOf: stateURL), as: UTF8.self)
         XCTAssertFalse(persisted.contains(identity))
     }
@@ -1012,9 +1194,11 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stateURL = directory.appendingPathComponent("gate.json")
         let identity = "write-secret-provider"
+        let clock = ProviderGateClock()
         let probe = ProviderRequestGateTestProbe()
         probe.failNextWrites(1)
         let gate = ProviderRequestGate(
+            now: clock.now,
             persistenceURL: stateURL,
             testProbe: probe
         )
@@ -1042,6 +1226,15 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
 
         let operationStartCount = await operation.startCount
         XCTAssertEqual(operationStartCount, 1)
+        clock.advance(by: 5)
+        let recovered = await gate.preflight(providerIdentity: identity, generation: 0)
+        guard case .cooldown(let deadline, let failureClass) = recovered else {
+            return XCTFail("recovered write must preserve the active cooldown")
+        }
+        XCTAssertEqual(failureClass, .server5xx)
+        XCTAssertEqual(deadline.timeIntervalSince(clock.now()), 55, accuracy: 0.001)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
         let files = try FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil
@@ -1052,13 +1245,169 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         }
     }
 
+    func testStartedTransportFailureDuringPersistenceBackoffDefersRewrite() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let clock = ProviderGateClock()
+        let probe = ProviderRequestGateTestProbe()
+        probe.failNextWrites(2)
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        let operation = SuspendedFailingGateOperation()
+        let request = Task {
+            try await gate.execute(providerIdentity: "started-provider", generation: 0) {
+                try await operation.run()
+            }
+        }
+        try await waitUntil { await operation.started }
+
+        await gate.recordFailure(
+            providerIdentity: "blocking-provider",
+            generation: 0,
+            failure: ProviderError.httpStatus(503, "unavailable")
+        )
+        XCTAssertEqual(probe.persistenceBlockCount, 1)
+
+        await operation.finish()
+        do {
+            _ = try await request.value
+            XCTFail("started provider must return its failure")
+        } catch ProviderError.httpStatus(let status, _) {
+            XCTAssertEqual(status, 503)
+        }
+        XCTAssertEqual(
+            probe.persistenceBlockCount,
+            1,
+            "started completion must update memory without touching disk during backoff"
+        )
+
+        clock.advance(by: 5)
+        guard case .persistenceBlocked(let retryAt) = await gate.preflight(
+            providerIdentity: "started-provider",
+            generation: 0
+        ) else {
+            return XCTFail("the first deferred rewrite retry is intentionally failed")
+        }
+        XCTAssertEqual(retryAt.timeIntervalSince(clock.now()), 10, accuracy: 0.001)
+
+        clock.advance(by: 10)
+        guard case .cooldown(_, let startedFailureClass) = await gate.preflight(
+            providerIdentity: "started-provider",
+            generation: 0
+        ) else {
+            return XCTFail("recovery must persist the started transport failure")
+        }
+        guard case .cooldown(_, let blockingFailureClass) = await gate.preflight(
+            providerIdentity: "blocking-provider",
+            generation: 0
+        ) else {
+            return XCTFail("recovery must retain the failure that entered backoff")
+        }
+        XCTAssertEqual(startedFailureClass, .server5xx)
+        XCTAssertEqual(blockingFailureClass, .server5xx)
+        XCTAssertEqual(probe.persistenceBlockCount, 2)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 2)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
+    }
+
+    func testPersistenceRecoveryPreservesEveryProviderCooldownClass() async throws {
+        for failureClass in [
+            ProviderRequestFailureClass.auth,
+            .rateLimit,
+            .server5xx,
+            .timeout
+        ] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let stateURL = directory.appendingPathComponent("gate.json")
+            let clock = ProviderGateClock()
+            let probe = ProviderRequestGateTestProbe()
+            probe.failNextWrites(1)
+            let gate = ProviderRequestGate(
+                now: clock.now,
+                persistenceURL: stateURL,
+                testProbe: probe
+            )
+            let identity = "cooldown-\(failureClass.rawValue)"
+
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: NSError(domain: "KnowTypeTests", code: 1),
+                forcedClass: failureClass
+            )
+            clock.advance(by: 5)
+            guard case .cooldown(let deadline, let recoveredClass) = await gate.preflight(
+                providerIdentity: identity,
+                generation: 0
+            ) else {
+                return XCTFail("recovery must retain the \(failureClass.rawValue) cooldown")
+            }
+
+            XCTAssertEqual(recoveredClass, failureClass)
+            XCTAssertEqual(deadline.timeIntervalSince(clock.now()), 55, accuracy: 0.001)
+            XCTAssertEqual(probe.persistenceRecoveryProbeCount, 1)
+            XCTAssertEqual(probe.persistenceRecoveryCount, 1)
+        }
+    }
+
+    func testPersistenceRecoveryDoesNotDuplicateStartedTransport() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let clock = ProviderGateClock()
+        let probe = ProviderRequestGateTestProbe()
+        probe.failNextWrites(1)
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: stateURL,
+            testProbe: probe
+        )
+        let operation = SuspendedGateOperation()
+        let request = Task {
+            try await gate.execute(providerIdentity: "in-flight-provider", generation: 0) {
+                await operation.run()
+                return 1
+            }
+        }
+        try await waitUntil { await operation.started }
+
+        await gate.recordFailure(
+            providerIdentity: "blocking-provider",
+            generation: 0,
+            failure: ProviderError.httpStatus(503, "unavailable")
+        )
+        clock.advance(by: 5)
+        let recoveredState = await gate.preflight(
+            providerIdentity: "in-flight-provider",
+            generation: 0
+        )
+        XCTAssertEqual(recoveredState, .busy)
+        do {
+            _ = try await gate.execute(providerIdentity: "in-flight-provider", generation: 0) { 2 }
+            XCTFail("recovery must not admit a duplicate transport")
+        } catch ProviderRequestGateError.busy {
+            // Expected.
+        }
+
+        XCTAssertEqual(probe.admittedAttemptCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
+        await operation.finish()
+        let value = try await request.value
+        XCTAssertEqual(value, 1)
+    }
+
     func testPersistentGateReadFailureBlocksProviderDispatch() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stateURL = directory.appendingPathComponent("gate.json")
-        let now = Date()
+        let clock = ProviderGateClock()
         let identity = "read-secret-provider"
-        let seed = ProviderRequestGate(now: { now }, persistenceURL: stateURL)
+        let seed = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
         await seed.recordFailure(
             providerIdentity: identity,
             generation: 0,
@@ -1067,7 +1416,7 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         let probe = ProviderRequestGateTestProbe()
         probe.failNextReads(1)
         let gate = ProviderRequestGate(
-            now: { now },
+            now: clock.now,
             persistenceURL: stateURL,
             testProbe: probe
         )
@@ -1085,6 +1434,16 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
 
         let operationStarted = await operation.hasStarted
         XCTAssertFalse(operationStarted)
+        clock.advance(by: 61)
+        let value = try await gate.execute(providerIdentity: identity, generation: 0) {
+            await operation.markStarted()
+            return 2
+        }
+        XCTAssertEqual(value, 2)
+        let operationStartCount = await operation.startCount
+        XCTAssertEqual(operationStartCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryProbeCount, 1)
+        XCTAssertEqual(probe.persistenceRecoveryCount, 1)
     }
 
     func testRequestGateSerializesSameIdentityButAllowsDifferentIdentity() async throws {

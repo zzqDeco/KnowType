@@ -69,6 +69,7 @@ without exposing provider-specific state to the input method.
 - [AIRecommendationRuntime](Sources/KnowTypeAI/AIRecommendationRuntime.plan.md)
 - [AIContextMemoryRuntime](Sources/KnowTypeAI/AIContextMemoryRuntime.plan.md)
 - [TypingEventStore](Sources/KnowTypeAI/TypingEventStore.plan.md)
+- [ProviderRequestGate](Sources/KnowTypeAI/ProviderRequestGate.swift.plan.md)
 - [ProviderRuntimeRegistry](Sources/KnowTypeAI/ProviderRuntimeRegistry.plan.md)
 - [AIAcceptedLearning](Sources/KnowTypeAI/AIAcceptedLearning.plan.md)
 - [AIDocumentStores](Sources/KnowTypeAI/AIDocumentStores.plan.md)
