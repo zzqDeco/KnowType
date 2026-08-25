@@ -194,7 +194,7 @@ generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.10-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.11-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -206,7 +206,7 @@ shasum -a 256 -c KnowType-v0.2.10-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.10-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.11-macos-local-mvp.zip
 ```
 
 ## 配置
@@ -291,8 +291,12 @@ User Notes；非法 digest candidate 会在写入或 claim 前拒绝。成功 cl
 digest 前的本地归档。清理会排除当前归档，删除失败时目录可暂时超出这些目标；启动和
 安装时不会清理或写入历史数据。Recommendation 与 digest
 使用各自的逻辑/HTTP 预算，但共享 privacy-safe provider identity gate，每个
-identity 最多一个 in-flight 请求，并共享 429 冷却。Context 诊断仅包含计数、
-字节数和冷却时长，不包含输入原文、notes、candidate、provider 输出、配置或 Key。
+identity 最多一个 in-flight 请求，并共享 429 冷却。如果本地 gate 状态暂时无法读取
+或写入，请求会继续 fail-closed，但运行中的输入法会按 5 到 60 秒的有界退避或在
+Provider generation 变化后重新验证；状态被可靠修复后无需重启。有效冷却和已经开始的
+请求仍会保留。恢复期间候选窗显示“AI 状态异常，正在重试”。Context 和 gate 诊断
+仅包含计数、时长和缩短后的哈希，不包含输入原文、notes、candidate、provider 输出、
+配置或 Key。
 实时 AI 推荐使用任务专属的后缀生成 prompt，runtime 超时为 10 秒；可用时
 优先使用 provider 级结构化 JSON Schema 输出，并通过 macOS unified logging
 输出不含原文的子状态诊断。Rime 正在 composition 时，当前页候选不会发送给

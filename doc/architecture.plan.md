@@ -132,8 +132,11 @@ Unreadable, undecodable, or unwritable persistent gate state blocks new provider
 attempts until the state is verifiably repaired; generation invalidation never
 turns that persistence failure into an empty cooldown state. A value-only gate
 preflight exposes that state before recommendation context projection or digest
-snapshot decoding, and each runtime latches it for the lifetime of that gate
-instance.
+snapshot decoding. The shared gate retries a reload or rewrite on an actor-owned
+5-to-60-second backoff, leaves the filesystem untouched between deadlines, and
+allows the first new Provider generation to force one immediate revalidation.
+Recovery preserves valid cooldowns and started-transport ownership; callers do
+not keep process-lifetime persistence-blocked latches.
 
 The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317/v1`, with a blank model for `/v1/models` discovery and no embedded API key. Existing saved provider profiles override seeded defaults. Local OpenAI-compatible runtimes may leave the model blank for discovery. Remote OpenAI-compatible profiles require an explicit model ID.
 
@@ -153,7 +156,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   not retained for a later provider. A path-shared inventory makes ordinary
   append and scheduling decisions constant-cost after the first scan. Pending
   data is capped at 500 events/1 MiB, digest claims at 50 events/48 KiB, and a
-  same-generation failure cooldown or latched gate-persistence failure returns
+  same-generation failure cooldown or shared gate-persistence backoff returns
   before reading pending JSONL. A
   successful digest also owns a 600-second minimum interval that the batch
   threshold cannot bypass; a single actor-owned deadline task wakes batch,

@@ -24,7 +24,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
-| [release-0.2.10.plan.md](release-0.2.10.plan.md) | Prepare and publish the KnowType v0.2.10 Developer Preview release | Active |
+| [release-0.2.11.plan.md](release-0.2.11.plan.md) | Prepare and publish the KnowType v0.2.11 Developer Preview release | Active |
 | [multi-api-v1.plan.md](multi-api-v1.plan.md) | Provider abstraction, protocol compatibility, correction, continuation, and workflow | Active |
 | [chinese-engine-foundation.plan.md](chinese-engine-foundation.plan.md) | MVP Chinese input engine foundation and candidate behavior | Active |
 | [chinese-lexicon-index.plan.md](chinese-lexicon-index.plan.md) | Larger-lexicon indexing path for `TraditionalInputEngine` | Active |
@@ -103,6 +103,7 @@ when converting a shipped plan into a short record.
 | [provider-api-contracts-template-rendering.plan.md](provider-api-contracts-template-rendering.plan.md) | Current provider model/API contracts and deterministic Custom HTTP template rendering | Active |
 | [ai-runtime-config-singleflight.plan.md](ai-runtime-config-singleflight.plan.md) | Reload provider generations without restart and serialize process-wide context digest | Active |
 | [ai-request-amplification-control.plan.md](ai-request-amplification-control.plan.md) | Bound ENV projection, digest cadence, recommendation trailing dispatch, and shared provider request budgets | Active |
+| [provider-request-gate-self-healing.plan.md](provider-request-gate-self-healing.plan.md) | Recover fail-closed provider gate persistence without restarting the input method | Active |
 | [settings-provider-profile-editing-policy-refactor.plan.md](settings-provider-profile-editing-policy-refactor.plan.md) | Extract Settings provider draft validation, save planning, secret mutation, and connection-test configuration from the ViewModel | Active |
 | [provider-failure-continuation-fallback.plan.md](provider-failure-continuation-fallback.plan.md) | Avoid replacing provider failures with local mock continuation text | Active |
 | [ai-timeout-diagnostics.plan.md](ai-timeout-diagnostics.plan.md) | AI recommendation 10-second runtime timeout and privacy-preserving substate diagnostics | Active |
@@ -152,6 +153,7 @@ when converting a shipped plan into a short record.
 |---|---|---|
 | [context-digest-backlog-performance.plan.md](context-digest-backlog-performance.plan.md) | Earlier backlog bounds now absorbed by the Issue #212 request-amplification contract | Absorbed |
 | [option-r-polish-removal.plan.md](option-r-polish-removal.plan.md) | Remove the Option+R rewrite workflow and make locked-prefix rewriting unsupported | Delivered |
+| [release-0.2.10.plan.md](release-0.2.10.plan.md) | Prepare and publish the KnowType v0.2.10 Developer Preview release | Delivered |
 | [release-0.2.9.plan.md](release-0.2.9.plan.md) | Prepare and publish the KnowType v0.2.9 Developer Preview release | Delivered |
 | [release-0.2.8.plan.md](release-0.2.8.plan.md) | Prepare and publish the KnowType v0.2.8 Developer Preview release | Delivered |
 | [release-0.2.7.plan.md](release-0.2.7.plan.md) | Prepare and publish the KnowType v0.2.7 Developer Preview release | Delivered |

@@ -134,7 +134,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         case none
         case recovered
         case blocked
-        case gatePersistenceBlocked
+        case gatePersistenceBlocked(retryAt: Date)
         case superseded
     }
 
@@ -181,9 +181,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var providerGeneration: UInt64?
     private var deadlineTask: Task<Void, Never>?
     private var gateWaitKey: GateWaitKey?
+    private var gatePersistenceRetryAt: Date?
     private var claimRecoveryRetryAt: Date?
     private var claimRecoveryBlockedCount = 0
-    private var gatePersistenceBlocked = false
     private var digestClaimRecoveryFlight: DigestClaimRecoveryFlight?
 
     public init(
@@ -298,7 +298,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     public func record(_ event: AITypingEvent) async {
-        guard !gatePersistenceBlocked, claimRecoveryRetryAt == nil else { return }
+        guard claimRecoveryRetryAt == nil else { return }
         if digestInFlight { digestRerunRequested = true }
         guard await preparePersistedClaimForRecord(now: nowProvider()) else { return }
         let lease: ProviderRuntimeLease?
@@ -328,7 +328,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
     private func processIfNeeded(now: Date, dispatchLease: ProviderRuntimeLease?) async {
         guard provider != nil || providerRegistry != nil else { return }
-        guard !gatePersistenceBlocked, claimRecoveryRetryAt == nil else { return }
+        guard claimRecoveryRetryAt == nil else { return }
         if digestInFlight {
             digestRerunRequested = true
             if persistedClaimNeedsRecovery, digestClaimRecoveryFlight != nil {
@@ -346,8 +346,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             digestInFlight = false
             if digestRerunRequested {
                 digestRerunRequested = false
-                if !gatePersistenceBlocked,
-                   claimRecoveryRetryAt == nil,
+                if claimRecoveryRetryAt == nil,
+                   gatePersistenceRetryAt == nil,
                    (gateWaitKey == nil || deadlineTask == nil) {
                     scheduleCoalescedRerun()
                 }
@@ -451,14 +451,15 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         let gateCooldown: Date?
         switch gatePreflight {
         case .available, .busy:
+            cancelGatePersistenceRetry()
             gateCooldown = nil
         case .cooldown(let deadline, _):
             gateCooldown = deadline
         case .staleGeneration:
             invalidateProviderRuntimeState()
             return
-        case .persistenceBlocked:
-            latchGatePersistenceBlocked()
+        case .persistenceBlocked(let retryAt):
+            scheduleGatePersistenceRetry(at: retryAt)
             return
         }
         let localCooldown = digestCooldownRemaining(at: now)
@@ -607,7 +608,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             await testProbe?.pauseAfterGateWaiterInstallIfNeeded()
             return
         } catch ProviderRequestGatePersistenceError.blocked {
-            latchGatePersistenceBlocked()
+            await scheduleGatePersistenceRetryFromGate()
             return
         } catch TypingEventStoreError.pendingContentChanged {
             return
@@ -669,9 +670,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             guard isCurrentClaimRecovery(token) else { return .superseded }
             persistedClaimNeedsRecovery = true
             scheduleClaimRecoveryRetry(now: now)
-        case .gatePersistenceBlocked:
+        case .gatePersistenceBlocked(let retryAt):
             persistedClaimNeedsRecovery = true
-            latchGatePersistenceBlocked()
+            scheduleGatePersistenceRetry(at: retryAt)
         case .superseded:
             break
         }
@@ -679,6 +680,15 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func recoverDigestClaim(now: Date, token: UUID) async -> DigestClaimRecovery {
+        if gatePersistenceRetryAt != nil {
+            switch await requestGate.persistencePreflight() {
+            case .persistenceBlocked(let retryAt):
+                scheduleGatePersistenceRetry(at: retryAt)
+                return .gatePersistenceBlocked(retryAt: retryAt)
+            case .available, .busy, .cooldown, .staleGeneration:
+                cancelGatePersistenceRetry()
+            }
+        }
         await testProbe?.recordClaimRecoveryClaimLoad()
         guard isCurrentClaimRecovery(token) else { return .superseded }
         let claim: EnvironmentDigestClaim?
@@ -695,9 +705,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard isCurrentClaimRecovery(token) else { return .superseded }
         let gatePreflight = await requestGate.persistencePreflight()
         guard isCurrentClaimRecovery(token) else { return .superseded }
-        if gatePreflight == .persistenceBlocked {
-            return .gatePersistenceBlocked
+        if case .persistenceBlocked(let retryAt) = gatePreflight {
+            return .gatePersistenceBlocked(retryAt: retryAt)
         }
+        cancelGatePersistenceRetry()
         do {
             let environment = try environmentStore.loadSnapshot()
             guard EnvironmentDocumentStore.generatedSectionHash(from: environment.content) == claim.generatedSHA256 else {
@@ -802,6 +813,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         providerIdentity = lease.fingerprint
         if changed {
             resetClaimRecoveryState()
+            cancelGatePersistenceRetry()
             cancelGateAvailabilityWait()
             lastDigestFailureAt = nil
             deferredDiagnosticFailureAt = nil
@@ -810,6 +822,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
     private func invalidateProviderRuntimeState() {
         resetClaimRecoveryState()
+        cancelGatePersistenceRetry()
         cancelGateAvailabilityWait()
         lastDigestFailureAt = nil
         deferredDiagnosticFailureAt = nil
@@ -850,7 +863,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func scheduleDeadline(at date: Date) {
-        guard !gatePersistenceBlocked, claimRecoveryRetryAt == nil else { return }
+        guard claimRecoveryRetryAt == nil else { return }
+        gatePersistenceRetryAt = nil
         gateWaitKey = nil
         digestRerunScheduled = false
         deadlineTask?.cancel()
@@ -863,8 +877,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func scheduleCoalescedRerun() {
-        guard !gatePersistenceBlocked,
-              claimRecoveryRetryAt == nil,
+        guard claimRecoveryRetryAt == nil,
+              gatePersistenceRetryAt == nil,
               !digestRerunScheduled else { return }
         gateWaitKey = nil
         deadlineTask?.cancel()
@@ -888,7 +902,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func scheduleGateAvailabilityWake() {
-        guard !gatePersistenceBlocked, claimRecoveryRetryAt == nil else { return }
+        guard claimRecoveryRetryAt == nil else { return }
+        gatePersistenceRetryAt = nil
         let key = GateWaitKey(
             identity: providerIdentity,
             generation: providerGeneration ?? 0
@@ -910,6 +925,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
     private func cancelDeadline() {
         guard claimRecoveryRetryAt == nil else { return }
+        gatePersistenceRetryAt = nil
         gateWaitKey = nil
         digestRerunScheduled = false
         deadlineTask?.cancel()
@@ -931,10 +947,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func scheduleClaimRecoveryRetry(now: Date) {
-        guard claimRecoveryRetryAt == nil, !gatePersistenceBlocked else { return }
+        guard claimRecoveryRetryAt == nil else { return }
         claimRecoveryBlockedCount = min(500, claimRecoveryBlockedCount + 1)
         let deadline = now.addingTimeInterval(claimRecoveryBackoff)
         claimRecoveryRetryAt = deadline
+        gatePersistenceRetryAt = nil
         gateWaitKey = nil
         digestRerunScheduled = false
         deadlineTask?.cancel()
@@ -973,14 +990,48 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         deadlineTask = nil
     }
 
-    private func latchGatePersistenceBlocked() {
-        guard !gatePersistenceBlocked else { return }
-        gatePersistenceBlocked = true
+    private func scheduleGatePersistenceRetry(at retryAt: Date) {
+        guard claimRecoveryRetryAt == nil else { return }
+        if gatePersistenceRetryAt == retryAt, deadlineTask != nil { return }
+        gatePersistenceRetryAt = retryAt
         gateWaitKey = nil
         digestRerunScheduled = false
         deadlineTask?.cancel()
+        let delay = deadlineNanoseconds(until: retryAt, now: nowProvider())
+        deadlineTask = Task { [weak self] in
+            if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            guard !Task.isCancelled, let self else { return }
+            await self.gatePersistenceRetryDidWake(retryAt)
+        }
+        emitDiagnostic(
+            stage: "context_gate_persistence_blocked",
+            fields: [
+                .init(
+                    .cooldownRemainingSeconds,
+                    max(0, Int(ceil(retryAt.timeIntervalSince(nowProvider()))))
+                )
+            ]
+        )
+    }
+
+    private func scheduleGatePersistenceRetryFromGate() async {
+        if case .persistenceBlocked(let retryAt) = await requestGate.persistencePreflight() {
+            scheduleGatePersistenceRetry(at: retryAt)
+        }
+    }
+
+    private func gatePersistenceRetryDidWake(_ retryAt: Date) async {
+        guard gatePersistenceRetryAt == retryAt else { return }
+        gatePersistenceRetryAt = nil
         deadlineTask = nil
-        emitDiagnostic(stage: "context_gate_persistence_blocked", fields: [])
+        await processIfNeeded(now: nowProvider(), dispatchLease: nil)
+    }
+
+    private func cancelGatePersistenceRetry() {
+        guard gatePersistenceRetryAt != nil else { return }
+        gatePersistenceRetryAt = nil
+        deadlineTask?.cancel()
+        deadlineTask = nil
     }
 
     private func scheduleAfterLocalArchive(now: Date) throws {
@@ -1164,8 +1215,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard claimBlockedReevaluationRequested else { return }
         claimBlockedReevaluationRequested = false
         let pendingEventCount = (try? eventStore.inventory().eventCount) ?? 0
-        guard !gatePersistenceBlocked,
-              claimRecoveryRetryAt == nil,
+        guard claimRecoveryRetryAt == nil,
+              gatePersistenceRetryAt == nil,
               pendingEventCount > 0 else { return }
         claimBlockedReevaluationScheduled = true
         scheduleCoalescedRerun()
