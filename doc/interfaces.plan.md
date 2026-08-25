@@ -86,8 +86,14 @@ decode, atomic-write, replace, or final-permission failure blocks subsequent
 attempts; generation invalidation does not reinterpret that failure as empty
 state. An internal value-only preflight distinguishes available, busy, cooldown,
 stale-generation, and persistence-blocked states without admitting a transport.
-Recommendation and Context Digest latch persistence-blocked before reading their
-context documents or decoding a digest snapshot. Cancellation after admission
+Persistence-blocked state owns a 5-to-60-second retry deadline and a reload or
+rewrite recovery operation. Calls before that deadline perform no persistence
+I/O; state changes from already-started transports merge into the desired
+in-memory rewrite. The first genuinely newer Provider generation can force one
+immediate revalidation, while stale invalidations cannot bypass the deadline.
+Successful recovery preserves valid cooldowns and active transport ownership,
+while Recommendation and Context Digest resume through this shared state rather
+than holding runtime-local permanent latches. Cancellation after admission
 but before transport registration aborts only the matching attempt, wakes
 waiters, and records no failure. A timeout that wins before `beginTransport`
 atomically records cooldown, releases only that attempt, runs its completion,
@@ -730,8 +736,8 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
 
 - reads `~/.knowtype/ENV.md` and `~/.knowtype/CORRECTION.md`
 - checks the shared gate's value-only persistence state before either document
-  read; a blocked gate instance returns unavailable without repeated preflight
-  or context projection
+  read; a blocked gate returns `AI 状态异常，正在重试` without context projection,
+  while repeated preflights remain disk-free until the shared retry deadline
 - includes `LEXICAL_PROFILE.md` when the coordinator provides a lexical snapshot
 - creates default documents when missing
 - uses one 450 ms debounce before provider calls; newer input replaces the
@@ -814,6 +820,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   guard creates no claim, and later appended events stay pending
 - uses a path-shared process inventory for count/byte/protection gates, so
   below-threshold and unchanged-generation cooldown paths do not decode JSONL
+- returns before digest-claim, pending-prefix, or ENV reads while the shared
+  gate is persistence-blocked; one actor deadline rechecks the gate at its retry
+  time, and a new Provider generation may revalidate it immediately
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, `context_archive_pruned`,
   `context_gate_persistence_blocked`, and

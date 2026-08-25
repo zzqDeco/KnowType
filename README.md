@@ -344,9 +344,14 @@ failures may temporarily leave the directory above those targets; startup and
 install never clean up or write history.
 Recommendation and digest requests use separate
 logical/body budgets but share one hashed provider gate, max one in-flight
-request per identity, and privacy-safe cooldown diagnostics. Context diagnostics
-contain counts, bytes, and cooldown durations only, not typed text, provider
-output, configuration, or keys.
+request per identity, and privacy-safe cooldown diagnostics. If the local gate
+state temporarily becomes unreadable or unwritable, requests remain fail-closed
+but the running input method revalidates it on a bounded 5-to-60-second backoff
+or after a Provider generation change; no restart is required after the state is
+verifiably repaired. Valid cooldowns and started requests remain enforced. The
+candidate panel reports `AI 状态异常，正在重试` during this recovery. Context and
+gate diagnostics contain counts, durations, and shortened hashes only, not
+typed text, provider output, configuration, or keys.
 Real-time AI recommendations use a task-specific suffix-generation prompt, have
 a 10-second runtime timeout, prefer provider-level structured JSON schema output
 when available, and emit privacy-preserving substate diagnostics through macOS
