@@ -787,6 +787,222 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
         }
     }
 
+    func testRequestGateHonorsEightyFiveHourRateLimitHintAcrossRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let clock = ProviderGateClock()
+        let identity = "long-rate-limit"
+        let gate = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
+
+        await gate.recordFailure(
+            providerIdentity: identity,
+            generation: 0,
+            failure: ProviderRateLimitError(
+                retryAfterSeconds: 85 * 60 * 60,
+                bodyByteCount: 128
+            )
+        )
+
+        let loadedDeadline = await gate.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        let deadline = try XCTUnwrap(loadedDeadline)
+        XCTAssertEqual(deadline.timeIntervalSince(clock.now()), 85 * 60 * 60, accuracy: 0.001)
+
+        let restarted = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
+        let loadedRestartedDeadline = await restarted.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        let restartedDeadline = try XCTUnwrap(loadedRestartedDeadline)
+        XCTAssertEqual(
+            restartedDeadline.timeIntervalSince(clock.now()),
+            85 * 60 * 60,
+            accuracy: 0.001
+        )
+    }
+
+    func testRequestGateUsesDedicatedBoundedRateLimitBackoffWithoutHint() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let clock = ProviderGateClock()
+        let identity = "rate-limit-without-hint"
+        var gate = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
+        let expected: [TimeInterval] = [
+            15 * 60,
+            30 * 60,
+            60 * 60,
+            2 * 60 * 60,
+            4 * 60 * 60,
+            8 * 60 * 60,
+            16 * 60 * 60,
+            24 * 60 * 60,
+            24 * 60 * 60
+        ]
+
+        for delay in expected {
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: ProviderRateLimitError(
+                    retryAfterSeconds: nil,
+                    bodyByteCount: 0
+                )
+            )
+            let loadedDeadline = await gate.cooldownDeadline(
+                providerIdentity: identity,
+                generation: 0
+            )
+            let deadline = try XCTUnwrap(loadedDeadline)
+            XCTAssertEqual(deadline.timeIntervalSince(clock.now()), delay, accuracy: 0.001)
+            clock.advance(by: delay + 1)
+            gate = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
+        }
+    }
+
+    func testRateLimitWithoutHintSequenceResetsAfterInterveningFailures() async throws {
+        let clock = ProviderGateClock()
+        let cases: [(String, ProviderRequestFailureClass)] = [
+            ("transport", .transport),
+            ("auth", .auth),
+            ("timeout", .timeout)
+        ]
+        for (identity, failureClass) in cases {
+            let gate = ProviderRequestGate(now: clock.now)
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: ProviderRateLimitError(retryAfterSeconds: nil, bodyByteCount: 0)
+            )
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: NSError(domain: "KnowTypeTests", code: 1),
+                forcedClass: failureClass
+            )
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: ProviderRateLimitError(retryAfterSeconds: nil, bodyByteCount: 0)
+            )
+            let loadedDeadline = await gate.cooldownDeadline(
+                providerIdentity: identity,
+                generation: 0
+            )
+            let deadline = try XCTUnwrap(loadedDeadline)
+            XCTAssertEqual(deadline.timeIntervalSince(clock.now()), 15 * 60, accuracy: 0.001)
+        }
+
+        let hintedIdentity = "hinted-rate-limit"
+        let hintedGate = ProviderRequestGate(now: clock.now)
+        await hintedGate.recordFailure(
+            providerIdentity: hintedIdentity,
+            generation: 0,
+            failure: ProviderRateLimitError(retryAfterSeconds: nil, bodyByteCount: 0)
+        )
+        await hintedGate.recordFailure(
+            providerIdentity: hintedIdentity,
+            generation: 0,
+            failure: ProviderRateLimitError(retryAfterSeconds: 85 * 60 * 60, bodyByteCount: 1)
+        )
+        await hintedGate.recordFailure(
+            providerIdentity: hintedIdentity,
+            generation: 0,
+            failure: ProviderRateLimitError(retryAfterSeconds: nil, bodyByteCount: 0)
+        )
+        let loadedHintedDeadline = await hintedGate.cooldownDeadline(
+            providerIdentity: hintedIdentity,
+            generation: 0
+        )
+        let hintedDeadline = try XCTUnwrap(loadedHintedDeadline)
+        XCTAssertEqual(hintedDeadline.timeIntervalSince(clock.now()), 15 * 60, accuracy: 0.001)
+    }
+
+    func testNonRateLimitBackoffRemainsUnchanged() async throws {
+        let clock = ProviderGateClock()
+        let identity = "server-failure"
+        let gate = ProviderRequestGate(now: clock.now)
+        let expected: [TimeInterval] = [60, 120, 240, 480, 900, 900]
+
+        for delay in expected {
+            await gate.recordFailure(
+                providerIdentity: identity,
+                generation: 0,
+                failure: ProviderError.httpStatus(503, "unavailable")
+            )
+            let loadedDeadline = await gate.cooldownDeadline(
+                providerIdentity: identity,
+                generation: 0
+            )
+            let deadline = try XCTUnwrap(loadedDeadline)
+            XCTAssertEqual(deadline.timeIntervalSince(clock.now()), delay, accuracy: 0.001)
+        }
+    }
+
+    func testPersistedDistantFutureCooldownIsBoundedAndWaiterDoesNotTrap() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stateURL = directory.appendingPathComponent("gate.json")
+        let clock = ProviderGateClock()
+        let identity = "distant-future-cooldown"
+        let identityHash = ProviderRequestGate.identityHash(identity)
+        let state: [String: Any] = [
+            "entries": [[
+                "identityHash": identityHash,
+                "deadline": Date.distantFuture.timeIntervalSinceReferenceDate,
+                "failureClass": ProviderRequestFailureClass.rateLimit.rawValue,
+                "failureCount": 1
+            ]]
+        ]
+        try JSONSerialization.data(withJSONObject: state, options: [.sortedKeys])
+            .write(to: stateURL, options: .atomic)
+
+        let gate = ProviderRequestGate(now: clock.now, persistenceURL: stateURL)
+        let loadedDeadline = await gate.cooldownDeadline(
+            providerIdentity: identity,
+            generation: 0
+        )
+        let deadline = try XCTUnwrap(loadedDeadline)
+        let maximumCooldown: TimeInterval = 7 * 24 * 60 * 60
+        XCTAssertEqual(
+            deadline.timeIntervalSince(clock.now()),
+            maximumCooldown,
+            accuracy: 0.001
+        )
+
+        let rewrittenData = try Data(contentsOf: stateURL)
+        let rewrittenObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: rewrittenData) as? [String: Any]
+        )
+        let rewrittenEntries = try XCTUnwrap(
+            rewrittenObject["entries"] as? [[String: Any]]
+        )
+        let rewrittenDeadlineValue = try XCTUnwrap(
+            rewrittenEntries.first?["deadline"] as? NSNumber
+        )
+        let rewrittenDeadline = Date(
+            timeIntervalSinceReferenceDate: rewrittenDeadlineValue.doubleValue
+        )
+        XCTAssertEqual(
+            rewrittenDeadline.timeIntervalSince(clock.now()),
+            maximumCooldown,
+            accuracy: 0.001
+        )
+
+        let waiter = Task {
+            await gate.waitForAvailability(
+                providerIdentity: identity,
+                generation: 0
+            )
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        waiter.cancel()
+        await waiter.value
+    }
+
     func testRequestGateDoesNotCooldownLocalBudgetFailure() async throws {
         let now = Date()
         let gate = ProviderRequestGate(now: { now })
@@ -1349,7 +1565,12 @@ final class ProviderRuntimeRegistryTests: XCTestCase {
             }
 
             XCTAssertEqual(recoveredClass, failureClass)
-            XCTAssertEqual(deadline.timeIntervalSince(clock.now()), 55, accuracy: 0.001)
+            let expectedRemaining: TimeInterval = failureClass == .rateLimit ? 895 : 55
+            XCTAssertEqual(
+                deadline.timeIntervalSince(clock.now()),
+                expectedRemaining,
+                accuracy: 0.001
+            )
             XCTAssertEqual(probe.persistenceRecoveryProbeCount, 1)
             XCTAssertEqual(probe.persistenceRecoveryCount, 1)
         }

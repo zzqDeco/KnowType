@@ -154,14 +154,20 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   recording requires a usable provider
   lease before appending, so events entered while no provider is available are
   not retained for a later provider. A path-shared inventory makes ordinary
-  append and scheduling decisions constant-cost after the first scan. Pending
+  append and scheduling decisions constant-cost after the first scan and keeps
+  the oldest retained event timestamp as the pending-age anchor. Pending
   data is capped at 500 events/1 MiB, digest claims at 50 events/48 KiB, and a
   same-generation failure cooldown or shared gate-persistence backoff returns
-  before reading pending JSONL. A
-  successful digest also owns a 600-second minimum interval that the batch
-  threshold cannot bypass; a single actor-owned deadline task wakes batch,
-  interval, provider-cooldown, and shared-gate availability work. The first
-  below-batch pending event receives its own forced deadline. While the actor is
+  before reading pending JSONL. Production digest eligibility requires either
+  50 pending events or a 24-hour pending age, at least 6 hours since the last
+  successful digest, and fewer than four successful digests in the preceding
+  rolling 24 hours. Successful timestamps and the next deadline are stored in
+  the existing privacy-safe schedule file, so restart does not reset the
+  budget. A successful prefix with a pending tail waits for the next 6-hour
+  window instead of starting a catch-up request. A single actor-owned deadline
+  task sleeps to the real batch-age, cadence, provider-cooldown, or
+  shared-gate-availability deadline, including a multi-day 429 recovery hint.
+  The first below-batch pending event receives its own forced deadline. While the actor is
   waiting for a busy gate, new records append only and return before another
   digest snapshot decode; malformed or oversized local prefixes rearm the same
   deadline when a tail remains. Calls received during an active digest set one
@@ -181,7 +187,9 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   mode 0600, recognizes managed boundaries only on exact marker lines, rejects
   invalid digest candidates before writes, and exposes a
   privacy-safe digest claim for recovery, plus bounded 0600 schedule state and
-  archive receipt metadata containing only timestamps, counts, and hashes.
+  archive receipt metadata containing only timestamps, counts, and hashes. The
+  schedule accepts legacy JSON without the rolling-success list and uses its
+  last-success timestamp as the existing cadence anchor.
   Recovery bounded-reads the deterministic processed archive and verifies its
   byte count and SHA-256 before treating a missing receipt as completed. It then
   distinguishes a missing or provably different pending prefix from an exact
@@ -196,7 +204,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   supersedes the old token without allowing it to clear newer state. A
   successful or claim-missing retry clears that local latch. Corrupt
   schedule state, including impossible date ordering or excessive future
-  deadlines, is replaced by a conservative minimum-interval delay or stays
+  deadlines, is replaced by a conservative cadence deadline or stays
   fail-closed. Existing ENV content is chmod 0600 before any read; User Notes
   headings overlapping or preceding the managed pair are ambiguous, and an
   existing deterministic backup must be a matching regular non-symlink file.
@@ -207,6 +215,12 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   instructions from this file, while the traditional engine remains
   deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
+- The shared provider gate honors valid 429 recovery hints from 15 seconds
+  through 7 days. `Retry-After` takes precedence over bounded structured JSON
+  body hints. A 429 without a hint uses a dedicated 15-minute-through-24-hour
+  sequence; non-429 backoff is unchanged. The digest rolling budget does not
+  apply to realtime recommendation, while both paths still share gate health,
+  generation fencing, cooldown, and one in-flight request per provider identity.
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 - Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction and context digest keep separate instructions.
 
