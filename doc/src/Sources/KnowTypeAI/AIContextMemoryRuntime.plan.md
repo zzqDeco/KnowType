@@ -27,9 +27,17 @@
 - Production injects one actor into every `KnowTypeInputController`, so
   `digestInFlight`, success time, and failure time are process-wide.
 - Registry-backed recording obtains a usable provider lease before appending an
-  event, applies generation changes before append, and reuses that lease for an
-  immediately eligible digest. Batch, interval, protected-only, and unchanged
-  generation cooldown gates use inventory before any digest snapshot decode.
+  event, including the gate-persistence-blocked append-only fallback, and
+  applies generation changes before append. A missing or disabled provider
+  leaves no new JSONL event; an available fallback lease preserves bounded
+  prefix-protected append without starting a provider request or cancelling the
+  current blocked preflight's gate-persistence retry deadline. The actor
+  revalidates recovery after the lease await: a new claim backoff remains
+  fail-closed, while completed recovery routes the event through normal
+  scheduling instead of fallback return. The normal path
+  reuses its lease for an immediately eligible digest. Batch, interval,
+  protected-only, and unchanged generation cooldown gates use inventory before
+  any digest snapshot decode.
 - One actor-owned deadline task wakes batch, interval, provider-cooldown, and
   shared-gate availability events. The first below-batch pending event records
   a forced deadline. A successful commit starts a 600-second minimum interval

@@ -47,9 +47,22 @@
   missing-claim recovery clears the latch.
 - Gate persistence is preflighted before persisted-claim metadata, digest
   snapshot, or ENV reads; a blocked result installs one deadline at the shared
-  gate's retry time. Records remain bounded while blocked and return before all
-  sensitive reads. A new Provider generation can cancel the old deadline and
-  immediately revalidate the shared gate.
+  gate's retry time. Its registry-backed append-only fallback obtains a usable
+  provider lease and applies its generation before `appendBounded`; a missing
+  or disabled provider returns before JSONL creation or append. An available
+  provider permits only the existing prefix-protected bounded append and starts
+  no network request. That fallback-specific generation application preserves
+  the gate retry deadline installed by the blocked preflight, so recovery still
+  runs without another record or manual process call. Direct-provider fallback
+  behavior is unchanged. Claim, digest snapshot, and ENV reads remain blocked.
+  After the registry await, record rechecks a newly installed claim-recovery
+  backoff before applying the lease, then reruns persisted-claim preparation. A
+  still-blocked episode preserves only its current gate retry and appends; a
+  recovered episode reuses the loaded lease in the normal append-and-process
+  path so the new backlog receives an eligibility deadline. An older retry is
+  never reinstalled.
+  Outside this fallback path, a new Provider generation can cancel the old
+  deadline and immediately revalidate the shared gate.
 - Digest eligibility is evaluated from the path-shared inventory and persisted
   schedule before JSONL snapshot decoding. Production requires 50 pending
   events or a 24-hour pending age, at least 6 hours since the last successful
@@ -125,5 +138,6 @@
   rollback across restart, conservative schedule-repair gating for record and
   process paths across restart, zero claim and snapshot reads before the repair
   deadline, post-deadline legacy recovery, zero claim reads during
-  gate-persistence blockage with post-repair recovery, and realtime
-  recommendation independence.
+  gate-persistence blockage with post-repair recovery, registry-provider
+  availability gating for fallback retention, append-only fallback without
+  transport, and realtime recommendation independence.
