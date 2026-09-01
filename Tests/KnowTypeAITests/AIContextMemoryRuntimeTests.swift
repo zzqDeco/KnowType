@@ -885,13 +885,18 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             provider: providerB
         )
         await runtime.record(makeContextEvent(rawInput: "zaijian", committedText: "再见"))
+        try await waitUntil { await providerB.requestCount == 1 }
 
         let providerARequestCount = await providerA.requestCount
         XCTAssertEqual(providerARequestCount, 1)
         let providerBRequests = await providerB.recordedRequests
         XCTAssertEqual(providerBRequests.count, 1)
-        XCTAssertTrue(providerBRequests[0].rawInput?.contains("nihao") == true)
-        XCTAssertTrue(providerBRequests[0].rawInput?.contains("zaijian") == true)
+        guard let request = providerBRequests.first else {
+            XCTFail("Provider B did not record a recovery digest request")
+            return
+        }
+        XCTAssertTrue(request.rawInput?.contains("nihao") == true)
+        XCTAssertTrue(request.rawInput?.contains("zaijian") == true)
         let pendingEvents = try await eventStore.pendingEvents()
         XCTAssertTrue(pendingEvents.isEmpty)
         XCTAssertEqual(probe.digestSnapshotDecodeCount, 2)
