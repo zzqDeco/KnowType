@@ -57,6 +57,23 @@
 - An internal value-only preflight reports available, busy, cooldown,
   stale-generation, or persistence-blocked without acquiring an attempt. It
   lets callers stop before document projection or digest snapshot decoding.
+- A valid 429 recovery hint is honored from 15 seconds through 7 days. Without
+  a hint, only rate limiting uses the bounded sequence 15 minutes, 30 minutes,
+  1 hour, 2 hours, 4 hours, 8 hours, 16 hours, and 24 hours, then remains capped
+  at 24 hours. The no-hint sequence has an optional persisted counter that
+  survives cooldown expiry and process restart; persistence written before the
+  counter existed decodes as zero. Any valid hint or intervening auth,
+  transport, timeout, 5xx, invalid-output, or local-commit failure resets that
+  dedicated counter while retaining the existing behavior of its own backoff.
+- Availability waiters sleep until the real cooldown deadline instead of
+  waking every 15 minutes. Cancellation and generation invalidation still
+  resume them immediately, and persisted deadlines retain the same behavior
+  after process restart.
+- Persisted and in-memory cooldown deadlines are bounded to the production
+  7-day maximum before admission or waiter creation. An anomalous finite
+  distant-future persisted deadline is rewritten to that bound; malformed or
+  non-finite state remains fail-closed. Deadline-to-nanosecond conversion is
+  explicit and saturating, so corrupt magnitudes cannot trap the process.
 - Blocked, probing, and recovered transitions use privacy-safe unified logs with
   no provider endpoint, model, input, output, or credential content.
 
@@ -67,4 +84,6 @@
   timeout/completion interleaving, single-failure ownership, started-transport
   generation fencing, fail-closed persistence, disk-free recovery backoff,
   deadline and generation recovery, cooldown retention, stale-state
-  non-resurrection, value-only preflight, and waiter release.
+  non-resurrection, value-only preflight, 429 hint/fallback schedules, dedicated
+  no-hint sequence persistence and reset, old-JSON compatibility,
+  distant-future bounding, safe waiter conversion, and waiter release.

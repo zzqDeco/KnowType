@@ -16,19 +16,26 @@ tests.
 - Mock clients keep adapter tests deterministic and offline.
 - Production request construction, headers, timeouts, response decoding, and
   encoded-body budget checks stay in the provider layer.
-- On a 429 response, the HTTP validation boundary parses finite, non-negative
-  delay-seconds plus IMF-fixdate, RFC 850 obsolete-date, and ANSI C asctime-date.
-  RFC 850 two-digit years use the injected current time: dates within 50 years
-  in the future keep that century, while later dates resolve to the most recent
-  past year with the same suffix. The boundary emits either `nil` or a finite
-  `Retry-After` hint from 15 seconds through 15 minutes; missing and invalid
-  headers remain `nil` for the shared AI gate's fallback.
+- On a 429 response, the HTTP validation boundary gives a valid standard
+  `Retry-After` header precedence. It parses finite non-negative delay seconds,
+  IMF-fixdate, RFC 850 obsolete-date, and ANSI C asctime-date. RFC 850
+  two-digit years use the injected current time: dates within 50 years in the
+  future keep that century, while later dates resolve to the most recent past
+  year with the same suffix.
+- When the header has no valid value, at most 64 KiB of structured JSON may
+  provide a finite numeric `reset_seconds`, `reset_time`, `retry_after`, or
+  `retry_after_seconds`. Traversal depth and node count are bounded. Strings,
+  booleans, negative values, current or past absolute reset times, malformed
+  JSON, and oversized bodies are ignored. Absolute `reset_time` is accepted
+  only when it is strictly later than the injected current time. A valid hint
+  is normalized to 15 seconds through 7 days. The raw 429 body is never
+  propagated or diagnosed.
 - `ProviderRateLimitError` remains a source-compatible carrier: its public
   `retryAfterSeconds` property is writable and its initializer preserves the
   supplied value verbatim. Manually constructed errors can therefore carry
-  arbitrary hints; the shared AI gate's defensive handling remains separate
-  and unchanged. This cooldown is distinct from Context Digest's 600-second
-  successful-commit interval.
+  arbitrary hints; the shared AI gate independently validates and bounds them.
+  Provider cooldown is distinct from Context Digest's persistent success
+  cadence.
 - Adapters validate the logical request before transport and the serialized HTTP
   body after encoding. OpenAI Chat and Responses run aggregate logical-payload
   preflight before model discovery, so local over-limit requests perform neither

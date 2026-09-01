@@ -75,8 +75,13 @@ count their structured bodies without canonical marker/heading separator
 newlines. A local budget rejection is a
 non-provider outcome and its budgeted payload fingerprint is the recommendation
 cache key. `ProviderRequestGate` hashes provider identity, permits one in-flight
-request per identity, fences generations, clamps `Retry-After` to 15 seconds to
-15 minutes, and applies privacy-safe cooldowns for missing retry hints. Persisted
+request per identity, fences generations, and honors valid 429 recovery hints
+from 15 seconds through 7 days. A valid standard `Retry-After` header wins;
+otherwise at most 64 KiB of structured JSON may supply a finite numeric
+`reset_seconds`, `reset_time`, `retry_after`, or `retry_after_seconds` value.
+Raw 429 bodies never enter diagnostics. A 429 without a hint uses 15 minutes,
+30 minutes, 1 hour, 2 hours, 4 hours, 8 hours, 16 hours, and then a 24-hour cap;
+non-429 backoff is unchanged. Persisted
 gate state contains only the identity hash, deadline, failure class, and a
 bounded count in atomic mode-0600 storage; it never persists in-flight state.
 One real gate attempt receives a non-reusable gate attempt id and records at
@@ -779,8 +784,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   digest prefix remains protected until both its actor flow and real gate
   attempt have finished
 - claims no more than the oldest 50 events or 48 KiB for one provider digest,
-  while always allowing one event to make progress; the 600-second interval
-  after a successful commit cannot be bypassed by the batch threshold
+  while always allowing one event to make progress; production processing
+  requires at least 50 pending events or a 24-hour pending age, at least 6 hours
+  since the previous successful digest, and fewer than four successful digests
+  in the preceding rolling 24 hours
 - archives processed event files under `~/.knowtype/events/processed/` and,
   after every successful local archive, best-effort targets 7 days, 100 files,
   and 10 MiB in the same existing file-lock critical section; the current
@@ -789,10 +796,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - protected-only, blank, malformed, unsendable, oversized, and persisted claim
   recovery archives use that same retention path; startup or initialization
   without an archive does not scan or rewrite `processed/`
-- archives protected-only prefixes locally without advancing the 600-second
-  provider-success interval; an unprotected tail follows normal pending
+- archives protected-only prefixes locally without advancing the successful
+  provider cadence; an unprotected tail follows normal pending
   scheduling
-- summarizes through one actor-owned deadline task for batch, interval,
+- summarizes through one actor-owned deadline task for batch age, interval,
   provider-cooldown, and shared-gate availability wakeups; a first below-batch
   pending event has an independent forced deadline; while gate availability is
   pending, appended records return before another snapshot decode, and locally
@@ -800,7 +807,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   data; calls arriving during a digest coalesce into one post-completion
   re-evaluation rather than a concurrent digest, except that an already
   installed gate waiter remains the sole wake source for its contention
-  episode. If such a record, manual, or deadline wake reaches a live-claim
+  episode. Deadline sleep uses the actual target, including a multi-day 429
+  recovery time, rather than periodically waking at 15 minutes. If such a
+  record, manual, or deadline wake reaches a live-claim
   guard, one signal is retained until both the actor flow and real gate attempt
   finish; one actor-owned `processIfNeeded` pass then rechecks pending data,
   interval, cooldown, gate, and generation eligibility. No blocked wake or
@@ -819,7 +828,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   prefix inside one synchronous current-lease guard; stale work before that
   guard creates no claim, and later appended events stay pending
 - uses a path-shared process inventory for count/byte/protection gates, so
-  below-threshold and unchanged-generation cooldown paths do not decode JSONL
+  below-threshold and unchanged-generation cooldown paths do not decode JSONL;
+  the inventory also carries the oldest retained decoded event timestamp, so a
+  post-claim tail receives its own pending-age anchor
 - returns before digest-claim, pending-prefix, or ENV reads while the shared
   gate is persistence-blocked; one actor deadline rechecks the gate at its retry
   time, and a new Provider generation may revalidate it immediately
@@ -839,7 +850,12 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   generated hash does not match ENV also remains blocked, and corrupt schedule
   state cannot trigger an immediate fresh-runtime batch dispatch. In
   particular, a positive pending count with no persisted time anchor is
-  conservatively delayed by the minimum interval. The first
+  conservatively delayed. The schedule keeps a bounded successful-digest
+  timestamp list for the rolling 24-hour budget; legacy JSON without the list
+  remains readable and uses its last-success timestamp as a cadence anchor.
+  Only successful digest commits consume that budget, and a pending tail waits
+  for the next 6-hour window. Realtime recommendation does not read this budget
+  but remains constrained by the same provider health gate. The first
   record after restart completes local claim recovery before append or
   compaction. A blocked claim recovery installs one bounded 60-second actor
   deadline; records before that deadline return without another recovery read,

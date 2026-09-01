@@ -6,17 +6,23 @@ public enum TypingEventStoreError: Error, Equatable {
     case pendingContentChanged
 }
 
+private enum TypingEventCompactionError: Error {
+    case potentialDigestRecordExceedsRetentionBudget
+}
+
 struct TypingEventInventory: Sendable, Equatable {
     var eventCount: Int
     var byteCount: Int
     var protectedEventCount: Int
     var unprotectedEventCount: Int
+    var oldestEventTimestamp: Date?
 
     static let empty = TypingEventInventory(
         eventCount: 0,
         byteCount: 0,
         protectedEventCount: 0,
-        unprotectedEventCount: 0
+        unprotectedEventCount: 0,
+        oldestEventTimestamp: nil
     )
 
     var isProtectedOnly: Bool {
@@ -56,6 +62,12 @@ struct TypingEventRetentionPolicy: Sendable, Equatable {
     var processedMaximumByteCount: Int = 10 * 1_048_576
 
     static let `default` = TypingEventRetentionPolicy()
+}
+
+enum TypingEventPendingPrefixProtection: Sendable, Equatable {
+    case none
+    case claimed(Data)
+    case potentialDigest
 }
 
 struct TypingEventAppendResult: Sendable, Equatable {
@@ -295,7 +307,7 @@ public final class TypingEventStore: @unchecked Sendable {
 
     func appendBounded(
         _ event: AITypingEvent,
-        preservingClaimedPrefix claimedPrefix: Data? = nil
+        prefixProtection: TypingEventPendingPrefixProtection = .none
     ) throws -> TypingEventAppendResult {
         try withTypingEventFileLock {
             var boundedEvent = event
@@ -315,27 +327,44 @@ public final class TypingEventStore: @unchecked Sendable {
                 withIntermediateDirectories: true
             )
             let existingInventory = try inventorySynchronously(
-                preservingClaimedPrefix: claimedPrefix
+                prefixProtection: prefixProtection
             )
             var line = try encoder.encode(boundedEvent)
             line.append(0x0A)
+            var appendPayload = Data(capacity: line.count + 1)
+            if try pendingFileNeedsAppendSeparator(
+                expectedByteCount: existingInventory.byteCount
+            ) {
+                appendPayload.append(0x0A)
+            }
+            appendPayload.append(line)
             if fileManager.fileExists(atPath: eventsFileURL.path) {
                 let handle = try secureFileHandleForWriting(at: eventsFileURL)
                 defer { try? handle.close() }
                 try handle.seekToEnd()
-                try handle.write(contentsOf: line)
+                try handle.write(contentsOf: appendPayload)
                 try setSecurePermissions(of: eventsFileURL)
             } else {
-                try secureAtomicWrite(line, to: eventsFileURL)
+                try secureAtomicWrite(appendPayload, to: eventsFileURL)
             }
 
             var inventory = existingInventory
             inventory.eventCount += 1
-            inventory.byteCount += line.count
+            inventory.byteCount += appendPayload.count
             if Self.isProtectedOnlyEvent(boundedEvent) {
                 inventory.protectedEventCount += 1
             } else {
                 inventory.unprotectedEventCount += 1
+            }
+            if boundedEvent.timestamp.timeIntervalSince1970.isFinite {
+                if let oldestEventTimestamp = inventory.oldestEventTimestamp {
+                    inventory.oldestEventTimestamp = min(
+                        oldestEventTimestamp,
+                        boundedEvent.timestamp
+                    )
+                } else {
+                    inventory.oldestEventTimestamp = boundedEvent.timestamp
+                }
             }
             cacheInventory(inventory)
 
@@ -343,13 +372,24 @@ public final class TypingEventStore: @unchecked Sendable {
             var droppedByteCount = 0
             if inventory.eventCount > retentionPolicy.maximumPendingEventCount
                 || inventory.byteCount > retentionPolicy.maximumPendingByteCount {
-                let compaction = try compactPendingSynchronously(
-                    preservingClaimedPrefix: claimedPrefix,
-                    originalEventCount: inventory.eventCount
-                )
-                inventory = compaction.inventory
-                droppedEventCount = compaction.droppedEventCount
-                droppedByteCount = compaction.droppedByteCount
+                do {
+                    let compaction = try compactPendingSynchronously(
+                        prefixProtection: prefixProtection,
+                        originalEventCount: inventory.eventCount
+                    )
+                    inventory = compaction.inventory
+                    droppedEventCount = compaction.droppedEventCount
+                    droppedByteCount = compaction.droppedByteCount
+                } catch TypingEventCompactionError.potentialDigestRecordExceedsRetentionBudget {
+                    try rollbackAppendPayloadSynchronously(
+                        appendPayload,
+                        originalByteCount: existingInventory.byteCount
+                    )
+                    inventory = existingInventory
+                    cacheInventory(inventory)
+                    droppedEventCount = 1
+                    droppedByteCount = appendPayload.count
+                }
             }
 
             return TypingEventAppendResult(
@@ -655,7 +695,7 @@ public final class TypingEventStore: @unchecked Sendable {
     }
 
     private func inventorySynchronously(
-        preservingClaimedPrefix claimedPrefix: Data? = nil
+        prefixProtection: TypingEventPendingPrefixProtection = .none
     ) throws -> TypingEventInventory {
         let key = Self.normalizedPath(for: eventsFileURL)
         guard fileManager.fileExists(atPath: eventsFileURL.path) else {
@@ -668,7 +708,7 @@ public final class TypingEventStore: @unchecked Sendable {
         }
         if try pendingFileExceedsHardLimit() {
             let compaction = try compactPendingSynchronously(
-                preservingClaimedPrefix: claimedPrefix,
+                prefixProtection: prefixProtection,
                 originalEventCount: nil
             )
             testProbe?.recordInventoryScan()
@@ -681,7 +721,7 @@ public final class TypingEventStore: @unchecked Sendable {
         let data = try readPendingFileBounded()
         if data.count > retentionPolicy.maximumPendingByteCount {
             let compaction = try compactPendingSynchronously(
-                preservingClaimedPrefix: claimedPrefix,
+                prefixProtection: prefixProtection,
                 originalEventCount: nil
             )
             testProbe?.recordInventoryScan()
@@ -692,7 +732,7 @@ public final class TypingEventStore: @unchecked Sendable {
         if inventory.eventCount > retentionPolicy.maximumPendingEventCount
             || inventory.byteCount > retentionPolicy.maximumPendingByteCount {
             let compaction = try compactPendingSynchronously(
-                preservingClaimedPrefix: claimedPrefix,
+                prefixProtection: prefixProtection,
                 originalEventCount: inventory.eventCount
             )
             testProbe?.recordInventoryScan()
@@ -714,7 +754,7 @@ public final class TypingEventStore: @unchecked Sendable {
     }
 
     private func compactPendingSynchronously(
-        preservingClaimedPrefix claimedPrefix: Data?,
+        prefixProtection: TypingEventPendingPrefixProtection,
         originalEventCount: Int?
     ) throws -> (
         inventory: TypingEventInventory,
@@ -728,28 +768,31 @@ public final class TypingEventStore: @unchecked Sendable {
             throw TypingEventStoreError.pendingContentChanged
         }
         let originalByteCount = Int(fileLength)
-        let retainedPrefix: Data
-        if let claimedPrefix,
-           !claimedPrefix.isEmpty,
-           claimedPrefix.count <= retentionPolicy.compactedPendingByteCount,
-           claimedPrefix.count <= originalByteCount,
-           try readBounded(
-               from: handle,
-               offset: 0,
-               byteCount: claimedPrefix.count
-           ) == claimedPrefix {
-            retainedPrefix = claimedPrefix
-        } else {
-            retainedPrefix = Data()
-        }
-        let retainedPrefixEventCount = Self.lines(in: retainedPrefix).count
+        let retainedPrefix = try retainedPendingPrefixSynchronously(
+            prefixProtection,
+            from: handle,
+            originalByteCount: originalByteCount
+        )
+        let retainedPrefixEventCount = Self.rawJSONLRecordCount(in: retainedPrefix)
+        let compactedEventLimit = min(
+            retentionPolicy.compactedPendingEventCount,
+            retentionPolicy.maximumPendingEventCount
+        )
+        let compactedByteLimit = min(
+            retentionPolicy.compactedPendingByteCount,
+            retentionPolicy.maximumPendingByteCount
+        )
+        let requiresSuffixSeparator = !retainedPrefix.isEmpty
+            && retainedPrefix.last != 0x0A
+            && retainedPrefix.count < originalByteCount
+        let suffixSeparatorByteCount = requiresSuffixSeparator ? 1 : 0
         let availableEventCount = max(
             0,
-            retentionPolicy.compactedPendingEventCount - retainedPrefixEventCount
+            compactedEventLimit - retainedPrefixEventCount
         )
         let availableByteCount = max(
             0,
-            retentionPolicy.compactedPendingByteCount - retainedPrefix.count
+            compactedByteLimit - retainedPrefix.count - suffixSeparatorByteCount
         )
         let tailStart = retainedPrefix.count
         let suffixStart = max(tailStart, originalByteCount - availableByteCount)
@@ -789,9 +832,18 @@ public final class TypingEventStore: @unchecked Sendable {
             retainedByteCount += line.count
         }
         let retainedLines = retainedReversed.reversed()
-        var retainedData = Data(capacity: retainedPrefix.count + retainedByteCount)
+        var retainedData = Data(
+            capacity: retainedPrefix.count + suffixSeparatorByteCount + retainedByteCount
+        )
         retainedData.append(retainedPrefix)
+        if requiresSuffixSeparator {
+            retainedData.append(0x0A)
+        }
         retainedLines.forEach { retainedData.append($0) }
+        guard retainedData.count <= compactedByteLimit,
+              Self.rawJSONLRecordCount(in: retainedData) <= compactedEventLimit else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
         try secureAtomicWrite(retainedData, to: eventsFileURL)
         testProbe?.recordAtomicRewrite()
         let retainedInventory = inventory(for: retainedData)
@@ -800,8 +852,189 @@ public final class TypingEventStore: @unchecked Sendable {
             retainedInventory,
             originalEventCount.map { max(0, $0 - retainedInventory.eventCount) }
                 ?? (originalByteCount > retainedData.count ? 1 : 0),
-            max(0, originalByteCount - retainedData.count)
+            max(0, originalByteCount - retainedPrefix.count - retainedByteCount)
         )
+    }
+
+    private func retainedPendingPrefixSynchronously(
+        _ protection: TypingEventPendingPrefixProtection,
+        from handle: FileHandle,
+        originalByteCount: Int
+    ) throws -> Data {
+        let compactedEventLimit = min(
+            retentionPolicy.compactedPendingEventCount,
+            retentionPolicy.maximumPendingEventCount
+        )
+        let compactedByteLimit = min(
+            retentionPolicy.compactedPendingByteCount,
+            retentionPolicy.maximumPendingByteCount
+        )
+        let candidate: Data
+        let requiresFileMatchValidation: Bool
+        let permitsUnterminatedCandidate: Bool
+        let candidateByteLimit: Int
+        switch protection {
+        case .none:
+            return Data()
+        case .claimed(let claimedPrefix):
+            candidate = claimedPrefix
+            requiresFileMatchValidation = true
+            permitsUnterminatedCandidate = true
+            candidateByteLimit = retentionPolicy.maximumDigestByteCount
+        case .potentialDigest:
+            let boundedByteCount = min(
+                originalByteCount,
+                retentionPolicy.maximumDigestByteCount
+            )
+            guard boundedByteCount > 0 else { return Data() }
+            let boundedData = try readBounded(
+                from: handle,
+                offset: 0,
+                byteCount: boundedByteCount
+            )
+            let reachedEnd = boundedData.count == originalByteCount
+            let prefix = digestPrefixLength(
+                in: boundedData,
+                reachedEnd: reachedEnd
+            )
+            let boundedRecordCount = Self.rawJSONLRecordCount(in: boundedData)
+            let stoppedAtByteLimitWithTrailingRecord = !reachedEnd
+                && boundedData.count == retentionPolicy.maximumDigestByteCount
+                && boundedData.last != 0x0A
+                && boundedRecordCount <= retentionPolicy.maximumDigestEventCount
+            if stoppedAtByteLimitWithTrailingRecord {
+                guard boundedRecordCount <= compactedEventLimit else {
+                    throw TypingEventCompactionError
+                        .potentialDigestRecordExceedsRetentionBudget
+                }
+                let extensionByteLimit = max(
+                    0,
+                    min(originalByteCount, compactedByteLimit) - boundedData.count
+                )
+                guard let extensionData = try readThroughNextNewline(
+                    from: handle,
+                    offset: boundedData.count,
+                    byteCount: extensionByteLimit
+                ) else {
+                    throw TypingEventCompactionError
+                        .potentialDigestRecordExceedsRetentionBudget
+                }
+                var completedRecordPrefix = boundedData
+                completedRecordPrefix.append(extensionData)
+                candidate = completedRecordPrefix
+            } else {
+                candidate = Data(boundedData.prefix(prefix.byteCount))
+            }
+            requiresFileMatchValidation = false
+            permitsUnterminatedCandidate = reachedEnd
+            candidateByteLimit = compactedByteLimit
+        }
+
+        guard !candidate.isEmpty,
+              candidate.count <= candidateByteLimit,
+              candidate.count <= compactedByteLimit,
+              Self.rawJSONLRecordCount(in: candidate)
+                <= retentionPolicy.maximumDigestEventCount,
+              candidate.count <= originalByteCount,
+              candidate.last == 0x0A || permitsUnterminatedCandidate else {
+            return Data()
+        }
+        if requiresFileMatchValidation,
+           try readBounded(
+               from: handle,
+               offset: 0,
+               byteCount: candidate.count
+           ) != candidate {
+            return Data()
+        }
+        return candidate
+    }
+
+    private func pendingFileNeedsAppendSeparator(
+        expectedByteCount: Int
+    ) throws -> Bool {
+        guard expectedByteCount > 0 else {
+            return false
+        }
+        guard fileManager.fileExists(atPath: eventsFileURL.path) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
+        defer { try? handle.close() }
+        let fileLength = try handle.seekToEnd()
+        guard fileLength == UInt64(expectedByteCount) else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        guard let finalByte = try readBounded(
+            from: handle,
+            offset: expectedByteCount - 1,
+            byteCount: 1
+        ).first else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        return finalByte != 0x0A
+    }
+
+    private func rollbackAppendPayloadSynchronously(
+        _ appendPayload: Data,
+        originalByteCount: Int
+    ) throws {
+        let (expectedByteCount, overflowed) = originalByteCount.addingReportingOverflow(
+            appendPayload.count
+        )
+        guard !overflowed, expectedByteCount < Int.max else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        let handle = try secureFileHandleForReading(at: eventsFileURL)
+        let currentData: Data
+        do {
+            currentData = try readBounded(
+                from: handle,
+                offset: 0,
+                byteCount: expectedByteCount + 1
+            )
+            try handle.close()
+        } catch {
+            try? handle.close()
+            throw error
+        }
+        guard currentData.count == expectedByteCount,
+              Data(currentData.suffix(appendPayload.count)) == appendPayload else {
+            throw TypingEventStoreError.pendingContentChanged
+        }
+        try secureAtomicWrite(
+            Data(currentData.prefix(originalByteCount)),
+            to: eventsFileURL
+        )
+        testProbe?.recordAtomicRewrite()
+    }
+
+    private func readThroughNextNewline(
+        from handle: FileHandle,
+        offset: Int,
+        byteCount: Int
+    ) throws -> Data? {
+        guard byteCount > 0 else {
+            return nil
+        }
+        try handle.seek(toOffset: UInt64(offset))
+        var data = Data()
+        data.reserveCapacity(min(byteCount, 64 * 1_024))
+        while data.count < byteCount {
+            let remaining = byteCount - data.count
+            let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)) ?? Data()
+            guard !chunk.isEmpty else {
+                break
+            }
+            if let newlineIndex = chunk.firstIndex(of: 0x0A) {
+                data.append(contentsOf: chunk[...newlineIndex])
+                testProbe?.recordBufferedRead(byteCount: data.count)
+                return data
+            }
+            data.append(chunk)
+        }
+        testProbe?.recordBufferedRead(byteCount: data.count)
+        return nil
     }
 
     private func readBounded(
@@ -839,7 +1072,7 @@ public final class TypingEventStore: @unchecked Sendable {
         var data = try readPendingFileBounded()
         if data.count > retentionPolicy.maximumPendingByteCount {
             _ = try compactPendingSynchronously(
-                preservingClaimedPrefix: nil,
+                prefixProtection: .none,
                 originalEventCount: nil
             )
             data = try readPendingFileBounded()
@@ -981,6 +1214,7 @@ public final class TypingEventStore: @unchecked Sendable {
     ) -> TypingEventInventory {
         var protectedCount = 0
         var unprotectedCount = 0
+        var oldestEventTimestamp: Date?
         for line in lines {
             guard let event = decodeEvent(line) else {
                 continue
@@ -990,12 +1224,18 @@ public final class TypingEventStore: @unchecked Sendable {
             } else {
                 unprotectedCount += 1
             }
+            if event.timestamp.timeIntervalSince1970.isFinite {
+                oldestEventTimestamp = oldestEventTimestamp.map {
+                    min($0, event.timestamp)
+                } ?? event.timestamp
+            }
         }
         return TypingEventInventory(
             eventCount: lines.count,
             byteCount: byteCount,
             protectedEventCount: protectedCount,
-            unprotectedEventCount: unprotectedCount
+            unprotectedEventCount: unprotectedCount,
+            oldestEventTimestamp: oldestEventTimestamp
         )
     }
 
@@ -1045,7 +1285,18 @@ public final class TypingEventStore: @unchecked Sendable {
             protecting: destination
         )
 
-        let remainingData = Data(currentData.dropFirst(rawData.count))
+        var remainingOffset = rawData.count
+        if rawData.last != 0x0A,
+           remainingOffset < currentData.count,
+           currentData[
+               currentData.index(
+                   currentData.startIndex,
+                   offsetBy: remainingOffset
+               )
+           ] == 0x0A {
+            remainingOffset += 1
+        }
+        let remainingData = Data(currentData.dropFirst(remainingOffset))
         if remainingData.isEmpty {
             try fileManager.removeItem(at: eventsFileURL)
         } else {
@@ -1281,6 +1532,14 @@ public final class TypingEventStore: @unchecked Sendable {
         return lines.filter { line in
             line.contains { $0 != 0x0A && $0 != 0x0D }
         }
+    }
+
+    private static func rawJSONLRecordCount(in data: Data) -> Int {
+        guard !data.isEmpty else { return 0 }
+        let newlineCount = data.reduce(0) { count, byte in
+            count + (byte == 0x0A ? 1 : 0)
+        }
+        return data.last == 0x0A ? newlineCount : newlineCount + 1
     }
 
     static func isProtectedOnlyEvent(_ event: AITypingEvent) -> Bool {

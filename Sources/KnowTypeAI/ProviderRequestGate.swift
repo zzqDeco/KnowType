@@ -254,6 +254,17 @@ public actor ProviderRequestGate {
 
     private static let maximumPersistenceByteCount = 64 * 1_024
     private static let maximumPersistedEntryCount = 256
+    private static let maximumCooldownInterval: TimeInterval = 7 * 24 * 60 * 60
+    private static let rateLimitWithoutHintBackoff: [TimeInterval] = [
+        15 * 60,
+        30 * 60,
+        60 * 60,
+        2 * 60 * 60,
+        4 * 60 * 60,
+        8 * 60 * 60,
+        16 * 60 * 60,
+        24 * 60 * 60
+    ]
     private static let persistenceRecoveryInitialDelay: TimeInterval = 5
     private static let persistenceRecoveryMaximumDelay: TimeInterval = 60
     private static let logger = Logger(
@@ -293,6 +304,7 @@ public actor ProviderRequestGate {
         var activeAttemptID: UUID?
         var timedOutAttemptID: UUID?
         var failureCount = 0
+        var rateLimitWithoutHintCount = 0
         var cooldownUntil: Date?
         var failureClass: ProviderRequestFailureClass?
 
@@ -304,6 +316,7 @@ public actor ProviderRequestGate {
         var deadline: Date
         var failureClass: ProviderRequestFailureClass
         var failureCount: Int
+        var rateLimitWithoutHintCount: Int?
     }
 
     private struct PersistedState: Codable {
@@ -403,6 +416,7 @@ public actor ProviderRequestGate {
         state.cooldownUntil = nil
         state.failureClass = nil
         state.failureCount = 0
+        state.rateLimitWithoutHintCount = 0
         state.timedOutAttemptID = nil
         states[key] = state
         clearPersistedEntry(for: key)
@@ -421,7 +435,10 @@ public actor ProviderRequestGate {
         guard isPersistenceAvailable else { return nil }
         guard state.generation <= generation else { return nil }
         guard let deadline = state.cooldownUntil, deadline > now() else {
-            if persistedEntries[key] != nil { clearPersistedEntry(for: key) }
+            if state.rateLimitWithoutHintCount == 0,
+               persistedEntries[key] != nil {
+                clearPersistedEntry(for: key)
+            }
             return nil
         }
         return deadline
@@ -451,6 +468,7 @@ public actor ProviderRequestGate {
         if generation > state.generation {
             state.generation = generation
             state.failureCount = 0
+            state.rateLimitWithoutHintCount = 0
             state.cooldownUntil = nil
             state.failureClass = nil
             state.timedOutAttemptID = nil
@@ -493,7 +511,10 @@ public actor ProviderRequestGate {
             }
             if !state.inFlight &&
                 (state.cooldownUntil == nil || state.cooldownUntil ?? .distantPast <= now()) {
-                if persistedEntries[key] != nil { clearPersistedEntry(for: key) }
+                if state.rateLimitWithoutHintCount == 0,
+                   persistedEntries[key] != nil {
+                    clearPersistedEntry(for: key)
+                }
                 return
             }
             let waiterID = UUID()
@@ -641,6 +662,7 @@ public actor ProviderRequestGate {
         if generation > state.generation {
             state.generation = generation
             state.failureCount = 0
+            state.rateLimitWithoutHintCount = 0
             state.cooldownUntil = nil
             state.failureClass = nil
             state.timedOutAttemptID = nil
@@ -735,14 +757,11 @@ public actor ProviderRequestGate {
         guard state.timedOutAttemptID != attempt.id,
               let ownership = attempt.fence.claimTimeoutOwnership(claimingTimeout) else { return nil }
 
-        state.failureCount = min(16, state.failureCount + 1)
-        state.failureClass = .timeout
-        state.cooldownUntil = now().addingTimeInterval(
-            Self.cooldownSeconds(
-                failureClass: .timeout,
-                failureCount: state.failureCount,
-                retryAfter: nil
-            )
+        Self.applyFailure(
+            to: &state,
+            failureClass: .timeout,
+            retryAfter: nil,
+            now: now()
         )
         switch ownership {
         case .beforeTransport:
@@ -787,6 +806,7 @@ public actor ProviderRequestGate {
             return value
         }
         state.failureCount = 0
+        state.rateLimitWithoutHintCount = 0
         state.cooldownUntil = nil
         state.failureClass = nil
         states[attempt.identityHash] = state
@@ -826,14 +846,11 @@ public actor ProviderRequestGate {
             return error
         }
         let failureClass = Self.classify(error)
-        state.failureCount = min(16, state.failureCount + 1)
-        state.failureClass = failureClass
-        state.cooldownUntil = now().addingTimeInterval(
-            Self.cooldownSeconds(
-                failureClass: failureClass,
-                failureCount: state.failureCount,
-                retryAfter: (error as? ProviderRateLimitError)?.retryAfterSeconds
-            )
+        Self.applyFailure(
+            to: &state,
+            failureClass: failureClass,
+            retryAfter: (error as? ProviderRateLimitError)?.retryAfterSeconds,
+            now: now()
         )
         states[attempt.identityHash] = state
         persist(state, for: attempt.identityHash)
@@ -871,18 +888,16 @@ public actor ProviderRequestGate {
         if generation > state.generation {
             state.generation = generation
             state.failureCount = 0
+            state.rateLimitWithoutHintCount = 0
             clearPersistedEntry(for: key)
             guard isPersistenceAvailable else { return }
         }
         let failureClass = forcedClass ?? Self.classify(failure)
-        state.failureCount = min(16, state.failureCount + 1)
-        state.failureClass = failureClass
-        state.cooldownUntil = now().addingTimeInterval(
-            Self.cooldownSeconds(
-                failureClass: failureClass,
-                failureCount: state.failureCount,
-                retryAfter: (failure as? ProviderRateLimitError)?.retryAfterSeconds
-            )
+        Self.applyFailure(
+            to: &state,
+            failureClass: failureClass,
+            retryAfter: (failure as? ProviderRateLimitError)?.retryAfterSeconds,
+            now: now()
         )
         states[key] = state
         persist(state, for: key)
@@ -892,13 +907,55 @@ public actor ProviderRequestGate {
     private static func cooldownSeconds(
         failureClass: ProviderRequestFailureClass,
         failureCount: Int,
-        retryAfter: TimeInterval?
+        retryAfter: TimeInterval?,
+        rateLimitWithoutHintCount: Int
     ) -> TimeInterval {
-        if failureClass == .rateLimit, let retryAfter {
-            return min(15 * 60, max(15, retryAfter))
+        if failureClass == .rateLimit {
+            if let retryAfter, retryAfter.isFinite, retryAfter >= 0 {
+                return min(maximumCooldownInterval, max(15, retryAfter))
+            }
+            let index = min(
+                rateLimitWithoutHintBackoff.count - 1,
+                max(0, rateLimitWithoutHintCount - 1)
+            )
+            return rateLimitWithoutHintBackoff[index]
         }
         let exponent = min(4, max(0, failureCount - 1))
         return min(15 * 60, 60 * pow(2, Double(exponent)))
+    }
+
+    private static func applyFailure(
+        to state: inout State,
+        failureClass: ProviderRequestFailureClass,
+        retryAfter: TimeInterval?,
+        now: Date
+    ) {
+        state.failureCount = min(16, state.failureCount + 1)
+        let hasValidRateLimitHint: Bool
+        if let retryAfter {
+            hasValidRateLimitHint = failureClass == .rateLimit
+                && retryAfter.isFinite
+                && retryAfter >= 0
+        } else {
+            hasValidRateLimitHint = false
+        }
+        if failureClass == .rateLimit, !hasValidRateLimitHint {
+            state.rateLimitWithoutHintCount = min(
+                rateLimitWithoutHintBackoff.count,
+                state.rateLimitWithoutHintCount + 1
+            )
+        } else {
+            state.rateLimitWithoutHintCount = 0
+        }
+        state.failureClass = failureClass
+        state.cooldownUntil = now.addingTimeInterval(
+            cooldownSeconds(
+                failureClass: failureClass,
+                failureCount: state.failureCount,
+                retryAfter: retryAfter,
+                rateLimitWithoutHintCount: state.rateLimitWithoutHintCount
+            )
+        )
     }
 
     private static func classify(_ error: Error) -> ProviderRequestFailureClass {
@@ -937,12 +994,26 @@ public actor ProviderRequestGate {
 
     private func state(for key: String) -> State {
         var state = states[key, default: State()]
+        let currentDate = now()
+        if let deadline = state.cooldownUntil,
+           let boundedDeadline = Self.boundedCooldownDeadline(
+               deadline,
+               relativeTo: currentDate
+           ), boundedDeadline != deadline {
+            state.cooldownUntil = boundedDeadline
+            states[key] = state
+        }
         if state.cooldownUntil == nil, let persisted = persistedEntries[key] {
-            if persisted.deadline > now(), persisted.failureCount >= 1, persisted.failureCount <= 16 {
+            let rateLimitWithoutHintCount = persisted.rateLimitWithoutHintCount ?? 0
+            state.rateLimitWithoutHintCount = rateLimitWithoutHintCount
+            if let boundedDeadline = Self.boundedCooldownDeadline(
+                persisted.deadline,
+                relativeTo: currentDate
+            ), persisted.failureCount >= 1, persisted.failureCount <= 16 {
                 state.failureCount = persisted.failureCount
-                state.cooldownUntil = persisted.deadline
+                state.cooldownUntil = boundedDeadline
                 state.failureClass = persisted.failureClass
-            } else {
+            } else if rateLimitWithoutHintCount == 0 {
                 clearPersistedEntry(for: key)
             }
         }
@@ -1109,40 +1180,69 @@ public actor ProviderRequestGate {
         let decoded = try JSONDecoder().decode(PersistedState.self, from: data)
         let currentDate = now()
         var validEntries: [String: PersistedEntry] = [:]
-        for entry in decoded.entries {
+        var needsRewrite = false
+        for rawEntry in decoded.entries {
+            var entry = rawEntry
+            let rateLimitWithoutHintCount = entry.rateLimitWithoutHintCount ?? 0
             guard entry.identityHash.count == 64,
                   entry.identityHash.allSatisfy(\.isHexDigit),
                   entry.failureCount >= 1,
                   entry.failureCount <= 16,
+                  rateLimitWithoutHintCount >= 0,
+                  rateLimitWithoutHintCount <= Self.rateLimitWithoutHintBackoff.count,
+                  rateLimitWithoutHintCount == 0 || entry.failureClass == .rateLimit,
                   validEntries[entry.identityHash] == nil else {
                 throw ProviderRequestGatePersistenceError.blocked
             }
-            guard entry.deadline > currentDate else { continue }
+            let interval = entry.deadline.timeIntervalSince(currentDate)
+            guard interval.isFinite else {
+                throw ProviderRequestGatePersistenceError.blocked
+            }
+            guard interval > 0 else {
+                guard rateLimitWithoutHintCount > 0 else { continue }
+                entry.deadline = currentDate
+                validEntries[entry.identityHash] = entry
+                continue
+            }
+            let boundedDeadline = currentDate.addingTimeInterval(
+                min(interval, Self.maximumCooldownInterval)
+            )
+            if boundedDeadline != entry.deadline {
+                entry.deadline = boundedDeadline
+                needsRewrite = true
+            }
             validEntries[entry.identityHash] = entry
         }
         return LoadedPersistedState(
             entries: validEntries,
-            needsRewrite: validEntries.count != decoded.entries.count
+            needsRewrite: needsRewrite
+                || validEntries.count != decoded.entries.count
                 || validEntries.isEmpty
                 || validEntries.count > Self.maximumPersistedEntryCount
         )
     }
 
     private func persist(_ state: State, for key: String) {
-        guard let deadline = state.cooldownUntil,
-              let failureClass = state.failureClass,
-              deadline > now(),
+        let currentDate = now()
+        let boundedDeadline = state.cooldownUntil.flatMap {
+            Self.boundedCooldownDeadline($0, relativeTo: currentDate)
+        }
+        guard let failureClass = state.failureClass,
               state.failureCount >= 1,
-              state.failureCount <= 16 else {
+              state.failureCount <= 16,
+              boundedDeadline != nil || state.rateLimitWithoutHintCount > 0 else {
             clearPersistedEntry(for: key)
             return
         }
         pendingPersistedEntryClears.remove(key)
         persistedEntries[key] = PersistedEntry(
             identityHash: key,
-            deadline: deadline,
+            deadline: boundedDeadline ?? currentDate,
             failureClass: failureClass,
-            failureCount: state.failureCount
+            failureCount: state.failureCount,
+            rateLimitWithoutHintCount: state.rateLimitWithoutHintCount > 0
+                ? state.rateLimitWithoutHintCount
+                : nil
         )
         guard !deferPersistenceRewriteIfNeeded() else { return }
         do {
@@ -1202,12 +1302,25 @@ public actor ProviderRequestGate {
         }
         let currentDate = now()
         var entries = persistedEntries.values
-            .filter {
-                $0.deadline > currentDate &&
-                    $0.identityHash.count == 64 &&
-                    $0.identityHash.allSatisfy(\.isHexDigit) &&
-                    $0.failureCount >= 1 &&
-                    $0.failureCount <= 16
+            .compactMap { entry -> PersistedEntry? in
+                let rateLimitWithoutHintCount = entry.rateLimitWithoutHintCount ?? 0
+                let boundedDeadline = Self.boundedCooldownDeadline(
+                    entry.deadline,
+                    relativeTo: currentDate
+                )
+                guard (boundedDeadline != nil || rateLimitWithoutHintCount > 0),
+                      entry.identityHash.count == 64,
+                      entry.identityHash.allSatisfy(\.isHexDigit),
+                      entry.failureCount >= 1,
+                      entry.failureCount <= 16,
+                      rateLimitWithoutHintCount >= 0,
+                      rateLimitWithoutHintCount <= Self.rateLimitWithoutHintBackoff.count,
+                      rateLimitWithoutHintCount == 0 || entry.failureClass == .rateLimit else {
+                    return nil
+                }
+                var entry = entry
+                entry.deadline = boundedDeadline ?? currentDate
+                return entry
             }
             .sorted {
                 if $0.deadline != $1.deadline { return $0.deadline > $1.deadline }
@@ -1385,8 +1498,22 @@ public actor ProviderRequestGate {
     }
 
     private static func nanoseconds(until deadline: Date, now: Date) -> UInt64 {
-        let interval = max(0, deadline.timeIntervalSince(now))
-        return UInt64(min(interval, 15 * 60) * 1_000_000_000)
+        let interval = deadline.timeIntervalSince(now)
+        guard interval.isFinite, interval > 0 else { return 0 }
+        let value = interval * 1_000_000_000
+        guard value.isFinite, value < Double(UInt64.max) else {
+            return UInt64.max
+        }
+        return UInt64(max(1, value.rounded(.up)))
+    }
+
+    private static func boundedCooldownDeadline(
+        _ deadline: Date,
+        relativeTo now: Date
+    ) -> Date? {
+        let interval = deadline.timeIntervalSince(now)
+        guard interval.isFinite, interval > 0 else { return nil }
+        return now.addingTimeInterval(min(interval, maximumCooldownInterval))
     }
 
     private func registerAvailabilityWaiter(

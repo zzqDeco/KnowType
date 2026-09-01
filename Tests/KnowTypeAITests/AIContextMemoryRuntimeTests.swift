@@ -223,6 +223,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 2,
             minimumInterval: 1,
+            maximumPendingAge: 1,
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
@@ -395,6 +396,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: environmentStore,
             batchSize: 3,
             minimumInterval: 1,
+            maximumPendingAge: 1,
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
@@ -1175,6 +1177,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 2,
             minimumInterval: 1,
+            maximumPendingAge: 1,
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
@@ -1222,6 +1225,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: directory.appendingPathComponent("ENV.md")),
             batchSize: 2,
             minimumInterval: 1,
+            maximumPendingAge: 1,
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
@@ -1975,6 +1979,472 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(try eventStore.inventory().eventCount, 1)
     }
 
+    func testDigestCadenceSurvivesClockRollbackInProcessAndAcrossRestart() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let oneDay: TimeInterval = 24 * 60 * 60
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+        let firstProvider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- bounded cadence")
+        let firstRuntime = AIContextMemoryRuntime(
+            provider: firstProvider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: sixHours,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            maximumDigestsPerWindow: 4,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await firstRuntime.record(makeContextEvent(rawInput: "first", committedText: "第一"))
+        await firstRuntime.record(makeContextEvent(rawInput: "second", committedText: "第二"))
+        let requestsBeforeFirstWindow = await firstProvider.requests
+        XCTAssertEqual(requestsBeforeFirstWindow.count, 1)
+
+        clock.advance(by: sixHours)
+        await firstRuntime.processIfNeeded(now: clock.now())
+        clock.advance(by: sixHours)
+        await firstRuntime.record(makeContextEvent(rawInput: "third", committedText: "第三"))
+        clock.advance(by: sixHours)
+        await firstRuntime.record(makeContextEvent(rawInput: "fourth", committedText: "第四"))
+        await firstRuntime.record(makeContextEvent(rawInput: "fifth", committedText: "第五"))
+
+        let requestsBeforeRestart = await firstProvider.requests
+        XCTAssertEqual(requestsBeforeRestart.count, 4)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
+        let persistedSchedule = try XCTUnwrap(environmentStore.loadDigestScheduleState())
+        XCTAssertEqual(persistedSchedule.successfulDigestTimestamps.count, 4)
+        XCTAssertEqual(persistedSchedule.pendingEventCount, 1)
+
+        clock.advance(by: -(2 * 60 * 60))
+        await firstRuntime.processIfNeeded(now: clock.now())
+        let requestsAfterInProcessRollback = await firstProvider.requests
+        XCTAssertEqual(requestsAfterInProcessRollback.count, 4)
+        let loadedInProcessDeadline = await firstRuntime.scheduledDeadlineForTesting()
+        let inProcessDeadline = try XCTUnwrap(loadedInProcessDeadline)
+        XCTAssertEqual(
+            inProcessDeadline.timeIntervalSince(clock.now()),
+            8 * 60 * 60,
+            accuracy: 0.001
+        )
+
+        let restartedProvider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- after window")
+        let restartedRuntime = AIContextMemoryRuntime(
+            provider: restartedProvider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: sixHours,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            maximumDigestsPerWindow: 4,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await restartedRuntime.processIfNeeded(now: clock.now())
+        let requestsImmediatelyAfterRestart = await restartedProvider.requests
+        XCTAssertTrue(requestsImmediatelyAfterRestart.isEmpty)
+        let loadedRestartedDeadline = await restartedRuntime.scheduledDeadlineForTesting()
+        let restartedDeadline = try XCTUnwrap(loadedRestartedDeadline)
+        XCTAssertEqual(restartedDeadline, inProcessDeadline)
+
+        clock.advance(by: 8 * 60 * 60 - 1)
+        await restartedRuntime.processIfNeeded(now: clock.now())
+        let requestsBeforeOriginalWindowEnd = await restartedProvider.requests
+        XCTAssertTrue(requestsBeforeOriginalWindowEnd.isEmpty)
+
+        clock.advance(by: 2)
+        await restartedRuntime.processIfNeeded(now: clock.now())
+
+        let requestsAfterRollingWindow = await restartedProvider.requests
+        XCTAssertEqual(requestsAfterRollingWindow.count, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testDigestProcessesLowVolumePendingAtTwentyFourHourMaximumAge() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let oneDay: TimeInterval = 24 * 60 * 60
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- aged pending")
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events")
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: directory.appendingPathComponent("ENV.md")
+            ),
+            batchSize: 50,
+            minimumInterval: 6 * 60 * 60,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.record(
+            makeContextEvent(
+                timestamp: clock.now(),
+                rawInput: "aged",
+                committedText: "待摘要"
+            )
+        )
+        clock.advance(by: oneDay - 1)
+        await runtime.processIfNeeded(now: clock.now())
+        let requestsBeforeMaximumAge = await provider.requests
+        XCTAssertTrue(requestsBeforeMaximumAge.isEmpty)
+
+        clock.advance(by: 2)
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requestsAfterMaximumAge = await provider.requests
+        XCTAssertEqual(requestsAfterMaximumAge.count, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testSuccessfulDigestTailUsesOldestRemainingEventForPendingAge() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let now = clock.now()
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let oneDay: TimeInterval = 24 * 60 * 60
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events")
+        )
+        for index in 0..<50 {
+            try await eventStore.append(
+                makeContextEvent(
+                    timestamp: now.addingTimeInterval(-oneDay),
+                    rawInput: "old-\(index)",
+                    committedText: "旧事件\(index)"
+                )
+            )
+        }
+        try await eventStore.append(
+            makeContextEvent(
+                timestamp: now,
+                rawInput: "new-tail",
+                committedText: "新尾部"
+            )
+        )
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: directory.appendingPathComponent("ENV.md")
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- old prefix")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 50,
+            minimumInterval: sixHours,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: now)
+
+        let schedule = try XCTUnwrap(environmentStore.loadDigestScheduleState())
+        XCTAssertEqual(schedule.pendingSince, now)
+        let nextEligibleAt = try XCTUnwrap(schedule.nextEligibleAt)
+        XCTAssertEqual(nextEligibleAt.timeIntervalSince(now), oneDay, accuracy: 0.001)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
+
+        clock.advance(by: sixHours + 1)
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
+    }
+
+    func testSuccessfulDigestTailWaitsForNextSixHourWindow() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events")
+        )
+        for index in 0..<100 {
+            try await eventStore.append(
+                makeContextEvent(rawInput: "event-\(index)", committedText: "事件\(index)")
+            )
+        }
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- bounded prefix")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: directory.appendingPathComponent("ENV.md")
+            ),
+            batchSize: 50,
+            minimumInterval: sixHours,
+            maximumPendingAge: 24 * 60 * 60,
+            digestBudgetWindow: 24 * 60 * 60,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requestsBeforeNextWindow = await provider.requests
+        XCTAssertEqual(requestsBeforeNextWindow.count, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 50)
+
+        clock.advance(by: sixHours + 1)
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requestsAfterNextWindow = await provider.requests
+        XCTAssertEqual(requestsAfterNextWindow.count, 2)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testLongProviderCooldownDefersDigestWithoutDecodingSnapshot() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: .default,
+            testProbe: probe
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let gate = ProviderRequestGate(now: clock.now)
+        let cooldown: TimeInterval = 85 * 60 * 60
+        await gate.recordFailure(
+            providerIdentity: provider.providerName,
+            generation: 0,
+            failure: ProviderRateLimitError(
+                retryAfterSeconds: cooldown,
+                bodyByteCount: 128
+            )
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: directory.appendingPathComponent("ENV.md")
+            ),
+            batchSize: 1,
+            minimumInterval: 6 * 60 * 60,
+            requestGate: gate,
+            nowProvider: clock.now
+        )
+
+        await runtime.record(makeContextEvent(rawInput: "cooldown", committedText: "冷却"))
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requestsDuringCooldown = await provider.requests
+        XCTAssertTrue(requestsDuringCooldown.isEmpty)
+        XCTAssertEqual(probe.digestSnapshotDecodeCount, 0)
+        let loadedDeadline = await runtime.scheduledDeadlineForTesting()
+        let deadline = try XCTUnwrap(loadedDeadline)
+        XCTAssertEqual(deadline.timeIntervalSince(clock.now()), cooldown, accuracy: 0.001)
+    }
+
+    func testRateLimitFailureImmediatelySchedulesTheFullGateDeadline() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: .default,
+            testProbe: probe
+        )
+        let cooldown: TimeInterval = 85 * 60 * 60
+        let provider = RateLimitedDigestLLMProvider(retryAfterSeconds: cooldown)
+        let gate = ProviderRequestGate(now: clock.now)
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: directory.appendingPathComponent("ENV.md")
+            ),
+            batchSize: 1,
+            minimumInterval: 6 * 60 * 60,
+            requestGate: gate,
+            nowProvider: clock.now
+        )
+
+        await runtime.record(
+            makeContextEvent(
+                timestamp: clock.now(),
+                rawInput: "rate-limited",
+                committedText: "等待恢复"
+            )
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(probe.digestSnapshotDecodeCount, 1)
+        let loadedDeadline = await runtime.scheduledDeadlineForTesting()
+        let deadline = try XCTUnwrap(loadedDeadline)
+        XCTAssertEqual(deadline.timeIntervalSince(clock.now()), cooldown, accuracy: 0.001)
+
+        await runtime.processIfNeeded(now: clock.now())
+        let requestsAfterExplicitCheck = await provider.requests
+        XCTAssertEqual(requestsAfterExplicitCheck.count, 1)
+        XCTAssertEqual(probe.digestSnapshotDecodeCount, 1)
+    }
+
+    func testRegistryGenerationChangeWakesLongCooldownWithoutNewInput() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let fingerprintA = String(repeating: "a", count: 64)
+        let fingerprintB = String(repeating: "b", count: 64)
+        let providerA = NamedLLMProvider(
+            name: "digest-provider-a",
+            responseText: "## Global Style\n- provider A"
+        )
+        let providerB = NamedLLMProvider(
+            name: "digest-provider-b",
+            responseText: "## Global Style\n- provider B"
+        )
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: fingerprintA,
+            provider: providerA
+        )
+        let signal = TestProviderRevisionSignal()
+        let gate = ProviderRequestGate(now: clock.now)
+        let registry = makeRegistry(
+            source: source,
+            signal: signal,
+            requestGate: gate
+        )
+        let initialLease = await registry.leaseForEligibleDispatch()
+        let cooldown: TimeInterval = 85 * 60 * 60
+        await gate.recordFailure(
+            providerIdentity: fingerprintA,
+            generation: initialLease.generation,
+            failure: ProviderRateLimitError(
+                retryAfterSeconds: cooldown,
+                bodyByteCount: 128
+            )
+        )
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events")
+        )
+        try await eventStore.append(
+            makeContextEvent(
+                timestamp: clock.now(),
+                rawInput: "pending-generation-change",
+                committedText: "等待新配置"
+            )
+        )
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: registry,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: directory.appendingPathComponent("ENV.md")
+            ),
+            batchSize: 1,
+            minimumInterval: 6 * 60 * 60,
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+
+        let observedDeadline = await runtime.scheduledDeadlineForTesting()
+        let deadline = try XCTUnwrap(observedDeadline)
+        XCTAssertEqual(deadline.timeIntervalSince(clock.now()), cooldown, accuracy: 0.001)
+        let providerARequestsDuringCooldown = await providerA.requestCount
+        let providerBRequestsDuringCooldown = await providerB.requestCount
+        XCTAssertEqual(providerARequestsDuringCooldown, 0)
+        XCTAssertEqual(providerBRequestsDuringCooldown, 0)
+
+        source.set(
+            revision: 2,
+            fingerprint: fingerprintB,
+            provider: providerB
+        )
+        signal.send(2)
+
+        try await waitUntil { await providerB.requestCount == 1 }
+        try await waitUntil { (try? eventStore.inventory().eventCount) == 0 }
+        let providerARequestsAfterChange = await providerA.requestCount
+        let providerBRequestsAfterChange = await providerB.requestCount
+        XCTAssertEqual(providerARequestsAfterChange, 0)
+        XCTAssertEqual(providerBRequestsAfterChange, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testDigestRollingBudgetDoesNotLimitRealtimeRecommendation() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let now = clock.now()
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let oneDay: TimeInterval = 24 * 60 * 60
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        try await eventStore.append(
+            makeContextEvent(rawInput: "digest-pending", committedText: "等待摘要")
+        )
+        let successfulDigests = [
+            now.addingTimeInterval(-18 * 60 * 60),
+            now.addingTimeInterval(-12 * 60 * 60),
+            now.addingTimeInterval(-6 * 60 * 60),
+            now
+        ]
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+        try environmentStore.saveDigestScheduleState(
+            EnvironmentDigestScheduleState(
+                pendingSince: now,
+                lastSuccessfulDigestAt: now,
+                nextEligibleAt: now.addingTimeInterval(sixHours),
+                pendingEventCount: 1,
+                successfulDigestTimestamps: successfulDigests
+            )
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "recommended continuation")
+        let gate = ProviderRequestGate(now: clock.now)
+        let contextRuntime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: sixHours,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            maximumDigestsPerWindow: 4,
+            requestGate: gate,
+            nowProvider: clock.now
+        )
+
+        await contextRuntime.processIfNeeded(now: now)
+        let digestRequests = await provider.requests
+        XCTAssertTrue(digestRequests.isEmpty)
+
+        let recommendationRuntime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: environmentStore,
+            correctionStore: CorrectionInstructionStore(
+                fileURL: directory.appendingPathComponent("CORRECTION.md")
+            ),
+            debounceMilliseconds: 0,
+            requestGate: gate
+        )
+        _ = await recommendationRuntime.recommendation(
+            for: AIRecommendationRequest(rawInput: "abc", compositionID: 220)
+        )
+
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.task, .continuation)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
+    }
+
     func testSuccessfulDigestRearmsDeadlineForTailAndDrainsOnePrefixPerInterval() async throws {
         let directory = makeTemporaryDirectory()
         let clock = ManualContextClock()
@@ -2124,8 +2594,10 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let gateStateURL = directory.appendingPathComponent("gate.json")
         try Data("corrupt-gate-state".utf8).write(to: gateStateURL)
+        let clock = ManualContextClock()
         let gateProbe = ProviderRequestGateTestProbe()
         let gate = ProviderRequestGate(
+            now: clock.now,
             persistenceURL: gateStateURL,
             testProbe: gateProbe
         )
@@ -2149,18 +2621,20 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             testProbe: environmentProbe
         )
         _ = try environmentStore.loadSnapshot()
+        let recoveredGenerated = "## Global Style\n- recovered claim"
         try environmentStore.saveDigestClaim(
             EnvironmentDigestClaim(
                 claimedPrefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
                 claimedPrefixByteCount: claimedSnapshot.rawData.count,
                 claimedEventCount: claimedSnapshot.claimedEventCount,
-                generatedSHA256: AIDocumentSnapshot.hash("## Global Style\n- not committed"),
+                generatedSHA256: AIDocumentSnapshot.hash(recoveredGenerated),
                 providerGeneration: 0
             )
         )
         let digestDecodesBeforeRuntime = eventStoreProbe.digestSnapshotDecodeCount
         let environmentReadsBeforeRuntime = environmentProbe.environmentDocumentReadCount
         let diagnostics = ContextMemoryDiagnosticProbe()
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe()
         let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
         let runtime = AIContextMemoryRuntime(
             provider: provider,
@@ -2169,11 +2643,13 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             batchSize: 1,
             minimumInterval: 600,
             diagnosticSink: { diagnostics.record($0) },
-            requestGate: gate
+            requestGate: gate,
+            nowProvider: clock.now,
+            testProbe: runtimeProbe
         )
 
         for _ in 0..<10 {
-            await runtime.processIfNeeded()
+            await runtime.processIfNeeded(now: clock.now())
         }
 
         let blockedProviderRequests = await provider.requests
@@ -2181,11 +2657,642 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(gateProbe.preflightCheckCount, 10)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
         XCTAssertEqual(gateProbe.persistenceRecoveryProbeCount, 0)
+        let blockedClaimLoadCount = await runtimeProbe.claimRecoveryClaimLoadCount
+        XCTAssertEqual(blockedClaimLoadCount, 0)
         XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, digestDecodesBeforeRuntime)
         XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRuntime)
         XCTAssertEqual(diagnostics.stageCount("context_gate_persistence_blocked"), 1)
         XCTAssertFalse(diagnostics.lines.joined().contains("blocked-digest-private-input"))
         XCTAssertFalse(diagnostics.lines.joined().contains("阻断内容"))
+
+        _ = try environmentStore.replaceGeneratedSection(with: recoveredGenerated)
+        try Data(#"{"entries":[]}"#.utf8).write(to: gateStateURL, options: .atomic)
+        clock.advance(by: 5)
+        await runtime.processIfNeeded(now: clock.now())
+
+        let recoveredClaimLoadCount = await runtimeProbe.claimRecoveryClaimLoadCount
+        XCTAssertEqual(recoveredClaimLoadCount, 1)
+        XCTAssertNil(try environmentStore.loadDigestClaim())
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+        let requestsAfterClaimRecovery = await provider.requests
+        XCTAssertTrue(requestsAfterClaimRecovery.isEmpty)
+
+        await runtime.record(
+            makeContextEvent(
+                timestamp: clock.now(),
+                rawInput: "post-recovery",
+                committedText: "恢复后事件"
+            )
+        )
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
+    }
+
+    func testPersistenceBlockedGateCompactionPreservesPersistedClaimPrefix() async throws {
+        let directory = makeTemporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let clock = ManualContextClock()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        let eventStoreProbe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: .default,
+            testProbe: eventStoreProbe
+        )
+        for index in 0..<500 {
+            _ = try eventStore.appendBounded(
+                makeContextEvent(
+                    timestamp: clock.now().addingTimeInterval(Double(index) / 1_000),
+                    rawInput: "claim-backlog-\(index)",
+                    committedText: "待恢复-\(index)"
+                )
+            )
+        }
+        let claimedSnapshot = try eventStore.pendingDigestSnapshot()
+        XCTAssertEqual(claimedSnapshot.claimedEventCount, 50)
+
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: directory.appendingPathComponent("ENV.md"),
+            testProbe: environmentProbe
+        )
+        let generated = "## Global Style\n- persisted before gate failure"
+        _ = try environmentStore.replaceGeneratedSection(with: generated)
+        let claim = EnvironmentDigestClaim(
+            claimedPrefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+            claimedPrefixByteCount: claimedSnapshot.rawData.count,
+            claimedEventCount: claimedSnapshot.claimedEventCount,
+            generatedSHA256: AIDocumentSnapshot.hash(generated),
+            providerGeneration: 0
+        )
+        try environmentStore.saveDigestClaim(claim)
+
+        let gateStateURL = directory.appendingPathComponent("gate.json")
+        try Data("corrupt-gate-state".utf8).write(to: gateStateURL)
+        let gateProbe = ProviderRequestGateTestProbe()
+        let gate = ProviderRequestGate(
+            now: clock.now,
+            persistenceURL: gateStateURL,
+            testProbe: gateProbe
+        )
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "a", count: 64),
+            provider: provider
+        )
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe()
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source, requestGate: gate),
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            nowProvider: clock.now,
+            testProbe: runtimeProbe
+        )
+        let digestDecodesBeforeRecord = eventStoreProbe.digestSnapshotDecodeCount
+        let environmentReadsBeforeRecord = environmentProbe.environmentDocumentReadCount
+
+        await runtime.record(
+            makeContextEvent(
+                timestamp: clock.now(),
+                rawInput: "claim-backlog-newest",
+                committedText: "阻断期间最新事件"
+            )
+        )
+
+        let blockedProviderRequests = await provider.requests
+        let blockedClaimLoadCount = await runtimeProbe.claimRecoveryClaimLoadCount
+        let compactedInventory = try eventStore.inventory()
+        let compactedData = try Data(contentsOf: pendingURL)
+        let retainedClaimPrefix = Data(
+            compactedData.prefix(claim.claimedPrefixByteCount)
+        )
+        XCTAssertTrue(blockedProviderRequests.isEmpty)
+        XCTAssertEqual(blockedClaimLoadCount, 0)
+        XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, digestDecodesBeforeRecord)
+        XCTAssertEqual(environmentProbe.environmentDocumentReadCount, environmentReadsBeforeRecord)
+        XCTAssertEqual(source.revisionReadCount, 0)
+        XCTAssertEqual(source.runtimeLoadCount, 0)
+        XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
+        XCTAssertEqual(eventStoreProbe.atomicRewriteCount, 1)
+        XCTAssertEqual(compactedInventory.eventCount, 450)
+        XCTAssertLessThanOrEqual(compactedInventory.eventCount, 500)
+        XCTAssertLessThanOrEqual(compactedInventory.byteCount, 786_432)
+        XCTAssertLessThanOrEqual(compactedInventory.byteCount, 1_048_576)
+        XCTAssertEqual(retainedClaimPrefix, claimedSnapshot.rawData)
+        XCTAssertEqual(
+            AIDocumentSnapshot.hash(String(decoding: retainedClaimPrefix, as: UTF8.self)),
+            claim.claimedPrefixSHA256
+        )
+        let compactedEvents = try await eventStore.pendingEvents()
+        XCTAssertEqual(
+            compactedEvents.prefix(50).map(\.rawInput),
+            (0..<50).map { Optional("claim-backlog-\($0)") }
+        )
+        XCTAssertEqual(compactedEvents.last?.rawInput, "claim-backlog-newest")
+
+        try Data(#"{"entries":[]}"#.utf8).write(to: gateStateURL, options: .atomic)
+        clock.advance(by: 5)
+        await runtime.processIfNeeded(now: clock.now())
+
+        let recoveredClaimLoadCount = await runtimeProbe.claimRecoveryClaimLoadCount
+        let requestsAfterRecovery = await provider.requests
+        let pendingAfterRecovery = try await eventStore.pendingEvents()
+        XCTAssertEqual(recoveredClaimLoadCount, 1)
+        XCTAssertNil(try environmentStore.loadDigestClaim())
+        XCTAssertEqual(
+            eventStore.processedArchiveValidation(
+                prefixSHA256: claim.claimedPrefixSHA256,
+                byteCount: claim.claimedPrefixByteCount
+            ),
+            .valid
+        )
+        XCTAssertTrue(requestsAfterRecovery.isEmpty)
+        XCTAssertEqual(
+            eventStoreProbe.digestSnapshotDecodeCount,
+            digestDecodesBeforeRecord + 1
+        )
+        XCTAssertEqual(source.revisionReadCount, 0)
+        XCTAssertEqual(source.runtimeLoadCount, 0)
+        XCTAssertEqual(pendingAfterRecovery.count, 400)
+        XCTAssertEqual(pendingAfterRecovery.first?.rawInput, "claim-backlog-101")
+        XCTAssertEqual(pendingAfterRecovery.last?.rawInput, "claim-backlog-newest")
+    }
+
+    func testPotentialDigestAppendSeparatesExistingLegacyEOFRecord() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let existingEvent = makeContextEvent(
+            rawInput: "legacy-eof-existing",
+            committedText: "已有事件"
+        )
+        let appendedEvent = makeContextEvent(
+            rawInput: "legacy-eof-appended",
+            committedText: "追加事件"
+        )
+        let existingData = try encoder.encode(existingEvent)
+        var appendedLine = try encoder.encode(appendedEvent)
+        appendedLine.append(0x0A)
+        try existingData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: .default,
+            testProbe: probe
+        )
+
+        let result = try eventStore.appendBounded(
+            appendedEvent,
+            prefixProtection: .potentialDigest
+        )
+
+        let pendingData = try Data(contentsOf: pendingURL)
+        let inventory = try eventStore.inventory()
+        let events = try await eventStore.pendingEvents()
+        var expectedData = existingData
+        expectedData.append(0x0A)
+        expectedData.append(appendedLine)
+        XCTAssertEqual(pendingData, expectedData)
+        XCTAssertEqual(Data(pendingData.prefix(existingData.count)), existingData)
+        XCTAssertEqual(pendingData.dropFirst(existingData.count).first, 0x0A)
+        XCTAssertEqual(result.inventory.eventCount, 2)
+        XCTAssertEqual(result.inventory.byteCount, pendingData.count)
+        XCTAssertEqual(inventory.eventCount, 2)
+        XCTAssertEqual(inventory.byteCount, pendingData.count)
+        XCTAssertEqual(events.map(\.rawInput), ["legacy-eof-existing", "legacy-eof-appended"])
+        XCTAssertEqual(result.droppedByteCount, 0)
+        XCTAssertEqual(probe.atomicRewriteCount, 0)
+    }
+
+    func testPersistenceBlockedGateCompactionPreservesLegacyEOFClaimAtDigestByteLimit() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        var policy = TypingEventRetentionPolicy.default
+        policy.maximumPendingEventCount = 5
+        policy.compactedPendingEventCount = 4
+        policy.maximumDigestEventCount = 2
+        policy.maximumDigestByteCount = 512
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let firstLegacyEvent = makeContextEvent(
+            timestamp: clock.now(),
+            rawInput: "legacy-eof-claim-1",
+            committedText: "首条"
+        )
+        var firstLegacyData = try encoder.encode(firstLegacyEvent)
+        firstLegacyData.append(0x0A)
+        var trailingLegacyEvent = makeContextEvent(
+            timestamp: clock.now(),
+            rawInput: "legacy-eof-claim-2",
+            committedText: ""
+        )
+        let unpaddedTrailingData = try encoder.encode(trailingLegacyEvent)
+        let targetClaimByteCount = policy.maximumDigestByteCount - 1
+        let paddingCount = try XCTUnwrap(
+            targetClaimByteCount >= firstLegacyData.count + unpaddedTrailingData.count
+                ? targetClaimByteCount
+                    - firstLegacyData.count
+                    - unpaddedTrailingData.count
+                : nil
+        )
+        trailingLegacyEvent.committedText = String(repeating: "x", count: paddingCount)
+        let trailingLegacyData = try encoder.encode(trailingLegacyEvent)
+        var legacyClaimData = Data(capacity: targetClaimByteCount)
+        legacyClaimData.append(firstLegacyData)
+        legacyClaimData.append(trailingLegacyData)
+        XCTAssertEqual(legacyClaimData.count, targetClaimByteCount)
+        XCTAssertLessThan(legacyClaimData.count, policy.maximumDigestByteCount)
+        XCTAssertNotEqual(legacyClaimData.last, 0x0A)
+        try legacyClaimData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+
+        let eventStoreProbe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            testProbe: eventStoreProbe
+        )
+        let claimedSnapshot = try eventStore.pendingDigestSnapshot()
+        XCTAssertEqual(claimedSnapshot.rawData, legacyClaimData)
+        XCTAssertEqual(claimedSnapshot.requestData.count, policy.maximumDigestByteCount)
+        XCTAssertEqual(claimedSnapshot.claimedEventCount, 2)
+        XCTAssertEqual(
+            claimedSnapshot.events.map(\.rawInput),
+            ["legacy-eof-claim-1", "legacy-eof-claim-2"]
+        )
+
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: directory.appendingPathComponent("ENV.md"),
+            testProbe: environmentProbe
+        )
+        let generated = "## Global Style\n- legacy EOF claim"
+        _ = try environmentStore.replaceGeneratedSection(with: generated)
+        let claim = EnvironmentDigestClaim(
+            claimedPrefixSHA256: AIDocumentSnapshot.hash(claimedSnapshot.rawContent),
+            claimedPrefixByteCount: claimedSnapshot.rawData.count,
+            claimedEventCount: claimedSnapshot.claimedEventCount,
+            generatedSHA256: AIDocumentSnapshot.hash(generated),
+            providerGeneration: 0
+        )
+        try environmentStore.saveDigestClaim(claim)
+
+        var firstTailLine = try encoder.encode(
+            makeContextEvent(
+                timestamp: clock.now(),
+                rawInput: "legacy-tail-0",
+                committedText: "尾部-0"
+            )
+        )
+        firstTailLine.append(0x0A)
+        var historicalPendingData = legacyClaimData
+        historicalPendingData.append(firstTailLine)
+        try historicalPendingData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+
+        let gateStateURL = directory.appendingPathComponent("gate.json")
+        try Data("corrupt-gate-state".utf8).write(to: gateStateURL)
+        let gate = ProviderRequestGate(now: clock.now, persistenceURL: gateStateURL)
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        let source = ProviderRuntimeTestSource(
+            revision: 1,
+            fingerprint: String(repeating: "b", count: 64),
+            provider: provider
+        )
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe()
+        let runtime = AIContextMemoryRuntime(
+            providerRegistry: makeRegistry(source: source, requestGate: gate),
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            nowProvider: clock.now,
+            testProbe: runtimeProbe
+        )
+        let digestDecodesBeforeRecords = eventStoreProbe.digestSnapshotDecodeCount
+        let environmentReadsBeforeRecords = environmentProbe.environmentDocumentReadCount
+
+        let crossingRecordByteCount = policy.maximumDigestByteCount - legacyClaimData.count
+        XCTAssertGreaterThan(crossingRecordByteCount, 0)
+        XCTAssertGreaterThan(firstTailLine.count, crossingRecordByteCount)
+        XCTAssertGreaterThan(historicalPendingData.count, policy.maximumDigestByteCount)
+        XCTAssertNotEqual(
+            historicalPendingData[
+                historicalPendingData.index(
+                    historicalPendingData.startIndex,
+                    offsetBy: policy.maximumDigestByteCount - 1
+                )
+            ],
+            0x0A
+        )
+        XCTAssertEqual(firstTailLine.last, 0x0A)
+
+        for index in 1..<5 {
+            await runtime.record(
+                makeContextEvent(
+                    timestamp: clock.now(),
+                    rawInput: "legacy-tail-\(index)",
+                    committedText: "尾部-\(index)"
+                )
+            )
+        }
+
+        let blockedRequests = await provider.requests
+        let blockedClaimLoadCount = await runtimeProbe.claimRecoveryClaimLoadCount
+        let compactedData = try Data(contentsOf: pendingURL)
+        let compactedTailData = Data(compactedData.dropFirst(legacyClaimData.count))
+        let compactedTailEvents = try compactedTailData
+            .split(separator: 0x0A)
+            .map { try decoder.decode(AITypingEvent.self, from: Data($0)) }
+        XCTAssertTrue(blockedRequests.isEmpty)
+        XCTAssertEqual(blockedClaimLoadCount, 0)
+        XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, digestDecodesBeforeRecords)
+        XCTAssertEqual(
+            environmentProbe.environmentDocumentReadCount,
+            environmentReadsBeforeRecords
+        )
+        XCTAssertEqual(source.revisionReadCount, 0)
+        XCTAssertEqual(source.runtimeLoadCount, 0)
+        XCTAssertEqual(eventStoreProbe.atomicRewriteCount, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 4)
+        XCTAssertGreaterThan(compactedData.count, policy.maximumDigestByteCount)
+        XCTAssertLessThanOrEqual(compactedData.count, policy.compactedPendingByteCount)
+        XCTAssertLessThanOrEqual(compactedData.count, policy.maximumPendingByteCount)
+        XCTAssertTrue(compactedData.starts(with: legacyClaimData))
+        XCTAssertTrue(compactedTailData.starts(with: firstTailLine))
+        XCTAssertEqual(
+            rawDataSHA256(Data(compactedData.prefix(legacyClaimData.count))),
+            claim.claimedPrefixSHA256
+        )
+        XCTAssertEqual(
+            compactedTailEvents.map(\.rawInput),
+            ["legacy-tail-0", "legacy-tail-3", "legacy-tail-4"]
+        )
+
+        try Data(#"{"entries":[]}"#.utf8).write(to: gateStateURL, options: .atomic)
+        clock.advance(by: 5)
+        await runtime.processIfNeeded(now: clock.now())
+
+        let recoveredClaimLoadCount = await runtimeProbe.claimRecoveryClaimLoadCount
+        let requestsAfterRecovery = await provider.requests
+        let remainingData = try Data(contentsOf: pendingURL)
+        let pendingAfterRecovery = try await eventStore.pendingEvents()
+        XCTAssertEqual(recoveredClaimLoadCount, 1)
+        XCTAssertNil(try environmentStore.loadDigestClaim())
+        XCTAssertEqual(
+            eventStore.processedArchiveValidation(
+                prefixSHA256: claim.claimedPrefixSHA256,
+                byteCount: claim.claimedPrefixByteCount
+            ),
+            .valid
+        )
+        XCTAssertTrue(requestsAfterRecovery.isEmpty)
+        XCTAssertEqual(source.revisionReadCount, 0)
+        XCTAssertEqual(source.runtimeLoadCount, 0)
+        XCTAssertEqual(
+            eventStoreProbe.digestSnapshotDecodeCount,
+            digestDecodesBeforeRecords + 1
+        )
+        XCTAssertTrue(remainingData.starts(with: firstTailLine))
+        XCTAssertEqual(
+            pendingAfterRecovery.map(\.rawInput),
+            ["legacy-tail-0", "legacy-tail-3", "legacy-tail-4"]
+        )
+    }
+
+    func testClaimedCompactionPreservesLegacyEOFPrefixWithoutNewline() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        var policy = TypingEventRetentionPolicy.default
+        policy.maximumPendingEventCount = 4
+        policy.compactedPendingEventCount = 3
+        policy.maximumDigestEventCount = 1
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let legacyEvent = makeContextEvent(
+            rawInput: "known-legacy-claim",
+            committedText: "已知旧声明"
+        )
+        let legacyClaimData = try encoder.encode(legacyEvent)
+        try legacyClaimData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy
+        )
+        let claimedSnapshot = try eventStore.pendingDigestSnapshot()
+        let legacyClaimSHA256 = rawDataSHA256(legacyClaimData)
+        XCTAssertEqual(claimedSnapshot.rawData, legacyClaimData)
+
+        for index in 0..<4 {
+            _ = try eventStore.appendBounded(
+                makeContextEvent(
+                    rawInput: "known-tail-\(index)",
+                    committedText: "尾部-\(index)"
+                ),
+                prefixProtection: .claimed(legacyClaimData)
+            )
+        }
+
+        let compactedData = try Data(contentsOf: pendingURL)
+        let compactedEvents = try await eventStore.pendingEvents()
+        XCTAssertEqual(
+            Data(compactedData.prefix(legacyClaimData.count)),
+            legacyClaimData
+        )
+        XCTAssertEqual(
+            rawDataSHA256(Data(compactedData.prefix(legacyClaimData.count))),
+            legacyClaimSHA256
+        )
+        XCTAssertEqual(compactedData.dropFirst(legacyClaimData.count).first, 0x0A)
+        let expectedPendingData = Data(
+            compactedData.dropFirst(legacyClaimData.count + 1)
+        )
+        XCTAssertEqual(
+            compactedEvents.map(\.rawInput),
+            ["known-legacy-claim", "known-tail-2", "known-tail-3"]
+        )
+
+        try eventStore.archivePendingEvents(matching: claimedSnapshot)
+
+        let archiveURL = eventsDirectory
+            .appendingPathComponent("processed")
+            .appendingPathComponent("typing-events-\(legacyClaimSHA256).jsonl")
+        let archivedData = try Data(contentsOf: archiveURL)
+        let pendingData = try Data(contentsOf: pendingURL)
+        let inventory = try eventStore.inventory()
+        let pendingAfterArchive = try await eventStore.pendingEvents()
+        XCTAssertEqual(archivedData, legacyClaimData)
+        XCTAssertEqual(rawDataSHA256(archivedData), legacyClaimSHA256)
+        XCTAssertEqual(pendingData, expectedPendingData)
+        XCTAssertEqual(pendingData.first, 0x7B)
+        XCTAssertEqual(inventory.byteCount, pendingData.count)
+        XCTAssertEqual(inventory.eventCount, 2)
+        XCTAssertEqual(
+            pendingAfterArchive.map(\.rawInput),
+            ["known-tail-2", "known-tail-3"]
+        )
+    }
+
+    func testPotentialDigestCompactionStopsAtEventCapBeforePartialNextRecord() async throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let firstEvent = makeContextEvent(
+            rawInput: "event-cap-first",
+            committedText: "首条"
+        )
+        let secondEvent = makeContextEvent(
+            rawInput: "event-cap-second",
+            committedText: String(repeating: "x", count: 512)
+        )
+        let newestEvent = makeContextEvent(
+            rawInput: "event-cap-newest",
+            committedText: "最新"
+        )
+        var firstLine = try encoder.encode(firstEvent)
+        firstLine.append(0x0A)
+        var secondLine = try encoder.encode(secondEvent)
+        secondLine.append(0x0A)
+        var newestLine = try encoder.encode(newestEvent)
+        newestLine.append(0x0A)
+        var policy = TypingEventRetentionPolicy.default
+        policy.maximumPendingEventCount = 2
+        policy.compactedPendingEventCount = 2
+        policy.maximumDigestEventCount = 1
+        policy.maximumDigestByteCount = max(firstLine.count + 1, newestLine.count)
+        XCTAssertGreaterThan(policy.maximumDigestByteCount, firstLine.count)
+        XCTAssertLessThan(policy.maximumDigestByteCount, firstLine.count + secondLine.count)
+        var initialData = firstLine
+        initialData.append(secondLine)
+        try initialData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            testProbe: probe
+        )
+
+        _ = try eventStore.appendBounded(
+            newestEvent,
+            prefixProtection: .potentialDigest
+        )
+
+        let compactedData = try Data(contentsOf: pendingURL)
+        let compactedEvents = try await eventStore.pendingEvents()
+        XCTAssertEqual(probe.atomicRewriteCount, 1)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 2)
+        XCTAssertLessThanOrEqual(compactedData.count, policy.compactedPendingByteCount)
+        XCTAssertTrue(compactedData.starts(with: firstLine))
+        XCTAssertFalse(String(decoding: compactedData, as: UTF8.self).contains("event-cap-second"))
+        XCTAssertEqual(
+            compactedEvents.map(\.rawInput),
+            ["event-cap-first", "event-cap-newest"]
+        )
+    }
+
+    func testPotentialDigestCompactionRollsBackAppendWhenCrossingRecordExceedsTarget() throws {
+        let directory = makeTemporaryDirectory()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let pendingURL = eventsDirectory.appendingPathComponent("typing-events.jsonl")
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var firstClaimLine = try encoder.encode(
+            makeContextEvent(rawInput: "rollback-claim-first", committedText: "首条")
+        )
+        firstClaimLine.append(0x0A)
+        let trailingClaimData = try encoder.encode(
+            makeContextEvent(rawInput: "rollback-claim-trailing", committedText: "末条")
+        )
+        var crossingTailLine = try encoder.encode(
+            makeContextEvent(
+                rawInput: "rollback-crossing-tail",
+                committedText: String(repeating: "x", count: 512)
+            )
+        )
+        crossingTailLine.append(0x0A)
+        let suffixLine = try encoder.encode(
+            makeContextEvent(rawInput: "rollback-suffix", committedText: "后缀")
+        )
+        let appendedEvent = makeContextEvent(
+            rawInput: "rollback-rejected-append",
+            committedText: "不得破坏声明"
+        )
+        var appendedLine = try encoder.encode(appendedEvent)
+        appendedLine.append(0x0A)
+        var initialData = firstClaimLine
+        initialData.append(trailingClaimData)
+        initialData.append(crossingTailLine)
+        initialData.append(suffixLine)
+        try initialData.write(to: pendingURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: pendingURL.path
+        )
+        var policy = TypingEventRetentionPolicy.default
+        policy.maximumPendingEventCount = 3
+        policy.compactedPendingEventCount = 3
+        policy.maximumPendingByteCount = initialData.count
+        policy.compactedPendingByteCount = firstClaimLine.count + trailingClaimData.count + 8
+        policy.maximumDigestEventCount = 2
+        policy.maximumDigestByteCount = firstClaimLine.count + trailingClaimData.count + 1
+        XCTAssertGreaterThan(
+            crossingTailLine.count,
+            policy.compactedPendingByteCount - policy.maximumDigestByteCount
+        )
+        let probe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: eventsDirectory,
+            retentionPolicy: policy,
+            testProbe: probe
+        )
+
+        let result = try eventStore.appendBounded(
+            appendedEvent,
+            prefixProtection: .potentialDigest
+        )
+
+        XCTAssertEqual(result.droppedEventCount, 1)
+        XCTAssertEqual(result.droppedByteCount, appendedLine.count + 1)
+        XCTAssertEqual(result.inventory.eventCount, 3)
+        XCTAssertEqual(result.inventory.byteCount, initialData.count)
+        XCTAssertLessThanOrEqual(result.inventory.byteCount, policy.maximumPendingByteCount)
+        XCTAssertEqual(probe.atomicRewriteCount, 1)
+        XCTAssertEqual(try Data(contentsOf: pendingURL), initialData)
     }
 
     func testPersistenceBlockedGateRecoversDigestWithoutRuntimeRebuildOrEventLoss() async throws {
@@ -2470,11 +3577,16 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
 
     func testClaimCleanupFailureWithTailRecoversAfterRestartWithoutProviderRetry() async throws {
         let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let successfulDigestAt = clock.now()
         let eventsDirectory = directory.appendingPathComponent("events")
         let environmentURL = directory.appendingPathComponent("ENV.md")
         let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
         let environmentProbe = EnvironmentDocumentStoreTestProbe()
-        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL, testProbe: environmentProbe)
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: environmentURL,
+            testProbe: environmentProbe
+        )
         let provider = SuspendedDigestLLMProvider()
         let runtime = AIContextMemoryRuntime(
             provider: provider,
@@ -2482,14 +3594,27 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: environmentStore,
             batchSize: 1,
             minimumInterval: 600,
-            requestGate: ProviderRequestGate()
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
         )
 
         let firstDigest = Task {
-            await runtime.record(makeContextEvent(rawInput: "claimed", committedText: "已声明"))
+            await runtime.record(
+                makeContextEvent(
+                    timestamp: successfulDigestAt,
+                    rawInput: "claimed",
+                    committedText: "已声明"
+                )
+            )
         }
         try await waitUntilProviderReceivesRequest(provider)
-        try await eventStore.append(makeContextEvent(rawInput: "tail", committedText: "尾部"))
+        try await eventStore.append(
+            makeContextEvent(
+                timestamp: successfulDigestAt,
+                rawInput: "tail",
+                committedText: "尾部"
+            )
+        )
         environmentProbe.failNextClaimClears(1)
         await provider.finish(generatedMarkdown: "## Global Style\n- recovered")
         await firstDigest.value
@@ -2498,7 +3623,21 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         XCTAssertEqual(requestsAfterCleanupFailure.count, 1)
         let pendingAfterFailure = try await eventStore.pendingEvents()
         XCTAssertEqual(pendingAfterFailure.map(\.rawInput), ["tail"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ENV.digest-claim.json").path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-claim.json").path
+            )
+        )
+        let scheduleBeforeRecovery = try XCTUnwrap(
+            environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(scheduleBeforeRecovery.successfulDigestTimestamps, [successfulDigestAt])
+        let receiptBeforeRecovery = try XCTUnwrap(
+            environmentStore.loadDigestArchiveReceipt()
+        )
+        XCTAssertEqual(receiptBeforeRecovery.successfulDigestAt, successfulDigestAt)
+
+        clock.advance(by: 120)
 
         let recoveryProvider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- should not run")
         let restartedRuntime = AIContextMemoryRuntime(
@@ -2507,19 +3646,582 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
             minimumInterval: 600,
-            requestGate: ProviderRequestGate()
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
         )
-        await restartedRuntime.processIfNeeded()
+        await restartedRuntime.processIfNeeded(now: clock.now())
 
         let recoveryRequests = await recoveryProvider.requests
         XCTAssertTrue(recoveryRequests.isEmpty)
         let pendingAfterRecovery = try await eventStore.pendingEvents()
         XCTAssertEqual(pendingAfterRecovery.map(\.rawInput), ["tail"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ENV.digest-claim.json").path))
+        let scheduleAfterRecovery = try XCTUnwrap(
+            EnvironmentDocumentStore(fileURL: environmentURL).loadDigestScheduleState()
+        )
+        XCTAssertEqual(scheduleAfterRecovery.successfulDigestTimestamps, [successfulDigestAt])
+        XCTAssertEqual(scheduleAfterRecovery.lastSuccessfulDigestAt, successfulDigestAt)
+    }
+
+    func testClaimRecoveryAcceptsBoundedFutureReceiptAfterClockRollback() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let successfulDigestAt = clock.now()
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: successfulDigestAt,
+            generated: "## Global Style\n- future receipt"
+        )
+        let nonFiniteReceipt = digestArchiveReceipt(
+            for: fixture.claim,
+            successfulDigestAt: Date(timeIntervalSince1970: .infinity)
+        )
+        XCTAssertThrowsError(
+            try fixture.environmentStore.saveDigestArchiveReceipt(nonFiniteReceipt)
+        )
+        try fixture.environmentStore.saveDigestArchiveReceipt(
+            digestArchiveReceipt(
+                for: fixture.claim,
+                successfulDigestAt: successfulDigestAt
+            )
+        )
+
+        clock.advance(by: -(2 * 60 * 60))
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: fixture.eventStore,
+            environmentStore: fixture.environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertNil(try fixture.environmentStore.loadDigestClaim())
+        let schedule = try XCTUnwrap(
+            fixture.environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(schedule.successfulDigestTimestamps, [successfulDigestAt])
+        XCTAssertEqual(schedule.lastSuccessfulDigestAt, successfulDigestAt)
+    }
+
+    func testClaimRecoveryRejectsReceiptBeyondScheduleAnchorBound() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: clock.now(),
+            generated: "## Global Style\n- reject future receipt"
+        )
+        try fixture.environmentStore.saveDigestArchiveReceipt(
+            digestArchiveReceipt(
+                for: fixture.claim,
+                successfulDigestAt: clock.now().addingTimeInterval(24 * 60 * 60 + 1)
+            )
+        )
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: fixture.eventStore,
+            environmentStore: fixture.environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(try fixture.environmentStore.loadDigestClaim(), fixture.claim)
+        XCTAssertNil(try fixture.environmentStore.loadDigestScheduleState())
+    }
+
+    func testRecordFirstLegacyClaimRecoveryPreservesRollingHistoryBeforeAppending() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let recoveryNow = clock.now()
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let oneDay: TimeInterval = 24 * 60 * 60
+        let priorSuccesses = [
+            recoveryNow.addingTimeInterval(-18 * 60 * 60),
+            recoveryNow.addingTimeInterval(-12 * 60 * 60),
+            recoveryNow.addingTimeInterval(-6 * 60 * 60)
+        ]
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: recoveryNow,
+            generated: "## Global Style\n- record-first recovery"
+        )
+        try writeLegacyDigestArchiveReceipt(for: fixture.claim, in: directory)
+        try fixture.environmentStore.saveDigestScheduleState(
+            EnvironmentDigestScheduleState(
+                pendingSince: nil,
+                lastSuccessfulDigestAt: priorSuccesses.last,
+                nextEligibleAt: nil,
+                pendingEventCount: 0,
+                successfulDigestTimestamps: priorSuccesses
+            )
+        )
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: fixture.eventStore,
+            environmentStore: fixture.environmentStore,
+            batchSize: 1,
+            minimumInterval: sixHours,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            maximumDigestsPerWindow: 4,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.record(
+            makeContextEvent(
+                timestamp: recoveryNow,
+                rawInput: "record-after-recovery",
+                committedText: "恢复后记录"
+            )
+        )
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertNil(try fixture.environmentStore.loadDigestClaim())
+        XCTAssertNil(try fixture.environmentStore.loadDigestArchiveReceipt())
+        let pending = try fixture.eventStore.pendingDigestSnapshot()
+        XCTAssertEqual(
+            pending.events.compactMap(\.rawInput),
+            ["record-after-recovery"]
+        )
+        let schedule = try XCTUnwrap(
+            fixture.environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(
+            schedule.successfulDigestTimestamps,
+            priorSuccesses + [recoveryNow]
+        )
+        XCTAssertEqual(schedule.lastSuccessfulDigestAt, recoveryNow)
+        XCTAssertEqual(schedule.pendingEventCount, 1)
+        XCTAssertEqual(
+            schedule.nextEligibleAt,
+            recoveryNow.addingTimeInterval(sixHours)
+        )
+        let scheduledDeadline = await runtime.scheduledDeadlineForTesting()
+        XCTAssertEqual(
+            scheduledDeadline,
+            recoveryNow.addingTimeInterval(sixHours)
+        )
+    }
+
+    func testLegacyClaimRecoveryPreservesBoundedFutureScheduleAcrossRestart() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let futureSuccess = clock.now()
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let oneDay: TimeInterval = 24 * 60 * 60
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: futureSuccess,
+            generated: "## Global Style\n- future legacy recovery"
+        )
+        try writeLegacyDigestArchiveReceipt(for: fixture.claim, in: directory)
+        try writeLegacyDigestSchedule(
+            lastSuccessfulDigestAt: futureSuccess,
+            pendingEventCount: 0,
+            in: directory
+        )
+
+        clock.advance(by: -(2 * 60 * 60))
+        let recoveryNow = clock.now()
+        try await fixture.eventStore.append(
+            makeContextEvent(
+                timestamp: recoveryNow,
+                rawInput: "pending-after-rollback",
+                committedText: "回拨后待处理"
+            )
+        )
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: fixture.eventStore,
+            environmentStore: fixture.environmentStore,
+            batchSize: 1,
+            minimumInterval: sixHours,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            maximumDigestsPerWindow: 4,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: recoveryNow)
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertNil(try fixture.environmentStore.loadDigestClaim())
+        let expectedDeadline = futureSuccess.addingTimeInterval(sixHours)
+        let recoveredSchedule = try XCTUnwrap(
+            fixture.environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(
+            recoveredSchedule.successfulDigestTimestamps,
+            [recoveryNow, futureSuccess]
+        )
+        XCTAssertEqual(recoveredSchedule.lastSuccessfulDigestAt, futureSuccess)
+        XCTAssertEqual(recoveredSchedule.nextEligibleAt, expectedDeadline)
+        XCTAssertEqual(recoveredSchedule.pendingEventCount, 1)
+
+        let restartedProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must still not run"
+        )
+        let restartedStore = EnvironmentDocumentStore(
+            fileURL: fixture.environmentURL
+        )
+        let restartedRuntime = AIContextMemoryRuntime(
+            provider: restartedProvider,
+            eventStore: TypingEventStore(
+                eventsDirectoryURL: directory.appendingPathComponent("events")
+            ),
+            environmentStore: restartedStore,
+            batchSize: 1,
+            minimumInterval: sixHours,
+            maximumPendingAge: oneDay,
+            digestBudgetWindow: oneDay,
+            maximumDigestsPerWindow: 4,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await restartedRuntime.processIfNeeded(now: recoveryNow)
+
+        let restartedRequests = await restartedProvider.requests
+        XCTAssertTrue(restartedRequests.isEmpty)
+        let restartedDeadline = await restartedRuntime.scheduledDeadlineForTesting()
+        XCTAssertEqual(restartedDeadline, expectedDeadline)
+        let restartedSchedule = try XCTUnwrap(
+            restartedStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(restartedSchedule, recoveredSchedule)
+    }
+
+    func testLegacyReceiptWithStaleSameCountScheduleChargesRecoverySuccess() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let priorDigestAt = clock.now().addingTimeInterval(-(6 * 60 * 60))
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: clock.now(),
+            generated: "## Global Style\n- legacy stale schedule"
+        )
+        try writeLegacyDigestArchiveReceipt(for: fixture.claim, in: directory)
+        try writeLegacyDigestSchedule(
+            lastSuccessfulDigestAt: priorDigestAt,
+            pendingEventCount: 0,
+            in: directory
+        )
+        XCTAssertEqual(try fixture.eventStore.inventory().eventCount, 0)
+
+        clock.advance(by: 120)
+        let recoveredDigestAt = clock.now()
+        let recoveryProbe = EnvironmentDocumentStoreTestProbe()
+        recoveryProbe.failNextClaimClears(1)
+        let recoveryStore = EnvironmentDocumentStore(
+            fileURL: fixture.environmentURL,
+            testProbe: recoveryProbe
+        )
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: fixture.eventStore,
+            environmentStore: recoveryStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: recoveredDigestAt)
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        let upgradedReceipt = try XCTUnwrap(recoveryStore.loadDigestArchiveReceipt())
+        XCTAssertEqual(upgradedReceipt.successfulDigestAt, recoveredDigestAt)
+        let schedule = try XCTUnwrap(recoveryStore.loadDigestScheduleState())
+        XCTAssertEqual(
+            schedule.successfulDigestTimestamps,
+            [priorDigestAt, recoveredDigestAt]
+        )
+        XCTAssertEqual(schedule.lastSuccessfulDigestAt, recoveredDigestAt)
+    }
+
+    func testLegacyReceiptWithRecordedScheduleSuccessChargesOnlyOnceAcrossRecovery() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let persistedDigestAt = clock.now()
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: persistedDigestAt,
+            generated: "## Global Style\n- legacy recorded schedule"
+        )
+        try writeLegacyDigestArchiveReceipt(for: fixture.claim, in: directory)
+        try writeLegacyDigestSchedule(
+            lastSuccessfulDigestAt: persistedDigestAt,
+            pendingEventCount: 0,
+            in: directory
+        )
+
+        clock.advance(by: 120)
+        let firstRecoveryDigestAt = clock.now()
+        let recoveryProbe = EnvironmentDocumentStoreTestProbe()
+        recoveryProbe.failNextClaimClears(1)
+        let recoveryStore = EnvironmentDocumentStore(
+            fileURL: fixture.environmentURL,
+            testProbe: recoveryProbe
+        )
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: fixture.eventStore,
+            environmentStore: recoveryStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: firstRecoveryDigestAt)
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        let upgradedReceipt = try XCTUnwrap(recoveryStore.loadDigestArchiveReceipt())
+        XCTAssertEqual(upgradedReceipt.successfulDigestAt, firstRecoveryDigestAt)
+        let scheduleAfterFirstRecovery = try XCTUnwrap(
+            recoveryStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(
+            scheduleAfterFirstRecovery.successfulDigestTimestamps,
+            [persistedDigestAt, firstRecoveryDigestAt]
+        )
+
+        clock.advance(by: 120)
+        let secondRecoveryDigestAt = clock.now()
+        let secondProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must still not run"
+        )
+        let secondRecoveryProbe = EnvironmentDocumentStoreTestProbe()
+        secondRecoveryProbe.failNextClaimClears(1)
+        let secondStore = EnvironmentDocumentStore(
+            fileURL: fixture.environmentURL,
+            testProbe: secondRecoveryProbe
+        )
+        let secondRuntime = AIContextMemoryRuntime(
+            provider: secondProvider,
+            eventStore: TypingEventStore(
+                eventsDirectoryURL: directory.appendingPathComponent("events")
+            ),
+            environmentStore: secondStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await secondRuntime.processIfNeeded(now: secondRecoveryDigestAt)
+
+        let secondRequests = await secondProvider.requests
+        XCTAssertTrue(secondRequests.isEmpty)
+        XCTAssertEqual(try secondStore.loadDigestClaim(), fixture.claim)
+        let retainedReceipt = try XCTUnwrap(secondStore.loadDigestArchiveReceipt())
+        XCTAssertEqual(retainedReceipt.successfulDigestAt, firstRecoveryDigestAt)
+        let scheduleAfterSecondRecovery = try XCTUnwrap(
+            secondStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(
+            scheduleAfterSecondRecovery.successfulDigestTimestamps,
+            [persistedDigestAt, firstRecoveryDigestAt]
+        )
+
+        clock.advance(by: 120)
+        let thirdProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must never run"
+        )
+        let thirdStore = EnvironmentDocumentStore(fileURL: fixture.environmentURL)
+        let thirdRuntime = AIContextMemoryRuntime(
+            provider: thirdProvider,
+            eventStore: TypingEventStore(
+                eventsDirectoryURL: directory.appendingPathComponent("events")
+            ),
+            environmentStore: thirdStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await thirdRuntime.processIfNeeded(now: clock.now())
+
+        let thirdRequests = await thirdProvider.requests
+        XCTAssertTrue(thirdRequests.isEmpty)
+        XCTAssertNil(try thirdStore.loadDigestClaim())
+        XCTAssertNil(try thirdStore.loadDigestArchiveReceipt())
+        let finalSchedule = try XCTUnwrap(thirdStore.loadDigestScheduleState())
+        XCTAssertEqual(
+            finalSchedule.successfulDigestTimestamps,
+            [persistedDigestAt, firstRecoveryDigestAt]
+        )
+        XCTAssertEqual(finalSchedule.lastSuccessfulDigestAt, firstRecoveryDigestAt)
+    }
+
+    func testLegacyReceiptWithoutScheduleUsesRecoveryTime() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: clock.now(),
+            generated: "## Global Style\n- legacy recovery time"
+        )
+        try writeLegacyDigestArchiveReceipt(for: fixture.claim, in: directory)
+
+        clock.advance(by: 120)
+        let recoveredDigestAt = clock.now()
+        let recoveryProbe = EnvironmentDocumentStoreTestProbe()
+        recoveryProbe.failNextClaimClears(1)
+        let recoveryStore = EnvironmentDocumentStore(
+            fileURL: fixture.environmentURL,
+            testProbe: recoveryProbe
+        )
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: fixture.eventStore,
+            environmentStore: recoveryStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: recoveredDigestAt)
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        let upgradedReceipt = try XCTUnwrap(recoveryStore.loadDigestArchiveReceipt())
+        XCTAssertEqual(upgradedReceipt.successfulDigestAt, recoveredDigestAt)
+        let schedule = try XCTUnwrap(recoveryStore.loadDigestScheduleState())
+        XCTAssertEqual(schedule.successfulDigestTimestamps, [recoveredDigestAt])
+        XCTAssertEqual(schedule.lastSuccessfulDigestAt, recoveredDigestAt)
+    }
+
+    func testScheduleWriteFailureRecoversReceiptTimestampIntoOneBudgetSlot() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let successfulDigestAt = clock.now()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let environmentStore = EnvironmentDocumentStore(
+            fileURL: environmentURL,
+            testProbe: environmentProbe
+        )
+        let provider = SuspendedDigestLLMProvider()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        let firstDigest = Task {
+            await runtime.record(
+                makeContextEvent(
+                    timestamp: successfulDigestAt,
+                    rawInput: "claimed",
+                    committedText: "已声明"
+                )
+            )
+        }
+        try await waitUntilProviderReceivesRequest(provider)
+        try await eventStore.append(
+            makeContextEvent(
+                timestamp: successfulDigestAt,
+                rawInput: "tail",
+                committedText: "尾部"
+            )
+        )
+        environmentProbe.failNextScheduleWrites(1)
+        await provider.finish(generatedMarkdown: "## Global Style\n- receipt timestamp")
+        await firstDigest.value
+
+        let initialRequests = await provider.requests
+        XCTAssertEqual(initialRequests.count, 1)
+        let receipt = try XCTUnwrap(environmentStore.loadDigestArchiveReceipt())
+        XCTAssertEqual(receipt.successfulDigestAt, successfulDigestAt)
+        let scheduleBeforeRecovery = try XCTUnwrap(
+            environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertTrue(scheduleBeforeRecovery.successfulDigestTimestamps.isEmpty)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-claim.json").path
+            )
+        )
+
+        clock.advance(by: 120)
+        let recoveryProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let restartedRuntime = AIContextMemoryRuntime(
+            provider: recoveryProvider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await restartedRuntime.processIfNeeded(now: clock.now())
+
+        let recoveryRequests = await recoveryProvider.requests
+        XCTAssertTrue(recoveryRequests.isEmpty)
+        let scheduleAfterRecovery = try XCTUnwrap(
+            EnvironmentDocumentStore(fileURL: environmentURL).loadDigestScheduleState()
+        )
+        XCTAssertEqual(scheduleAfterRecovery.successfulDigestTimestamps, [successfulDigestAt])
+        XCTAssertEqual(scheduleAfterRecovery.lastSuccessfulDigestAt, successfulDigestAt)
+        let pendingAfterRecovery = try await eventStore.pendingEvents()
+        XCTAssertEqual(pendingAfterRecovery.map(\.rawInput), ["tail"])
     }
 
     func testArchiveReceiptWriteFailureRecoversFromProcessedContentWithoutProviderRetry() async throws {
         let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let initialDigestAt = clock.now()
         let eventsDirectory = directory.appendingPathComponent("events")
         let environmentURL = directory.appendingPathComponent("ENV.md")
         let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
@@ -2532,14 +4234,27 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: environmentStore,
             batchSize: 1,
             minimumInterval: 600,
-            requestGate: ProviderRequestGate()
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
         )
 
         let firstDigest = Task {
-            await runtime.record(makeContextEvent(rawInput: "claimed", committedText: "已声明"))
+            await runtime.record(
+                makeContextEvent(
+                    timestamp: initialDigestAt,
+                    rawInput: "claimed",
+                    committedText: "已声明"
+                )
+            )
         }
         try await waitUntilProviderReceivesRequest(provider)
-        try await eventStore.append(makeContextEvent(rawInput: "tail", committedText: "尾部"))
+        try await eventStore.append(
+            makeContextEvent(
+                timestamp: initialDigestAt,
+                rawInput: "tail",
+                committedText: "尾部"
+            )
+        )
         environmentProbe.failNextArchiveReceiptWrites(1)
         await provider.finish(generatedMarkdown: "## Global Style\n- receipt recovery")
         await firstDigest.value
@@ -2554,25 +4269,159 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 atPath: directory.appendingPathComponent("ENV.digest-archive-receipt.json").path
             )
         )
+        let scheduleBeforeRecovery = try XCTUnwrap(
+            environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertTrue(scheduleBeforeRecovery.successfulDigestTimestamps.isEmpty)
 
-        let recoveryProvider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must not run")
+        clock.advance(by: 120)
+        let recoveredDigestAt = clock.now()
+        let recoveryProbe = EnvironmentDocumentStoreTestProbe()
+        recoveryProbe.failNextClaimClears(1)
+        let recoveryProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let restartedRuntime = AIContextMemoryRuntime(
+            provider: recoveryProvider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: environmentURL,
+                testProbe: recoveryProbe
+            ),
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+        await restartedRuntime.processIfNeeded(now: clock.now())
+
+        let recoveryRequests = await recoveryProvider.requests
+        XCTAssertTrue(recoveryRequests.isEmpty)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-claim.json").path
+            )
+        )
+        let receiptAfterFirstRecovery = try XCTUnwrap(
+            EnvironmentDocumentStore(fileURL: environmentURL).loadDigestArchiveReceipt()
+        )
+        XCTAssertEqual(receiptAfterFirstRecovery.successfulDigestAt, recoveredDigestAt)
+        let scheduleAfterFirstRecovery = try XCTUnwrap(
+            EnvironmentDocumentStore(fileURL: environmentURL).loadDigestScheduleState()
+        )
+        XCTAssertEqual(scheduleAfterFirstRecovery.successfulDigestTimestamps, [recoveredDigestAt])
+
+        clock.advance(by: 120)
+        let secondRecoveryProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must still not run"
+        )
+        let secondRestart = AIContextMemoryRuntime(
+            provider: secondRecoveryProvider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+        await secondRestart.processIfNeeded(now: clock.now())
+
+        let secondRecoveryRequests = await secondRecoveryProvider.requests
+        let pendingAfterRecovery = try await eventStore.pendingEvents()
+        XCTAssertTrue(secondRecoveryRequests.isEmpty)
+        XCTAssertEqual(pendingAfterRecovery.map(\.rawInput), ["tail"])
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-claim.json").path
+            )
+        )
+        let finalSchedule = try XCTUnwrap(
+            EnvironmentDocumentStore(fileURL: environmentURL).loadDigestScheduleState()
+        )
+        XCTAssertEqual(finalSchedule.successfulDigestTimestamps, [recoveredDigestAt])
+        XCTAssertEqual(finalSchedule.lastSuccessfulDigestAt, recoveredDigestAt)
+    }
+
+    func testArchiveReceiptCleanupFailureDoesNotConsumeAnotherBudgetSlot() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let successfulDigestAt = clock.now()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let environmentProbe = EnvironmentDocumentStoreTestProbe()
+        let provider = SuspendedDigestLLMProvider()
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: environmentURL,
+                testProbe: environmentProbe
+            ),
+            batchSize: 1,
+            minimumInterval: 600,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        let firstDigest = Task {
+            await runtime.record(
+                makeContextEvent(
+                    timestamp: successfulDigestAt,
+                    rawInput: "cleanup",
+                    committedText: "清理回执"
+                )
+            )
+        }
+        try await waitUntilProviderReceivesRequest(provider)
+        environmentProbe.failNextArchiveReceiptClears(1)
+        await provider.finish(generatedMarkdown: "## Global Style\n- receipt cleanup")
+        await firstDigest.value
+
+        let initialRequests = await provider.requests
+        XCTAssertEqual(initialRequests.count, 1)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-claim.json").path
+            )
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-archive-receipt.json").path
+            )
+        )
+        let scheduleBeforeRestart = try XCTUnwrap(
+            EnvironmentDocumentStore(fileURL: environmentURL).loadDigestScheduleState()
+        )
+        XCTAssertEqual(scheduleBeforeRestart.successfulDigestTimestamps, [successfulDigestAt])
+
+        clock.advance(by: 120)
+        let recoveryProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
         let restartedRuntime = AIContextMemoryRuntime(
             provider: recoveryProvider,
             eventStore: TypingEventStore(eventsDirectoryURL: eventsDirectory),
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
             minimumInterval: 600,
-            requestGate: ProviderRequestGate()
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
         )
-        await restartedRuntime.processIfNeeded()
+
+        await restartedRuntime.processIfNeeded(now: clock.now())
 
         let recoveryRequests = await recoveryProvider.requests
-        let pendingAfterRecovery = try await TypingEventStore(
-            eventsDirectoryURL: eventsDirectory
-        ).pendingEvents()
         XCTAssertTrue(recoveryRequests.isEmpty)
-        XCTAssertEqual(pendingAfterRecovery.map(\.rawInput), ["tail"])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("ENV.digest-claim.json").path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("ENV.digest-archive-receipt.json").path
+            )
+        )
+        let scheduleAfterRestart = try XCTUnwrap(
+            EnvironmentDocumentStore(fileURL: environmentURL).loadDigestScheduleState()
+        )
+        XCTAssertEqual(scheduleAfterRestart.successfulDigestTimestamps, [successfulDigestAt])
+        XCTAssertEqual(scheduleAfterRestart.lastSuccessfulDigestAt, successfulDigestAt)
     }
 
     func testCorruptSameSizeProcessedArchiveBlocksReceiptRecovery() async throws {
@@ -2738,7 +4587,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let attemptsWhilePaused = await runtimeProbe.claimRecoveryAttemptCount
         let claimLoadsWhilePaused = await runtimeProbe.claimRecoveryClaimLoadCount
         XCTAssertEqual(attemptsWhilePaused, 1)
-        XCTAssertEqual(claimLoadsWhilePaused, 1)
+        XCTAssertEqual(claimLoadsWhilePaused, 0)
         XCTAssertEqual(gateProbe.preflightCheckCount, 0)
         XCTAssertEqual(environmentProbe.environmentDocumentReadCount, readsBeforeRecovery)
         let requestsWhileRecoveryPaused = await provider.requests
@@ -2834,7 +4683,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let attemptsWhilePaused = await runtimeProbe.claimRecoveryAttemptCount
         let claimLoadsWhilePaused = await runtimeProbe.claimRecoveryClaimLoadCount
         XCTAssertEqual(attemptsWhilePaused, 1)
-        XCTAssertEqual(claimLoadsWhilePaused, 1)
+        XCTAssertEqual(claimLoadsWhilePaused, 0)
         XCTAssertEqual(gateProbe.preflightCheckCount, 0)
         XCTAssertEqual(environmentProbe.environmentDocumentReadCount, readsBeforeRecovery)
 
@@ -3073,6 +4922,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
             minimumInterval: 10,
+            maximumPendingAge: 10,
+            digestBudgetWindow: 10,
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
@@ -3099,6 +4950,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: EnvironmentDocumentStore(fileURL: environmentURL),
             batchSize: 1,
             minimumInterval: 10,
+            maximumPendingAge: 10,
+            digestBudgetWindow: 10,
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
@@ -3111,6 +4964,288 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         let requestsAfterDeadline = await secondProvider.requests
         XCTAssertEqual(requestsAfterDeadline.count, 1)
         XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+    }
+
+    func testConservativeScheduleRepairBlocksRecordRecoveryAcrossRestartUntilDeadline() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let interval: TimeInterval = 600
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: clock.now(),
+            generated: "## Global Style\n- repaired schedule claim"
+        )
+        try writeLegacyDigestArchiveReceipt(for: fixture.claim, in: directory)
+        let receiptBeforeRepair = try XCTUnwrap(
+            fixture.environmentStore.loadDigestArchiveReceipt()
+        )
+        try Data("corrupt schedule".utf8).write(
+            to: directory.appendingPathComponent("ENV.digest-schedule.json"),
+            options: .atomic
+        )
+        let eventStoreProbe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: .default,
+            testProbe: eventStoreProbe
+        )
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe()
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: fixture.environmentURL
+            ),
+            batchSize: 1,
+            minimumInterval: interval,
+            maximumPendingAge: interval,
+            digestBudgetWindow: interval,
+            diagnosticSink: { _ in },
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now,
+            testProbe: runtimeProbe
+        )
+
+        await runtime.record(
+            makeContextEvent(
+                timestamp: clock.now(),
+                rawInput: "must-not-append-before-repair-deadline",
+                committedText: "修复期限前不得追加"
+            )
+        )
+
+        let expectedDeadline = clock.now().addingTimeInterval(interval)
+        let claimLoadsBeforeDeadline = await runtimeProbe.claimRecoveryClaimLoadCount
+        let providerRequestsBeforeDeadline = await provider.requests
+        XCTAssertEqual(claimLoadsBeforeDeadline, 0)
+        XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 0)
+        XCTAssertTrue(providerRequestsBeforeDeadline.isEmpty)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+        XCTAssertEqual(
+            try fixture.environmentStore.loadDigestClaim(),
+            fixture.claim
+        )
+        XCTAssertEqual(
+            try fixture.environmentStore.loadDigestArchiveReceipt(),
+            receiptBeforeRepair
+        )
+        let repairedSchedule = try XCTUnwrap(
+            fixture.environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(repairedSchedule.pendingSince, clock.now())
+        XCTAssertNil(repairedSchedule.lastSuccessfulDigestAt)
+        XCTAssertEqual(repairedSchedule.nextEligibleAt, expectedDeadline)
+        XCTAssertEqual(repairedSchedule.pendingEventCount, 0)
+        XCTAssertTrue(repairedSchedule.successfulDigestTimestamps.isEmpty)
+        let firstDeadline = await runtime.scheduledDeadlineForTesting()
+        XCTAssertEqual(firstDeadline, expectedDeadline)
+
+        let restartedEventStoreProbe = TypingEventStoreTestProbe()
+        let restartedRuntimeProbe = AIContextMemoryRuntimeTestProbe()
+        let restartedProvider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must still not run"
+        )
+        let restartedRuntime = AIContextMemoryRuntime(
+            provider: restartedProvider,
+            eventStore: TypingEventStore(
+                eventsDirectoryURL: directory.appendingPathComponent("events"),
+                retentionPolicy: .default,
+                testProbe: restartedEventStoreProbe
+            ),
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: fixture.environmentURL
+            ),
+            batchSize: 1,
+            minimumInterval: interval,
+            maximumPendingAge: interval,
+            digestBudgetWindow: interval,
+            diagnosticSink: { _ in },
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now,
+            testProbe: restartedRuntimeProbe
+        )
+
+        await restartedRuntime.processIfNeeded(now: clock.now())
+
+        let restartedClaimLoads = await restartedRuntimeProbe.claimRecoveryClaimLoadCount
+        let restartedRequests = await restartedProvider.requests
+        XCTAssertEqual(restartedClaimLoads, 0)
+        XCTAssertEqual(restartedEventStoreProbe.digestSnapshotDecodeCount, 0)
+        XCTAssertTrue(restartedRequests.isEmpty)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+        XCTAssertEqual(
+            try fixture.environmentStore.loadDigestClaim(),
+            fixture.claim
+        )
+        XCTAssertEqual(
+            try fixture.environmentStore.loadDigestArchiveReceipt(),
+            receiptBeforeRepair
+        )
+        XCTAssertEqual(
+            try fixture.environmentStore.loadDigestScheduleState(),
+            repairedSchedule
+        )
+        let restartedDeadline = await restartedRuntime.scheduledDeadlineForTesting()
+        XCTAssertEqual(restartedDeadline, expectedDeadline)
+
+        clock.advance(by: interval + 1)
+        let recoveryNow = clock.now()
+        await restartedRuntime.processIfNeeded(now: recoveryNow)
+
+        let claimLoadsAfterDeadline = await restartedRuntimeProbe.claimRecoveryClaimLoadCount
+        let requestsAfterDeadline = await restartedProvider.requests
+        XCTAssertEqual(claimLoadsAfterDeadline, 1)
+        XCTAssertTrue(requestsAfterDeadline.isEmpty)
+        XCTAssertNil(try fixture.environmentStore.loadDigestClaim())
+        XCTAssertNil(try fixture.environmentStore.loadDigestArchiveReceipt())
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+        let recoveredSchedule = try XCTUnwrap(
+            fixture.environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(recoveredSchedule.lastSuccessfulDigestAt, recoveryNow)
+        XCTAssertEqual(
+            recoveredSchedule.successfulDigestTimestamps,
+            [recoveryNow]
+        )
+        XCTAssertNil(recoveredSchedule.nextEligibleAt)
+        let deadlineAfterRecovery = await restartedRuntime.scheduledDeadlineForTesting()
+        XCTAssertNil(deadlineAfterRecovery)
+    }
+
+    func testConservativeScheduleRepairBlocksProcessClaimRecoveryBeforeDeadline() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let interval: TimeInterval = 600
+        let fixture = try await makeArchivedDigestClaimRecoveryFixture(
+            directory: directory,
+            timestamp: clock.now(),
+            generated: "## Global Style\n- semantic repair claim"
+        )
+        try writeLegacyDigestArchiveReceipt(for: fixture.claim, in: directory)
+        let receiptBeforeRepair = try XCTUnwrap(
+            fixture.environmentStore.loadDigestArchiveReceipt()
+        )
+        try fixture.environmentStore.saveDigestScheduleState(
+            EnvironmentDigestScheduleState(
+                pendingSince: clock.now(),
+                lastSuccessfulDigestAt: nil,
+                nextEligibleAt: clock.now().addingTimeInterval(-1),
+                pendingEventCount: 1,
+                successfulDigestTimestamps: []
+            )
+        )
+        let eventStoreProbe = TypingEventStoreTestProbe()
+        let eventStore = TypingEventStore(
+            eventsDirectoryURL: directory.appendingPathComponent("events"),
+            retentionPolicy: .default,
+            testProbe: eventStoreProbe
+        )
+        let runtimeProbe = AIContextMemoryRuntimeTestProbe()
+        let provider = DigestLLMProvider(
+            generatedMarkdown: "## Global Style\n- must not run"
+        )
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: EnvironmentDocumentStore(
+                fileURL: fixture.environmentURL
+            ),
+            batchSize: 1,
+            minimumInterval: interval,
+            maximumPendingAge: interval,
+            digestBudgetWindow: interval,
+            diagnosticSink: { _ in },
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now,
+            testProbe: runtimeProbe
+        )
+
+        await runtime.processIfNeeded(now: clock.now())
+
+        let claimLoads = await runtimeProbe.claimRecoveryClaimLoadCount
+        let providerRequests = await provider.requests
+        XCTAssertEqual(claimLoads, 0)
+        XCTAssertEqual(eventStoreProbe.digestSnapshotDecodeCount, 0)
+        XCTAssertTrue(providerRequests.isEmpty)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 0)
+        XCTAssertEqual(
+            try fixture.environmentStore.loadDigestClaim(),
+            fixture.claim
+        )
+        XCTAssertEqual(
+            try fixture.environmentStore.loadDigestArchiveReceipt(),
+            receiptBeforeRepair
+        )
+        let repairedSchedule = try XCTUnwrap(
+            fixture.environmentStore.loadDigestScheduleState()
+        )
+        XCTAssertEqual(repairedSchedule.pendingSince, clock.now())
+        XCTAssertNil(repairedSchedule.lastSuccessfulDigestAt)
+        XCTAssertEqual(
+            repairedSchedule.nextEligibleAt,
+            clock.now().addingTimeInterval(interval)
+        )
+        XCTAssertEqual(repairedSchedule.pendingEventCount, 0)
+        XCTAssertTrue(repairedSchedule.successfulDigestTimestamps.isEmpty)
+        let scheduledDeadline = await runtime.scheduledDeadlineForTesting()
+        XCTAssertEqual(
+            scheduledDeadline,
+            clock.now().addingTimeInterval(interval)
+        )
+    }
+
+    func testLegacyScheduleWithoutDigestHistoryRemainsReadableAndPreservesInterval() async throws {
+        let directory = makeTemporaryDirectory()
+        let clock = ManualContextClock()
+        let sixHours: TimeInterval = 6 * 60 * 60
+        let now = clock.now()
+        let eventsDirectory = directory.appendingPathComponent("events")
+        let environmentURL = directory.appendingPathComponent("ENV.md")
+        let eventStore = TypingEventStore(eventsDirectoryURL: eventsDirectory)
+        try await eventStore.append(
+            makeContextEvent(rawInput: "legacy-tail", committedText: "旧排程尾部")
+        )
+        let legacySchedule: [String: Any] = [
+            "pendingSince": now.timeIntervalSinceReferenceDate,
+            "lastSuccessfulDigestAt": now.timeIntervalSinceReferenceDate,
+            "nextEligibleAt": now.addingTimeInterval(sixHours).timeIntervalSinceReferenceDate,
+            "pendingEventCount": 1
+        ]
+        try JSONSerialization.data(
+            withJSONObject: legacySchedule,
+            options: [.sortedKeys]
+        ).write(
+            to: directory.appendingPathComponent("ENV.digest-schedule.json"),
+            options: .atomic
+        )
+        let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+
+        let decoded = try XCTUnwrap(environmentStore.loadDigestScheduleState())
+        XCTAssertTrue(decoded.successfulDigestTimestamps.isEmpty)
+        XCTAssertEqual(decoded.lastSuccessfulDigestAt, now)
+
+        let provider = DigestLLMProvider(generatedMarkdown: "## Global Style\n- must wait")
+        let runtime = AIContextMemoryRuntime(
+            provider: provider,
+            eventStore: eventStore,
+            environmentStore: environmentStore,
+            batchSize: 1,
+            minimumInterval: sixHours,
+            maximumPendingAge: 24 * 60 * 60,
+            digestBudgetWindow: 24 * 60 * 60,
+            maximumDigestsPerWindow: 4,
+            requestGate: ProviderRequestGate(),
+            nowProvider: clock.now
+        )
+
+        await runtime.processIfNeeded(now: now)
+
+        let requests = await provider.requests
+        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(try eventStore.inventory().eventCount, 1)
     }
 
     func testSemanticallyInvalidScheduleStateRebuildsConservativeDeadline() async throws {
@@ -3128,9 +5263,9 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 )
             case 1:
                 state = EnvironmentDigestScheduleState(
-                    pendingSince: now.addingTimeInterval(1),
+                    pendingSince: now.addingTimeInterval(11),
                     lastSuccessfulDigestAt: nil,
-                    nextEligibleAt: now.addingTimeInterval(11),
+                    nextEligibleAt: now.addingTimeInterval(12),
                     pendingEventCount: 1
                 )
             default:
@@ -3161,6 +5296,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
                 environmentStore: environmentStore,
                 batchSize: 1,
                 minimumInterval: 10,
+                maximumPendingAge: 10,
+                digestBudgetWindow: 10,
                 requestGate: ProviderRequestGate(),
                 nowProvider: clock.now
             )
@@ -3206,6 +5343,8 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
             environmentStore: environmentStore,
             batchSize: 1,
             minimumInterval: 10,
+            maximumPendingAge: 10,
+            digestBudgetWindow: 10,
             requestGate: ProviderRequestGate(),
             nowProvider: clock.now
         )
@@ -3501,6 +5640,7 @@ final class AIContextMemoryRuntimeTests: XCTestCase {
         )
 
         clock.advance(by: 61)
+        await runtime.cancelGateAvailabilityWaitForTesting()
         let blockerProbe = ContextGateProbe()
         let blocker = Task {
             try await gate.execute(
@@ -3741,8 +5881,13 @@ private actor ContextGateProbe {
     }
 }
 
-private func makeContextEvent(rawInput: String, committedText: String) -> AITypingEvent {
+private func makeContextEvent(
+    timestamp: Date = Date(),
+    rawInput: String,
+    committedText: String
+) -> AITypingEvent {
     AITypingEvent(
+        timestamp: timestamp,
         rawInput: rawInput,
         committedText: committedText,
         commitKind: .traditional,
@@ -3770,6 +5915,28 @@ private actor DigestLLMProvider: LLMProvider {
         return LLMResponse(candidates: [
             LLMCandidate(text: generatedMarkdown, confidence: 0.9)
         ])
+    }
+
+    var requests: [LLMRequest] {
+        recordedRequests
+    }
+}
+
+private actor RateLimitedDigestLLMProvider: LLMProvider {
+    nonisolated let providerName = "rate-limited-digest"
+    private let retryAfterSeconds: TimeInterval
+    private var recordedRequests: [LLMRequest] = []
+
+    init(retryAfterSeconds: TimeInterval) {
+        self.retryAfterSeconds = retryAfterSeconds
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        throw ProviderRateLimitError(
+            retryAfterSeconds: retryAfterSeconds,
+            bodyByteCount: 128
+        )
     }
 
     var requests: [LLMRequest] {
@@ -3994,6 +6161,101 @@ private final class PendingAttributesErrorFileManager: FileManager, @unchecked S
         if path == pendingPath { throw error }
         return try super.attributesOfItem(atPath: path)
     }
+}
+
+private struct ArchivedDigestClaimRecoveryFixture {
+    let eventStore: TypingEventStore
+    let environmentStore: EnvironmentDocumentStore
+    let environmentURL: URL
+    let claim: EnvironmentDigestClaim
+}
+
+private func makeArchivedDigestClaimRecoveryFixture(
+    directory: URL,
+    timestamp: Date,
+    generated: String
+) async throws -> ArchivedDigestClaimRecoveryFixture {
+    let eventStore = TypingEventStore(
+        eventsDirectoryURL: directory.appendingPathComponent("events")
+    )
+    try await eventStore.append(
+        makeContextEvent(
+            timestamp: timestamp,
+            rawInput: "claimed-recovery",
+            committedText: "已归档"
+        )
+    )
+    let snapshot = try eventStore.pendingDigestSnapshot()
+    let environmentURL = directory.appendingPathComponent("ENV.md")
+    let environmentStore = EnvironmentDocumentStore(fileURL: environmentURL)
+    _ = try environmentStore.replaceGeneratedSection(with: generated)
+    let claim = EnvironmentDigestClaim(
+        claimedPrefixSHA256: AIDocumentSnapshot.hash(snapshot.rawContent),
+        claimedPrefixByteCount: snapshot.rawData.count,
+        claimedEventCount: snapshot.claimedEventCount,
+        generatedSHA256: AIDocumentSnapshot.hash(generated),
+        providerGeneration: 0
+    )
+    try environmentStore.saveDigestClaim(claim)
+    _ = try eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
+    return ArchivedDigestClaimRecoveryFixture(
+        eventStore: eventStore,
+        environmentStore: environmentStore,
+        environmentURL: environmentURL,
+        claim: claim
+    )
+}
+
+private func digestArchiveReceipt(
+    for claim: EnvironmentDigestClaim,
+    successfulDigestAt: Date
+) -> EnvironmentDigestArchiveReceipt {
+    EnvironmentDigestArchiveReceipt(
+        claimedPrefixSHA256: claim.claimedPrefixSHA256,
+        claimedPrefixByteCount: claim.claimedPrefixByteCount,
+        claimedEventCount: claim.claimedEventCount,
+        generatedSHA256: claim.generatedSHA256,
+        archivedByteCount: claim.claimedPrefixByteCount,
+        successfulDigestAt: successfulDigestAt
+    )
+}
+
+private func writeLegacyDigestArchiveReceipt(
+    for claim: EnvironmentDigestClaim,
+    in directory: URL
+) throws {
+    let receipt: [String: Any] = [
+        "claimedPrefixSHA256": claim.claimedPrefixSHA256,
+        "claimedPrefixByteCount": claim.claimedPrefixByteCount,
+        "claimedEventCount": claim.claimedEventCount,
+        "generatedSHA256": claim.generatedSHA256,
+        "archivedByteCount": claim.claimedPrefixByteCount
+    ]
+    let receiptURL = directory.appendingPathComponent("ENV.digest-archive-receipt.json")
+    try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+        .write(to: receiptURL, options: .atomic)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o600],
+        ofItemAtPath: receiptURL.path
+    )
+}
+
+private func writeLegacyDigestSchedule(
+    lastSuccessfulDigestAt: Date,
+    pendingEventCount: Int,
+    in directory: URL
+) throws {
+    let schedule: [String: Any] = [
+        "lastSuccessfulDigestAt": lastSuccessfulDigestAt.timeIntervalSinceReferenceDate,
+        "pendingEventCount": pendingEventCount
+    ]
+    let scheduleURL = directory.appendingPathComponent("ENV.digest-schedule.json")
+    try JSONSerialization.data(withJSONObject: schedule, options: [.sortedKeys])
+        .write(to: scheduleURL, options: .atomic)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o600],
+        ofItemAtPath: scheduleURL.path
+    )
 }
 
 private func seedProcessedRetentionArchives(
