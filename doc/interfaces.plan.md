@@ -774,8 +774,13 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 `AIContextMemoryRuntime`:
 
 - records only committed text, not marked text
-- requires a usable provider lease before a registry-backed event is appended,
-  so text entered without an available provider is not retained for later upload
+- requires a usable provider lease before any registry-backed event is
+  appended, including the gate-persistence-blocked append-only fallback, so
+  text entered with a missing or disabled provider is not retained for later
+  upload; an available fallback lease applies the current generation without
+  starting a provider request; after lease lookup, a new claim-recovery backoff
+  drops the event, a recovered episode uses normal append and scheduling, and
+  only the current blocked episode remains append-only
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
 - limits AI raw input and locked prefix to 4 KiB UTF-8 before dispatch; event
   text fields are bounded to 2,048 Unicode scalars before JSONL append
@@ -833,7 +838,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   post-claim tail receives its own pending-age anchor
 - returns before digest-claim, pending-prefix, or ENV reads while the shared
   gate is persistence-blocked; one actor deadline rechecks the gate at its retry
-  time, and a new Provider generation may revalidate it immediately
+  time; fallback lease application preserves that deadline, while a new Provider
+  generation may revalidate it immediately on normal processing paths; lease
+  waits never revive an older retry deadline
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, `context_archive_pruned`,
   `context_gate_persistence_blocked`, and

@@ -83,8 +83,19 @@ Status: Active
   cooldown or in-flight ownership. Ordinary 6-hour and rolling-budget
   eligibility continue to use the runtime's cadence deadline.
 - Persisted-claim recovery preflights gate persistence before reading claim
-  metadata. A blocked gate schedules the existing retry without claim, JSONL,
-  or ENV reads and resumes normal local recovery after persistence is repaired.
+  metadata. A blocked gate schedules the existing retry without claim metadata,
+  digest-snapshot JSONL, or ENV reads and resumes normal local recovery after
+  persistence is repaired.
+  Its registry-backed append-only fallback first obtains a usable provider
+  lease and applies the current generation. A missing or disabled provider
+  returns before JSONL creation or append; an available provider retains the
+  existing prefix-protected bounded append without starting a network request
+  or cancelling the gate-persistence retry scheduled by the blocked preflight.
+  Recovery is revalidated after the lease await: a newly installed claim
+  backoff drops the event without applying the lease, completed recovery reuses
+  the lease through normal append and scheduling, and only a still-current
+  blocked episode uses fallback append. No stale retry deadline is restored.
+  Direct-provider fallback behavior is unchanged.
 
 ## Test Plan
 
@@ -110,8 +121,12 @@ Status: Active
   conservative repair gating on record and process paths across restart, zero
   claim and snapshot reads before the repair deadline, post-deadline legacy
   recovery, zero claim reads while gate persistence is blocked, resumed claim
-  recovery after repair, and realtime recommendation independence from the
-  digest success budget.
+  recovery after repair, missing and disabled registry providers retaining no
+  fallback event, usable registry fallback append without provider transport,
+  automatic persisted-claim recovery after that fallback without new input,
+  lease-wait claim backoff remaining fail-closed, recovered-during-lease events
+  receiving normal processing or a deadline without another input,
+  and realtime recommendation independence from the digest success budget.
 - GitHub Actions must run the focused suites, full `swift test`, and
   `./scripts/perf-input-hotpath.sh`. This writer runs only `git diff --check`
   locally.

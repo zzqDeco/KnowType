@@ -151,14 +151,20 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   serialized so later appends remain pending and stale provider generations
   cannot persist results; registry-backed claim creation starts inside the same
   final current-lease guard as ENV and archive persistence. Registry-backed
-  recording requires a usable provider
-  lease before appending, so events entered while no provider is available are
-  not retained for a later provider. A path-shared inventory makes ordinary
-  append and scheduling decisions constant-cost after the first scan and keeps
+  recording, including the gate-persistence-blocked append-only fallback,
+  requires a usable provider lease before appending, so events entered while a
+  provider is missing or disabled are not retained for a later provider. A
+  usable fallback lease applies the current generation semantics but starts no
+  network request, and applying that lease preserves the gate-persistence retry
+  deadline already scheduled by the blocked preflight. After the asynchronous
+  lease lookup, recovery is revalidated: a new claim backoff drops the event,
+  completed recovery returns to normal append and scheduling, and only a still
+  blocked episode uses the append-only fallback. A path-shared inventory makes
+  ordinary append and scheduling decisions constant-cost after the first scan and keeps
   the oldest retained event timestamp as the pending-age anchor. Pending
   data is capped at 500 events/1 MiB, digest claims at 50 events/48 KiB, and a
   same-generation failure cooldown or shared gate-persistence backoff returns
-  before reading pending JSONL. Production digest eligibility requires either
+  before digest snapshot decoding. Production digest eligibility requires either
   50 pending events or a 24-hour pending age, at least 6 hours since the last
   successful digest, and fewer than four successful digests in the preceding
   rolling 24 hours. Successful timestamps and the next deadline are stored in

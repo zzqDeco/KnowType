@@ -351,7 +351,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         digestBudgetWindow: TimeInterval = 24 * 60 * 60,
         maximumDigestsPerWindow: Int = 4,
         nowProvider: @escaping @Sendable () -> Date = Date.init,
-        testProbe: AIContextMemoryRuntimeTestProbe
+        testProbe: AIContextMemoryRuntimeTestProbe,
+        claimRecoverySleeper: (@Sendable (UInt64) async -> Void)? = nil
     ) {
         self.provider = nil
         self.providerRegistry = providerRegistry
@@ -369,16 +370,30 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
         self.testProbe = testProbe
         self.claimRecoveryBackoff = Self.defaultClaimRecoveryBackoff
-        self.claimRecoverySleeper = nil
+        self.claimRecoverySleeper = claimRecoverySleeper
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
 
     public func record(_ event: AITypingEvent) async {
         guard claimRecoveryRetryAt == nil else { return }
         if digestInFlight { digestRerunRequested = true }
-        let preparation = await preparePersistedClaimForRecord(now: nowProvider())
+        var preparation = await preparePersistedClaimForRecord(now: nowProvider())
         guard preparation != .blocked else { return }
         let sanitizedEvent = sanitized(event)
+        var lease: ProviderRuntimeLease? = nil
+        if preparation == .appendWithoutProcessing, let providerRegistry {
+            let loaded = await providerRegistry.leaseForEligibleDispatch()
+            guard claimRecoveryRetryAt == nil else { return }
+            guard loaded.provider != nil else { return }
+            preparation = await preparePersistedClaimForRecord(now: nowProvider())
+            guard claimRecoveryRetryAt == nil, preparation != .blocked else { return }
+            if preparation == .appendWithoutProcessing {
+                applyProviderLease(loaded, preservingGatePersistenceRetry: true)
+            } else {
+                applyProviderLease(loaded)
+                lease = loaded
+            }
+        }
         if preparation == .appendWithoutProcessing {
             do {
                 let prefixProtection = digestClaimProtection.map {
@@ -392,14 +407,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             } catch {}
             return
         }
-        let lease: ProviderRuntimeLease?
-        if let providerRegistry {
+        if let providerRegistry, lease == nil {
             let loaded = await providerRegistry.leaseForEligibleDispatch()
             guard loaded.provider != nil else { return }
             applyProviderLease(loaded)
             lease = loaded
-        } else {
-            lease = nil
         }
         do {
             let prefixProtection = digestClaimProtection.map {
@@ -1003,13 +1015,18 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         clearClaimRecoveryBlock()
     }
 
-    private func applyProviderLease(_ lease: ProviderRuntimeLease) {
+    private func applyProviderLease(
+        _ lease: ProviderRuntimeLease,
+        preservingGatePersistenceRetry: Bool = false
+    ) {
         let changed = providerGeneration != lease.generation || providerIdentity != lease.fingerprint
         providerGeneration = lease.generation
         providerIdentity = lease.fingerprint
         if changed {
             resetClaimRecoveryState()
-            cancelGatePersistenceRetry()
+            if !preservingGatePersistenceRetry {
+                cancelGatePersistenceRetry()
+            }
             cancelGateAvailabilityWait()
             lastDigestFailureAt = nil
             deferredDiagnosticKey = nil
@@ -1382,8 +1399,13 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         deadlineTask?.cancel()
         scheduledDeadlineAt = nil
         let delay = deadlineNanoseconds(until: retryAt, now: nowProvider())
+        let sleeper = claimRecoverySleeper
         deadlineTask = Task { [weak self] in
-            if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            if let sleeper {
+                await sleeper(delay)
+            } else if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
             guard !Task.isCancelled, let self else { return }
             await self.gatePersistenceRetryDidWake(retryAt)
         }
