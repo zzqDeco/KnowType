@@ -43,13 +43,43 @@ Status: Active
 - Store a bounded list of successful digest timestamps in
   `ENV.digest-schedule.json`. Missing lists decode as empty for old schedule
   files; a legacy `lastSuccessfulDigestAt` remains a minimum-interval anchor.
+  Loading sorts and exactly deduplicates the finite storage-bounded list without
+  applying a startup-relative rolling cutoff. Eligibility and deferral normalize
+  a temporary current-window copy, so ordinary forward-clock work ignores stale
+  anchors while ordinary schedule writes preserve them for a supported
+  completion-time rollback. Live success or claim recovery replaces actor state
+  with completion-relative history bounded to `maximumDigestsPerWindow`.
   A bounded system-clock rollback retains future-relative success anchors until
   their original rolling-window expiry, in process and after restart; dates
   beyond the existing schedule bound are still treated as corrupt.
   Only a committed or locally recovered successful digest consumes this
-  budget. The archive receipt records the exact success timestamp before the
-  schedule write, so schedule, receipt, or claim cleanup recovery reuses one
-  durable budget slot across restarts. Receipt timestamps use the same bounded
+  budget. Registry-backed live success samples wall time inside the final
+  `commitIfCurrent` operation after generation/revision waits; direct-provider
+  success invokes the same persistence closure. A bounded rollback advances the
+  latest prior anchor by its smallest representable `Date` successor, while
+  keeping the result at or below the existing completion-relative future bound.
+  History normalization merges the retained list with the prior last-success
+  anchor only while it is inside the completion-relative rolling window and
+  future bound. When that prior anchor is within the schedule's `<1 ms` semantic
+  tolerance of the retained history's latest entry, the retained entry already
+  represents it; other anchors, including the current success, retain exact
+  identity. History is then sorted and exactly deduplicated. Live success and
+  completed-claim recovery include the current anchor and keep the newest bounded
+  `maximumDigestsPerWindow` slots. Receipt, rolling history, last success,
+  recovery pending-tail bound/fallback, and both persisted and in-memory
+  eligibility use that same value, so request latency does not shorten either
+  the 6-hour interval or rolling window. If the prior anchor is
+  already at the upper bound, the closure fails before claim, ENV, archive,
+  receipt, or schedule-success mutation. Pending data and existing budget slots
+  remain intact for the local commit-failure cooldown and missing-claim recovery
+  path. The receipt records the exact success timestamp before archive creation
+  or pending-prefix removal; a receipt-write failure leaves the claimed prefix
+  pending and unarchived. Recovery never treats a receipt as archive proof: it
+  validates claim/ENV and processed/pending facts, ensures the receipt before
+  any pending-prefix archive, and reuses its timestamp for archive/schedule
+  recovery. A missing receipt uses bounded recovery time, including a legacy
+  valid archive without a receipt.
+  Receipt timestamps use the same bounded
   future-anchor rule as the schedule during a clock rollback. A legacy receipt
   has no claim-linked timestamp, so schedule time and pending count cannot prove
   that they describe the same success. Recovery therefore charges the bounded
@@ -61,7 +91,9 @@ Status: Active
 - Load and validate the persisted digest schedule before record-first claim
   recovery. A blocked schedule prevents both recovery and append, so local
   recovery always extends the durable rolling history instead of replacing it
-  from an empty actor state.
+  from an empty actor state. Recovery normalization also merges the actor's
+  last-success anchor under the same semantic canonicalization, window/bound
+  filter, exact deduplication, and newest-slot runtime bound.
 - Treat a successfully written conservative schedule repair as a deadline gate,
   including after restart. Before that deadline both record and process return
   without claim or pending reads, append, provider work, or schedule overwrite;
@@ -107,13 +139,24 @@ Status: Active
   intervening failure or valid hint, old persistence JSON, unchanged non-429
   backoff, and bounded recovery from a distant-future persisted deadline without
   unsafe sleep conversion.
-- Context tests cover the 6-hour interval, four-per-24-hour rolling budget,
-  bounded clock rollback in process and across restart, 24-hour maximum pending
-  age, old-schedule decoding, restart persistence,
+- Context tests cover receipt-write failure before archive, persisted-receipt
+  archive failure across restart, completion-time
+  receipt/history/last-success/tail/deadline anchoring with a suspended provider
+  and guarded-commit wait, the 6-hour interval, sampling after registry revision
+  refresh, four-per-24-hour rolling budget, restoration of dispatch- or
+  startup-window-pruned anchors after in-flight rollback, including four
+  completion-window anchors and recovery, runtime-budget
+  trimming after rollback restoration and schedule-write recovery without
+  double-counting a semantically equivalent prior anchor,
+  saturated-anchor failure before claim or success-state mutation, 24-hour
+  maximum pending age,
+  old-schedule decoding,
+  restart persistence,
   no tail catch-up, immediate scheduling to a fresh long 429 deadline, no
   snapshot decode during that cooldown, generation-change wake without new
   input, exact one-slot claim recovery across schedule/receipt/cleanup
-  failures, bounded-future receipt recovery after clock rollback, conservative
+  failures, bounded-future receipt recovery after clock rollback with below-batch
+  pending age anchored to the recovered success, conservative
   legacy receipt charging with a stale same-count schedule, one-time charging
   when the schedule already contains the success, legacy recovery without a
   schedule, record-first recovery preserving existing rolling history before
@@ -133,8 +176,9 @@ Status: Active
 
 ## Assumptions
 
-- The rolling window is based on successful digest commit timestamps; failed
-  provider attempts do not consume a success slot.
+- The rolling window is based on the bounded monotonic timestamp sampled inside
+  the final persistence operation after provider completion and registry waits;
+  failed provider or local commit attempts do not consume a success slot.
 - Existing pending JSONL is retained and continues to use the current
   500-event/1-MiB hard limit and 450-event/768-KiB compaction target.
 - Realtime recommendation and Context Digest share provider health and

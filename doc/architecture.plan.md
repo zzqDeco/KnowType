@@ -169,8 +169,32 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   successful digest, and fewer than four successful digests in the preceding
   rolling 24 hours. Successful timestamps and the next deadline are stored in
   the existing privacy-safe schedule file, so restart does not reset the
-  budget. A successful prefix with a pending tail waits for the next 6-hour
-  window instead of starting a catch-up request. A single actor-owned deadline
+  budget. Schedule loading keeps the storage-bounded history sorted and exactly
+  deduplicated without applying the startup clock's rolling-window cutoff.
+  Eligibility checks normalize a temporary copy, so stale anchors do not block
+  forward-clock work while supported completion-time rollback can re-evaluate
+  every loaded anchor. A live provider success samples wall time inside the
+  final current-generation persistence operation, after provider completion and
+  all registry generation/revision waits. The completion sample is the success
+  anchor unless clock rollback requires the prior anchor's smallest
+  representable successor; that monotonic value must remain inside the existing
+  future-anchor bound. Completion-relative history normalization includes the
+  actor's prior last-success anchor only while it remains inside the
+  completion-relative rolling window and future bound, then sorts and
+  deduplicates it. A prior anchor
+  within the schedule's `<1 ms` semantic tolerance of the retained history's
+  latest entry represents that same prior success and does not consume another
+  slot; other anchors, including the current success, retain exact identity.
+  After the current success anchor is included, live success and completed-claim
+  recovery keep only the newest runtime-budget slots, including that anchor. The
+  same final anchor drives the receipt, history, last-success state, recovery
+  pending-tail bound/fallback, and persisted/in-memory deadline, so request
+  latency cannot consume the next 6-hour or rolling-budget window. If the prior
+  anchor already equals the completion sample's upper bound, the commit fails
+  before claim, ENV, archive, receipt, or schedule-success mutation; pending data
+  and the existing budget remain intact for the local commit-failure cooldown path. A
+  successful prefix with a pending tail waits for the next 6-hour window instead
+  of starting a catch-up request. A single actor-owned deadline
   task sleeps to the real batch-age, cadence, provider-cooldown, or
   shared-gate-availability deadline, including a multi-day 429 recovery hint.
   The first below-batch pending event receives its own forced deadline. While the actor is
@@ -196,10 +220,16 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   archive receipt metadata containing only timestamps, counts, and hashes. The
   schedule accepts legacy JSON without the rolling-success list and uses its
   last-success timestamp as the existing cadence anchor.
-  Recovery bounded-reads the deterministic processed archive and verifies its
-  byte count and SHA-256 before treating a missing receipt as completed. It then
-  distinguishes a missing or provably different pending prefix from an exact
-  prefix; truncated or unreadable pending evidence remains blocked. A claim
+  A live success writes its final-anchor receipt before processed archive
+  creation or claimed-prefix removal; if that write fails, the claimed prefix
+  remains pending and no processed archive is created. The receipt preserves
+  time but is not archive proof. Recovery validates claim and ENV plus the
+  processed archive's byte count and SHA-256 or the exact pending prefix. Before
+  any recovery archive it validates or creates the receipt and then reuses that
+  timestamp for schedule persistence. A missing receipt uses bounded recovery
+  time, including the legacy boundary where the archive is already valid.
+  Truncated or unreadable
+  pending evidence remains blocked. A claim
   whose generated hash is not yet present in ENV remains blocked, and corrupt
   claim evidence is retried at most once per bounded 60-second actor deadline;
   intervening records are rejected without another recovery read or append. A
