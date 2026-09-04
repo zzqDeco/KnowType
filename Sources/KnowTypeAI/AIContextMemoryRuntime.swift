@@ -128,6 +128,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private static let maximumBudgetWindow: TimeInterval = 7 * 24 * 60 * 60
     private static let defaultClaimRecoveryBackoff: TimeInterval = 60
     private static let maximumClaimRecoveryBackoff: TimeInterval = 15 * 60
+    private static let successfulDigestAnchorSemanticTolerance: TimeInterval = 0.001
 
     private struct GateWaitKey: Equatable {
         var identity: String
@@ -178,6 +179,13 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         var archiveResult: TypingEventArchiveResult
         var pendingTailCount: Int
         var pendingTailSince: Date?
+        var successAnchor: Date
+        var successfulDigestTimestamps: [Date]
+    }
+
+    private struct DigestSuccessState: Sendable {
+        var anchor: Date
+        var successfulDigestTimestamps: [Date]
     }
 
     private let provider: (any LLMProvider)?
@@ -691,21 +699,29 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 ),
                 providerGeneration: requestGeneration
             )
-            let successHistory = successfulDigestHistory(adding: now, relativeTo: now)
+            let successNowProvider = nowProvider
+            let previousSuccessHistory = successfulDigestTimestamps
+            let previousSuccessAnchor = lastDigestAt
             let successBatchSize = batchSize
             let successMinimumInterval = minimumInterval
             let successMaximumPendingAge = maximumPendingAge
             let successBudgetWindow = digestBudgetWindow
             let successMaximumDigestsPerWindow = maximumDigestsPerWindow
-            let persistAfterClaim: @Sendable () throws -> DigestCommitResult = {
+            let successMaximumScheduleAnchorOffset = maximumScheduleAnchorOffset
+            let persistSuccess: @Sendable () throws -> DigestCommitResult = {
+                let completionNow = successNowProvider()
+                let successState = try Self.liveDigestSuccessState(
+                    sampledAt: completionNow,
+                    previousSuccessfulDigestTimestamps: previousSuccessHistory,
+                    previousSuccessAnchor: previousSuccessAnchor,
+                    digestBudgetWindow: successBudgetWindow,
+                    maximumDigestsPerWindow: successMaximumDigestsPerWindow,
+                    maximumScheduleAnchorOffset: successMaximumScheduleAnchorOffset
+                )
+                let successAnchor = successState.anchor
+                let successHistory = successState.successfulDigestTimestamps
+                try self.environmentStore.saveDigestClaim(claim)
                 _ = try self.environmentStore.replaceGeneratedSection(with: generated)
-                let result = try self.eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
-                guard self.eventStore.hasProcessedArchive(
-                    prefixSHA256: Self.sha256(snapshot.rawData),
-                    byteCount: snapshot.rawData.count
-                ) else {
-                    throw TypingEventStoreError.pendingContentChanged
-                }
                 try self.environmentStore.saveDigestArchiveReceipt(
                     EnvironmentDigestArchiveReceipt(
                         claimedPrefixSHA256: Self.sha256(snapshot.rawData),
@@ -713,33 +729,40 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                         claimedEventCount: snapshot.claimedEventCount,
                         generatedSHA256: claim.generatedSHA256,
                         archivedByteCount: snapshot.rawData.count,
-                        successfulDigestAt: now
+                        successfulDigestAt: successAnchor
                     )
                 )
+                let result = try self.eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
+                guard self.eventStore.hasProcessedArchive(
+                    prefixSHA256: Self.sha256(snapshot.rawData),
+                    byteCount: snapshot.rawData.count
+                ) else {
+                    throw TypingEventStoreError.pendingContentChanged
+                }
                 let tailInventory = try self.eventStore.inventory()
                 let tailCount = tailInventory.eventCount
                 let tailPendingSince = tailCount > 0
                     ? Self.boundedPendingTimestamp(
                         tailInventory.oldestEventTimestamp,
-                        noLaterThan: now
-                    ) ?? now
+                        noLaterThan: successAnchor
+                    ) ?? successAnchor
                     : nil
                 try self.environmentStore.saveDigestScheduleState(
                     EnvironmentDigestScheduleState(
                         pendingSince: tailPendingSince,
-                        lastSuccessfulDigestAt: now,
+                        lastSuccessfulDigestAt: successAnchor,
                         nextEligibleAt: tailCount > 0
                             ? Self.nextDigestDeadline(
                                 eventCount: tailCount,
                                 pendingSince: tailPendingSince,
                                 successfulDigestTimestamps: successHistory,
-                                lastSuccessfulDigestAt: now,
+                                lastSuccessfulDigestAt: successAnchor,
                                 batchSize: successBatchSize,
                                 minimumInterval: successMinimumInterval,
                                 maximumPendingAge: successMaximumPendingAge,
                                 digestBudgetWindow: successBudgetWindow,
                                 maximumDigestsPerWindow: successMaximumDigestsPerWindow,
-                                now: now
+                                now: successAnchor
                             )
                             : nil,
                         pendingEventCount: tailCount,
@@ -749,29 +772,30 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 return DigestCommitResult(
                     archiveResult: result,
                     pendingTailCount: tailCount,
-                    pendingTailSince: tailPendingSince
+                    pendingTailSince: tailPendingSince,
+                    successAnchor: successAnchor,
+                    successfulDigestTimestamps: successHistory
                 )
             }
             let result: DigestCommitResult
+            // Arm recovery before either path can persist a claim. A guarded
+            // pre-commit failure is cleared by the existing missing-claim path.
+            persistedClaimNeedsRecovery = true
             if let providerRegistry, let lease {
-                persistedClaimNeedsRecovery = true
                 result = try await providerRegistry.commitIfCurrent(using: lease) {
-                    try environmentStore.saveDigestClaim(claim)
-                    return try persistAfterClaim()
+                    try persistSuccess()
                 }
             } else {
-                try environmentStore.saveDigestClaim(claim)
-                persistedClaimNeedsRecovery = true
-                result = try persistAfterClaim()
+                result = try persistSuccess()
             }
             try environmentStore.clearDigestClaim()
             persistedClaimNeedsRecovery = false
             try? environmentStore.clearDigestArchiveReceipt()
             applyDigestSuccessState(
-                at: now,
+                at: result.successAnchor,
                 pendingTailCount: result.pendingTailCount,
                 pendingAnchor: result.pendingTailSince,
-                successfulDigestTimestamps: successHistory
+                successfulDigestTimestamps: result.successfulDigestTimestamps
             )
             finishDigestSuccessScheduling()
             emitArchiveDiagnostic(result.archiveResult)
@@ -920,22 +944,24 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 byteCount: claim.claimedPrefixByteCount
             ) {
             case .valid:
-                switch eventStore.pendingClaimedPrefixValidation(
+                let pendingPrefixValidation = eventStore.pendingClaimedPrefixValidation(
                     prefixSHA256: claim.claimedPrefixSHA256,
                     byteCount: claim.claimedPrefixByteCount,
                     eventCount: claim.claimedEventCount
-                ) {
-                case .matching(let snapshot):
-                    try eventStore.archivePendingEvents(matching: snapshot)
-                case .missing, .notMatching:
-                    break
+                )
+                switch pendingPrefixValidation {
                 case .indeterminate:
                     return .blocked
+                case .matching, .missing, .notMatching:
+                    break
                 }
                 let successfulDigestAt = try ensureDigestRecoveryReceipt(
                     for: claim,
                     relativeTo: now
                 )
+                if case .matching(let snapshot) = pendingPrefixValidation {
+                    try eventStore.archivePendingEvents(matching: snapshot)
+                }
                 try persistScheduleState(
                     afterSuccessAt: successfulDigestAt,
                     recoveryNow: now
@@ -957,6 +983,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             guard Self.sha256(snapshot.rawData) == claim.claimedPrefixSHA256 else {
                 return .blocked
             }
+            let successfulDigestAt = try ensureDigestRecoveryReceipt(
+                for: claim,
+                relativeTo: now
+            )
             try eventStore.archivePendingEvents(matching: snapshot)
             guard eventStore.hasProcessedArchive(
                 prefixSHA256: claim.claimedPrefixSHA256,
@@ -964,17 +994,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             ) else {
                 return .blocked
             }
-            try environmentStore.saveDigestArchiveReceipt(
-                EnvironmentDigestArchiveReceipt(
-                    claimedPrefixSHA256: claim.claimedPrefixSHA256,
-                    claimedPrefixByteCount: claim.claimedPrefixByteCount,
-                    claimedEventCount: claim.claimedEventCount,
-                    generatedSHA256: claim.generatedSHA256,
-                    archivedByteCount: claim.claimedPrefixByteCount,
-                    successfulDigestAt: now
-                )
+            try persistScheduleState(
+                afterSuccessAt: successfulDigestAt,
+                recoveryNow: now
             )
-            try persistScheduleState(afterSuccessAt: now, recoveryNow: now)
             try environmentStore.clearDigestClaim()
             try? environmentStore.clearDigestArchiveReceipt()
             finishDigestSuccessScheduling()
@@ -1108,14 +1131,14 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         for inventory: TypingEventInventory,
         now: Date
     ) -> DigestEligibility {
-        successfulDigestTimestamps = normalizedSuccessfulDigestHistory(
+        let eligibleSuccessfulDigestTimestamps = normalizedSuccessfulDigestHistory(
             successfulDigestTimestamps,
             relativeTo: now
         )
         var constraints = digestConstraints(
             eventCount: inventory.eventCount,
             pendingSince: pendingSince,
-            successfulDigestTimestamps: successfulDigestTimestamps,
+            successfulDigestTimestamps: eligibleSuccessfulDigestTimestamps,
             now: now
         )
         if let conservativeScheduleDeadline, conservativeScheduleDeadline > now {
@@ -1219,9 +1242,14 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         adding timestamp: Date,
         relativeTo now: Date
     ) -> [Date] {
-        normalizedSuccessfulDigestHistory(
-            successfulDigestTimestamps + [timestamp],
-            relativeTo: now
+        return Self.boundedSuccessfulDigestHistory(
+            previousSuccessfulDigestTimestamps: successfulDigestTimestamps,
+            previousSuccessAnchor: lastDigestAt,
+            adding: timestamp,
+            relativeTo: now,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumDigestsPerWindow: maximumDigestsPerWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
         )
     }
 
@@ -1229,21 +1257,129 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         _ timestamps: [Date],
         relativeTo now: Date
     ) -> [Date] {
+        Self.normalizedSuccessfulDigestHistory(
+            timestamps,
+            relativeTo: now,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
+        )
+    }
+
+    private static func normalizedSuccessfulDigestHistory(
+        _ timestamps: [Date],
+        relativeTo now: Date,
+        digestBudgetWindow: TimeInterval,
+        maximumScheduleAnchorOffset: TimeInterval
+    ) -> [Date] {
         let cutoff = now.addingTimeInterval(-digestBudgetWindow)
         let maximumFutureTimestamp = now.addingTimeInterval(
             maximumScheduleAnchorOffset
         )
-        var result: [Date] = []
-        for timestamp in timestamps
-            .filter({
+        return sortedUniqueSuccessfulDigestHistory(
+            timestamps.filter({
                 $0.timeIntervalSince1970.isFinite
                     && $0 > cutoff
                     && $0 <= maximumFutureTimestamp
             })
-            .sorted() {
+        )
+    }
+
+    private static func sortedUniqueSuccessfulDigestHistory(
+        _ timestamps: [Date]
+    ) -> [Date] {
+        var result: [Date] = []
+        for timestamp in timestamps.sorted() {
             if result.last != timestamp { result.append(timestamp) }
         }
         return result
+    }
+
+    private static func successfulDigestAnchorsAreSemanticallyEquivalent(
+        _ lhs: Date,
+        _ rhs: Date
+    ) -> Bool {
+        abs(lhs.timeIntervalSince(rhs)) < successfulDigestAnchorSemanticTolerance
+    }
+
+    private static func boundedSuccessfulDigestHistory(
+        previousSuccessfulDigestTimestamps: [Date],
+        previousSuccessAnchor: Date?,
+        adding successAnchor: Date,
+        relativeTo now: Date,
+        digestBudgetWindow: TimeInterval,
+        maximumDigestsPerWindow: Int,
+        maximumScheduleAnchorOffset: TimeInterval
+    ) -> [Date] {
+        var timestamps = previousSuccessfulDigestTimestamps
+        if let previousSuccessAnchor {
+            let duplicatesLatestPersistedSuccess = previousSuccessfulDigestTimestamps.max()
+                .map {
+                    successfulDigestAnchorsAreSemanticallyEquivalent(
+                        previousSuccessAnchor,
+                        $0
+                    )
+                } ?? false
+            if !duplicatesLatestPersistedSuccess {
+                timestamps.append(previousSuccessAnchor)
+            }
+        }
+        timestamps.append(successAnchor)
+        let history = normalizedSuccessfulDigestHistory(
+            timestamps,
+            relativeTo: now,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
+        )
+        return Array(history.suffix(maximumDigestsPerWindow))
+    }
+
+    private static func liveDigestSuccessState(
+        sampledAt completionNow: Date,
+        previousSuccessfulDigestTimestamps: [Date],
+        previousSuccessAnchor: Date?,
+        digestBudgetWindow: TimeInterval,
+        maximumDigestsPerWindow: Int,
+        maximumScheduleAnchorOffset: TimeInterval
+    ) throws -> DigestSuccessState {
+        guard completionNow.timeIntervalSince1970.isFinite else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        let existingSuccessAnchors = previousSuccessfulDigestTimestamps
+            + [previousSuccessAnchor].compactMap { $0 }
+        guard existingSuccessAnchors.allSatisfy({
+            $0.timeIntervalSince1970.isFinite
+        }) else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        let latestSuccessAnchor = existingSuccessAnchors.max()
+        var successAnchor = completionNow
+        if let latestSuccessAnchor, successAnchor <= latestSuccessAnchor {
+            let successor = latestSuccessAnchor.timeIntervalSinceReferenceDate.nextUp
+            guard successor.isFinite else {
+                throw EnvironmentDocumentError.claimMismatch
+            }
+            successAnchor = Date(timeIntervalSinceReferenceDate: successor)
+        }
+        let maximumFutureAnchor = completionNow.addingTimeInterval(
+            maximumScheduleAnchorOffset
+        )
+        guard maximumFutureAnchor.timeIntervalSince1970.isFinite,
+              successAnchor <= maximumFutureAnchor else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        let successfulDigestTimestamps = boundedSuccessfulDigestHistory(
+            previousSuccessfulDigestTimestamps: previousSuccessfulDigestTimestamps,
+            previousSuccessAnchor: previousSuccessAnchor,
+            adding: successAnchor,
+            relativeTo: completionNow,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumDigestsPerWindow: maximumDigestsPerWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
+        )
+        return DigestSuccessState(
+            anchor: successAnchor,
+            successfulDigestTimestamps: successfulDigestTimestamps
+        )
     }
 
     private func scheduleDeadline(at date: Date) {
@@ -1475,9 +1611,8 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             if persistedHistory.isEmpty, let legacySuccess = state.lastSuccessfulDigestAt {
                 persistedHistory = [legacySuccess]
             }
-            successfulDigestTimestamps = normalizedSuccessfulDigestHistory(
-                persistedHistory,
-                relativeTo: now
+            successfulDigestTimestamps = Self.sortedUniqueSuccessfulDigestHistory(
+                persistedHistory
             )
             lastDigestAt = state.lastSuccessfulDigestAt
                 ?? successfulDigestTimestamps.last
@@ -1554,7 +1689,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
         if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt,
            let latestPersistedSuccess = state.successfulDigestTimestamps.max(),
-           abs(lastSuccessfulDigestAt.timeIntervalSince(latestPersistedSuccess)) >= 0.001 {
+           !Self.successfulDigestAnchorsAreSemanticallyEquivalent(
+               lastSuccessfulDigestAt,
+               latestPersistedSuccess
+           ) {
             return false
         }
         if state.pendingSince == nil,
@@ -1701,19 +1839,19 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         afterSuccessAt successfulDigestAt: Date,
         recoveryNow: Date
     ) throws {
-        let tailInventory = try eventStore.inventory()
-        let tailCount = tailInventory.eventCount
-        let tailPendingSince = tailCount > 0
-            ? Self.boundedPendingTimestamp(
-                tailInventory.oldestEventTimestamp,
-                noLaterThan: recoveryNow
-            ) ?? recoveryNow
-            : nil
         let history = successfulDigestHistory(
             adding: successfulDigestAt,
             relativeTo: recoveryNow
         )
         let latestSuccessAnchor = history.last ?? successfulDigestAt
+        let tailInventory = try eventStore.inventory()
+        let tailCount = tailInventory.eventCount
+        let tailPendingSince = tailCount > 0
+            ? Self.boundedPendingTimestamp(
+                tailInventory.oldestEventTimestamp,
+                noLaterThan: latestSuccessAnchor
+            ) ?? latestSuccessAnchor
+            : nil
         applyDigestSuccessState(
             at: latestSuccessAnchor,
             pendingTailCount: tailCount,

@@ -792,7 +792,29 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   while always allowing one event to make progress; production processing
   requires at least 50 pending events or a 24-hour pending age, at least 6 hours
   since the previous successful digest, and fewer than four successful digests
-  in the preceding rolling 24 hours
+  in the preceding rolling 24 hours. Schedule loading retains the finite,
+  storage-bounded success history after sorting and exact deduplication; each
+  eligibility check applies its current rolling window to a temporary copy.
+  Ordinary schedule updates preserve the loaded list, while a successful commit
+  replaces it with completion-relative bounded history. A registry-backed live
+  success samples wall time inside `ProviderRuntimeRegistry.commitIfCurrent`,
+  after its generation/revision waits; a direct-provider runtime executes the
+  same persistence closure directly. The final success anchor is the completion
+  sample or, after clock rollback, the prior anchor's smallest representable
+  successor within the existing future-anchor bound. Normalization merges the
+  retained history with the prior last-success anchor only when that anchor is
+  inside the completion-relative rolling window and future bound, then sorts and
+  deduplicates it. A prior anchor within the schedule's `<1 ms` semantic
+  tolerance of the retained history's latest entry is not merged as another
+  slot; all other anchors, including the current success, retain exact identity.
+  After including the current success anchor, live success and completed-claim
+  recovery retain the newest `maximumDigestsPerWindow` slots, including that
+  anchor. The same anchor drives its receipt, history, last success, recovery
+  pending-tail bound/fallback, and persisted/in-memory deadline.
+  If the prior anchor is already at the completion-relative upper bound, the
+  operation fails closed before claim, ENV, archive, receipt, or schedule-success
+  mutation; pending data and prior budget history remain available to the
+  existing local commit-failure cooldown and retry path
 - archives processed event files under `~/.knowtype/events/processed/` and,
   after every successful local archive, best-effort targets 7 days, 100 files,
   and 10 MiB in the same existing file-lock critical section; the current
@@ -829,9 +851,11 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - sanitizes Level 0 protected content before writing logs
 - is shared across all controllers in the process, so one pending snapshot
   starts at most one digest request
-- creates a registry-backed claim and then updates ENV and archives a pending
-  prefix inside one synchronous current-lease guard; stale work before that
-  guard creates no claim, and later appended events stay pending
+- creates a registry-backed claim, updates ENV, writes the final-anchor receipt,
+  and only then archives the pending prefix inside one synchronous current-lease
+  guard; a receipt-write failure leaves the claimed prefix pending with no
+  processed archive, stale work before the guard creates no claim, and later
+  appended events stay pending
 - uses a path-shared process inventory for count/byte/protection gates, so
   below-threshold and unchanged-generation cooldown paths do not decode JSONL;
   the inventory also carries the oldest retained decoded event timestamp, so a
@@ -848,10 +872,15 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - persists only privacy-safe claim metadata plus bounded timestamp/count schedule
   state and a deterministic archive receipt, so an ENV-success/archive-failure
   path is recoverable without repeating the provider call; appended tail events
-  remain outside the old claim. Receipt-missing recovery bounded-reads the
-  deterministic processed archive and requires both recorded byte count and
-  SHA-256. Recovery archives an exact pending prefix, accepts an explicitly
-  missing or different prefix as already archived, and blocks on truncated,
+  remain outside the old claim. A receipt preserves the success anchor but is
+  never archive proof. Recovery first validates claim, ENV, and processed/pending
+  facts. It requires the deterministic processed archive's byte count and
+  SHA-256, or an exact hash/count/byte-matched pending prefix; before archiving
+  that prefix it validates or creates a receipt and reuses its timestamp for the
+  schedule. A missing receipt uses bounded recovery time, including a legacy
+  valid archive with no receipt.
+  Recovery accepts an explicitly missing or different pending prefix only when
+  the processed archive is valid, and blocks on truncated,
   unreadable, or otherwise indeterminate pending evidence; a same-size corrupt
   archive remains blocked. A pre-ENV claim whose
   generated hash does not match ENV also remains blocked, and corrupt schedule
@@ -860,9 +889,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   conservatively delayed. The schedule keeps a bounded successful-digest
   timestamp list for the rolling 24-hour budget; legacy JSON without the list
   remains readable and uses its last-success timestamp as a cadence anchor.
-  Only successful digest commits consume that budget, and a pending tail waits
-  for the next 6-hour window. Realtime recommendation does not read this budget
-  but remains constrained by the same provider health gate. The first
+  Only successful digest commits consume that budget, with live cadence counted
+  from the final bounded completion anchor rather than request start; a pending
+  tail waits for the next 6-hour window. Realtime recommendation does not read
+  this budget but remains constrained by the same provider health gate. The first
   record after restart completes local claim recovery before append or
   compaction. A blocked claim recovery installs one bounded 60-second actor
   deadline; records before that deadline return without another recovery read,

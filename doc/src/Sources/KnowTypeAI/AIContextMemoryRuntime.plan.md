@@ -40,9 +40,14 @@
   any digest snapshot decode.
 - One actor-owned deadline task wakes batch, interval, provider-cooldown, and
   shared-gate availability events. The first below-batch pending event records
-  a forced deadline. A successful commit starts a 600-second minimum interval
-  that a batch of 50 cannot bypass; provider generation changes do not reset
-  it. Gate-busy state suppresses additional snapshot decode until the one
+  a forced deadline. Registry-backed success samples wall time inside the final
+  `commitIfCurrent` operation after its generation/revision waits; direct-provider
+  success runs the same synchronous persistence closure. The sample, or the
+  prior anchor's smallest representable successor after clock rollback, becomes
+  the bounded monotonic success anchor. That anchor, not request start, begins
+  the configured successful-commit interval that a full batch cannot bypass;
+  provider generation changes do not reset it.
+  Gate-busy state suppresses additional snapshot decode until the one
   cancellable availability waiter wakes, is invalidated, or is cancelled.
 - Stale responses cannot write `ENV.md` or archive events. Shared gate cooldown
   and max-one-in-flight identity state apply equally to recommendation and
@@ -87,19 +92,43 @@
   counts and durations only, never event or provider text.
 - A privacy-safe claim records only prefix hash, byte/event counts, generated
   section hash, and provider generation. ENV-success/archive-failure recovery
-  reads and validates only the claimed byte/event prefix, archives that exact
-  prefix, and leaves appended tail bytes pending. A durable archive receipt or
-  a bounded deterministic processed-archive read with matching byte count and
-  SHA-256 distinguishes completed archive from cleanup failure; missing,
-  oversized, or same-size corrupt archive evidence remains blocked. A matching
-  ENV with a changed claim prefix still fails closed without another provider
-  request. A claim written before ENV replacement also remains blocked when its
+  reads and validates only the claimed byte/event prefix, ensures the
+  final-anchor receipt, archives that exact prefix, and leaves appended tail
+  bytes pending. Live success also writes the receipt before archive creation or
+  prefix removal, so receipt failure leaves the prefix pending and unarchived.
+  The receipt is timestamp evidence, not archive proof: only a deterministic
+  processed archive with matching byte count and SHA-256 proves completion;
+  missing, oversized, or same-size corrupt archive evidence remains blocked. A
+  matching ENV with a changed claim prefix still fails closed without another
+  provider request. A claim written before ENV replacement also remains blocked when its
   generated hash is absent, so restart cannot redispatch that prefix. Corrupt
   schedule state is replaced with a conservative minimum-interval delay; if
   that state cannot be persisted, processing stays blocked.
+  When no receipt exists, recovery persists bounded recovery time before any
+  archive, including for a legacy already-valid archive.
   Timestamp/count schedule state survives runtime or process rebuild and is
-  written before claim cleanup. Successful commits rearm the one deadline task
-  when a tail remains; an empty store cancels it.
+  written before claim cleanup. Schedule load sorts and exactly deduplicates the
+  storage-bounded success history without applying a startup-relative rolling
+  cutoff. Eligibility and deferral use a temporary now-relative copy; ordinary
+  schedule writes preserve the loaded anchors until live success or claim
+  recovery replaces them with completion-relative bounded history. Receipt
+  time, successful history, last success, pending-tail bound/fallback, and
+  persisted/in-memory next deadline share the final success anchor. Its strict
+  monotonicity keeps each committed digest as a distinct rolling-budget slot
+  while the existing future-anchor bound keeps the schedule restart-valid. The
+  prior last-success anchor is restored into
+  normalized history only inside the completion-relative rolling window and
+  future bound. If it is within the schedule's `<1 ms` semantic tolerance of the
+  retained history's latest entry, that entry already represents the prior
+  success; other anchors retain exact identity. Sorting and deduplication apply
+  equally during recovery. Live success and completed-claim recovery then keep
+  the newest runtime-budget slots after including the current anchor. When the
+  prior anchor already equals the completion-relative upper bound, success
+  persistence fails before claim, ENV, archive, receipt, or schedule-success
+  mutation. Pending events and existing
+  budget slots remain intact while the normal local commit-failure cooldown path
+  handles recovery. Successful commits rearm the one deadline task when a tail
+  remains; an empty store cancels it.
 
 ## Tests
 
