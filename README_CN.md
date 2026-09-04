@@ -63,10 +63,12 @@ Keychain-backed API key 和本地词库工具。
 
 它还不是公证安装器、自动更新程序或 App Store 应用。
 
-GitHub Releases 默认提供名为 `KnowType-vX.Y.Z-macos-dev-preview.dmg` 的
-Developer Preview DMG。它包含 `KnowType.app`、命令文件安装入口、release manifest
-和 SHA256 文件。该 DMG 没有 Developer ID 签名，也未公证；macOS 可能要求右键打开，
-或在“隐私与安全性”里点击“仍要打开”。旧的本地 MVP zip 仍保留为开发者调试资产。
+GitHub Releases 默认同时提供名为 `KnowType-vX.Y.Z-macos-dev-preview.dmg` 的
+Developer Preview DMG，以及独立的旁路校验资产
+`KnowType-vX.Y.Z-macos-dev-preview.dmg.sha256`。DMG 内包含 `KnowType.app`、
+命令文件安装入口和 release manifest。该 DMG 没有 Developer ID 签名，也未公证；
+macOS 可能要求右键打开，或在“隐私与安全性”里点击“仍要打开”。旧的本地 MVP zip
+仍保留为开发者调试资产。
 
 ## 快速开始
 
@@ -194,7 +196,7 @@ generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.11-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.12-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -206,7 +208,7 @@ shasum -a 256 -c KnowType-v0.2.11-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.11-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.12-macos-local-mvp.zip
 ```
 
 ## 配置
@@ -283,15 +285,21 @@ CORRECTION 数据。
 `~/.knowtype/events/`。事件文本字段最多保留 2048 个 Unicode scalar；raw input
 或 locked prefix 超过 4 KiB UTF-8 时跳过 AI 且不做语义截断。pending 最多保留
 500 条或 1 MiB，溢出后丢弃最旧的派生事件。每次 provider digest 最多 claim
-最旧的 50 条或 48 KiB，且成功提交后 600 秒 minimumInterval 不能被 batch
-阈值绕过。`ENV.md` 最多有一个 managed generated marker pair 和一个 canonical
+最旧的 50 条或 48 KiB。生产环境只有在 pending 达到 50 条或最旧 pending 已满
+24 小时时才处理；成功 digest 最多每 6 小时一次，滚动 24 小时最多 4 次。成功
+预算会跨重启持久化，claim 后仍有 tail 时也必须等待下一个 6 小时窗口，不会立即
+追赶 backlog。`ENV.md` 最多有一个 managed generated marker pair 和一个 canonical
 User Notes；非法 digest candidate 会在写入或 claim 前拒绝。成功 claim 会移入
 `events/processed/`；该目录的保留目标为 7 天、100 个文件和 10 MiB。每次成功的本地
 归档后都会执行 best-effort 清理，包括 provider digest claim 后的归档和 provider
 digest 前的本地归档。清理会排除当前归档，删除失败时目录可暂时超出这些目标；启动和
 安装时不会清理或写入历史数据。Recommendation 与 digest
 使用各自的逻辑/HTTP 预算，但共享 privacy-safe provider identity gate，每个
-identity 最多一个 in-flight 请求，并共享 429 冷却。如果本地 gate 状态暂时无法读取
+identity 最多一个 in-flight 请求，并共享 429 冷却。有效的标准 `Retry-After`
+header 优先于受限结构化 JSON 错误体中的数字恢复字段，提示会按 15 秒到 7 天完整
+遵守；无提示 429 从 15 分钟逐级退避到 24 小时上限。原始错误体不会进入日志或诊断。
+Digest 成功预算不限制 realtime recommendation，但共享 gate 仍会同时约束两条链路的
+provider health 和 cooldown。如果本地 gate 状态暂时无法读取
 或写入，请求会继续 fail-closed，但运行中的输入法会按 5 到 60 秒的有界退避或在
 Provider generation 变化后重新验证；状态被可靠修复后无需重启。有效冷却和已经开始的
 请求仍会保留。恢复期间候选窗显示“AI 状态异常，正在重试”。Context 和 gate 诊断

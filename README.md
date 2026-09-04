@@ -69,8 +69,9 @@ local dictionary tooling.
 It is not yet a notarized installer, auto-updater, or App Store package.
 
 GitHub Releases provide a Developer Preview DMG named
-`KnowType-vX.Y.Z-macos-dev-preview.dmg`. It contains `KnowType.app`, a
-command-file installer, a release manifest, and a SHA256 file. The DMG is not
+`KnowType-vX.Y.Z-macos-dev-preview.dmg` together with a separate sidecar
+`KnowType-vX.Y.Z-macos-dev-preview.dmg.sha256` checksum asset. The DMG contains
+`KnowType.app`, a command-file installer, and a release manifest. The DMG is not
 Developer ID signed or notarized; macOS may require Control-click > Open or
 Privacy & Security > Open Anyway before installation. The local MVP zip remains
 available as a developer/debug asset.
@@ -230,7 +231,7 @@ For a GitHub Release DMG, verify the downloaded image with the published
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.11-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.12-macos-dev-preview.dmg.sha256
 ```
 
 Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
@@ -244,7 +245,7 @@ sidebar entry unless the matching pane is installed.
 The older local MVP zip can still be installed for developer debugging:
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.11-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.12-macos-local-mvp.zip
 ```
 
 ## Configuration
@@ -332,8 +333,12 @@ Committed Context Digest events are queued locally as JSONL under
 `~/.knowtype/events/`. Event text fields are limited to 2,048 Unicode scalars;
 raw input and locked prefixes over 4 KiB UTF-8 skip an AI request without
 semantic truncation. Pending data keeps at most 500 events or 1 MiB by dropping
-the oldest derived events after overflow. Each provider digest claims at most the oldest 50 events or
-48 KiB and cannot bypass the 600-second interval after a successful commit.
+the oldest derived events after overflow. Each provider digest claims at most
+the oldest 50 events or 48 KiB. Production sends a digest only after 50 pending
+events or 24 hours of pending age, at most once every 6 hours and at most four
+successful digests in any rolling 24 hours. The success budget is persisted
+across restart, and a pending tail waits for the next 6-hour window rather than
+triggering a catch-up request.
 `ENV.md` has one managed generated pair and one canonical User Notes section;
 invalid digest candidates are rejected before any write or archive claim.
 Successful claims move to `events/processed/`; its retention targets are 7 days,
@@ -344,7 +349,13 @@ failures may temporarily leave the directory above those targets; startup and
 install never clean up or write history.
 Recommendation and digest requests use separate
 logical/body budgets but share one hashed provider gate, max one in-flight
-request per identity, and privacy-safe cooldown diagnostics. If the local gate
+request per identity, and privacy-safe cooldown diagnostics. A valid 429
+`Retry-After` header takes precedence over bounded numeric recovery fields in a
+small structured JSON error body; hints are honored from 15 seconds through
+7 days. A 429 without a hint backs off from 15 minutes to a 24-hour cap. Raw
+error bodies are not logged or propagated into diagnostics. The digest success
+budget does not limit realtime recommendations, while the shared gate still
+applies provider health and cooldown to both paths. If the local gate
 state temporarily becomes unreadable or unwritable, requests remain fail-closed
 but the running input method revalidates it on a bounded 5-to-60-second backoff
 or after a Provider generation change; no restart is required after the state is

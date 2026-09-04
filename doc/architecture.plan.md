@@ -151,17 +151,53 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   serialized so later appends remain pending and stale provider generations
   cannot persist results; registry-backed claim creation starts inside the same
   final current-lease guard as ENV and archive persistence. Registry-backed
-  recording requires a usable provider
-  lease before appending, so events entered while no provider is available are
-  not retained for a later provider. A path-shared inventory makes ordinary
-  append and scheduling decisions constant-cost after the first scan. Pending
+  recording, including the gate-persistence-blocked append-only fallback,
+  requires a usable provider lease before appending, so events entered while a
+  provider is missing or disabled are not retained for a later provider. A
+  usable fallback lease applies the current generation semantics but starts no
+  network request, and applying that lease preserves the gate-persistence retry
+  deadline already scheduled by the blocked preflight. After the asynchronous
+  lease lookup, recovery is revalidated: a new claim backoff drops the event,
+  completed recovery returns to normal append and scheduling, and only a still
+  blocked episode uses the append-only fallback. A path-shared inventory makes
+  ordinary append and scheduling decisions constant-cost after the first scan and keeps
+  the oldest retained event timestamp as the pending-age anchor. Pending
   data is capped at 500 events/1 MiB, digest claims at 50 events/48 KiB, and a
   same-generation failure cooldown or shared gate-persistence backoff returns
-  before reading pending JSONL. A
-  successful digest also owns a 600-second minimum interval that the batch
-  threshold cannot bypass; a single actor-owned deadline task wakes batch,
-  interval, provider-cooldown, and shared-gate availability work. The first
-  below-batch pending event receives its own forced deadline. While the actor is
+  before digest snapshot decoding. Production digest eligibility requires either
+  50 pending events or a 24-hour pending age, at least 6 hours since the last
+  successful digest, and fewer than four successful digests in the preceding
+  rolling 24 hours. Successful timestamps and the next deadline are stored in
+  the existing privacy-safe schedule file, so restart does not reset the
+  budget. Schedule loading keeps the storage-bounded history sorted and exactly
+  deduplicated without applying the startup clock's rolling-window cutoff.
+  Eligibility checks normalize a temporary copy, so stale anchors do not block
+  forward-clock work while supported completion-time rollback can re-evaluate
+  every loaded anchor. A live provider success samples wall time inside the
+  final current-generation persistence operation, after provider completion and
+  all registry generation/revision waits. The completion sample is the success
+  anchor unless clock rollback requires the prior anchor's smallest
+  representable successor; that monotonic value must remain inside the existing
+  future-anchor bound. Completion-relative history normalization includes the
+  actor's prior last-success anchor only while it remains inside the
+  completion-relative rolling window and future bound, then sorts and
+  deduplicates it. A prior anchor
+  within the schedule's `<1 ms` semantic tolerance of the retained history's
+  latest entry represents that same prior success and does not consume another
+  slot; other anchors, including the current success, retain exact identity.
+  After the current success anchor is included, live success and completed-claim
+  recovery keep only the newest runtime-budget slots, including that anchor. The
+  same final anchor drives the receipt, history, last-success state, recovery
+  pending-tail bound/fallback, and persisted/in-memory deadline, so request
+  latency cannot consume the next 6-hour or rolling-budget window. If the prior
+  anchor already equals the completion sample's upper bound, the commit fails
+  before claim, ENV, archive, receipt, or schedule-success mutation; pending data
+  and the existing budget remain intact for the local commit-failure cooldown path. A
+  successful prefix with a pending tail waits for the next 6-hour window instead
+  of starting a catch-up request. A single actor-owned deadline
+  task sleeps to the real batch-age, cadence, provider-cooldown, or
+  shared-gate-availability deadline, including a multi-day 429 recovery hint.
+  The first below-batch pending event receives its own forced deadline. While the actor is
   waiting for a busy gate, new records append only and return before another
   digest snapshot decode; malformed or oversized local prefixes rearm the same
   deadline when a tail remains. Calls received during an active digest set one
@@ -181,11 +217,19 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   mode 0600, recognizes managed boundaries only on exact marker lines, rejects
   invalid digest candidates before writes, and exposes a
   privacy-safe digest claim for recovery, plus bounded 0600 schedule state and
-  archive receipt metadata containing only timestamps, counts, and hashes.
-  Recovery bounded-reads the deterministic processed archive and verifies its
-  byte count and SHA-256 before treating a missing receipt as completed. It then
-  distinguishes a missing or provably different pending prefix from an exact
-  prefix; truncated or unreadable pending evidence remains blocked. A claim
+  archive receipt metadata containing only timestamps, counts, and hashes. The
+  schedule accepts legacy JSON without the rolling-success list and uses its
+  last-success timestamp as the existing cadence anchor.
+  A live success writes its final-anchor receipt before processed archive
+  creation or claimed-prefix removal; if that write fails, the claimed prefix
+  remains pending and no processed archive is created. The receipt preserves
+  time but is not archive proof. Recovery validates claim and ENV plus the
+  processed archive's byte count and SHA-256 or the exact pending prefix. Before
+  any recovery archive it validates or creates the receipt and then reuses that
+  timestamp for schedule persistence. A missing receipt uses bounded recovery
+  time, including the legacy boundary where the archive is already valid.
+  Truncated or unreadable
+  pending evidence remains blocked. A claim
   whose generated hash is not yet present in ENV remains blocked, and corrupt
   claim evidence is retried at most once per bounded 60-second actor deadline;
   intervening records are rejected without another recovery read or append. A
@@ -196,7 +240,7 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   supersedes the old token without allowing it to clear newer state. A
   successful or claim-missing retry clears that local latch. Corrupt
   schedule state, including impossible date ordering or excessive future
-  deadlines, is replaced by a conservative minimum-interval delay or stays
+  deadlines, is replaced by a conservative cadence deadline or stays
   fail-closed. Existing ENV content is chmod 0600 before any read; User Notes
   headings overlapping or preceding the managed pair are ambiguous, and an
   existing deterministic backup must be a matching regular non-symlink file.
@@ -207,6 +251,12 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   instructions from this file, while the traditional engine remains
   deterministic.
 - `AIHealthMonitor` counts provider timeouts, 429/5xx errors, and malformed responses. After repeated failures it enters cooldown so the input method can show an unavailable AI slot without sending more requests.
+- The shared provider gate honors valid 429 recovery hints from 15 seconds
+  through 7 days. `Retry-After` takes precedence over bounded structured JSON
+  body hints. A 429 without a hint uses a dedicated 15-minute-through-24-hour
+  sequence; non-429 backoff is unchanged. The digest rolling budget does not
+  apply to realtime recommendation, while both paths still share gate health,
+  generation fencing, cooldown, and one in-flight request per provider identity.
 - `AIRecommendationDiagnosticSink` records privacy-preserving AI substates to macOS unified logging so provider latency, empty responses, prefix-lock filtering, stale drops, and cooldown can be diagnosed without logging raw input.
 - Provider prompts are task-specific: real-time continuation uses suffix-only text when a locked prefix exists and full commit-ready text when only raw input and context are available, while correction and context digest keep separate instructions.
 

@@ -75,8 +75,13 @@ count their structured bodies without canonical marker/heading separator
 newlines. A local budget rejection is a
 non-provider outcome and its budgeted payload fingerprint is the recommendation
 cache key. `ProviderRequestGate` hashes provider identity, permits one in-flight
-request per identity, fences generations, clamps `Retry-After` to 15 seconds to
-15 minutes, and applies privacy-safe cooldowns for missing retry hints. Persisted
+request per identity, fences generations, and honors valid 429 recovery hints
+from 15 seconds through 7 days. A valid standard `Retry-After` header wins;
+otherwise at most 64 KiB of structured JSON may supply a finite numeric
+`reset_seconds`, `reset_time`, `retry_after`, or `retry_after_seconds` value.
+Raw 429 bodies never enter diagnostics. A 429 without a hint uses 15 minutes,
+30 minutes, 1 hour, 2 hours, 4 hours, 8 hours, 16 hours, and then a 24-hour cap;
+non-429 backoff is unchanged. Persisted
 gate state contains only the identity hash, deadline, failure class, and a
 bounded count in atomic mode-0600 storage; it never persists in-flight state.
 One real gate attempt receives a non-reusable gate attempt id and records at
@@ -769,8 +774,13 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 `AIContextMemoryRuntime`:
 
 - records only committed text, not marked text
-- requires a usable provider lease before a registry-backed event is appended,
-  so text entered without an available provider is not retained for later upload
+- requires a usable provider lease before any registry-backed event is
+  appended, including the gate-persistence-blocked append-only fallback, so
+  text entered with a missing or disabled provider is not retained for later
+  upload; an available fallback lease applies the current generation without
+  starting a provider request; after lease lookup, a new claim-recovery backoff
+  drops the event, a recovered episode uses normal append and scheduling, and
+  only the current blocked episode remains append-only
 - writes JSONL events under `~/.knowtype/events/typing-events.jsonl`
 - limits AI raw input and locked prefix to 4 KiB UTF-8 before dispatch; event
   text fields are bounded to 2,048 Unicode scalars before JSONL append
@@ -779,8 +789,32 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   digest prefix remains protected until both its actor flow and real gate
   attempt have finished
 - claims no more than the oldest 50 events or 48 KiB for one provider digest,
-  while always allowing one event to make progress; the 600-second interval
-  after a successful commit cannot be bypassed by the batch threshold
+  while always allowing one event to make progress; production processing
+  requires at least 50 pending events or a 24-hour pending age, at least 6 hours
+  since the previous successful digest, and fewer than four successful digests
+  in the preceding rolling 24 hours. Schedule loading retains the finite,
+  storage-bounded success history after sorting and exact deduplication; each
+  eligibility check applies its current rolling window to a temporary copy.
+  Ordinary schedule updates preserve the loaded list, while a successful commit
+  replaces it with completion-relative bounded history. A registry-backed live
+  success samples wall time inside `ProviderRuntimeRegistry.commitIfCurrent`,
+  after its generation/revision waits; a direct-provider runtime executes the
+  same persistence closure directly. The final success anchor is the completion
+  sample or, after clock rollback, the prior anchor's smallest representable
+  successor within the existing future-anchor bound. Normalization merges the
+  retained history with the prior last-success anchor only when that anchor is
+  inside the completion-relative rolling window and future bound, then sorts and
+  deduplicates it. A prior anchor within the schedule's `<1 ms` semantic
+  tolerance of the retained history's latest entry is not merged as another
+  slot; all other anchors, including the current success, retain exact identity.
+  After including the current success anchor, live success and completed-claim
+  recovery retain the newest `maximumDigestsPerWindow` slots, including that
+  anchor. The same anchor drives its receipt, history, last success, recovery
+  pending-tail bound/fallback, and persisted/in-memory deadline.
+  If the prior anchor is already at the completion-relative upper bound, the
+  operation fails closed before claim, ENV, archive, receipt, or schedule-success
+  mutation; pending data and prior budget history remain available to the
+  existing local commit-failure cooldown and retry path
 - archives processed event files under `~/.knowtype/events/processed/` and,
   after every successful local archive, best-effort targets 7 days, 100 files,
   and 10 MiB in the same existing file-lock critical section; the current
@@ -789,10 +823,10 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - protected-only, blank, malformed, unsendable, oversized, and persisted claim
   recovery archives use that same retention path; startup or initialization
   without an archive does not scan or rewrite `processed/`
-- archives protected-only prefixes locally without advancing the 600-second
-  provider-success interval; an unprotected tail follows normal pending
+- archives protected-only prefixes locally without advancing the successful
+  provider cadence; an unprotected tail follows normal pending
   scheduling
-- summarizes through one actor-owned deadline task for batch, interval,
+- summarizes through one actor-owned deadline task for batch age, interval,
   provider-cooldown, and shared-gate availability wakeups; a first below-batch
   pending event has an independent forced deadline; while gate availability is
   pending, appended records return before another snapshot decode, and locally
@@ -800,7 +834,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   data; calls arriving during a digest coalesce into one post-completion
   re-evaluation rather than a concurrent digest, except that an already
   installed gate waiter remains the sole wake source for its contention
-  episode. If such a record, manual, or deadline wake reaches a live-claim
+  episode. Deadline sleep uses the actual target, including a multi-day 429
+  recovery time, rather than periodically waking at 15 minutes. If such a
+  record, manual, or deadline wake reaches a live-claim
   guard, one signal is retained until both the actor flow and real gate attempt
   finish; one actor-owned `processIfNeeded` pass then rechecks pending data,
   interval, cooldown, gate, and generation eligibility. No blocked wake or
@@ -815,14 +851,20 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - sanitizes Level 0 protected content before writing logs
 - is shared across all controllers in the process, so one pending snapshot
   starts at most one digest request
-- creates a registry-backed claim and then updates ENV and archives a pending
-  prefix inside one synchronous current-lease guard; stale work before that
-  guard creates no claim, and later appended events stay pending
+- creates a registry-backed claim, updates ENV, writes the final-anchor receipt,
+  and only then archives the pending prefix inside one synchronous current-lease
+  guard; a receipt-write failure leaves the claimed prefix pending with no
+  processed archive, stale work before the guard creates no claim, and later
+  appended events stay pending
 - uses a path-shared process inventory for count/byte/protection gates, so
-  below-threshold and unchanged-generation cooldown paths do not decode JSONL
+  below-threshold and unchanged-generation cooldown paths do not decode JSONL;
+  the inventory also carries the oldest retained decoded event timestamp, so a
+  post-claim tail receives its own pending-age anchor
 - returns before digest-claim, pending-prefix, or ENV reads while the shared
   gate is persistence-blocked; one actor deadline rechecks the gate at its retry
-  time, and a new Provider generation may revalidate it immediately
+  time; fallback lease application preserves that deadline, while a new Provider
+  generation may revalidate it immediately on normal processing paths; lease
+  waits never revive an older retry deadline
 - emits count-only `context_event_truncated`, `context_backlog_trimmed`,
   `context_digest_deferred`, `context_archive_pruned`,
   `context_gate_persistence_blocked`, and
@@ -830,16 +872,27 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - persists only privacy-safe claim metadata plus bounded timestamp/count schedule
   state and a deterministic archive receipt, so an ENV-success/archive-failure
   path is recoverable without repeating the provider call; appended tail events
-  remain outside the old claim. Receipt-missing recovery bounded-reads the
-  deterministic processed archive and requires both recorded byte count and
-  SHA-256. Recovery archives an exact pending prefix, accepts an explicitly
-  missing or different prefix as already archived, and blocks on truncated,
+  remain outside the old claim. A receipt preserves the success anchor but is
+  never archive proof. Recovery first validates claim, ENV, and processed/pending
+  facts. It requires the deterministic processed archive's byte count and
+  SHA-256, or an exact hash/count/byte-matched pending prefix; before archiving
+  that prefix it validates or creates a receipt and reuses its timestamp for the
+  schedule. A missing receipt uses bounded recovery time, including a legacy
+  valid archive with no receipt.
+  Recovery accepts an explicitly missing or different pending prefix only when
+  the processed archive is valid, and blocks on truncated,
   unreadable, or otherwise indeterminate pending evidence; a same-size corrupt
   archive remains blocked. A pre-ENV claim whose
   generated hash does not match ENV also remains blocked, and corrupt schedule
   state cannot trigger an immediate fresh-runtime batch dispatch. In
   particular, a positive pending count with no persisted time anchor is
-  conservatively delayed by the minimum interval. The first
+  conservatively delayed. The schedule keeps a bounded successful-digest
+  timestamp list for the rolling 24-hour budget; legacy JSON without the list
+  remains readable and uses its last-success timestamp as a cadence anchor.
+  Only successful digest commits consume that budget, with live cadence counted
+  from the final bounded completion anchor rather than request start; a pending
+  tail waits for the next 6-hour window. Realtime recommendation does not read
+  this budget but remains constrained by the same provider health gate. The first
   record after restart completes local claim recovery before append or
   compaction. A blocked claim recovery installs one bounded 60-second actor
   deadline; records before that deadline return without another recovery read,

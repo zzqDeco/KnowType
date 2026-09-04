@@ -121,13 +121,38 @@ public actor LazyDefaultAIContextMemoryRuntime: AIContextEventRecording {
 }
 
 public actor AIContextMemoryRuntime: AIContextEventRecording {
+    private static let defaultMinimumInterval: TimeInterval = 6 * 60 * 60
+    private static let defaultMaximumPendingAge: TimeInterval = 24 * 60 * 60
+    private static let defaultDigestBudgetWindow: TimeInterval = 24 * 60 * 60
     private static let maximumScheduleInterval: TimeInterval = 24 * 60 * 60
+    private static let maximumBudgetWindow: TimeInterval = 7 * 24 * 60 * 60
     private static let defaultClaimRecoveryBackoff: TimeInterval = 60
     private static let maximumClaimRecoveryBackoff: TimeInterval = 15 * 60
+    private static let successfulDigestAnchorSemanticTolerance: TimeInterval = 0.001
 
     private struct GateWaitKey: Equatable {
         var identity: String
         var generation: UInt64
+    }
+
+    private enum DigestDeferralReason: String {
+        case maximumPendingAge = "pending_age"
+        case minimumInterval = "minimum_interval"
+        case rollingBudget = "rolling_budget"
+        case providerCooldown = "provider_cooldown"
+        case scheduleRepair = "schedule_repair"
+    }
+
+    private struct DigestEligibility {
+        var isEligible: Bool
+        var deadline: Date?
+        var reason: DigestDeferralReason?
+    }
+
+    private enum RecordPreparation: Equatable {
+        case ready
+        case appendWithoutProcessing
+        case blocked
     }
 
     private enum DigestClaimRecovery: Sendable {
@@ -150,12 +175,28 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         var attemptFinished = false
     }
 
+    private struct DigestCommitResult: Sendable {
+        var archiveResult: TypingEventArchiveResult
+        var pendingTailCount: Int
+        var pendingTailSince: Date?
+        var successAnchor: Date
+        var successfulDigestTimestamps: [Date]
+    }
+
+    private struct DigestSuccessState: Sendable {
+        var anchor: Date
+        var successfulDigestTimestamps: [Date]
+    }
+
     private let provider: (any LLMProvider)?
     private let providerRegistry: ProviderRuntimeRegistry?
     private let eventStore: TypingEventStore
     private let environmentStore: EnvironmentDocumentStore
     private let batchSize: Int
     private let minimumInterval: TimeInterval
+    private let maximumPendingAge: TimeInterval
+    private let digestBudgetWindow: TimeInterval
+    private let maximumDigestsPerWindow: Int
     private let diagnosticSink: @Sendable ([InputDebugDiagnostics.Field]) -> Void
     private let requestGate: ProviderRequestGate
     private let nowProvider: @Sendable () -> Date
@@ -165,12 +206,14 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private let claimRecoverySleeper: (@Sendable (UInt64) async -> Void)?
     private var providerIdentity = "context-digest"
     private var lastDigestAt: Date?
+    private var successfulDigestTimestamps: [Date] = []
     private var pendingSince: Date?
     private var nextEligibleAt: Date?
+    private var conservativeScheduleDeadline: Date?
     private var scheduleStateLoaded = false
     private var scheduleStateBlocked = false
     private var lastDigestFailureAt: Date?
-    private var deferredDiagnosticFailureAt: Date?
+    private var deferredDiagnosticKey: String?
     private var digestInFlight = false
     private var digestRerunRequested = false
     private var digestRerunScheduled = false
@@ -180,6 +223,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     private var persistedClaimNeedsRecovery = true
     private var providerGeneration: UInt64?
     private var deadlineTask: Task<Void, Never>?
+    private var scheduledDeadlineAt: Date?
     private var gateWaitKey: GateWaitKey?
     private var gatePersistenceRetryAt: Date?
     private var claimRecoveryRetryAt: Date?
@@ -191,7 +235,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         eventStore: TypingEventStore = TypingEventStore(),
         environmentStore: EnvironmentDocumentStore = EnvironmentDocumentStore(),
         batchSize: Int = 50,
-        minimumInterval: TimeInterval = 600,
+        minimumInterval: TimeInterval = 6 * 60 * 60,
+        maximumPendingAge: TimeInterval = 24 * 60 * 60,
+        digestBudgetWindow: TimeInterval = 24 * 60 * 60,
+        maximumDigestsPerWindow: Int = 4,
         requestGate: ProviderRequestGate = .shared,
         nowProvider: @escaping @Sendable () -> Date = Date.init,
         providerIdentity: String? = nil
@@ -202,6 +249,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
         self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
+        self.maximumPendingAge = Self.boundedMaximumPendingAge(maximumPendingAge)
+        self.digestBudgetWindow = Self.boundedDigestBudgetWindow(digestBudgetWindow)
+        self.maximumDigestsPerWindow = Self.boundedMaximumDigestsPerWindow(
+            maximumDigestsPerWindow
+        )
         self.requestGate = requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
@@ -218,6 +270,9 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         environmentStore: EnvironmentDocumentStore,
         batchSize: Int,
         minimumInterval: TimeInterval,
+        maximumPendingAge: TimeInterval = 24 * 60 * 60,
+        digestBudgetWindow: TimeInterval = 24 * 60 * 60,
+        maximumDigestsPerWindow: Int = 4,
         hardTimeoutMilliseconds: Int = AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds,
         diagnosticSink: @escaping @Sendable ([InputDebugDiagnostics.Field]) -> Void,
         requestGate: ProviderRequestGate = .shared,
@@ -232,6 +287,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
         self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
+        self.maximumPendingAge = Self.boundedMaximumPendingAge(maximumPendingAge)
+        self.digestBudgetWindow = Self.boundedDigestBudgetWindow(digestBudgetWindow)
+        self.maximumDigestsPerWindow = Self.boundedMaximumDigestsPerWindow(
+            maximumDigestsPerWindow
+        )
         self.requestGate = requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(max(1, hardTimeoutMilliseconds)) * 1_000_000
@@ -247,7 +307,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         eventStore: TypingEventStore = TypingEventStore(),
         environmentStore: EnvironmentDocumentStore = EnvironmentDocumentStore(),
         batchSize: Int = 50,
-        minimumInterval: TimeInterval = 600,
+        minimumInterval: TimeInterval = 6 * 60 * 60,
+        maximumPendingAge: TimeInterval = 24 * 60 * 60,
+        digestBudgetWindow: TimeInterval = 24 * 60 * 60,
+        maximumDigestsPerWindow: Int = 4,
         nowProvider: @escaping @Sendable () -> Date = Date.init
     ) {
         self.provider = nil
@@ -256,6 +319,11 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
         self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
+        self.maximumPendingAge = Self.boundedMaximumPendingAge(maximumPendingAge)
+        self.digestBudgetWindow = Self.boundedDigestBudgetWindow(digestBudgetWindow)
+        self.maximumDigestsPerWindow = Self.boundedMaximumDigestsPerWindow(
+            maximumDigestsPerWindow
+        )
         self.requestGate = providerRegistry.requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
@@ -273,14 +341,26 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         digestClaimProtection != nil
     }
 
+    func scheduledDeadlineForTesting() -> Date? {
+        scheduledDeadlineAt
+    }
+
+    func cancelGateAvailabilityWaitForTesting() {
+        cancelGateAvailabilityWait()
+    }
+
     init(
         providerRegistry: ProviderRuntimeRegistry,
         eventStore: TypingEventStore,
         environmentStore: EnvironmentDocumentStore,
         batchSize: Int,
         minimumInterval: TimeInterval,
+        maximumPendingAge: TimeInterval = 24 * 60 * 60,
+        digestBudgetWindow: TimeInterval = 24 * 60 * 60,
+        maximumDigestsPerWindow: Int = 4,
         nowProvider: @escaping @Sendable () -> Date = Date.init,
-        testProbe: AIContextMemoryRuntimeTestProbe
+        testProbe: AIContextMemoryRuntimeTestProbe,
+        claimRecoverySleeper: (@Sendable (UInt64) async -> Void)? = nil
     ) {
         self.provider = nil
         self.providerRegistry = providerRegistry
@@ -288,32 +368,66 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         self.environmentStore = environmentStore
         self.batchSize = max(1, batchSize)
         self.minimumInterval = Self.boundedMinimumInterval(minimumInterval)
+        self.maximumPendingAge = Self.boundedMaximumPendingAge(maximumPendingAge)
+        self.digestBudgetWindow = Self.boundedDigestBudgetWindow(digestBudgetWindow)
+        self.maximumDigestsPerWindow = Self.boundedMaximumDigestsPerWindow(
+            maximumDigestsPerWindow
+        )
         self.requestGate = providerRegistry.requestGate
         self.nowProvider = nowProvider
         self.hardTimeoutNanoseconds = UInt64(AIRecommendationRuntime.Defaults.hardTimeoutMilliseconds) * 1_000_000
         self.testProbe = testProbe
         self.claimRecoveryBackoff = Self.defaultClaimRecoveryBackoff
-        self.claimRecoverySleeper = nil
+        self.claimRecoverySleeper = claimRecoverySleeper
         self.diagnosticSink = { InputDebugDiagnostics.emit(category: .ai, fields: $0) }
     }
 
     public func record(_ event: AITypingEvent) async {
         guard claimRecoveryRetryAt == nil else { return }
         if digestInFlight { digestRerunRequested = true }
-        guard await preparePersistedClaimForRecord(now: nowProvider()) else { return }
-        let lease: ProviderRuntimeLease?
-        if let providerRegistry {
+        var preparation = await preparePersistedClaimForRecord(now: nowProvider())
+        guard preparation != .blocked else { return }
+        let sanitizedEvent = sanitized(event)
+        var lease: ProviderRuntimeLease? = nil
+        if preparation == .appendWithoutProcessing, let providerRegistry {
+            let loaded = await providerRegistry.leaseForEligibleDispatch()
+            guard claimRecoveryRetryAt == nil else { return }
+            guard loaded.provider != nil else { return }
+            preparation = await preparePersistedClaimForRecord(now: nowProvider())
+            guard claimRecoveryRetryAt == nil, preparation != .blocked else { return }
+            if preparation == .appendWithoutProcessing {
+                applyProviderLease(loaded, preservingGatePersistenceRetry: true)
+            } else {
+                applyProviderLease(loaded)
+                lease = loaded
+            }
+        }
+        if preparation == .appendWithoutProcessing {
+            do {
+                let prefixProtection = digestClaimProtection.map {
+                    TypingEventPendingPrefixProtection.claimed($0.rawData)
+                } ?? .potentialDigest
+                let result = try eventStore.appendBounded(
+                    sanitizedEvent,
+                    prefixProtection: prefixProtection
+                )
+                emitAppendDiagnostics(result)
+            } catch {}
+            return
+        }
+        if let providerRegistry, lease == nil {
             let loaded = await providerRegistry.leaseForEligibleDispatch()
             guard loaded.provider != nil else { return }
             applyProviderLease(loaded)
             lease = loaded
-        } else {
-            lease = nil
         }
         do {
+            let prefixProtection = digestClaimProtection.map {
+                TypingEventPendingPrefixProtection.claimed($0.rawData)
+            } ?? .none
             let result = try eventStore.appendBounded(
-                sanitized(event),
-                preservingClaimedPrefix: digestClaimProtection?.rawData
+                sanitizedEvent,
+                prefixProtection: prefixProtection
             )
             emitAppendDiagnostics(result)
             await processIfNeeded(now: nowProvider(), dispatchLease: lease)
@@ -336,7 +450,41 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             }
             return
         }
-        guard gateWaitKey == nil, !digestRerunScheduled else { return }
+        guard !digestRerunScheduled else { return }
+        var dispatchLease = dispatchLease
+        if gateWaitKey != nil {
+            if let providerRegistry {
+                let loaded: ProviderRuntimeLease
+                if let dispatchLease {
+                    loaded = dispatchLease
+                } else {
+                    loaded = await providerRegistry.leaseForEligibleDispatch()
+                }
+                applyProviderLease(loaded)
+                dispatchLease = loaded
+            }
+            guard gateWaitKey == nil else {
+                if digestClaimProtection != nil {
+                    claimBlockedReevaluationRequested = true
+                }
+                if let inventory = try? eventStore.inventory(),
+                   inventory.eventCount > 0,
+                   !inventory.isProtectedOnly {
+                    let remaining = max(
+                        0,
+                        scheduledDeadlineAt?.timeIntervalSince(now)
+                            ?? digestCooldownRemaining(at: now)
+                            ?? 0
+                    )
+                    emitDeferredDiagnostic(
+                        inventory: inventory,
+                        cooldownRemaining: remaining,
+                        reason: .providerCooldown
+                    )
+                }
+                return
+            }
+        }
         digestInFlight = true
         var ownedClaimProtectionToken: UUID?
         defer {
@@ -356,6 +504,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
 
         loadScheduleStateIfNeeded(now: now)
         guard !scheduleStateBlocked else { return }
+        guard !conservativeScheduleRepairDefersWork(at: now) else { return }
 
         if persistedClaimNeedsRecovery {
             switch await attemptDigestClaimRecovery(now: now) {
@@ -377,6 +526,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard inventory.eventCount > 0 else {
             pendingSince = nil
             nextEligibleAt = nil
+            conservativeScheduleDeadline = nil
             try? persistScheduleState()
             cancelDeadline()
             return
@@ -391,36 +541,27 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         }
 
-        let intervalElapsed: Bool
-        let deferredDeadline: Date
-        if let nextEligibleAt, nextEligibleAt > now {
-            intervalElapsed = false
-            deferredDeadline = nextEligibleAt
-        } else if let lastDigestAt {
-            intervalElapsed = now.timeIntervalSince(lastDigestAt) >= minimumInterval
-            deferredDeadline = nextEligibleAt ?? lastDigestAt.addingTimeInterval(minimumInterval)
-        } else {
-            if inventory.eventCount >= batchSize {
-                intervalElapsed = true
-                deferredDeadline = now
-            } else {
-                if pendingSince == nil {
-                    pendingSince = now
-                    guard (try? persistScheduleState()) != nil else { return }
-                }
-                deferredDeadline = pendingSince!.addingTimeInterval(minimumInterval)
-                intervalElapsed = now >= deferredDeadline
-            }
+        let previousPendingSince = pendingSince
+        pendingSince = Self.boundedPendingTimestamp(
+            inventory.oldestEventTimestamp,
+            noLaterThan: now
+        ) ?? pendingSince ?? now
+        let previousNextEligibleAt = nextEligibleAt
+        let eligibility = digestEligibility(for: inventory, now: now)
+        nextEligibleAt = eligibility.deadline
+        let scheduleChanged = previousPendingSince != pendingSince
+            || previousNextEligibleAt != nextEligibleAt
+        if conservativeScheduleDeadline == nil, scheduleChanged {
+            guard (try? persistScheduleState()) != nil else { return }
         }
-        guard intervalElapsed else {
+        guard eligibility.isEligible else {
+            guard let deferredDeadline = eligibility.deadline,
+                  let reason = eligibility.reason else { return }
             scheduleDeadline(at: deferredDeadline)
-            emitDiagnostic(
-                stage: "context_digest_deferred",
-                fields: [
-                    .init(.eventCount, inventory.eventCount),
-                    .init(.byteCount, inventory.byteCount),
-                    .init(.cooldownRemainingSeconds, Int(ceil(deferredDeadline.timeIntervalSince(now))))
-                ]
+            emitDeferredDiagnostic(
+                inventory: inventory,
+                cooldownRemaining: deferredDeadline.timeIntervalSince(now),
+                reason: reason
             )
             return
         }
@@ -448,13 +589,18 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             providerIdentity: providerIdentity,
             generation: providerGeneration ?? 0
         )
-        let gateCooldown: Date?
         switch gatePreflight {
         case .available, .busy:
             cancelGatePersistenceRetry()
-            gateCooldown = nil
         case .cooldown(let deadline, _):
-            gateCooldown = deadline
+            cancelGatePersistenceRetry()
+            scheduleGateAvailabilityWake(observedDeadline: deadline)
+            emitDeferredDiagnostic(
+                inventory: inventory,
+                cooldownRemaining: deadline.timeIntervalSince(now),
+                reason: .providerCooldown
+            )
+            return
         case .staleGeneration:
             invalidateProviderRuntimeState()
             return
@@ -463,9 +609,13 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             return
         }
         let localCooldown = digestCooldownRemaining(at: now)
-        if let deadline = [localCooldown.map { now.addingTimeInterval($0) }, gateCooldown].compactMap({ $0 }).max(), deadline > now {
+        if let deadline = localCooldown.map({ now.addingTimeInterval($0) }), deadline > now {
             scheduleDeadline(at: deadline)
-            emitDeferredDiagnostic(inventory: inventory, cooldownRemaining: deadline.timeIntervalSince(now))
+            emitDeferredDiagnostic(
+                inventory: inventory,
+                cooldownRemaining: deadline.timeIntervalSince(now),
+                reason: .providerCooldown
+            )
             return
         }
 
@@ -549,8 +699,39 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 ),
                 providerGeneration: requestGeneration
             )
-            let persistAfterClaim: @Sendable () throws -> TypingEventArchiveResult = {
+            let successNowProvider = nowProvider
+            let previousSuccessHistory = successfulDigestTimestamps
+            let previousSuccessAnchor = lastDigestAt
+            let successBatchSize = batchSize
+            let successMinimumInterval = minimumInterval
+            let successMaximumPendingAge = maximumPendingAge
+            let successBudgetWindow = digestBudgetWindow
+            let successMaximumDigestsPerWindow = maximumDigestsPerWindow
+            let successMaximumScheduleAnchorOffset = maximumScheduleAnchorOffset
+            let persistSuccess: @Sendable () throws -> DigestCommitResult = {
+                let completionNow = successNowProvider()
+                let successState = try Self.liveDigestSuccessState(
+                    sampledAt: completionNow,
+                    previousSuccessfulDigestTimestamps: previousSuccessHistory,
+                    previousSuccessAnchor: previousSuccessAnchor,
+                    digestBudgetWindow: successBudgetWindow,
+                    maximumDigestsPerWindow: successMaximumDigestsPerWindow,
+                    maximumScheduleAnchorOffset: successMaximumScheduleAnchorOffset
+                )
+                let successAnchor = successState.anchor
+                let successHistory = successState.successfulDigestTimestamps
+                try self.environmentStore.saveDigestClaim(claim)
                 _ = try self.environmentStore.replaceGeneratedSection(with: generated)
+                try self.environmentStore.saveDigestArchiveReceipt(
+                    EnvironmentDigestArchiveReceipt(
+                        claimedPrefixSHA256: Self.sha256(snapshot.rawData),
+                        claimedPrefixByteCount: snapshot.rawData.count,
+                        claimedEventCount: snapshot.claimedEventCount,
+                        generatedSHA256: claim.generatedSHA256,
+                        archivedByteCount: snapshot.rawData.count,
+                        successfulDigestAt: successAnchor
+                    )
+                )
                 let result = try self.eventStore.commitPendingEvents(matching: snapshot, beforeArchive: {})
                 guard self.eventStore.hasProcessedArchive(
                     prefixSHA256: Self.sha256(snapshot.rawData),
@@ -558,43 +739,66 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 ) else {
                     throw TypingEventStoreError.pendingContentChanged
                 }
-                try self.environmentStore.saveDigestArchiveReceipt(
-                    EnvironmentDigestArchiveReceipt(
-                        claimedPrefixSHA256: Self.sha256(snapshot.rawData),
-                        claimedPrefixByteCount: snapshot.rawData.count,
-                        claimedEventCount: snapshot.claimedEventCount,
-                        generatedSHA256: claim.generatedSHA256,
-                        archivedByteCount: snapshot.rawData.count
-                    )
-                )
-                let tailCount = try self.eventStore.inventory().eventCount
+                let tailInventory = try self.eventStore.inventory()
+                let tailCount = tailInventory.eventCount
+                let tailPendingSince = tailCount > 0
+                    ? Self.boundedPendingTimestamp(
+                        tailInventory.oldestEventTimestamp,
+                        noLaterThan: successAnchor
+                    ) ?? successAnchor
+                    : nil
                 try self.environmentStore.saveDigestScheduleState(
                     EnvironmentDigestScheduleState(
-                        pendingSince: nil,
-                        lastSuccessfulDigestAt: now,
-                        nextEligibleAt: tailCount > 0 ? now.addingTimeInterval(self.minimumInterval) : nil,
-                        pendingEventCount: tailCount
+                        pendingSince: tailPendingSince,
+                        lastSuccessfulDigestAt: successAnchor,
+                        nextEligibleAt: tailCount > 0
+                            ? Self.nextDigestDeadline(
+                                eventCount: tailCount,
+                                pendingSince: tailPendingSince,
+                                successfulDigestTimestamps: successHistory,
+                                lastSuccessfulDigestAt: successAnchor,
+                                batchSize: successBatchSize,
+                                minimumInterval: successMinimumInterval,
+                                maximumPendingAge: successMaximumPendingAge,
+                                digestBudgetWindow: successBudgetWindow,
+                                maximumDigestsPerWindow: successMaximumDigestsPerWindow,
+                                now: successAnchor
+                            )
+                            : nil,
+                        pendingEventCount: tailCount,
+                        successfulDigestTimestamps: successHistory
                     )
                 )
-                return result
+                return DigestCommitResult(
+                    archiveResult: result,
+                    pendingTailCount: tailCount,
+                    pendingTailSince: tailPendingSince,
+                    successAnchor: successAnchor,
+                    successfulDigestTimestamps: successHistory
+                )
             }
-            let result: TypingEventArchiveResult
+            let result: DigestCommitResult
+            // Arm recovery before either path can persist a claim. A guarded
+            // pre-commit failure is cleared by the existing missing-claim path.
+            persistedClaimNeedsRecovery = true
             if let providerRegistry, let lease {
-                persistedClaimNeedsRecovery = true
                 result = try await providerRegistry.commitIfCurrent(using: lease) {
-                    try environmentStore.saveDigestClaim(claim)
-                    return try persistAfterClaim()
+                    try persistSuccess()
                 }
             } else {
-                try environmentStore.saveDigestClaim(claim)
-                persistedClaimNeedsRecovery = true
-                result = try persistAfterClaim()
+                result = try persistSuccess()
             }
             try environmentStore.clearDigestClaim()
             persistedClaimNeedsRecovery = false
             try? environmentStore.clearDigestArchiveReceipt()
-            recordDigestSuccess(at: now)
-            emitArchiveDiagnostic(result)
+            applyDigestSuccessState(
+                at: result.successAnchor,
+                pendingTailCount: result.pendingTailCount,
+                pendingAnchor: result.pendingTailSince,
+                successfulDigestTimestamps: result.successfulDigestTimestamps
+            )
+            finishDigestSuccessScheduling()
+            emitArchiveDiagnostic(result.archiveResult)
         } catch is ProviderRequestBudgetError {
             scheduleDeadline(at: now.addingTimeInterval(minimumInterval))
         } catch ProviderRuntimeRegistryError.staleGeneration {
@@ -602,7 +806,18 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         } catch ProviderRequestGateError.staleGeneration {
             invalidateProviderRuntimeState()
         } catch ProviderRequestGateError.cooldown(let deadline, _) {
-            scheduleDeadline(at: deadline)
+            scheduleGateAvailabilityWake(
+                for: GateWaitKey(
+                    identity: requestIdentity,
+                    generation: requestGeneration
+                ),
+                observedDeadline: deadline
+            )
+            emitDeferredDiagnostic(
+                inventory: inventory,
+                cooldownRemaining: deadline.timeIntervalSince(now),
+                reason: .providerCooldown
+            )
         } catch ProviderRequestGateError.busy {
             scheduleGateAvailabilityWake()
             await testProbe?.pauseAfterGateWaiterInstallIfNeeded()
@@ -613,12 +828,19 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         } catch TypingEventStoreError.pendingContentChanged {
             return
         } catch EnvironmentDocumentError.invalidDigestCandidate {
-            markDigestFailure(at: now)
+            await markDigestFailure(
+                at: now,
+                providerIdentity: requestIdentity,
+                generation: requestGeneration
+            )
         } catch is TimeoutError {
-            markDigestFailure(at: now)
+            await markDigestFailure(
+                at: now,
+                providerIdentity: requestIdentity,
+                generation: requestGeneration
+            )
         } catch {
             if error is CancellationError { return }
-            markDigestFailure(at: now)
             if providerGateCompleted {
                 await requestGate.recordLocalCommitFailure(
                     providerIdentity: requestIdentity,
@@ -630,16 +852,26 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                     generation: requestGeneration
                 )
             }
+            await markDigestFailure(
+                at: now,
+                providerIdentity: requestIdentity,
+                generation: requestGeneration
+            )
         }
     }
 
-    private func preparePersistedClaimForRecord(now: Date) async -> Bool {
-        guard digestClaimProtection == nil, persistedClaimNeedsRecovery else { return true }
+    private func preparePersistedClaimForRecord(now: Date) async -> RecordPreparation {
+        loadScheduleStateIfNeeded(now: now)
+        guard !scheduleStateBlocked else { return .blocked }
+        guard !conservativeScheduleRepairDefersWork(at: now) else { return .blocked }
+        guard digestClaimProtection == nil, persistedClaimNeedsRecovery else { return .ready }
         switch await attemptDigestClaimRecovery(now: now) {
         case .none, .recovered:
-            return true
-        case .blocked, .gatePersistenceBlocked, .superseded:
-            return false
+            return .ready
+        case .gatePersistenceBlocked:
+            return .appendWithoutProcessing
+        case .blocked, .superseded:
+            return .blocked
         }
     }
 
@@ -680,15 +912,15 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
     }
 
     private func recoverDigestClaim(now: Date, token: UUID) async -> DigestClaimRecovery {
-        if gatePersistenceRetryAt != nil {
-            switch await requestGate.persistencePreflight() {
-            case .persistenceBlocked(let retryAt):
-                scheduleGatePersistenceRetry(at: retryAt)
-                return .gatePersistenceBlocked(retryAt: retryAt)
-            case .available, .busy, .cooldown, .staleGeneration:
-                cancelGatePersistenceRetry()
-            }
+        await testProbe?.pauseBeforeClaimRecoveryGatePreflightIfNeeded()
+        guard isCurrentClaimRecovery(token) else { return .superseded }
+        switch await requestGate.persistencePreflight() {
+        case .persistenceBlocked(let retryAt):
+            return .gatePersistenceBlocked(retryAt: retryAt)
+        case .available, .busy, .cooldown, .staleGeneration:
+            cancelGatePersistenceRetry()
         }
+        guard isCurrentClaimRecovery(token) else { return .superseded }
         await testProbe?.recordClaimRecoveryClaimLoad()
         guard isCurrentClaimRecovery(token) else { return .superseded }
         let claim: EnvironmentDigestClaim?
@@ -701,14 +933,6 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             try? environmentStore.clearDigestArchiveReceipt()
             return .none
         }
-        await testProbe?.pauseBeforeClaimRecoveryGatePreflightIfNeeded()
-        guard isCurrentClaimRecovery(token) else { return .superseded }
-        let gatePreflight = await requestGate.persistencePreflight()
-        guard isCurrentClaimRecovery(token) else { return .superseded }
-        if case .persistenceBlocked(let retryAt) = gatePreflight {
-            return .gatePersistenceBlocked(retryAt: retryAt)
-        }
-        cancelGatePersistenceRetry()
         do {
             let environment = try environmentStore.loadSnapshot()
             guard EnvironmentDocumentStore.generatedSectionHash(from: environment.content) == claim.generatedSHA256 else {
@@ -720,22 +944,31 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 byteCount: claim.claimedPrefixByteCount
             ) {
             case .valid:
-                switch eventStore.pendingClaimedPrefixValidation(
+                let pendingPrefixValidation = eventStore.pendingClaimedPrefixValidation(
                     prefixSHA256: claim.claimedPrefixSHA256,
                     byteCount: claim.claimedPrefixByteCount,
                     eventCount: claim.claimedEventCount
-                ) {
-                case .matching(let snapshot):
-                    try eventStore.archivePendingEvents(matching: snapshot)
-                case .missing, .notMatching:
-                    break
+                )
+                switch pendingPrefixValidation {
                 case .indeterminate:
                     return .blocked
+                case .matching, .missing, .notMatching:
+                    break
                 }
-                try persistScheduleState(afterSuccessAt: now)
+                let successfulDigestAt = try ensureDigestRecoveryReceipt(
+                    for: claim,
+                    relativeTo: now
+                )
+                if case .matching(let snapshot) = pendingPrefixValidation {
+                    try eventStore.archivePendingEvents(matching: snapshot)
+                }
+                try persistScheduleState(
+                    afterSuccessAt: successfulDigestAt,
+                    recoveryNow: now
+                )
                 try environmentStore.clearDigestClaim()
                 try? environmentStore.clearDigestArchiveReceipt()
-                recordDigestSuccess(at: now)
+                finishDigestSuccessScheduling()
                 return .recovered
             case .invalid:
                 return .blocked
@@ -750,6 +983,10 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             guard Self.sha256(snapshot.rawData) == claim.claimedPrefixSHA256 else {
                 return .blocked
             }
+            let successfulDigestAt = try ensureDigestRecoveryReceipt(
+                for: claim,
+                relativeTo: now
+            )
             try eventStore.archivePendingEvents(matching: snapshot)
             guard eventStore.hasProcessedArchive(
                 prefixSHA256: claim.claimedPrefixSHA256,
@@ -757,19 +994,13 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             ) else {
                 return .blocked
             }
-            try environmentStore.saveDigestArchiveReceipt(
-                EnvironmentDigestArchiveReceipt(
-                    claimedPrefixSHA256: claim.claimedPrefixSHA256,
-                    claimedPrefixByteCount: claim.claimedPrefixByteCount,
-                    claimedEventCount: claim.claimedEventCount,
-                    generatedSHA256: claim.generatedSHA256,
-                    archivedByteCount: claim.claimedPrefixByteCount
-                )
+            try persistScheduleState(
+                afterSuccessAt: successfulDigestAt,
+                recoveryNow: now
             )
-            try persistScheduleState(afterSuccessAt: now)
             try environmentStore.clearDigestClaim()
             try? environmentStore.clearDigestArchiveReceipt()
-            recordDigestSuccess(at: now)
+            finishDigestSuccessScheduling()
             return .recovered
         } catch {
             return .blocked
@@ -807,16 +1038,21 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         clearClaimRecoveryBlock()
     }
 
-    private func applyProviderLease(_ lease: ProviderRuntimeLease) {
+    private func applyProviderLease(
+        _ lease: ProviderRuntimeLease,
+        preservingGatePersistenceRetry: Bool = false
+    ) {
         let changed = providerGeneration != lease.generation || providerIdentity != lease.fingerprint
         providerGeneration = lease.generation
         providerIdentity = lease.fingerprint
         if changed {
             resetClaimRecoveryState()
-            cancelGatePersistenceRetry()
+            if !preservingGatePersistenceRetry {
+                cancelGatePersistenceRetry()
+            }
             cancelGateAvailabilityWait()
             lastDigestFailureAt = nil
-            deferredDiagnosticFailureAt = nil
+            deferredDiagnosticKey = nil
         }
     }
 
@@ -825,35 +1061,64 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         cancelGatePersistenceRetry()
         cancelGateAvailabilityWait()
         lastDigestFailureAt = nil
-        deferredDiagnosticFailureAt = nil
+        deferredDiagnosticKey = nil
         providerGeneration = nil
         providerIdentity = "context-digest"
     }
 
-    private func recordDigestSuccess(at now: Date) {
+    private func applyDigestSuccessState(
+        at now: Date,
+        pendingTailCount: Int,
+        pendingAnchor: Date?,
+        successfulDigestTimestamps: [Date]
+    ) {
         lastDigestAt = now
-        pendingSince = nil
+        self.successfulDigestTimestamps = successfulDigestTimestamps
+        pendingSince = pendingTailCount > 0 ? (pendingAnchor ?? now) : nil
+        conservativeScheduleDeadline = nil
+        nextEligibleAt = pendingTailCount > 0
+            ? nextDigestDeadline(
+                eventCount: pendingTailCount,
+                pendingSince: pendingSince,
+                successfulDigestTimestamps: successfulDigestTimestamps,
+                now: now
+            )
+            : nil
         lastDigestFailureAt = nil
-        deferredDiagnosticFailureAt = nil
-        let hasPendingTail: Bool
-        do {
-            hasPendingTail = try eventStore.inventory().eventCount > 0
-        } catch {
-            hasPendingTail = true
-        }
-        nextEligibleAt = hasPendingTail ? now.addingTimeInterval(minimumInterval) : nil
-        try? persistScheduleState()
-        if hasPendingTail {
-            scheduleDeadline(at: nextEligibleAt!)
+        deferredDiagnosticKey = nil
+    }
+
+    private func finishDigestSuccessScheduling() {
+        if let nextEligibleAt {
+            scheduleDeadline(at: nextEligibleAt)
         } else {
             cancelDeadline()
         }
     }
 
-    private func markDigestFailure(at now: Date) {
+    private func markDigestFailure(
+        at now: Date,
+        providerIdentity: String,
+        generation: UInt64
+    ) async {
         lastDigestFailureAt = now
-        deferredDiagnosticFailureAt = nil
-        scheduleDeadline(at: now.addingTimeInterval(60))
+        deferredDiagnosticKey = nil
+        let localDeadline = now.addingTimeInterval(60)
+        let gateDeadline = await requestGate.cooldownDeadline(
+            providerIdentity: providerIdentity,
+            generation: generation
+        )
+        if let gateDeadline {
+            scheduleGateAvailabilityWake(
+                for: GateWaitKey(
+                    identity: providerIdentity,
+                    generation: generation
+                ),
+                observedDeadline: gateDeadline
+            )
+        } else {
+            scheduleDeadline(at: localDeadline)
+        }
     }
 
     private func digestCooldownRemaining(at now: Date) -> TimeInterval? {
@@ -862,12 +1127,268 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         return remaining > 0 ? remaining : nil
     }
 
+    private func digestEligibility(
+        for inventory: TypingEventInventory,
+        now: Date
+    ) -> DigestEligibility {
+        let eligibleSuccessfulDigestTimestamps = normalizedSuccessfulDigestHistory(
+            successfulDigestTimestamps,
+            relativeTo: now
+        )
+        var constraints = digestConstraints(
+            eventCount: inventory.eventCount,
+            pendingSince: pendingSince,
+            successfulDigestTimestamps: eligibleSuccessfulDigestTimestamps,
+            now: now
+        )
+        if let conservativeScheduleDeadline, conservativeScheduleDeadline > now {
+            constraints.append((conservativeScheduleDeadline, .scheduleRepair))
+        } else {
+            conservativeScheduleDeadline = nil
+        }
+        guard let deferred = constraints
+            .filter({ $0.deadline > now })
+            .max(by: { $0.deadline < $1.deadline }) else {
+            return DigestEligibility(isEligible: true, deadline: nil, reason: nil)
+        }
+        return DigestEligibility(
+            isEligible: false,
+            deadline: deferred.deadline,
+            reason: deferred.reason
+        )
+    }
+
+    private func nextDigestDeadline(
+        eventCount: Int,
+        pendingSince: Date?,
+        successfulDigestTimestamps: [Date],
+        now: Date
+    ) -> Date {
+        Self.nextDigestDeadline(
+            eventCount: eventCount,
+            pendingSince: pendingSince,
+            successfulDigestTimestamps: successfulDigestTimestamps,
+            lastSuccessfulDigestAt: lastDigestAt,
+            batchSize: batchSize,
+            minimumInterval: minimumInterval,
+            maximumPendingAge: maximumPendingAge,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumDigestsPerWindow: maximumDigestsPerWindow,
+            now: now
+        )
+    }
+
+    private static func nextDigestDeadline(
+        eventCount: Int,
+        pendingSince: Date?,
+        successfulDigestTimestamps: [Date],
+        lastSuccessfulDigestAt: Date?,
+        batchSize: Int,
+        minimumInterval: TimeInterval,
+        maximumPendingAge: TimeInterval,
+        digestBudgetWindow: TimeInterval,
+        maximumDigestsPerWindow: Int,
+        now: Date
+    ) -> Date {
+        var deadlines: [Date] = []
+        if eventCount < batchSize {
+            deadlines.append((pendingSince ?? now).addingTimeInterval(maximumPendingAge))
+        }
+        if let lastSuccessfulDigestAt = successfulDigestTimestamps.last
+            ?? lastSuccessfulDigestAt {
+            deadlines.append(lastSuccessfulDigestAt.addingTimeInterval(minimumInterval))
+        }
+        if successfulDigestTimestamps.count >= maximumDigestsPerWindow {
+            let blockingIndex = successfulDigestTimestamps.count - maximumDigestsPerWindow
+            deadlines.append(
+                successfulDigestTimestamps[blockingIndex]
+                    .addingTimeInterval(digestBudgetWindow)
+            )
+        }
+        return deadlines.max() ?? now
+    }
+
+    private func digestConstraints(
+        eventCount: Int,
+        pendingSince: Date?,
+        successfulDigestTimestamps: [Date],
+        now: Date
+    ) -> [(deadline: Date, reason: DigestDeferralReason)] {
+        var constraints: [(deadline: Date, reason: DigestDeferralReason)] = []
+        if eventCount < batchSize {
+            constraints.append((
+                (pendingSince ?? now).addingTimeInterval(maximumPendingAge),
+                .maximumPendingAge
+            ))
+        }
+        if let lastSuccessfulDigestAt = successfulDigestTimestamps.last ?? lastDigestAt {
+            constraints.append((
+                lastSuccessfulDigestAt.addingTimeInterval(minimumInterval),
+                .minimumInterval
+            ))
+        }
+        if successfulDigestTimestamps.count >= maximumDigestsPerWindow {
+            let blockingIndex = successfulDigestTimestamps.count - maximumDigestsPerWindow
+            constraints.append((
+                successfulDigestTimestamps[blockingIndex]
+                    .addingTimeInterval(digestBudgetWindow),
+                .rollingBudget
+            ))
+        }
+        return constraints
+    }
+
+    private func successfulDigestHistory(
+        adding timestamp: Date,
+        relativeTo now: Date
+    ) -> [Date] {
+        return Self.boundedSuccessfulDigestHistory(
+            previousSuccessfulDigestTimestamps: successfulDigestTimestamps,
+            previousSuccessAnchor: lastDigestAt,
+            adding: timestamp,
+            relativeTo: now,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumDigestsPerWindow: maximumDigestsPerWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
+        )
+    }
+
+    private func normalizedSuccessfulDigestHistory(
+        _ timestamps: [Date],
+        relativeTo now: Date
+    ) -> [Date] {
+        Self.normalizedSuccessfulDigestHistory(
+            timestamps,
+            relativeTo: now,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
+        )
+    }
+
+    private static func normalizedSuccessfulDigestHistory(
+        _ timestamps: [Date],
+        relativeTo now: Date,
+        digestBudgetWindow: TimeInterval,
+        maximumScheduleAnchorOffset: TimeInterval
+    ) -> [Date] {
+        let cutoff = now.addingTimeInterval(-digestBudgetWindow)
+        let maximumFutureTimestamp = now.addingTimeInterval(
+            maximumScheduleAnchorOffset
+        )
+        return sortedUniqueSuccessfulDigestHistory(
+            timestamps.filter({
+                $0.timeIntervalSince1970.isFinite
+                    && $0 > cutoff
+                    && $0 <= maximumFutureTimestamp
+            })
+        )
+    }
+
+    private static func sortedUniqueSuccessfulDigestHistory(
+        _ timestamps: [Date]
+    ) -> [Date] {
+        var result: [Date] = []
+        for timestamp in timestamps.sorted() {
+            if result.last != timestamp { result.append(timestamp) }
+        }
+        return result
+    }
+
+    private static func successfulDigestAnchorsAreSemanticallyEquivalent(
+        _ lhs: Date,
+        _ rhs: Date
+    ) -> Bool {
+        abs(lhs.timeIntervalSince(rhs)) < successfulDigestAnchorSemanticTolerance
+    }
+
+    private static func boundedSuccessfulDigestHistory(
+        previousSuccessfulDigestTimestamps: [Date],
+        previousSuccessAnchor: Date?,
+        adding successAnchor: Date,
+        relativeTo now: Date,
+        digestBudgetWindow: TimeInterval,
+        maximumDigestsPerWindow: Int,
+        maximumScheduleAnchorOffset: TimeInterval
+    ) -> [Date] {
+        var timestamps = previousSuccessfulDigestTimestamps
+        if let previousSuccessAnchor {
+            let duplicatesLatestPersistedSuccess = previousSuccessfulDigestTimestamps.max()
+                .map {
+                    successfulDigestAnchorsAreSemanticallyEquivalent(
+                        previousSuccessAnchor,
+                        $0
+                    )
+                } ?? false
+            if !duplicatesLatestPersistedSuccess {
+                timestamps.append(previousSuccessAnchor)
+            }
+        }
+        timestamps.append(successAnchor)
+        let history = normalizedSuccessfulDigestHistory(
+            timestamps,
+            relativeTo: now,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
+        )
+        return Array(history.suffix(maximumDigestsPerWindow))
+    }
+
+    private static func liveDigestSuccessState(
+        sampledAt completionNow: Date,
+        previousSuccessfulDigestTimestamps: [Date],
+        previousSuccessAnchor: Date?,
+        digestBudgetWindow: TimeInterval,
+        maximumDigestsPerWindow: Int,
+        maximumScheduleAnchorOffset: TimeInterval
+    ) throws -> DigestSuccessState {
+        guard completionNow.timeIntervalSince1970.isFinite else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        let existingSuccessAnchors = previousSuccessfulDigestTimestamps
+            + [previousSuccessAnchor].compactMap { $0 }
+        guard existingSuccessAnchors.allSatisfy({
+            $0.timeIntervalSince1970.isFinite
+        }) else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        let latestSuccessAnchor = existingSuccessAnchors.max()
+        var successAnchor = completionNow
+        if let latestSuccessAnchor, successAnchor <= latestSuccessAnchor {
+            let successor = latestSuccessAnchor.timeIntervalSinceReferenceDate.nextUp
+            guard successor.isFinite else {
+                throw EnvironmentDocumentError.claimMismatch
+            }
+            successAnchor = Date(timeIntervalSinceReferenceDate: successor)
+        }
+        let maximumFutureAnchor = completionNow.addingTimeInterval(
+            maximumScheduleAnchorOffset
+        )
+        guard maximumFutureAnchor.timeIntervalSince1970.isFinite,
+              successAnchor <= maximumFutureAnchor else {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        let successfulDigestTimestamps = boundedSuccessfulDigestHistory(
+            previousSuccessfulDigestTimestamps: previousSuccessfulDigestTimestamps,
+            previousSuccessAnchor: previousSuccessAnchor,
+            adding: successAnchor,
+            relativeTo: completionNow,
+            digestBudgetWindow: digestBudgetWindow,
+            maximumDigestsPerWindow: maximumDigestsPerWindow,
+            maximumScheduleAnchorOffset: maximumScheduleAnchorOffset
+        )
+        return DigestSuccessState(
+            anchor: successAnchor,
+            successfulDigestTimestamps: successfulDigestTimestamps
+        )
+    }
+
     private func scheduleDeadline(at date: Date) {
         guard claimRecoveryRetryAt == nil else { return }
         gatePersistenceRetryAt = nil
         gateWaitKey = nil
         digestRerunScheduled = false
         deadlineTask?.cancel()
+        scheduledDeadlineAt = date
         let delay = deadlineNanoseconds(until: date, now: nowProvider())
         deadlineTask = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
@@ -883,6 +1404,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         gateWaitKey = nil
         deadlineTask?.cancel()
         digestRerunScheduled = true
+        scheduledDeadlineAt = nil
         deadlineTask = Task { [weak self] in
             guard !Task.isCancelled, let self else { return }
             await self.runCoalescedRerun()
@@ -893,6 +1415,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard digestRerunScheduled else { return }
         digestRerunScheduled = false
         deadlineTask = nil
+        scheduledDeadlineAt = nil
         let recordsClaimBlockedReevaluation = claimBlockedReevaluationScheduled
         claimBlockedReevaluationScheduled = false
         await processIfNeeded(now: nowProvider(), dispatchLease: nil)
@@ -901,17 +1424,24 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
     }
 
-    private func scheduleGateAvailabilityWake() {
+    private func scheduleGateAvailabilityWake(
+        for requestedKey: GateWaitKey? = nil,
+        observedDeadline: Date? = nil
+    ) {
         guard claimRecoveryRetryAt == nil else { return }
         gatePersistenceRetryAt = nil
-        let key = GateWaitKey(
+        let key = requestedKey ?? GateWaitKey(
             identity: providerIdentity,
             generation: providerGeneration ?? 0
         )
-        if gateWaitKey == key, deadlineTask != nil { return }
+        if gateWaitKey == key, deadlineTask != nil {
+            if let observedDeadline { scheduledDeadlineAt = observedDeadline }
+            return
+        }
         deadlineTask?.cancel()
         digestRerunScheduled = false
         gateWaitKey = key
+        scheduledDeadlineAt = observedDeadline
         let gate = requestGate
         deadlineTask = Task { [weak self] in
             await gate.waitForAvailability(
@@ -930,6 +1460,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         digestRerunScheduled = false
         deadlineTask?.cancel()
         deadlineTask = nil
+        scheduledDeadlineAt = nil
     }
 
     private func cancelGateAvailabilityWait() {
@@ -937,12 +1468,14 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         gateWaitKey = nil
         deadlineTask?.cancel()
         deadlineTask = nil
+        scheduledDeadlineAt = nil
     }
 
     private func gateAvailabilityDidWake(_ key: GateWaitKey) async {
         guard gateWaitKey == key else { return }
         gateWaitKey = nil
         deadlineTask = nil
+        scheduledDeadlineAt = nil
         await processIfNeeded(now: nowProvider())
     }
 
@@ -955,6 +1488,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         gateWaitKey = nil
         digestRerunScheduled = false
         deadlineTask?.cancel()
+        scheduledDeadlineAt = nil
         let delay = deadlineNanoseconds(until: deadline, now: nowProvider())
         let sleeper = claimRecoverySleeper
         deadlineTask = Task { [weak self] in
@@ -979,6 +1513,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard claimRecoveryRetryAt == deadline else { return }
         claimRecoveryRetryAt = nil
         deadlineTask = nil
+        scheduledDeadlineAt = nil
         await processIfNeeded(now: nowProvider(), dispatchLease: nil)
     }
 
@@ -988,6 +1523,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         claimRecoveryRetryAt = nil
         deadlineTask?.cancel()
         deadlineTask = nil
+        scheduledDeadlineAt = nil
     }
 
     private func scheduleGatePersistenceRetry(at retryAt: Date) {
@@ -997,9 +1533,15 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         gateWaitKey = nil
         digestRerunScheduled = false
         deadlineTask?.cancel()
+        scheduledDeadlineAt = nil
         let delay = deadlineNanoseconds(until: retryAt, now: nowProvider())
+        let sleeper = claimRecoverySleeper
         deadlineTask = Task { [weak self] in
-            if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            if let sleeper {
+                await sleeper(delay)
+            } else if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
             guard !Task.isCancelled, let self else { return }
             await self.gatePersistenceRetryDidWake(retryAt)
         }
@@ -1024,6 +1566,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard gatePersistenceRetryAt == retryAt else { return }
         gatePersistenceRetryAt = nil
         deadlineTask = nil
+        scheduledDeadlineAt = nil
         await processIfNeeded(now: nowProvider(), dispatchLease: nil)
     }
 
@@ -1032,6 +1575,7 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         gatePersistenceRetryAt = nil
         deadlineTask?.cancel()
         deadlineTask = nil
+        scheduledDeadlineAt = nil
     }
 
     private func scheduleAfterLocalArchive(now: Date) throws {
@@ -1039,25 +1583,20 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         guard inventory.eventCount > 0 else {
             pendingSince = nil
             nextEligibleAt = nil
+            conservativeScheduleDeadline = nil
             try persistScheduleState()
             cancelDeadline()
             return
         }
 
-        let deadline: Date
-        if let lastDigestAt {
-            let eligibleAt = lastDigestAt.addingTimeInterval(minimumInterval)
-            nextEligibleAt = eligibleAt
-            deadline = max(now, eligibleAt)
-        } else if inventory.eventCount >= batchSize {
-            pendingSince = pendingSince ?? now
-            deadline = now
-        } else {
-            pendingSince = pendingSince ?? now
-            deadline = pendingSince!.addingTimeInterval(minimumInterval)
-        }
+        pendingSince = Self.boundedPendingTimestamp(
+            inventory.oldestEventTimestamp,
+            noLaterThan: now
+        ) ?? pendingSince ?? now
+        let eligibility = digestEligibility(for: inventory, now: now)
+        nextEligibleAt = eligibility.deadline
         try persistScheduleState()
-        scheduleDeadline(at: deadline)
+        scheduleDeadline(at: eligibility.deadline ?? now)
     }
 
     private func loadScheduleStateIfNeeded(now: Date) {
@@ -1068,21 +1607,47 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
             guard scheduleStateIsSemanticallyValid(state, now: now) else {
                 throw EnvironmentDocumentError.claimMismatch
             }
-            pendingSince = state.pendingSince
+            var persistedHistory = state.successfulDigestTimestamps
+            if persistedHistory.isEmpty, let legacySuccess = state.lastSuccessfulDigestAt {
+                persistedHistory = [legacySuccess]
+            }
+            successfulDigestTimestamps = Self.sortedUniqueSuccessfulDigestHistory(
+                persistedHistory
+            )
             lastDigestAt = state.lastSuccessfulDigestAt
+                ?? successfulDigestTimestamps.last
+            if state.pendingEventCount > 0 {
+                pendingSince = state.pendingSince
+                    ?? state.lastSuccessfulDigestAt
+                    ?? now
+            } else {
+                pendingSince = state.pendingSince
+            }
             nextEligibleAt = state.nextEligibleAt
+            if state.pendingEventCount == 0,
+               state.lastSuccessfulDigestAt == nil,
+               state.successfulDigestTimestamps.isEmpty,
+               let repairedDeadline = state.nextEligibleAt,
+               repairedDeadline > now {
+                conservativeScheduleDeadline = repairedDeadline
+            }
         } catch {
             pendingSince = now
             lastDigestAt = nil
-            let conservativeDeadline = now.addingTimeInterval(minimumInterval)
+            successfulDigestTimestamps = []
+            let conservativeDeadline = now.addingTimeInterval(
+                max(minimumInterval, max(maximumPendingAge, digestBudgetWindow))
+            )
             nextEligibleAt = conservativeDeadline
+            conservativeScheduleDeadline = conservativeDeadline
             do {
                 try environmentStore.saveDigestScheduleState(
                     EnvironmentDigestScheduleState(
                         pendingSince: now,
                         lastSuccessfulDigestAt: nil,
                         nextEligibleAt: conservativeDeadline,
-                        pendingEventCount: 0
+                        pendingEventCount: 0,
+                        successfulDigestTimestamps: []
                     )
                 )
                 scheduleDeadline(at: conservativeDeadline)
@@ -1092,57 +1657,102 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
     }
 
+    private func conservativeScheduleRepairDefersWork(at now: Date) -> Bool {
+        guard let deadline = conservativeScheduleDeadline else { return false }
+        guard deadline > now else {
+            conservativeScheduleDeadline = nil
+            return false
+        }
+        scheduleDeadline(at: deadline)
+        return true
+    }
+
     private func scheduleStateIsSemanticallyValid(
         _ state: EnvironmentDigestScheduleState,
         now: Date
     ) -> Bool {
-        let maximumFutureDate = now.addingTimeInterval(
-            max(15 * 60, minimumInterval)
+        let maximumFutureAnchorDate = now.addingTimeInterval(
+            maximumScheduleAnchorOffset
         )
-        let dates = [state.pendingSince, state.lastSuccessfulDigestAt, state.nextEligibleAt]
-            .compactMap { $0 }
-        guard dates.allSatisfy({
-            $0.timeIntervalSince1970.isFinite && $0 <= maximumFutureDate
+        let maximumFutureDeadline = maximumFutureAnchorDate.addingTimeInterval(
+            maximumScheduleAnchorOffset
+        )
+        let anchorDates = [state.pendingSince, state.lastSuccessfulDigestAt]
+            .compactMap { $0 } + state.successfulDigestTimestamps
+        guard anchorDates.allSatisfy({
+            $0.timeIntervalSince1970.isFinite && $0 <= maximumFutureAnchorDate
         }) else { return false }
-        if let pendingSince = state.pendingSince, pendingSince > now { return false }
+        if let nextEligibleAt = state.nextEligibleAt,
+           (!nextEligibleAt.timeIntervalSince1970.isFinite
+               || nextEligibleAt > maximumFutureDeadline) {
+            return false
+        }
         if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt,
-           lastSuccessfulDigestAt > now { return false }
-        guard state.pendingSince == nil || state.lastSuccessfulDigestAt == nil else { return false }
+           let latestPersistedSuccess = state.successfulDigestTimestamps.max(),
+           !Self.successfulDigestAnchorsAreSemanticallyEquivalent(
+               lastSuccessfulDigestAt,
+               latestPersistedSuccess
+           ) {
+            return false
+        }
         if state.pendingSince == nil,
            state.lastSuccessfulDigestAt == nil,
            state.nextEligibleAt == nil,
            state.pendingEventCount > 0 {
             return false
         }
+        if let nextEligibleAt = state.nextEligibleAt {
+            if let pendingSince = state.pendingSince, nextEligibleAt < pendingSince {
+                return false
+            }
+            if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt,
+               nextEligibleAt < lastSuccessfulDigestAt {
+                return false
+            }
+        }
+        return true
+    }
 
-        let expectedDeadline: Date?
-        if let lastSuccessfulDigestAt = state.lastSuccessfulDigestAt {
-            expectedDeadline = lastSuccessfulDigestAt.addingTimeInterval(minimumInterval)
-        } else if let pendingSince = state.pendingSince {
-            expectedDeadline = pendingSince.addingTimeInterval(minimumInterval)
-        } else {
-            expectedDeadline = nil
-        }
-        switch (state.nextEligibleAt, expectedDeadline) {
-        case (nil, _):
-            return true
-        case (let actual?, let expected?):
-            return abs(actual.timeIntervalSince(expected)) < 0.001
-        case (.some, nil):
-            return false
-        }
+    private var maximumScheduleAnchorOffset: TimeInterval {
+        max(minimumInterval, max(maximumPendingAge, digestBudgetWindow))
     }
 
     private func deadlineNanoseconds(until deadline: Date, now: Date) -> UInt64 {
         let interval = deadline.timeIntervalSince(now)
         guard interval.isFinite, interval > 0 else { return 0 }
-        let bounded = min(interval, max(15 * 60, minimumInterval))
-        return UInt64((bounded * 1_000_000_000).rounded(.up))
+        let maximumSeconds = Double(UInt64.max) / 1_000_000_000
+        return UInt64((min(interval, maximumSeconds) * 1_000_000_000).rounded(.up))
     }
 
     private static func boundedMinimumInterval(_ interval: TimeInterval) -> TimeInterval {
-        guard interval.isFinite else { return 600 }
+        guard interval.isFinite else { return defaultMinimumInterval }
         return min(max(1, interval), maximumScheduleInterval)
+    }
+
+    private static func boundedMaximumPendingAge(_ interval: TimeInterval) -> TimeInterval {
+        guard interval.isFinite else { return defaultMaximumPendingAge }
+        return min(max(1, interval), maximumBudgetWindow)
+    }
+
+    private static func boundedDigestBudgetWindow(_ interval: TimeInterval) -> TimeInterval {
+        guard interval.isFinite else { return defaultDigestBudgetWindow }
+        return min(max(1, interval), maximumBudgetWindow)
+    }
+
+    private static func boundedMaximumDigestsPerWindow(_ count: Int) -> Int {
+        min(max(1, count), 64)
+    }
+
+    private static func boundedPendingTimestamp(
+        _ timestamp: Date?,
+        noLaterThan now: Date
+    ) -> Date? {
+        guard let timestamp,
+              timestamp.timeIntervalSince1970.isFinite,
+              timestamp <= now else {
+            return nil
+        }
+        return timestamp
     }
 
     private static func boundedClaimRecoveryBackoff(_ interval: TimeInterval) -> TimeInterval {
@@ -1162,22 +1772,99 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
                 pendingSince: pendingSince,
                 lastSuccessfulDigestAt: lastDigestAt,
                 nextEligibleAt: nextEligibleAt,
-                pendingEventCount: max(0, min(500, eventCount))
+                pendingEventCount: max(0, min(500, eventCount)),
+                successfulDigestTimestamps: successfulDigestTimestamps
             )
         )
     }
 
-    private func persistScheduleState(afterSuccessAt now: Date) throws {
-        let tailCount = try eventStore.inventory().eventCount
-        lastDigestAt = now
-        pendingSince = nil
-        nextEligibleAt = tailCount > 0 ? now.addingTimeInterval(minimumInterval) : nil
+    private func ensureDigestRecoveryReceipt(
+        for claim: EnvironmentDigestClaim,
+        relativeTo now: Date
+    ) throws -> Date {
+        if let receipt = try environmentStore.loadDigestArchiveReceipt() {
+            guard receipt.claimedPrefixSHA256 == claim.claimedPrefixSHA256,
+                  receipt.claimedPrefixByteCount == claim.claimedPrefixByteCount,
+                  receipt.claimedEventCount == claim.claimedEventCount,
+                  receipt.generatedSHA256 == claim.generatedSHA256,
+                  receipt.archivedByteCount == claim.claimedPrefixByteCount else {
+                throw EnvironmentDocumentError.claimMismatch
+            }
+            if let successfulDigestAt = receipt.successfulDigestAt {
+                guard let boundedTimestamp = boundedScheduleAnchorTimestamp(
+                    successfulDigestAt,
+                    relativeTo: now
+                ) else {
+                    throw EnvironmentDocumentError.claimMismatch
+                }
+                return boundedTimestamp
+            }
+
+            guard let successfulDigestAt = boundedScheduleAnchorTimestamp(
+                now,
+                relativeTo: now
+            ) else {
+                throw EnvironmentDocumentError.claimMismatch
+            }
+            var upgradedReceipt = receipt
+            upgradedReceipt.successfulDigestAt = successfulDigestAt
+            try environmentStore.saveDigestArchiveReceipt(upgradedReceipt)
+            return successfulDigestAt
+        }
+
+        let receipt = EnvironmentDigestArchiveReceipt(
+            claimedPrefixSHA256: claim.claimedPrefixSHA256,
+            claimedPrefixByteCount: claim.claimedPrefixByteCount,
+            claimedEventCount: claim.claimedEventCount,
+            generatedSHA256: claim.generatedSHA256,
+            archivedByteCount: claim.claimedPrefixByteCount,
+            successfulDigestAt: now
+        )
+        try environmentStore.saveDigestArchiveReceipt(receipt)
+        return now
+    }
+
+    private func boundedScheduleAnchorTimestamp(
+        _ timestamp: Date,
+        relativeTo now: Date
+    ) -> Date? {
+        guard timestamp.timeIntervalSince1970.isFinite,
+              timestamp <= now.addingTimeInterval(maximumScheduleAnchorOffset) else {
+            return nil
+        }
+        return timestamp
+    }
+
+    private func persistScheduleState(
+        afterSuccessAt successfulDigestAt: Date,
+        recoveryNow: Date
+    ) throws {
+        let history = successfulDigestHistory(
+            adding: successfulDigestAt,
+            relativeTo: recoveryNow
+        )
+        let latestSuccessAnchor = history.last ?? successfulDigestAt
+        let tailInventory = try eventStore.inventory()
+        let tailCount = tailInventory.eventCount
+        let tailPendingSince = tailCount > 0
+            ? Self.boundedPendingTimestamp(
+                tailInventory.oldestEventTimestamp,
+                noLaterThan: latestSuccessAnchor
+            ) ?? latestSuccessAnchor
+            : nil
+        applyDigestSuccessState(
+            at: latestSuccessAnchor,
+            pendingTailCount: tailCount,
+            pendingAnchor: tailPendingSince,
+            successfulDigestTimestamps: history
+        )
         try environmentStore.saveDigestScheduleState(
             EnvironmentDigestScheduleState(
-                pendingSince: nil,
-                lastSuccessfulDigestAt: now,
+                pendingSince: pendingSince,
+                lastSuccessfulDigestAt: latestSuccessAnchor,
                 nextEligibleAt: nextEligibleAt,
-                pendingEventCount: tailCount
+                pendingEventCount: tailCount,
+                successfulDigestTimestamps: history
             )
         )
     }
@@ -1231,10 +1918,25 @@ public actor AIContextMemoryRuntime: AIContextEventRecording {
         }
     }
 
-    private func emitDeferredDiagnostic(inventory: TypingEventInventory, cooldownRemaining: TimeInterval) {
-        guard deferredDiagnosticFailureAt != lastDigestFailureAt else { return }
-        deferredDiagnosticFailureAt = lastDigestFailureAt
-        emitDiagnostic(stage: "context_digest_deferred", fields: [.init(.eventCount, inventory.eventCount), .init(.byteCount, inventory.byteCount), .init(.cooldownRemainingSeconds, Int(ceil(cooldownRemaining)))])
+    private func emitDeferredDiagnostic(
+        inventory: TypingEventInventory,
+        cooldownRemaining: TimeInterval,
+        reason: DigestDeferralReason
+    ) {
+        let deadline = nowProvider().addingTimeInterval(max(0, cooldownRemaining))
+        let key = "\(reason.rawValue):\(Int(deadline.timeIntervalSince1970.rounded()))"
+        guard deferredDiagnosticKey != key else { return }
+        deferredDiagnosticKey = key
+        emitDiagnostic(
+            stage: "context_digest_deferred",
+            fields: [
+                .init(.eventCount, inventory.eventCount),
+                .init(.byteCount, inventory.byteCount),
+                .init(.probeCount, successfulDigestTimestamps.count),
+                .init(.reason, reason.rawValue),
+                .init(.cooldownRemainingSeconds, Int(ceil(cooldownRemaining)))
+            ]
+        )
     }
 
     private func emitArchiveDiagnostic(_ result: TypingEventArchiveResult) {

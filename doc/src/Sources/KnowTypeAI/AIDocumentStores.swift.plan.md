@@ -20,6 +20,15 @@
 - An existing hash-named backup is opened without following symlinks, verified
   as a regular file, bounded-read, matched by byte count, SHA-256, and content,
   and restricted to 0600 before migration continues.
+- `ENV.digest-schedule.json` stores only bounded timestamps and event counts.
+  It includes at most 64 successful Context Digest timestamps for rolling
+  budget recovery. Older JSON without that field decodes it as an empty list
+  and keeps `lastSuccessfulDigestAt` as the legacy cadence anchor.
+- `ENV.digest-archive-receipt.json` binds archive evidence to an optional exact
+  successful-digest timestamp. Older receipts without that field still decode;
+  recovery upgrades a matching receipt before schedule persistence. This
+  ordering makes a completed claim's rolling-budget slot idempotent across
+  schedule and cleanup failures without storing event or generated content.
 
 ## Tests
 

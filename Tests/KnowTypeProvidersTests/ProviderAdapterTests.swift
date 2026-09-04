@@ -135,7 +135,9 @@ final class ProviderAdapterTests: XCTestCase {
         XCTAssertEqual(retryAfterSeconds(from: "14.999", now: now), 15)
         XCTAssertEqual(retryAfterSeconds(from: "15", now: now), 15)
         XCTAssertEqual(retryAfterSeconds(from: "900", now: now), 900)
-        XCTAssertEqual(retryAfterSeconds(from: "900.001", now: now), 900)
+        XCTAssertEqual(retryAfterSeconds(from: "900.001", now: now), 900.001)
+        XCTAssertEqual(retryAfterSeconds(from: "306000", now: now), 306_000)
+        XCTAssertEqual(retryAfterSeconds(from: "700000", now: now), 7 * 24 * 60 * 60)
 
         for value in [
             "-1",
@@ -166,7 +168,7 @@ final class ProviderAdapterTests: XCTestCase {
 
         XCTAssertEqual(
             retryAfterSeconds(from: "Wednesday, 01-Jan-70 00:00:00 GMT", now: now),
-            900
+            7 * 24 * 60 * 60
         )
         XCTAssertEqual(
             retryAfterSeconds(from: "Thursday, 01-Jan-70 00:00:01 GMT", now: now),
@@ -179,11 +181,11 @@ final class ProviderAdapterTests: XCTestCase {
 
         XCTAssertEqual(
             retryAfterSeconds(from: "Thursday, 01-Jan-99 00:00:00 GMT", now: now),
-            900
+            7 * 24 * 60 * 60
         )
         XCTAssertEqual(
             retryAfterSeconds(from: "Friday, 01-Jan-00 00:00:00 GMT", now: now),
-            900
+            7 * 24 * 60 * 60
         )
     }
 
@@ -194,7 +196,7 @@ final class ProviderAdapterTests: XCTestCase {
             ("Tue, 14 Nov 2023 22:13:34 GMT", 15.0),
             ("Tue, 14 Nov 2023 22:13:35 GMT", 15.0),
             ("Tue, 14 Nov 2023 22:28:20 GMT", 900.0),
-            ("Tue, 14 Nov 2023 22:28:21 GMT", 900.0)
+            ("Tue, 14 Nov 2023 22:28:21 GMT", 901.0)
         ]
 
         for (value, expected) in cases {
@@ -223,7 +225,7 @@ final class ProviderAdapterTests: XCTestCase {
             XCTFail("Expected a 429 response to throw ProviderRateLimitError")
         } catch let error as ProviderRateLimitError {
             XCTAssertEqual(error.statusCode, 429)
-            XCTAssertEqual(error.retryAfterSeconds, 900)
+            XCTAssertEqual(error.retryAfterSeconds, 901)
             XCTAssertTrue(error.retryAfterSeconds?.isFinite == true)
             XCTAssertEqual(error.bodyByteCount, Data(body.utf8).count)
         } catch {
@@ -259,6 +261,77 @@ final class ProviderAdapterTests: XCTestCase {
             } catch {
                 XCTFail("Expected ProviderRateLimitError, got \(error)")
             }
+        }
+    }
+
+    func test429HeaderTakesPrecedenceOverStructuredBodyHint() {
+        let body = Data(#"{"error":{"reset_seconds":306000}}"#.utf8)
+
+        XCTAssertEqual(
+            retryAfterSeconds(
+                headerValue: "42",
+                responseBody: body,
+                now: Date(timeIntervalSince1970: 1_700_000_000)
+            ),
+            42
+        )
+    }
+
+    func test429StructuredBodyProvidesBoundedGenericRecoveryHints() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let cases: [(String, TimeInterval)] = [
+            (#"{"error":{"reset_seconds":306000}}"#, 306_000),
+            (#"{"error":{"retry_after_seconds":3600}}"#, 3_600),
+            (#"{"retry_after":7200}"#, 7_200),
+            (#"{"error":{"reset_time":1700030000}}"#, 30_000),
+            (#"{"error":{"reset_seconds":9999999}}"#, 7 * 24 * 60 * 60)
+        ]
+
+        for (body, expected) in cases {
+            XCTAssertEqual(
+                retryAfterSeconds(
+                    headerValue: "invalid-header",
+                    responseBody: Data(body.utf8),
+                    now: now
+                ),
+                expected
+            )
+        }
+    }
+
+    func test429PastAndCurrentResetTimeDoNotProduceHints() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        for resetTime in [1_699_999_999, 1_700_000_000] {
+            let body = Data(#"{"error":{"reset_time":\#(resetTime)}}"#.utf8)
+            XCTAssertNil(
+                retryAfterSeconds(
+                    headerValue: nil,
+                    responseBody: body,
+                    now: now
+                )
+            )
+        }
+    }
+
+    func test429MalformedOversizedAndNonnumericBodiesDoNotProduceHints() {
+        let oversized = Data(repeating: 0x20, count: 64 * 1_024 + 1)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let cases = [
+            Data("not-json".utf8),
+            Data(#"{"error":{"reset_seconds":"306000"}}"#.utf8),
+            Data(#"{"error":{"reset_seconds":true}}"#.utf8),
+            oversized
+        ]
+
+        for body in cases {
+            XCTAssertNil(
+                retryAfterSeconds(
+                    headerValue: nil,
+                    responseBody: body,
+                    now: now
+                )
+            )
         }
     }
 

@@ -30,7 +30,10 @@ func validateHTTPResponse(_ response: HTTPURLResponse, data: Data) throws {
     guard (200..<300).contains(response.statusCode) else {
         if response.statusCode == 429 {
             throw ProviderRateLimitError(
-                retryAfterSeconds: retryAfterSeconds(from: response.value(forHTTPHeaderField: "Retry-After")),
+                retryAfterSeconds: retryAfterSeconds(
+                    headerValue: response.value(forHTTPHeaderField: "Retry-After"),
+                    responseBody: data
+                ),
                 bodyByteCount: data.count
             )
         }
@@ -56,9 +59,73 @@ func retryAfterSeconds(from value: String?, now: Date = Date()) -> TimeInterval?
     return normalizedRetryAfterHeaderSeconds(max(0, delay))
 }
 
+func retryAfterSeconds(
+    headerValue: String?,
+    responseBody: Data,
+    now: Date = Date()
+) -> TimeInterval? {
+    if let headerDelay = retryAfterSeconds(from: headerValue, now: now) {
+        return headerDelay
+    }
+    return retryAfterSeconds(fromRateLimitResponseBody: responseBody, now: now)
+}
+
 private func normalizedRetryAfterHeaderSeconds(_ value: TimeInterval?) -> TimeInterval? {
     guard let value, value.isFinite, value >= 0 else { return nil }
-    return min(max(value, 15), 15 * 60)
+    return min(max(value, 15), 7 * 24 * 60 * 60)
+}
+
+private func retryAfterSeconds(
+    fromRateLimitResponseBody data: Data,
+    now: Date
+) -> TimeInterval? {
+    let maximumRateLimitErrorBodyByteCount = 64 * 1_024
+    guard !data.isEmpty, data.count <= maximumRateLimitErrorBodyByteCount,
+          let object = try? JSONSerialization.jsonObject(with: data) else {
+        return nil
+    }
+
+    let durationKeys = ["reset_seconds", "retry_after_seconds", "retry_after"]
+    for key in durationKeys {
+        if let value = finiteNumericValue(for: key, in: object) {
+            return normalizedRetryAfterHeaderSeconds(value)
+        }
+    }
+    guard let resetTime = finiteNumericValue(for: "reset_time", in: object) else {
+        return nil
+    }
+    let delay = resetTime - now.timeIntervalSince1970
+    guard delay.isFinite, delay > 0 else { return nil }
+    return normalizedRetryAfterHeaderSeconds(delay)
+}
+
+private func finiteNumericValue(for key: String, in root: Any) -> TimeInterval? {
+    var remainingNodeCount = 256
+
+    func search(_ value: Any, depth: Int) -> TimeInterval? {
+        guard depth <= 8, remainingNodeCount > 0 else { return nil }
+        remainingNodeCount -= 1
+        if let dictionary = value as? [String: Any] {
+            if let candidate = dictionary[key], !(candidate is Bool),
+               let number = candidate as? NSNumber {
+                let numericValue = number.doubleValue
+                if numericValue.isFinite, numericValue >= 0 {
+                    return numericValue
+                }
+            }
+            for nestedKey in dictionary.keys.sorted() {
+                guard let nested = dictionary[nestedKey] else { continue }
+                if let result = search(nested, depth: depth + 1) { return result }
+            }
+        } else if let array = value as? [Any] {
+            for nested in array {
+                if let result = search(nested, depth: depth + 1) { return result }
+            }
+        }
+        return nil
+    }
+
+    return search(root, depth: 0)
 }
 
 private enum HTTPDateFormatter {

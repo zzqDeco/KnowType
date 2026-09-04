@@ -32,6 +32,11 @@
   prefix archive, and legacy archive safety checks use file-handle reads capped
   at the pending hard limit plus one detection byte rather than metadata or
   whole-file allocation.
+- The same inventory records the oldest finite decoded event timestamp. Append
+  updates it in constant time, while prefix archive and compaction recompute it
+  from the retained lines. `AIContextMemoryRuntime` uses that value only as the
+  pending-age anchor after rejecting non-finite or future timestamps, so a newly
+  appended tail does not inherit the age of an archived prefix.
 - Inventory counts undecodable lines toward backlog size and prefix claims but
   excludes them from protected/unprotected event classification and provider
   request content. A protected-only backlog therefore remains local even when a

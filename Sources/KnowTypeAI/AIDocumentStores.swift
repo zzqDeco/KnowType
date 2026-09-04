@@ -65,17 +65,49 @@ public struct EnvironmentDigestScheduleState: Codable, Sendable, Equatable {
     public var lastSuccessfulDigestAt: Date?
     public var nextEligibleAt: Date?
     public var pendingEventCount: Int
+    public var successfulDigestTimestamps: [Date]
+
+    private enum CodingKeys: String, CodingKey {
+        case pendingSince
+        case lastSuccessfulDigestAt
+        case nextEligibleAt
+        case pendingEventCount
+        case successfulDigestTimestamps
+    }
 
     public init(
         pendingSince: Date?,
         lastSuccessfulDigestAt: Date?,
         nextEligibleAt: Date?,
-        pendingEventCount: Int
+        pendingEventCount: Int,
+        successfulDigestTimestamps: [Date] = []
     ) {
         self.pendingSince = pendingSince
         self.lastSuccessfulDigestAt = lastSuccessfulDigestAt
         self.nextEligibleAt = nextEligibleAt
         self.pendingEventCount = pendingEventCount
+        self.successfulDigestTimestamps = successfulDigestTimestamps
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pendingSince = try container.decodeIfPresent(Date.self, forKey: .pendingSince)
+        lastSuccessfulDigestAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessfulDigestAt)
+        nextEligibleAt = try container.decodeIfPresent(Date.self, forKey: .nextEligibleAt)
+        pendingEventCount = try container.decode(Int.self, forKey: .pendingEventCount)
+        successfulDigestTimestamps = try container.decodeIfPresent(
+            [Date].self,
+            forKey: .successfulDigestTimestamps
+        ) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(pendingSince, forKey: .pendingSince)
+        try container.encodeIfPresent(lastSuccessfulDigestAt, forKey: .lastSuccessfulDigestAt)
+        try container.encodeIfPresent(nextEligibleAt, forKey: .nextEligibleAt)
+        try container.encode(pendingEventCount, forKey: .pendingEventCount)
+        try container.encode(successfulDigestTimestamps, forKey: .successfulDigestTimestamps)
     }
 }
 
@@ -85,19 +117,22 @@ public struct EnvironmentDigestArchiveReceipt: Codable, Sendable, Equatable {
     public var claimedEventCount: Int
     public var generatedSHA256: String
     public var archivedByteCount: Int
+    public var successfulDigestAt: Date?
 
     public init(
         claimedPrefixSHA256: String,
         claimedPrefixByteCount: Int,
         claimedEventCount: Int,
         generatedSHA256: String,
-        archivedByteCount: Int
+        archivedByteCount: Int,
+        successfulDigestAt: Date? = nil
     ) {
         self.claimedPrefixSHA256 = claimedPrefixSHA256
         self.claimedPrefixByteCount = claimedPrefixByteCount
         self.claimedEventCount = claimedEventCount
         self.generatedSHA256 = generatedSHA256
         self.archivedByteCount = archivedByteCount
+        self.successfulDigestAt = successfulDigestAt
     }
 }
 
@@ -121,6 +156,8 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var failedClaimClearsRemaining = 0
     private var failedArchiveReceiptWritesRemaining = 0
+    private var failedArchiveReceiptClearsRemaining = 0
+    private var failedScheduleWritesRemaining = 0
     private var failedPermissionChangesRemaining = 0
     private var failedBackupPermissionChangesRemaining = 0
     private var failedBackupReadsRemaining = 0
@@ -136,6 +173,18 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
     func failNextArchiveReceiptWrites(_ count: Int) {
         lock.lock()
         failedArchiveReceiptWritesRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextArchiveReceiptClears(_ count: Int) {
+        lock.lock()
+        failedArchiveReceiptClearsRemaining = max(0, count)
+        lock.unlock()
+    }
+
+    func failNextScheduleWrites(_ count: Int) {
+        lock.lock()
+        failedScheduleWritesRemaining = max(0, count)
         lock.unlock()
     }
 
@@ -188,6 +237,22 @@ final class EnvironmentDocumentStoreTestProbe: @unchecked Sendable {
         defer { lock.unlock() }
         guard failedArchiveReceiptWritesRemaining > 0 else { return false }
         failedArchiveReceiptWritesRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailArchiveReceiptClear() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedArchiveReceiptClearsRemaining > 0 else { return false }
+        failedArchiveReceiptClearsRemaining -= 1
+        return true
+    }
+
+    fileprivate func shouldFailScheduleWrite() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard failedScheduleWritesRemaining > 0 else { return false }
+        failedScheduleWritesRemaining -= 1
         return true
     }
 
@@ -327,14 +392,27 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         try setSecurePermissions(of: scheduleURL)
         let data = try boundedData(at: scheduleURL, limit: 16 * 1_024, readKind: .metadata)
         let state = try JSONDecoder().decode(EnvironmentDigestScheduleState.self, from: data)
-        guard state.pendingEventCount >= 0, state.pendingEventCount <= 500 else {
+        guard state.pendingEventCount >= 0,
+              state.pendingEventCount <= 500,
+              state.successfulDigestTimestamps.count <= 64,
+              state.successfulDigestTimestamps.allSatisfy({
+                  $0.timeIntervalSince1970.isFinite
+              }) else {
             throw EnvironmentDocumentError.claimMismatch
         }
         return state
     }
 
     public func saveDigestScheduleState(_ state: EnvironmentDigestScheduleState) throws {
-        guard state.pendingEventCount >= 0, state.pendingEventCount <= 500 else {
+        if testProbe?.shouldFailScheduleWrite() == true {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        guard state.pendingEventCount >= 0,
+              state.pendingEventCount <= 500,
+              state.successfulDigestTimestamps.count <= 64,
+              state.successfulDigestTimestamps.allSatisfy({
+                  $0.timeIntervalSince1970.isFinite
+              }) else {
             throw EnvironmentDocumentError.claimMismatch
         }
         let encoder = JSONEncoder()
@@ -351,12 +429,21 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
         guard fileManager.fileExists(atPath: archiveReceiptURL.path) else { return nil }
         try setSecurePermissions(of: archiveReceiptURL)
         let data = try boundedData(at: archiveReceiptURL, limit: 16 * 1_024, readKind: .metadata)
-        return try JSONDecoder().decode(EnvironmentDigestArchiveReceipt.self, from: data)
+        let receipt = try JSONDecoder().decode(EnvironmentDigestArchiveReceipt.self, from: data)
+        if let successfulDigestAt = receipt.successfulDigestAt,
+           !successfulDigestAt.timeIntervalSince1970.isFinite {
+            throw EnvironmentDocumentError.claimMismatch
+        }
+        return receipt
     }
 
     public func saveDigestArchiveReceipt(_ receipt: EnvironmentDigestArchiveReceipt) throws {
         if testProbe?.shouldFailArchiveReceiptWrite() == true {
             throw CocoaError(.fileWriteUnknown)
+        }
+        if let successfulDigestAt = receipt.successfulDigestAt,
+           !successfulDigestAt.timeIntervalSince1970.isFinite {
+            throw EnvironmentDocumentError.claimMismatch
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -364,6 +451,9 @@ public struct EnvironmentDocumentStore: @unchecked Sendable {
     }
 
     public func clearDigestArchiveReceipt() throws {
+        if testProbe?.shouldFailArchiveReceiptClear() == true {
+            throw CocoaError(.fileWriteUnknown)
+        }
         guard fileManager.fileExists(atPath: archiveReceiptURL.path) else { return }
         try fileManager.removeItem(at: archiveReceiptURL)
     }

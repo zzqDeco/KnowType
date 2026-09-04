@@ -1,6 +1,6 @@
 # KnowType v0.2.11 Developer Preview Release
 
-Status: Active
+Status: Delivered
 
 ## Summary
 
