@@ -63,10 +63,12 @@ Keychain-backed API key 和本地词库工具。
 
 它还不是公证安装器、自动更新程序或 App Store 应用。
 
-GitHub Releases 默认提供名为 `KnowType-vX.Y.Z-macos-dev-preview.dmg` 的
-Developer Preview DMG。它包含 `KnowType.app`、命令文件安装入口、release manifest
-和 SHA256 文件。该 DMG 没有 Developer ID 签名，也未公证；macOS 可能要求右键打开，
-或在“隐私与安全性”里点击“仍要打开”。旧的本地 MVP zip 仍保留为开发者调试资产。
+GitHub Releases 默认同时提供名为 `KnowType-vX.Y.Z-macos-dev-preview.dmg` 的
+Developer Preview DMG，以及独立的旁路校验资产
+`KnowType-vX.Y.Z-macos-dev-preview.dmg.sha256`。DMG 内包含 `KnowType.app`、
+命令文件安装入口和 release manifest。该 DMG 没有 Developer ID 签名，也未公证；
+macOS 可能要求右键打开，或在“隐私与安全性”里点击“仍要打开”。旧的本地 MVP zip
+仍保留为开发者调试资产。
 
 ## 快速开始
 
@@ -194,7 +196,7 @@ generation 2，当前 app 会先把最新 profile 元数据无损转换为旧版
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.11-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.12-macos-dev-preview.dmg.sha256
 ```
 
 打开 DMG 后运行 `Install KnowType.command`。如果 macOS 阻止运行，使用右键打开，
@@ -206,7 +208,7 @@ shasum -a 256 -c KnowType-v0.2.11-macos-dev-preview.dmg.sha256
 旧的本地 MVP zip 仍可用于开发者调试：
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.11-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.12-macos-local-mvp.zip
 ```
 
 ## 配置

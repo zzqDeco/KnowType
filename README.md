@@ -69,8 +69,9 @@ local dictionary tooling.
 It is not yet a notarized installer, auto-updater, or App Store package.
 
 GitHub Releases provide a Developer Preview DMG named
-`KnowType-vX.Y.Z-macos-dev-preview.dmg`. It contains `KnowType.app`, a
-command-file installer, a release manifest, and a SHA256 file. The DMG is not
+`KnowType-vX.Y.Z-macos-dev-preview.dmg` together with a separate sidecar
+`KnowType-vX.Y.Z-macos-dev-preview.dmg.sha256` checksum asset. The DMG contains
+`KnowType.app`, a command-file installer, and a release manifest. The DMG is not
 Developer ID signed or notarized; macOS may require Control-click > Open or
 Privacy & Security > Open Anyway before installation. The local MVP zip remains
 available as a developer/debug asset.
@@ -230,7 +231,7 @@ For a GitHub Release DMG, verify the downloaded image with the published
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c KnowType-v0.2.11-macos-dev-preview.dmg.sha256
+shasum -a 256 -c KnowType-v0.2.12-macos-dev-preview.dmg.sha256
 ```
 
 Open the DMG and run `Install KnowType.command`. If macOS blocks it, use
@@ -244,7 +245,7 @@ sidebar entry unless the matching pane is installed.
 The older local MVP zip can still be installed for developer debugging:
 
 ```bash
-./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.11-macos-local-mvp.zip
+./scripts/install-inputmethod.sh --from-release-zip ~/Downloads/KnowType-v0.2.12-macos-local-mvp.zip
 ```
 
 ## Configuration
