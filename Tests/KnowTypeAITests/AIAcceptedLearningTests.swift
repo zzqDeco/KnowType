@@ -615,8 +615,12 @@ final class AIAcceptedLearningTests: XCTestCase {
             )
         )
         let mirrorMarkdown = try String(contentsOf: mirrorURL, encoding: .utf8)
-        XCTAssertTrue(mirrorMarkdown.contains("Retained history (a sliding window of the latest 500 records"))
+        XCTAssertTrue(mirrorMarkdown.contains("Retained history (a sliding window of the latest 1 record"))
         XCTAssertFalse(mirrorMarkdown.contains("Full history stays local"))
+        if let summary = store.snapshot() {
+            let defaultMarkdown = AIAcceptedLearningStore.renderMarkdown(summary)
+            XCTAssertTrue(defaultMarkdown.contains("Retained history (a sliding window of the latest 500 records"))
+        }
 
         let context = LexicalContextSnapshot(
             terms: [
@@ -772,6 +776,69 @@ final class AIAcceptedLearningTests: XCTestCase {
             from: Data(contentsOf: lexicalJSONURL)
         )
         XCTAssertEqual(scrubbedProfile.lexicalContext.recentCommits, ["NormalUserCommit 普通提交"])
+    }
+
+    func testCompactionInPeerStoreInvalidatesLiveStoreSchemaSnapshotAndNotifiesObserver() async throws {
+        let dir = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let historyURL = dir.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = dir.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = dir.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+
+        let storeA = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 1
+        )
+        let storeB = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 1
+        )
+
+        let collectorA = SummaryReadyEventCollector()
+        _ = storeA.addSummaryReadyObserver { event in
+            collectorA.record(event)
+        }
+
+        await storeA.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 1),
+                schemaID: "double_pinyin",
+                rawInput: "dp",
+                acceptedText: "DoublePinyin 旧方案",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        XCTAssertNotNil(storeA.snapshot(schemaID: "double_pinyin"))
+        collectorA.reset()
+
+        await storeB.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 2),
+                schemaID: "pinyin_simp",
+                rawInput: "ps",
+                acceptedText: "PinyinSimp 新方案",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let eventsOnA = collectorA.snapshot()
+        XCTAssertEqual(eventsOnA.map(\.schemaID), ["double_pinyin", "pinyin_simp"])
+        let evictedEventOnA = eventsOnA.first { $0.schemaID == "double_pinyin" }
+        XCTAssertEqual(evictedEventOnA?.acceptedCount, 0)
+        XCTAssertEqual(evictedEventOnA?.historyHash, "")
+        XCTAssertNil(storeA.snapshot(schemaID: "double_pinyin"))
+        XCTAssertEqual(storeA.snapshot(schemaID: "pinyin_simp")?.acceptedCount, 1)
     }
 }
 

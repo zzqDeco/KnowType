@@ -424,6 +424,71 @@ public struct AIAcceptedTermExtractor: Sendable {
     }
 }
 
+private final class LiveAcceptedLearningStoreRegistry: @unchecked Sendable {
+    static let shared = LiveAcceptedLearningStoreRegistry()
+
+    private struct Entry {
+        weak var store: AIAcceptedLearningStore?
+    }
+
+    private let lock = NSLock()
+    private var entriesByKey: [String: [Entry]] = [:]
+
+    func register(_ store: AIAcceptedLearningStore, historyURL: URL?) {
+        guard let key = Self.canonicalKey(for: historyURL) else {
+            return
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        var entries = entriesByKey[key, default: []].filter { $0.store != nil && $0.store !== store }
+        entries.append(Entry(store: store))
+        entriesByKey[key] = entries
+    }
+
+    func peerStores(
+        for historyURL: URL?,
+        excluding excludedStore: AIAcceptedLearningStore? = nil
+    ) -> [AIAcceptedLearningStore] {
+        guard let key = Self.canonicalKey(for: historyURL) else {
+            return []
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entries = entriesByKey[key] else {
+            return []
+        }
+        let liveEntries = entries.filter { $0.store != nil }
+        if liveEntries.isEmpty {
+            entriesByKey.removeValue(forKey: key)
+            return []
+        }
+        entriesByKey[key] = liveEntries
+        return liveEntries.compactMap { entry in
+            guard let store = entry.store, store !== excludedStore else {
+                return nil
+            }
+            return store
+        }
+    }
+
+    private static func canonicalKey(for url: URL?) -> String? {
+        url?.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+}
+
+func synchronizePeerAcceptedLearningStores(
+    for historyURL: URL?,
+    excluding excludedStore: AIAcceptedLearningStore? = nil
+) {
+    let peers = LiveAcceptedLearningStoreRegistry.shared.peerStores(
+        for: historyURL,
+        excluding: excludedStore
+    )
+    for peer in peers {
+        peer.synchronizeWithDiskState()
+    }
+}
+
 public final class AIAcceptedLearningStore:
     AIAcceptedLearningRecording,
     AIAcceptedLearningSnapshotProviding,
@@ -449,12 +514,14 @@ public final class AIAcceptedLearningStore:
     private var summaryTask: Task<Void, Never>?
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
     private var lastClearMarkerModifiedAt: Date?
+    private var lastDiskStateSignature: String?
 
     private struct StartupState {
         var records: [AIAcceptedLearningRecord]
         var summary: AIAcceptedLanguageSummary?
         var schemaSummaries: [String: AIAcceptedLanguageSummary]
         var lastClearMarkerModifiedAt: Date?
+        var lastDiskStateSignature: String?
         var needsCompaction: Bool = false
     }
 
@@ -474,6 +541,7 @@ public final class AIAcceptedLearningStore:
         configuredDecoder.dateDecodingStrategy = .iso8601
         let startupState: StartupState
         let startupRepairErrorReason: String?
+        var didCompactOnStartup = false
         do {
             let initialState = try withExistingAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
@@ -508,6 +576,7 @@ public final class AIAcceptedLearningStore:
                         repairPersistentSummary: false
                     )
                 }
+                didCompactOnStartup = true
             } else {
                 startupState = initialState
             }
@@ -535,6 +604,10 @@ public final class AIAcceptedLearningStore:
                 lastClearMarkerModifiedAt: Self.fileModificationDate(
                     acceptedLearningClearMarkerURL(historyURL: historyURL),
                     fileManager: fileManager
+                ),
+                lastDiskStateSignature: Self.diskStateSignature(
+                    historyURL: historyURL,
+                    fileManager: fileManager
                 )
             )
             startupRepairErrorReason = String(describing: type(of: error))
@@ -551,9 +624,14 @@ public final class AIAcceptedLearningStore:
         self.decoder = configuredDecoder
         self.records = startupState.records
         self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
+        self.lastDiskStateSignature = startupState.lastDiskStateSignature
         self.summary = startupState.summary
         self.schemaSummaries = startupState.schemaSummaries
         self.pendingSummarySchemaIDs = []
+        LiveAcceptedLearningStoreRegistry.shared.register(self, historyURL: historyURL)
+        if didCompactOnStartup {
+            synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
+        }
         if let startupRepairErrorReason {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
@@ -674,8 +752,10 @@ public final class AIAcceptedLearningStore:
     }
 
     private func append(_ record: AIAcceptedLearningRecord) throws {
+        var externalEvents: [AIAcceptedLearningSummaryReadyEvent] = []
+        var didCompact = false
         try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
-            syncRecordsAfterExternalClearLocked()
+            externalEvents = syncRecordsAfterExternalClearLocked()
             var nextRecords: [AIAcceptedLearningRecord]
             if let historyURL, fileManager.fileExists(atPath: historyURL.path) {
                 nextRecords = Self.loadRecords(from: historyURL, decoder: decoder)
@@ -686,7 +766,6 @@ public final class AIAcceptedLearningStore:
             }
 
             nextRecords.append(record)
-            let didCompact: Bool
             let evictedRecords: [AIAcceptedLearningRecord]
             let evictedSchemaIDs: Set<String>
             if nextRecords.count > maxRecordCount {
@@ -732,11 +811,33 @@ public final class AIAcceptedLearningStore:
                     }
                 }
             }
+            let updatedSignature = Self.diskStateSignature(
+                historyURL: historyURL,
+                fileManager: fileManager
+            )
             lock.lock()
             records = nextRecords
+            lastDiskStateSignature = updatedSignature
+            if didCompact {
+                let generatedAt = Date()
+                if summary != nil {
+                    summary = Self.buildSummary(records: nextRecords, generatedAt: generatedAt)
+                }
+                for evictedSchemaID in evictedSchemaIDs where schemaSummaries[evictedSchemaID] != nil {
+                    let retainedSchemaRecords = nextRecords.filter { $0.schemaID == evictedSchemaID }
+                    schemaSummaries[evictedSchemaID] = Self.buildSummary(
+                        records: retainedSchemaRecords,
+                        generatedAt: generatedAt
+                    )
+                }
+            }
             pendingSummarySchemaIDs.insert(record.schemaID)
             pendingSummarySchemaIDs.formUnion(evictedSchemaIDs)
             lock.unlock()
+        }
+        notifySummaryReady(externalEvents)
+        if didCompact, summaryDelayNanoseconds > 0 {
+            synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
         }
         scheduleSummaryRebuild()
     }
@@ -777,7 +878,7 @@ public final class AIAcceptedLearningStore:
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) { () -> [AIAcceptedLearningSummaryReadyEvent] in
-                syncRecordsAfterExternalClearLocked()
+                let externalEvents = syncRecordsAfterExternalClearLocked()
                 let currentRecords: [AIAcceptedLearningRecord]
                 if let historyURL, fileManager.fileExists(atPath: historyURL.path) {
                     let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
@@ -805,10 +906,15 @@ public final class AIAcceptedLearningStore:
                     lock.unlock()
                 }
 
+                let updatedSignature = Self.diskStateSignature(
+                    historyURL: historyURL,
+                    fileManager: fileManager
+                )
                 lock.lock()
                 let previousRecords = records
                 records = currentRecords
-                var changedSchemaIDs = pendingSummarySchemaIDs
+                lastDiskStateSignature = updatedSignature
+                var changedSchemaIDs = pendingSummarySchemaIDs.union(externalEvents.map(\.schemaID))
                 if previousRecords != currentRecords {
                     let allSchemas = Set(previousRecords.map(\.schemaID)).union(currentRecords.map(\.schemaID))
                     for schemaID in allSchemas {
@@ -837,6 +943,7 @@ public final class AIAcceptedLearningStore:
                 )
             }
             notifySummaryReady(events)
+            synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
         } catch {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
@@ -850,56 +957,74 @@ public final class AIAcceptedLearningStore:
         }
     }
 
-    private func syncRecordsAfterExternalClearLocked() {
-        guard let markerURL = acceptedLearningClearMarkerURL(historyURL: historyURL) else {
-            return
+    @discardableResult
+    private func syncRecordsAfterExternalClearLocked() -> [AIAcceptedLearningSummaryReadyEvent] {
+        guard historyURL != nil else {
+            return []
         }
+        let markerURL = acceptedLearningClearMarkerURL(historyURL: historyURL)
         let markerModifiedAt = Self.fileModificationDate(markerURL, fileManager: fileManager)
-        guard let markerModifiedAt else {
-            return
-        }
+        let currentSignature = Self.diskStateSignature(
+            historyURL: historyURL,
+            fileManager: fileManager
+        )
         lock.lock()
-        let shouldReload = lastClearMarkerModifiedAt == nil || markerModifiedAt > (lastClearMarkerModifiedAt ?? .distantPast)
+        let markerChanged = markerModifiedAt != nil
+            && (lastClearMarkerModifiedAt == nil || markerModifiedAt! > (lastClearMarkerModifiedAt ?? .distantPast))
+        let signatureChanged = currentSignature != lastDiskStateSignature
+        let shouldReload = markerChanged || signatureChanged
         lock.unlock()
         guard shouldReload else {
-            return
+            return []
         }
         let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
-        let reloadedRecords: [AIAcceptedLearningRecord]
-        if loadedRecords.count > maxRecordCount {
-            let overflowCount = loadedRecords.count - maxRecordCount
-            let evictedRecords = Array(loadedRecords.prefix(overflowCount))
-            reloadedRecords = Array(loadedRecords.suffix(maxRecordCount))
-            if let historyURL {
-                try? recordAcceptedLearningEvictedCommits(
-                    evictedRecords,
-                    historyURL: historyURL,
-                    fileManager: fileManager
-                )
-                try? Self.writeRecords(
-                    reloadedRecords,
-                    to: historyURL,
-                    encoder: encoder,
-                    fileManager: fileManager
-                )
-            }
-        } else {
-            reloadedRecords = loadedRecords
-        }
-        let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: Date())
-        let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: Date())
+        let reloadedRecords = loadedRecords.count > maxRecordCount
+            ? Array(loadedRecords.suffix(maxRecordCount))
+            : loadedRecords
+        let finalSignature = currentSignature
+        let generatedAt = Date()
+        let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: generatedAt)
+        let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: generatedAt)
         lock.lock()
+        let previousRecords = records
+        let previousSchemaSummaries = schemaSummaries
+        var changedSchemaIDs = pendingSummarySchemaIDs
+        let allSchemas = Set(previousRecords.map(\.schemaID))
+            .union(reloadedRecords.map(\.schemaID))
+            .union(previousSchemaSummaries.keys)
+            .union(reloadedSchemaSummaries.keys)
+        for schemaID in allSchemas {
+            let previousSchemaRecords = previousRecords.filter { $0.schemaID == schemaID }
+            let reloadedSchemaRecords = reloadedRecords.filter { $0.schemaID == schemaID }
+            if previousSchemaRecords != reloadedSchemaRecords
+                || previousSchemaSummaries[schemaID]?.historyHash != reloadedSchemaSummaries[schemaID]?.historyHash
+                || previousSchemaSummaries[schemaID]?.acceptedCount != reloadedSchemaSummaries[schemaID]?.acceptedCount {
+                changedSchemaIDs.insert(schemaID)
+            }
+        }
         records = reloadedRecords
         summary = reloadedSummary
         schemaSummaries = reloadedSchemaSummaries
         pendingSummarySchemaIDs.removeAll()
-        lastClearMarkerModifiedAt = markerModifiedAt
+        if let markerModifiedAt {
+            lastClearMarkerModifiedAt = markerModifiedAt
+        }
+        lastDiskStateSignature = finalSignature
         lock.unlock()
+        return Self.summaryReadyEvents(
+            from: reloadedSchemaSummaries,
+            changedSchemaIDs: changedSchemaIDs
+        )
+    }
+
+    fileprivate func synchronizeWithDiskState() {
+        syncRecordsAfterExternalClear()
     }
 
     private func syncRecordsAfterExternalClear() {
+        let events: [AIAcceptedLearningSummaryReadyEvent]
         do {
-            try withExistingAcceptedLearningFileLock(
+            events = try withExistingAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) {
@@ -912,7 +1037,9 @@ public final class AIAcceptedLearningStore:
                     reason: "accepted_learning_clear_sync_failed:\(String(describing: type(of: error)))"
                 )
             )
+            return
         }
+        notifySummaryReady(events)
     }
 
     private func notifySummaryReady(_ events: [AIAcceptedLearningSummaryReadyEvent]) {
@@ -1068,11 +1195,18 @@ public final class AIAcceptedLearningStore:
             .joined()
     }
 
-    public static func renderMarkdown(_ summary: AIAcceptedLanguageSummary) -> String {
+    public static func renderMarkdown(
+        _ summary: AIAcceptedLanguageSummary,
+        maxRecordCount: Int = defaultMaxRecordCount
+    ) -> String {
+        let clampedMaxRecordCount = max(1, maxRecordCount)
+        let recordCountDescription = clampedMaxRecordCount == 1
+            ? "1 record"
+            : "\(clampedMaxRecordCount) records"
         var lines: [String] = [
             "# KnowType Accepted AI Learning",
             "",
-            "This is a local summary of AI recommendations the user explicitly accepted. Retained history (a sliding window of the latest 500 records, plus a bounded ledger of up to 4,096 SHA-256 digests for evicted commits in accepted-ai-learning.evicted-commits.json) stays local and is not injected into provider requests.",
+            "This is a local summary of AI recommendations the user explicitly accepted. Retained history (a sliding window of the latest \(recordCountDescription), plus a bounded ledger of up to 4,096 SHA-256 digests for evicted commits in accepted-ai-learning.evicted-commits.json) stays local and is not injected into provider requests.",
             "",
             "## Stats",
             "- Accepted count: \(summary.acceptedCount)",
@@ -1188,7 +1322,8 @@ public final class AIAcceptedLearningStore:
                 summaryURL: summaryURL,
                 mirrorURL: mirrorURL,
                 encoder: encoder,
-                fileManager: fileManager
+                fileManager: fileManager,
+                maxRecordCount: maxRecordCount
             )
         }
         return StartupState(
@@ -1199,8 +1334,45 @@ public final class AIAcceptedLearningStore:
                 acceptedLearningClearMarkerURL(historyURL: historyURL),
                 fileManager: fileManager
             ),
+            lastDiskStateSignature: Self.diskStateSignature(
+                historyURL: historyURL,
+                fileManager: fileManager
+            ),
             needsCompaction: needsCompaction
         )
+    }
+
+    private static func diskStateSignature(
+        historyURL: URL?,
+        fileManager: FileManager
+    ) -> String? {
+        guard let historyURL else {
+            return nil
+        }
+        let historyPart: String
+        if fileManager.fileExists(atPath: historyURL.path),
+           let data = try? Data(contentsOf: historyURL) {
+            let digest = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined()
+            historyPart = "h:\(data.count):\(digest)"
+        } else {
+            historyPart = "h:missing"
+        }
+
+        let clearPart: String
+        if let clearURL = acceptedLearningClearMarkerURL(historyURL: historyURL),
+           fileManager.fileExists(atPath: clearURL.path),
+           let data = try? Data(contentsOf: clearURL) {
+            let digest = SHA256.hash(data: data)
+                .map { String(format: "%02x", $0) }
+                .joined()
+            clearPart = "c:\(data.count):\(digest)"
+        } else {
+            clearPart = "c:missing"
+        }
+
+        return "\(historyPart)|\(clearPart)"
     }
 
     private static func fileModificationDate(_ url: URL?, fileManager: FileManager) -> Date? {
@@ -1244,7 +1416,8 @@ public final class AIAcceptedLearningStore:
             summaryURL: summaryURL,
             mirrorURL: mirrorURL,
             encoder: encoder,
-            fileManager: fileManager
+            fileManager: fileManager,
+            maxRecordCount: maxRecordCount
         )
     }
 
@@ -1253,14 +1426,19 @@ public final class AIAcceptedLearningStore:
         summaryURL: URL?,
         mirrorURL: URL?,
         encoder: JSONEncoder,
-        fileManager: FileManager
+        fileManager: FileManager,
+        maxRecordCount: Int
     ) throws {
         if let summary {
             if let summaryURL {
                 try atomicWrite(try encoder.encode(summary), to: summaryURL, fileManager: fileManager)
             }
             if let mirrorURL {
-                try atomicWrite(Data(Self.renderMarkdown(summary).utf8), to: mirrorURL, fileManager: fileManager)
+                try atomicWrite(
+                    Data(Self.renderMarkdown(summary, maxRecordCount: maxRecordCount).utf8),
+                    to: mirrorURL,
+                    fileManager: fileManager
+                )
             }
             return
         }

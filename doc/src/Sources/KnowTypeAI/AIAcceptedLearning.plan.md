@@ -26,13 +26,16 @@ request or persistent lexical context.
 
 Summary rebuilds are delayed and run on a utility task. Each rebuild reloads the
 authoritative on-disk history under the interprocess file lock so a delayed
-rebuild cannot overwrite a newer store's compacted state. After a rebuild is
-persisted, the store emits summary-ready metadata containing only schema id,
-history hash, and counts (including a zero-count invalidation event when a
-schema's last record is evicted by compaction). It does not emit raw input or
-accepted text. It emits ready events only for schemas whose accepted history
-changed since the previous rebuild, so schema-specific lexical profile refreshes
-are not retriggered by unchanged cached summaries.
+rebuild cannot overwrite a newer store's compacted state, renders the diagnostics
+mirror with the configured `maxRecordCount` retention capacity, and synchronizes
+other live stores sharing `historyURL` (while `snapshot()` / `snapshot(schemaID:)`
+also detect on-disk history signature changes across processes). After a rebuild
+or peer synchronization is applied, the store emits summary-ready metadata
+containing only schema id, history hash, and counts (including a zero-count
+invalidation event when a schema's last record is evicted by compaction). It
+does not emit raw input or accepted text. It emits ready events only for schemas
+whose accepted history changed since the previous rebuild, so schema-specific
+lexical profile refreshes are not retriggered by unchanged cached summaries.
 
 Runtime store construction is read-only when history is missing or within
 `maxRecordCount` (acquiring the interprocess file lock and compacting on disk

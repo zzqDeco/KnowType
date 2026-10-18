@@ -266,7 +266,10 @@ public struct AIAcceptedLearningMaintenance {
             let summary = AIAcceptedLearningStore.buildSummary(records: records, generatedAt: Date())
             if let summary {
                 try atomicWrite(encode(summary), to: summaryURL)
-                try atomicWrite(Data(AIAcceptedLearningStore.renderMarkdown(summary).utf8), to: mirrorURL)
+                try atomicWrite(
+                    Data(AIAcceptedLearningStore.renderMarkdown(summary, maxRecordCount: effectiveMaxRecordCount).utf8),
+                    to: mirrorURL
+                )
             } else {
                 try removeIfExists(summaryURL)
                 try removeIfExists(mirrorURL)
@@ -286,6 +289,7 @@ public struct AIAcceptedLearningMaintenance {
                 }
             }
         }
+        synchronizePeerAcceptedLearningStores(for: historyURL)
         return status(action: "rebuilt")
     }
 
@@ -325,6 +329,7 @@ public struct AIAcceptedLearningMaintenance {
             )
             try removeIfExists(evictedCommitsURL)
         }
+        synchronizePeerAcceptedLearningStores(for: historyURL)
         return status(action: "cleared")
     }
 

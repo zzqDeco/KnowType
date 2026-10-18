@@ -13,15 +13,19 @@
   missing-history cold starts read-only.
 - Updated `AIAcceptedLearningStore.append(_:)` and `rebuildSummary()` to reload
   locked on-disk history before compacting or rebuilding summaries, fast-path
-  append when within `maxRecordCount`, emit zero-count summary invalidation
-  events for fully evicted schemas, and persist SHA-256 digests of evicted
-  commit text variants (`accepted-ai-learning.evicted-commits.json`, bounded to
-  4,096 digests) so `AIAcceptedLearningMaintenance.clear(confirm:)` can still
-  scrub evicted accepted commits from `LEXICAL_PROFILE.md` without retaining raw
-  evicted commit text on disk.
-- Updated `AIAcceptedLearningMaintenance` (`status`, `rebuild`, `clear`, and
-  `maxRecordCount` mutation clamping) and `README.md` / `README_CN.md` to
-  enforce and document the 500-record window and evicted-commit digest ledger.
+  append when within `maxRecordCount`, synchronize live peer stores and detect
+  on-disk history signature changes so `snapshot(schemaID:)` and observers are
+  invalidated immediately when a schema is evicted by another store's
+  compaction, and persist SHA-256 digests of evicted commit text variants
+  (`accepted-ai-learning.evicted-commits.json`, bounded to 4,096 digests) so
+  `AIAcceptedLearningMaintenance.clear(confirm:)` can still scrub evicted
+  accepted commits from `LEXICAL_PROFILE.md` without retaining raw evicted
+  commit text on disk.
+- Updated `AIAcceptedLearningStore.renderMarkdown(_:maxRecordCount:)` and
+  `AIAcceptedLearningMaintenance` (`status`, `rebuild`, `clear`, and
+  `maxRecordCount` mutation clamping) plus `README.md` / `README_CN.md` to
+  report and enforce the configured sliding-window capacity and evicted-commit
+  digest ledger.
 - Documented the current-state contract in
   `doc/interfaces.plan.md` and
   `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.plan.md`.
