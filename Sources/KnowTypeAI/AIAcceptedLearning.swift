@@ -155,9 +155,14 @@ func withExistingAcceptedLearningFileLock<T>(
         acceptedLearningFileLock.unlock()
     }
 
-    guard let lockURL,
-          fileManager.fileExists(atPath: lockURL.path) else {
+    guard let lockURL else {
         return try body()
+    }
+    if !fileManager.fileExists(atPath: lockURL.path) {
+        let initialResult = try body()
+        guard fileManager.fileExists(atPath: lockURL.path) else {
+            return initialResult
+        }
     }
     let handle = try FileHandle(forWritingTo: lockURL)
     defer {
@@ -497,6 +502,19 @@ public final class AIAcceptedLearningStore:
 {
     public static let defaultMaxRecordCount = 500
 
+    private struct FileMetadataStamp: Equatable, Sendable {
+        var exists: Bool
+        var fileNumber: UInt64?
+        var size: UInt64?
+        var modificationDate: Date?
+    }
+
+    private struct DiskStateMetadata: Equatable, Sendable {
+        var history: FileMetadataStamp
+        var clearMarker: FileMetadataStamp
+        var evictedCommits: FileMetadataStamp
+    }
+
     public let maxRecordCount: Int
     private let historyURL: URL?
     private let summaryURL: URL?
@@ -514,14 +532,14 @@ public final class AIAcceptedLearningStore:
     private var summaryTask: Task<Void, Never>?
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
     private var lastClearMarkerModifiedAt: Date?
-    private var lastDiskStateSignature: String?
+    private var lastDiskStateMetadata: DiskStateMetadata?
 
     private struct StartupState {
         var records: [AIAcceptedLearningRecord]
         var summary: AIAcceptedLanguageSummary?
         var schemaSummaries: [String: AIAcceptedLanguageSummary]
         var lastClearMarkerModifiedAt: Date?
-        var lastDiskStateSignature: String?
+        var lastDiskStateMetadata: DiskStateMetadata?
         var needsCompaction: Bool = false
     }
 
@@ -573,7 +591,7 @@ public final class AIAcceptedLearningStore:
                         decoder: configuredDecoder,
                         maxRecordCount: clampedMaxRecordCount,
                         compactPersistentHistory: true,
-                        repairPersistentSummary: false
+                        repairPersistentSummary: true
                     )
                 }
                 didCompactOnStartup = true
@@ -605,10 +623,7 @@ public final class AIAcceptedLearningStore:
                     acceptedLearningClearMarkerURL(historyURL: historyURL),
                     fileManager: fileManager
                 ),
-                lastDiskStateSignature: Self.diskStateSignature(
-                    historyURL: historyURL,
-                    fileManager: fileManager
-                )
+                lastDiskStateMetadata: nil
             )
             startupRepairErrorReason = String(describing: type(of: error))
         }
@@ -624,7 +639,7 @@ public final class AIAcceptedLearningStore:
         self.decoder = configuredDecoder
         self.records = startupState.records
         self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
-        self.lastDiskStateSignature = startupState.lastDiskStateSignature
+        self.lastDiskStateMetadata = startupState.lastDiskStateMetadata
         self.summary = startupState.summary
         self.schemaSummaries = startupState.schemaSummaries
         self.pendingSummarySchemaIDs = []
@@ -811,13 +826,13 @@ public final class AIAcceptedLearningStore:
                     }
                 }
             }
-            let updatedSignature = Self.diskStateSignature(
+            let updatedMetadata = Self.diskStateMetadata(
                 historyURL: historyURL,
                 fileManager: fileManager
             )
             lock.lock()
             records = nextRecords
-            lastDiskStateSignature = updatedSignature
+            lastDiskStateMetadata = updatedMetadata
             if didCompact {
                 let generatedAt = Date()
                 if summary != nil {
@@ -906,14 +921,14 @@ public final class AIAcceptedLearningStore:
                     lock.unlock()
                 }
 
-                let updatedSignature = Self.diskStateSignature(
+                let updatedMetadata = Self.diskStateMetadata(
                     historyURL: historyURL,
                     fileManager: fileManager
                 )
                 lock.lock()
                 let previousRecords = records
                 records = currentRecords
-                lastDiskStateSignature = updatedSignature
+                lastDiskStateMetadata = updatedMetadata
                 var changedSchemaIDs = pendingSummarySchemaIDs.union(externalEvents.map(\.schemaID))
                 if previousRecords != currentRecords {
                     let allSchemas = Set(previousRecords.map(\.schemaID)).union(currentRecords.map(\.schemaID))
@@ -962,26 +977,29 @@ public final class AIAcceptedLearningStore:
         guard historyURL != nil else {
             return []
         }
-        let markerURL = acceptedLearningClearMarkerURL(historyURL: historyURL)
-        let markerModifiedAt = Self.fileModificationDate(markerURL, fileManager: fileManager)
-        let currentSignature = Self.diskStateSignature(
+        let currentMetadata = Self.diskStateMetadata(
             historyURL: historyURL,
             fileManager: fileManager
         )
+        let markerModifiedAt = currentMetadata?.clearMarker.modificationDate
         lock.lock()
         let markerChanged = markerModifiedAt != nil
             && (lastClearMarkerModifiedAt == nil || markerModifiedAt! > (lastClearMarkerModifiedAt ?? .distantPast))
-        let signatureChanged = currentSignature != lastDiskStateSignature
-        let shouldReload = markerChanged || signatureChanged
+        let metadataChanged = lastDiskStateMetadata == nil || currentMetadata != lastDiskStateMetadata
+        let shouldReload = markerChanged || metadataChanged
         lock.unlock()
         guard shouldReload else {
             return []
         }
-        let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
-        let reloadedRecords = loadedRecords.count > maxRecordCount
-            ? Array(loadedRecords.suffix(maxRecordCount))
-            : loadedRecords
-        let finalSignature = currentSignature
+        let loaded = Self.loadRecordsWithMetadata(
+            from: historyURL,
+            decoder: decoder,
+            fileManager: fileManager
+        )
+        let reloadedRecords = loaded.records.count > maxRecordCount
+            ? Array(loaded.records.suffix(maxRecordCount))
+            : loaded.records
+        let finalMetadata = loaded.metadata
         let generatedAt = Date()
         let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: generatedAt)
         let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: generatedAt)
@@ -1006,10 +1024,10 @@ public final class AIAcceptedLearningStore:
         summary = reloadedSummary
         schemaSummaries = reloadedSchemaSummaries
         pendingSummarySchemaIDs.removeAll()
-        if let markerModifiedAt {
-            lastClearMarkerModifiedAt = markerModifiedAt
+        if let updatedMarkerDate = finalMetadata?.clearMarker.modificationDate ?? markerModifiedAt {
+            lastClearMarkerModifiedAt = updatedMarkerDate
         }
-        lastDiskStateSignature = finalSignature
+        lastDiskStateMetadata = finalMetadata
         lock.unlock()
         return Self.summaryReadyEvents(
             from: reloadedSchemaSummaries,
@@ -1265,6 +1283,26 @@ public final class AIAcceptedLearningStore:
             }
     }
 
+    private static func loadRecordsWithMetadata(
+        from historyURL: URL?,
+        decoder: JSONDecoder,
+        fileManager: FileManager
+    ) -> (records: [AIAcceptedLearningRecord], metadata: DiskStateMetadata?) {
+        guard let historyURL else {
+            return ([], nil)
+        }
+        for _ in 0..<3 {
+            let before = diskStateMetadata(historyURL: historyURL, fileManager: fileManager)
+            let records = loadRecords(from: historyURL, decoder: decoder)
+            let after = diskStateMetadata(historyURL: historyURL, fileManager: fileManager)
+            if before == after {
+                return (records, before)
+            }
+        }
+        let fallbackRecords = loadRecords(from: historyURL, decoder: decoder)
+        return (fallbackRecords, nil)
+    }
+
     private static func loadSummary(
         from url: URL?,
         decoder: JSONDecoder
@@ -1287,7 +1325,13 @@ public final class AIAcceptedLearningStore:
         compactPersistentHistory: Bool,
         repairPersistentSummary: Bool
     ) throws -> StartupState {
-        let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let loaded = Self.loadRecordsWithMetadata(
+            from: historyURL,
+            decoder: decoder,
+            fileManager: fileManager
+        )
+        let loadedRecords = loaded.records
+        var diskMetadata = loaded.metadata
         let needsCompaction = loadedRecords.count > maxRecordCount
         let records: [AIAcceptedLearningRecord]
         if needsCompaction {
@@ -1313,7 +1357,8 @@ public final class AIAcceptedLearningStore:
         let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
         let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
         let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
-        let summaryIsCurrent = Self.summary(loadedSummary, matches: records)
+        let summaryIsCurrent = !needsCompaction
+            && Self.summary(loadedSummary, matches: records)
             && (!summaryFileExists || loadedSummary != nil)
         let nextSummary = summaryIsCurrent ? loadedSummary : rebuiltSummary
         if repairPersistentSummary, !summaryIsCurrent {
@@ -1326,53 +1371,59 @@ public final class AIAcceptedLearningStore:
                 maxRecordCount: maxRecordCount
             )
         }
+        if compactPersistentHistory, needsCompaction {
+            diskMetadata = Self.diskStateMetadata(
+                historyURL: historyURL,
+                fileManager: fileManager
+            )
+        }
         return StartupState(
             records: records,
             summary: nextSummary,
             schemaSummaries: Self.buildSchemaSummaries(records: records, generatedAt: Date()),
-            lastClearMarkerModifiedAt: Self.fileModificationDate(
-                acceptedLearningClearMarkerURL(historyURL: historyURL),
-                fileManager: fileManager
-            ),
-            lastDiskStateSignature: Self.diskStateSignature(
-                historyURL: historyURL,
-                fileManager: fileManager
-            ),
+            lastClearMarkerModifiedAt: diskMetadata?.clearMarker.modificationDate,
+            lastDiskStateMetadata: diskMetadata,
             needsCompaction: needsCompaction
         )
     }
 
-    private static func diskStateSignature(
+    private static func fileMetadataStamp(
+        _ url: URL?,
+        fileManager: FileManager
+    ) -> FileMetadataStamp {
+        guard let url,
+              let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
+            return FileMetadataStamp(exists: false, fileNumber: nil, size: nil, modificationDate: nil)
+        }
+        let fileNumber = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+        let size = (attributes[.size] as? NSNumber)?.uint64Value
+        let modificationDate = attributes[.modificationDate] as? Date
+        return FileMetadataStamp(
+            exists: true,
+            fileNumber: fileNumber,
+            size: size,
+            modificationDate: modificationDate
+        )
+    }
+
+    private static func diskStateMetadata(
         historyURL: URL?,
         fileManager: FileManager
-    ) -> String? {
+    ) -> DiskStateMetadata? {
         guard let historyURL else {
             return nil
         }
-        let historyPart: String
-        if fileManager.fileExists(atPath: historyURL.path),
-           let data = try? Data(contentsOf: historyURL) {
-            let digest = SHA256.hash(data: data)
-                .map { String(format: "%02x", $0) }
-                .joined()
-            historyPart = "h:\(data.count):\(digest)"
-        } else {
-            historyPart = "h:missing"
-        }
-
-        let clearPart: String
-        if let clearURL = acceptedLearningClearMarkerURL(historyURL: historyURL),
-           fileManager.fileExists(atPath: clearURL.path),
-           let data = try? Data(contentsOf: clearURL) {
-            let digest = SHA256.hash(data: data)
-                .map { String(format: "%02x", $0) }
-                .joined()
-            clearPart = "c:\(data.count):\(digest)"
-        } else {
-            clearPart = "c:missing"
-        }
-
-        return "\(historyPart)|\(clearPart)"
+        return DiskStateMetadata(
+            history: fileMetadataStamp(historyURL, fileManager: fileManager),
+            clearMarker: fileMetadataStamp(
+                acceptedLearningClearMarkerURL(historyURL: historyURL),
+                fileManager: fileManager
+            ),
+            evictedCommits: fileMetadataStamp(
+                acceptedLearningEvictedCommitsURL(historyURL: historyURL),
+                fileManager: fileManager
+            )
+        )
     }
 
     private static func fileModificationDate(_ url: URL?, fileManager: FileManager) -> Date? {

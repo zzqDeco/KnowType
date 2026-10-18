@@ -86,6 +86,15 @@ final class AIAcceptedLearningTests: XCTestCase {
             .map { try XCTUnwrap(String(data: encoder.encode($0), encoding: .utf8)) }
             .joined(separator: "\n") + "\n"
         try initialLines.write(to: historyURL, atomically: true, encoding: .utf8)
+        let preCompactionSummary = try XCTUnwrap(
+            AIAcceptedLearningStore.buildSummary(
+                records: records,
+                generatedAt: Date(timeIntervalSince1970: 10)
+            )
+        )
+        try encoder.encode(preCompactionSummary).write(to: summaryURL, options: .atomic)
+        try Data(AIAcceptedLearningStore.renderMarkdown(preCompactionSummary).utf8)
+            .write(to: mirrorURL, options: .atomic)
 
         let store = AIAcceptedLearningStore(
             historyURL: historyURL,
@@ -115,6 +124,20 @@ final class AIAcceptedLearningTests: XCTestCase {
         let summary = try XCTUnwrap(store.snapshot())
         XCTAssertEqual(summary.acceptedCount, 2)
         XCTAssertEqual(summary.historyHash, AIAcceptedLearningStore.historyHash(store.allRecords()))
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let persistedSummary = try decoder.decode(
+            AIAcceptedLanguageSummary.self,
+            from: Data(contentsOf: summaryURL)
+        )
+        XCTAssertEqual(persistedSummary.acceptedCount, 2)
+        XCTAssertEqual(persistedSummary.historyHash, summary.historyHash)
+        XCTAssertFalse(persistedSummary.termProfile.contains { $0.text == "InitToken1" })
+        let persistedMirror = try String(contentsOf: mirrorURL, encoding: .utf8)
+        XCTAssertTrue(persistedMirror.contains("Retained history (a sliding window of the latest 2 records"))
+        XCTAssertFalse(persistedMirror.contains("InitToken1"))
+        XCTAssertTrue(persistedMirror.contains("InitToken4"))
     }
 
     func testRebuildSummaryReflectsRetainedSlidingWindow() async throws {
