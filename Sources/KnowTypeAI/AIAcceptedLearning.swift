@@ -88,9 +88,10 @@ func loadAcceptedLearningEvictedCommits(
 func recordAcceptedLearningEvictedCommits(
     _ evictedRecords: [AIAcceptedLearningRecord],
     historyURL: URL?,
+    evictedCommitsURL: URL? = nil,
     fileManager: FileManager = .default
 ) throws {
-    guard let evictedURL = acceptedLearningEvictedCommitsURL(historyURL: historyURL) else {
+    guard let evictedURL = evictedCommitsURL ?? acceptedLearningEvictedCommitsURL(historyURL: historyURL) else {
         return
     }
     let newDigests = acceptedLearningCommitDigestVariants(from: evictedRecords)

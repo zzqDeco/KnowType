@@ -51,18 +51,22 @@ data. It powers `knowtype-accepted-learning-tool` and the
 `scripts/accepted-learning.sh` wrapper with read-only status, explicit rebuild,
 and guarded clear operations. Rebuild applies the same `maxRecordCount` sliding
 window and summary builder used by runtime learning. Maintenance writes share an
-interprocess lock file. Clear removes accepted-learning history, evicted-commits
-ledger, summary, and mirror files, writes a clear marker so a running store drops
-stale in-memory records before the next snapshot, append, or rebuild, and scrubs
+interprocess lock file. Clear folds active accepted-learning records into the
+evicted-commits digest ledger before removing accepted-learning history,
+summary, and mirror files, writes a clear marker so a running store drops stale
+in-memory records before the next snapshot, append, or rebuild, scrubs
 accepted-AI terms/source lines plus matching accepted recent commits (including
-any previously evicted commits recorded in the ledger) from the persistent
-lexical profile while preserving non-AI recent commits and tone data. If only
-the markdown mirror can be scrubbed and accepted history is unavailable, clear
-removes accepted-AI marker/source lines but leaves unknown recent commits alone
-because their source cannot be proven. Active `LexicalProfileRuntime` instances
-reload the scrubbed persistent profile, and still filter accepted-AI terms/source
-lines as a fallback, before producing request-time lexical context. Clear never
-touches Rime, provider profiles, Keychain data, ENV, or CORRECTION.
+both active and previously evicted commits recorded in the ledger) from the
+persistent lexical profile while preserving non-AI recent commits and tone data,
+and removes `accepted-ai-learning.evicted-commits.json` only after the lexical
+profile scrub succeeds so a retry after a transient lexical write failure still
+scrubs those commits. If only the markdown mirror can be scrubbed and accepted
+history is unavailable, clear removes accepted-AI marker/source lines but leaves
+unknown recent commits alone because their source cannot be proven. Active
+`LexicalProfileRuntime` instances reload the scrubbed persistent profile, and
+still filter accepted-AI terms/source lines as a fallback, before producing
+request-time lexical context. Clear never touches Rime, provider profiles,
+Keychain data, ENV, or CORRECTION.
 
 Privacy rules:
 

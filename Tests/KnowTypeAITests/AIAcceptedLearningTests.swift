@@ -665,6 +665,111 @@ final class AIAcceptedLearningTests: XCTestCase {
         XCTAssertFalse(scrubbedMarkdown.contains(retainedCommitText))
         XCTAssertTrue(scrubbedMarkdown.contains("NormalUserCommit 普通提交"))
     }
+
+    func testClearRetryScrubsEvictedAndRetainedCommitsAfterLexicalWriteFailure() async throws {
+        let dir = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let historyURL = dir.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = dir.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = dir.appendingPathComponent("accepted-ai-learning.md")
+        let evictedCommitsURL = dir.appendingPathComponent("accepted-ai-learning.evicted-commits.json")
+        let feedbackHistoryURL = dir.appendingPathComponent("accepted-ai-feedback.jsonl")
+        let feedbackSummaryURL = dir.appendingPathComponent("accepted-ai-feedback-summary.json")
+        let feedbackMirrorURL = dir.appendingPathComponent("accepted-ai-feedback.md")
+        let lexicalDir = dir.appendingPathComponent("lexical", isDirectory: true)
+        try FileManager.default.createDirectory(at: lexicalDir, withIntermediateDirectories: true)
+        let lexicalJSONURL = lexicalDir.appendingPathComponent("lexical-profile.json")
+        let lexicalMarkdownURL = lexicalDir.appendingPathComponent("lexical-profile.md")
+
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 1
+        )
+
+        let evictedCommitText = "EvictedBeforeFailedScrub 淘汰提交"
+        let retainedCommitText = "RetainedBeforeFailedScrub 保留提交"
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "luna_pinyin",
+                rawInput: "one",
+                acceptedText: evictedCommitText,
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                schemaID: "luna_pinyin",
+                rawInput: "two",
+                acceptedText: retainedCommitText,
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let context = LexicalContextSnapshot(
+            terms: [
+                LexicalContextTerm(text: "普通词条", score: 0.9, source: "rime-userdb")
+            ],
+            recentCommits: [
+                evictedCommitText,
+                retainedCommitText,
+                "NormalUserCommit 普通提交"
+            ],
+            toneProfile: ToneProfile(),
+            sourceSummary: [
+                "rime-userdb: 1"
+            ]
+        )
+        let profile = PersistentLexicalProfile(
+            schemaID: "luna_pinyin",
+            rimeSnapshotPath: nil,
+            rimeSnapshotModifiedAt: nil,
+            lexicalContext: context
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(profile).write(to: lexicalJSONURL, options: .atomic)
+        try Data(context.markdown.utf8).write(to: lexicalMarkdownURL, options: .atomic)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: lexicalDir.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: lexicalDir.path)
+        }
+
+        let maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            feedbackHistoryURL: feedbackHistoryURL,
+            feedbackSummaryURL: feedbackSummaryURL,
+            feedbackMirrorURL: feedbackMirrorURL,
+            lexicalJSONURL: lexicalJSONURL,
+            lexicalMarkdownURL: lexicalMarkdownURL,
+            maxRecordCount: 1
+        )
+
+        XCTAssertThrowsError(try maintenance.clear(confirm: true))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: evictedCommitsURL.path))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: lexicalDir.path)
+        _ = try maintenance.clear(confirm: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: evictedCommitsURL.path))
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let scrubbedProfile = try decoder.decode(
+            PersistentLexicalProfile.self,
+            from: Data(contentsOf: lexicalJSONURL)
+        )
+        XCTAssertEqual(scrubbedProfile.lexicalContext.recentCommits, ["NormalUserCommit 普通提交"])
+    }
 }
 
 private final class SummaryReadyEventCollector: @unchecked Sendable {

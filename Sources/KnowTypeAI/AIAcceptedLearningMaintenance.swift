@@ -255,6 +255,7 @@ public struct AIAcceptedLearningMaintenance {
                 try recordAcceptedLearningEvictedCommits(
                     Array(loadedRecords.prefix(overflowCount)),
                     historyURL: historyURL,
+                    evictedCommitsURL: evictedCommitsURL,
                     fileManager: fileManager
                 )
                 records = Array(loadedRecords.suffix(effectiveMaxRecordCount))
@@ -294,10 +295,18 @@ public struct AIAcceptedLearningMaintenance {
             throw Error.clearRequiresConfirmation
         }
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
-            let acceptedCommitTexts = acceptedCommitTextVariants(from: loadRecords().records)
+            let currentRecords = loadRecords().records
+            let acceptedCommitTexts = acceptedCommitTextVariants(from: currentRecords)
+            if !currentRecords.isEmpty {
+                try recordAcceptedLearningEvictedCommits(
+                    currentRecords,
+                    historyURL: historyURL,
+                    evictedCommitsURL: evictedCommitsURL,
+                    fileManager: fileManager
+                )
+            }
             let evictedCommitEntries = loadAcceptedLearningEvictedCommits(from: evictedCommitsURL, fileManager: fileManager)
             try removeIfExists(historyURL)
-            try removeIfExists(evictedCommitsURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
             try withAcceptedFeedbackFileLock(
@@ -314,6 +323,7 @@ public struct AIAcceptedLearningMaintenance {
                 acceptedCommitTexts: acceptedCommitTexts,
                 evictedCommitEntries: evictedCommitEntries
             )
+            try removeIfExists(evictedCommitsURL)
         }
         return status(action: "cleared")
     }
