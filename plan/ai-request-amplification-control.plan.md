@@ -67,12 +67,13 @@ of already-started recommendations, and independent provider failure budgets.
   replaces debounce work, and during mid-composition typing a started transport
   keeps running while the latest revision is held in `trailingWork` and enters
   `startDeferred` debounce when the in-flight request completes. Explicit
-  session reset, commit, Escape, or close cancels the in-flight transport task
-  and propagates cancellation through `AIRecommendationRuntime` to release the
-  `ProviderRequestGate` lease for the next session. Caller hard timeout is
-  outside the shared gate, so an uncancelled timeout-exceeding transport retains
-  its identity lease until actual completion and late success does not erase the
-  timeout cooldown.
+  session reset, commit, Escape, or close cancels the in-flight transport task,
+  tracks the cancelling attempt before resuming the final cancelled waiter, and
+  drains the cancelled attempt after a cache miss so the `ProviderRequestGate`
+  lease is released for the next session without blocking cache hits. Caller
+  hard timeout is outside the shared gate, so an uncancelled timeout-exceeding
+  transport retains its identity lease until actual completion and late success
+  does not erase the timeout cooldown.
 - Digest uses one actor-owned deadline task. A successful commit starts the
   600-second interval; batch, cooldown, and interval wakeups cannot bypass it.
   A below-batch first pending event gets a forced deadline, and gate busy uses

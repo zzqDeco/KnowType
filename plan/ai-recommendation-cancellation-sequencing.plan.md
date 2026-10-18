@@ -45,12 +45,15 @@ Non-goals:
   and `transport_left_stale`, cancel `transportTask`, clear `activeWork` and
   `trailingWork`, and release the single-flight slot without showing
   `AI 暂不可用`.
-- `AIRecommendationRuntime` propagates waiter cancellation to its in-flight
-  attempt task and drains any cancelling attempt before gate preflight/dispatch,
-  returning `.idle` for `CancellationError` and `URLError(.cancelled)` /
-  `NSURLErrorCancelled` without updating provider health or cooldown.
+- `AIRecommendationRuntime` registers cancellation tracking and cancels its
+  in-flight attempt task before resuming the final cancelled waiter, and drains
+  any tracked cancelling attempt after a cache miss (before gate
+  preflight/dispatch), returning `.idle` for `CancellationError` and
+  `URLError(.cancelled)` / `NSURLErrorCancelled` without updating provider
+  health or cooldown.
 - Hard timeout and real provider/decode/HTTP failures keep existing failure and
-  cooldown behavior.
+  cooldown behavior, and `doc/architecture.plan.md` / `doc/interfaces.plan.md`
+  record the updated cancellation and debounce contracts.
 
 ## Validation
 

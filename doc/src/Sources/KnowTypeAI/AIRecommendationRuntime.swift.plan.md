@@ -19,9 +19,10 @@
 - The single-flight owner uses the gate's hard-timeout execution seam. Waiters
   share that attempt and cannot multiply timeout failures.
 - When all waiters for an in-flight payload fingerprint are cancelled, the
-  shared attempt task is cancelled immediately and tracked until its
-  `ProviderRequestGate` lease unwinds, preventing a cancelled composition
-  session from holding the gate busy until hard timeout.
+  shared attempt task is cancelled and tracked before resuming the final
+  waiter, and any tracked cancelling attempt is drained after a cache miss
+  (before gate preflight/dispatch) so a cancelled composition session releases
+  its `ProviderRequestGate` lease without blocking cache hits.
 - The shared attempt task owns `AIHealthMonitor` observation, so one physical
   provider success or qualifying failure is observed once; waiters only consume
   the shared result.

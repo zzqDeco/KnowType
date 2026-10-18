@@ -344,16 +344,20 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         }
 
         @discardableResult
-        func cancelWaiter(_ waiterID: UUID) -> Bool {
+        func cancelWaiter(
+            _ waiterID: UUID,
+            onLastWaiterCancelled: () -> Void = {}
+        ) -> Bool {
             lock.lock()
             waiterIDs.remove(waiterID)
             let cancelledContinuation = waiterContinuations.removeValue(forKey: waiterID)
             let shouldCancel = completedResult == nil && waiterIDs.isEmpty
             lock.unlock()
-            cancelledContinuation?.resume(throwing: CancellationError())
             if shouldCancel {
                 task.cancel()
+                onLastWaiterCancelled()
             }
+            cancelledContinuation?.resume(throwing: CancellationError())
             return shouldCancel
         }
 
@@ -894,7 +898,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             let response = try await withTaskCancellationHandler {
                 try await attempt.waitForResponse(waiterID: waiterID)
             } onCancel: {
-                if attempt.cancelWaiter(waiterID) {
+                attempt.cancelWaiter(waiterID) {
                     Self.cancellingAttemptTracker.track(
                         key: trackerKey,
                         attemptID: attempt.attemptID,
