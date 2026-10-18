@@ -211,8 +211,9 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             currentWaiters.forEach { $0.resume() }
         }
 
-        func wait(timeoutNanoseconds: UInt64 = 200_000_000) async {
-            guard !isCompleted() else { return }
+        @discardableResult
+        func wait(timeoutNanoseconds: UInt64) async -> Bool {
+            guard !isCompleted() else { return true }
             let waiterID = UUID()
 
             await withTaskCancellationHandler {
@@ -229,6 +230,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             } onCancel: {
                 self.removeWaiter(waiterID)?.resume()
             }
+            return isCompleted()
         }
 
         private func isCompleted() -> Bool {
@@ -356,6 +358,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     private let providerGeneration: UInt64
     private var cache: [CacheKey: CacheEntry] = [:]
     private var inFlight: [String: InFlightAttempt] = [:]
+    private var gatePersistenceBlocked = false
 
     public init(
         provider: (any LLMProvider)?,
@@ -442,6 +445,16 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: "AI 未配置")
         }
+        if gatePersistenceBlocked {
+            record(
+                .cooldownActive,
+                request: request,
+                providerName: provider.providerName,
+                elapsedSince: startedAt,
+                reason: "gate_persistence_blocked"
+            )
+            return .unavailable(reason: "AI 暂不可用")
+        }
         if let reason = await healthMonitor.unavailableReason() {
             record(
                 .cooldownActive,
@@ -478,6 +491,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .stale
         case .persistenceBlocked:
+            gatePersistenceBlocked = true
             record(
                 .cooldownActive,
                 request: request,
@@ -485,7 +499,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 elapsedSince: startedAt,
                 reason: "gate_persistence_blocked"
             )
-            return .unavailable(reason: "AI 状态异常，正在重试")
+            return .unavailable(reason: "AI 暂不可用")
         }
 
         var waitingForIdle = false
@@ -656,6 +670,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             record(.cancelled, request: request, providerName: provider.providerName, elapsedSince: startedAt, reason: "stale_generation")
             return .stale
         } catch ProviderRequestGatePersistenceError.blocked {
+            gatePersistenceBlocked = true
             record(
                 .cooldownActive,
                 request: request,
@@ -663,7 +678,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 elapsedSince: startedAt,
                 reason: "gate_persistence_blocked"
             )
-            return .unavailable(reason: "AI 状态异常，正在重试")
+            return .unavailable(reason: "AI 暂不可用")
         } catch is CancellationError {
             record(
                 .cancelled,
@@ -731,8 +746,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         let gateID = ObjectIdentifier(requestGate)
         let snapshot = Self.cancellingAttemptTracker.takeSnapshot(gateID: gateID)
         for (attemptID, signal) in snapshot {
-            await signal.wait()
-            Self.cancellingAttemptTracker.remove(gateID: gateID, attemptID: attemptID)
+            guard !Task.isCancelled else { break }
+            if await signal.wait(timeoutNanoseconds: hardTimeoutNanoseconds) {
+                Self.cancellingAttemptTracker.remove(gateID: gateID, attemptID: attemptID)
+            }
         }
     }
 

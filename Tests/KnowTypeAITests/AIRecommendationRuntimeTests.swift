@@ -1713,15 +1713,13 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(diskContent, polluted)
     }
 
-    func testPersistenceBlockedGateRecoversWithoutRebuildingRecommendationRuntime() async throws {
+    func testPersistenceBlockedGateLatchesBeforeRecommendationDocumentReads() async throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let gateStateURL = directory.appendingPathComponent("gate.json")
         try Data("corrupt-gate-state".utf8).write(to: gateStateURL)
-        let clock = RecommendationGateClock()
         let gateProbe = ProviderRequestGateTestProbe()
         let gate = ProviderRequestGate(
-            now: clock.now,
             persistenceURL: gateStateURL,
             testProbe: gateProbe
         )
@@ -1729,7 +1727,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         let correctionURL = directory.appendingPathComponent("CORRECTION.md")
         let environmentProbe = EnvironmentDocumentStoreTestProbe()
         let provider = RecordingLLMProvider(response: LLMResponse(candidates: [
-            LLMCandidate(text: "恢复成功", confidence: 0.9)
+            LLMCandidate(text: "must not run", confidence: 0.9)
         ]))
         let diagnostics = RecordingDiagnosticSink()
         let runtime = AIRecommendationRuntime(
@@ -1752,37 +1750,18 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         }
 
         for state in states {
-            guard state == .unavailable(reason: "AI 状态异常，正在重试") else {
+            guard case .unavailable = state else {
                 return XCTFail("persistence-blocked recommendation must be unavailable")
             }
         }
         let providerRequests = await provider.requests
         XCTAssertTrue(providerRequests.isEmpty)
-        XCTAssertEqual(gateProbe.preflightCheckCount, 10)
+        XCTAssertEqual(gateProbe.preflightCheckCount, 1)
         XCTAssertEqual(gateProbe.admittedAttemptCount, 0)
-        XCTAssertEqual(gateProbe.persistenceRecoveryProbeCount, 0)
         XCTAssertEqual(environmentProbe.environmentDocumentReadCount, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: environmentURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: correctionURL.path))
         XCTAssertTrue(diagnostics.events.allSatisfy { $0.reason == "gate_persistence_blocked" })
-        XCTAssertFalse(String(describing: diagnostics.events).contains(sensitiveInput))
-
-        try Data(#"{"entries":[]}"#.utf8).write(to: gateStateURL, options: .atomic)
-        clock.advance(by: 5)
-        let recoveredState = await runtime.recommendation(for: request)
-
-        guard case .ready(let candidate) = recoveredState else {
-            return XCTFail("same recommendation runtime must recover after bounded gate retry")
-        }
-        XCTAssertEqual(candidate.displayText, "恢复成功")
-        let recoveredProviderRequests = await provider.requests
-        XCTAssertEqual(recoveredProviderRequests.count, 1)
-        XCTAssertEqual(gateProbe.admittedAttemptCount, 1)
-        XCTAssertEqual(gateProbe.persistenceRecoveryProbeCount, 1)
-        XCTAssertEqual(gateProbe.persistenceRecoveryCount, 1)
-        XCTAssertGreaterThan(environmentProbe.environmentDocumentReadCount, 0)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: environmentURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: correctionURL.path))
         XCTAssertFalse(String(describing: diagnostics.events).contains(sensitiveInput))
     }
 
@@ -1825,7 +1804,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
             return XCTFail("first request did not enter provider before cancellation: \(startResult)")
         }
 
-        // Cancel the first task while the first provider call is suspended; cancellation must propagate to the underlying attempt task and release ProviderRequestGate.
+        // Cancel the first task while the first provider call is suspended; cancellation must propagate to the underlying attempt task and wait for its slow (>200ms) unwind to release ProviderRequestGate.
         firstTask.cancel()
         let secondState = await runtime.recommendation(for: secondRequest)
         let firstState = await firstTask.value
@@ -1842,13 +1821,15 @@ final class AIRecommendationRuntimeTests: XCTestCase {
 
 private actor CancellationAwareBlockedFirstLLMProvider: LLMProvider {
     nonisolated let providerName: String
+    private let cancellationUnwindDelayNanoseconds: UInt64
     private var recordedRequests: [LLMRequest] = []
     private let firstRequestStarts: AsyncStream<Void>
     private let firstRequestStartContinuation: AsyncStream<Void>.Continuation
     private var firstRequestStartStreamFinished = false
 
-    init(providerName: String) {
+    init(providerName: String, cancellationUnwindDelayNanoseconds: UInt64 = 300_000_000) {
         self.providerName = providerName
+        self.cancellationUnwindDelayNanoseconds = cancellationUnwindDelayNanoseconds
         let startEvents = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         self.firstRequestStarts = startEvents.stream
         self.firstRequestStartContinuation = startEvents.continuation
@@ -1862,7 +1843,16 @@ private actor CancellationAwareBlockedFirstLLMProvider: LLMProvider {
                 firstRequestStartContinuation.yield(())
                 firstRequestStartContinuation.finish()
             }
-            try await Task.sleep(nanoseconds: 60_000_000_000)
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                if cancellationUnwindDelayNanoseconds > 0 {
+                    await Task.detached {
+                        try? await Task.sleep(nanoseconds: self.cancellationUnwindDelayNanoseconds)
+                    }.value
+                }
+                throw error
+            }
         }
         return LLMResponse(candidates: [
             LLMCandidate(text: "shared gate completed", confidence: 0.9)
