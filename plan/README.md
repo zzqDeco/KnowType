@@ -173,6 +173,7 @@ when converting a shipped plan into a short record.
 | [input-native-candidate-navigation-runtime-refactor.plan.md](input-native-candidate-navigation-runtime-refactor.plan.md) | Extract Rime/native candidate selection, highlight, paging, and panel-selection mapping from the coordinator | Delivered |
 | [input-candidate-panel-publication-runtime-refactor.plan.md](input-candidate-panel-publication-runtime-refactor.plan.md) | Extract candidate-panel publication, visibility, async refresh, and delayed re-anchor lifecycle from the coordinator | Delivered |
 | [input-ai-acceptance-runtime-refactor.plan.md](input-ai-acceptance-runtime-refactor.plan.md) | Extract post-commit AI acceptance learning and feedback side effects from the coordinator | Delivered |
+| [accepted-learning-store-cap.plan.md](accepted-learning-store-cap.plan.md) | Enforce sliding-window capacity retention and JSONL compaction in `AIAcceptedLearningStore` | Delivered |
 | [input-ai-recommendation-runtime-refactor.plan.md](input-ai-recommendation-runtime-refactor.plan.md) | Extract real-time AI recommendation request lifecycle from the coordinator | Delivered |
 | [input-ai-recommendation-schedule-policy-refactor.plan.md](input-ai-recommendation-schedule-policy-refactor.plan.md) | Extract real-time AI recommendation schedule eligibility from the coordinator | Delivered |
 | [input-method-decouple-host-carrier.plan.md](input-method-decouple-host-carrier.plan.md) | Decouple code-app input defaults from host marked-text carrier selection and remove Codex carrier remnants | Delivered |

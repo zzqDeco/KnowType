@@ -332,6 +332,9 @@ public final class AIAcceptedLearningStore:
     AIAcceptedLearningSummaryObserving,
     @unchecked Sendable
 {
+    public static let defaultMaxRecordCount = 500
+
+    public let maxRecordCount: Int
     private let historyURL: URL?
     private let summaryURL: URL?
     private let mirrorURL: URL?
@@ -362,8 +365,10 @@ public final class AIAcceptedLearningStore:
         mirrorURL: URL? = AIUserDirectory.defaultDirectory().acceptedLearningMirrorURL,
         fileManager: FileManager = .default,
         diagnosticSink: any AIRecommendationDiagnosticSink = NoopAIRecommendationDiagnosticSink(),
-        summaryDelayNanoseconds: UInt64 = 2_000_000_000
+        summaryDelayNanoseconds: UInt64 = 2_000_000_000,
+        maxRecordCount: Int = AIAcceptedLearningStore.defaultMaxRecordCount
     ) {
+        let clampedMaxRecordCount = max(1, maxRecordCount)
         let configuredEncoder = JSONEncoder()
         configuredEncoder.dateEncodingStrategy = .iso8601
         let configuredDecoder = JSONDecoder()
@@ -382,6 +387,8 @@ public final class AIAcceptedLearningStore:
                     fileManager: fileManager,
                     encoder: configuredEncoder,
                     decoder: configuredDecoder,
+                    maxRecordCount: clampedMaxRecordCount,
+                    compactPersistentHistory: true,
                     repairPersistentSummary: false
                 )
             }
@@ -398,6 +405,8 @@ public final class AIAcceptedLearningStore:
                     fileManager: fileManager,
                     encoder: configuredEncoder,
                     decoder: configuredDecoder,
+                    maxRecordCount: clampedMaxRecordCount,
+                    compactPersistentHistory: false,
                     repairPersistentSummary: false
                 )
             }) ?? StartupState(
@@ -412,6 +421,7 @@ public final class AIAcceptedLearningStore:
             startupRepairErrorReason = String(describing: type(of: error))
         }
 
+        self.maxRecordCount = clampedMaxRecordCount
         self.historyURL = historyURL
         self.summaryURL = summaryURL
         self.mirrorURL = mirrorURL
@@ -436,14 +446,16 @@ public final class AIAcceptedLearningStore:
     }
 
     public static func inMemory(
-        diagnosticSink: any AIRecommendationDiagnosticSink = NoopAIRecommendationDiagnosticSink()
+        diagnosticSink: any AIRecommendationDiagnosticSink = NoopAIRecommendationDiagnosticSink(),
+        maxRecordCount: Int = AIAcceptedLearningStore.defaultMaxRecordCount
     ) -> AIAcceptedLearningStore {
         AIAcceptedLearningStore(
             historyURL: nil,
             summaryURL: nil,
             mirrorURL: nil,
             diagnosticSink: diagnosticSink,
-            summaryDelayNanoseconds: 0
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: maxRecordCount
         )
     }
 
@@ -545,26 +557,53 @@ public final class AIAcceptedLearningStore:
     private func append(_ record: AIAcceptedLearningRecord) throws {
         try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
             syncRecordsAfterExternalClearLocked()
+            lock.lock()
+            var nextRecords = records
+            lock.unlock()
+
+            nextRecords.append(record)
+            let didCompact: Bool
+            let evictedSchemaIDs: Set<String>
+            if nextRecords.count > maxRecordCount {
+                let overflowCount = nextRecords.count - maxRecordCount
+                evictedSchemaIDs = Set(nextRecords.prefix(overflowCount).map(\.schemaID))
+                nextRecords = Array(nextRecords.suffix(maxRecordCount))
+                didCompact = true
+            } else {
+                evictedSchemaIDs = []
+                didCompact = false
+            }
+
             if let historyURL {
-                try fileManager.createDirectory(
-                    at: historyURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                let data = try encoder.encode(record)
-                var line = data
-                line.append(0x0A)
-                if fileManager.fileExists(atPath: historyURL.path) {
-                    let handle = try FileHandle(forWritingTo: historyURL)
-                    defer { try? handle.close() }
-                    try handle.seekToEnd()
-                    try handle.write(contentsOf: line)
+                if didCompact {
+                    try Self.writeRecords(
+                        nextRecords,
+                        to: historyURL,
+                        encoder: encoder,
+                        fileManager: fileManager
+                    )
                 } else {
-                    try line.write(to: historyURL, options: .atomic)
+                    try fileManager.createDirectory(
+                        at: historyURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true
+                    )
+                    let data = try encoder.encode(record)
+                    var line = data
+                    line.append(0x0A)
+                    if fileManager.fileExists(atPath: historyURL.path) {
+                        let handle = try FileHandle(forWritingTo: historyURL)
+                        defer { try? handle.close() }
+                        try handle.seekToEnd()
+                        try handle.write(contentsOf: line)
+                    } else {
+                        try line.write(to: historyURL, options: .atomic)
+                    }
                 }
             }
             lock.lock()
-            records.append(record)
+            records = nextRecords
             pendingSummarySchemaIDs.insert(record.schemaID)
+            pendingSummarySchemaIDs.formUnion(evictedSchemaIDs)
             lock.unlock()
         }
         scheduleSummaryRebuild()
@@ -657,7 +696,21 @@ public final class AIAcceptedLearningStore:
         guard shouldReload else {
             return
         }
-        let reloadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let reloadedRecords: [AIAcceptedLearningRecord]
+        if loadedRecords.count > maxRecordCount {
+            reloadedRecords = Array(loadedRecords.suffix(maxRecordCount))
+            if let historyURL {
+                try? Self.writeRecords(
+                    reloadedRecords,
+                    to: historyURL,
+                    encoder: encoder,
+                    fileManager: fileManager
+                )
+            }
+        } else {
+            reloadedRecords = loadedRecords
+        }
         let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: Date())
         let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: Date())
         lock.lock()
@@ -915,9 +968,25 @@ public final class AIAcceptedLearningStore:
         fileManager: FileManager,
         encoder: JSONEncoder,
         decoder: JSONDecoder,
+        maxRecordCount: Int,
+        compactPersistentHistory: Bool,
         repairPersistentSummary: Bool
     ) throws -> StartupState {
-        let records = Self.loadRecords(from: historyURL, decoder: decoder)
+        let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let records: [AIAcceptedLearningRecord]
+        if loadedRecords.count > maxRecordCount {
+            records = Array(loadedRecords.suffix(maxRecordCount))
+            if compactPersistentHistory, let historyURL {
+                try Self.writeRecords(
+                    records,
+                    to: historyURL,
+                    encoder: encoder,
+                    fileManager: fileManager
+                )
+            }
+        } else {
+            records = loadedRecords
+        }
         let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
         let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
         let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
@@ -950,6 +1019,21 @@ public final class AIAcceptedLearningStore:
             return nil
         }
         return attributes[.modificationDate] as? Date
+    }
+
+    private static func writeRecords(
+        _ records: [AIAcceptedLearningRecord],
+        to url: URL,
+        encoder: JSONEncoder,
+        fileManager: FileManager
+    ) throws {
+        var buffer = Data()
+        for record in records {
+            let data = try encoder.encode(record)
+            buffer.append(data)
+            buffer.append(0x0A)
+        }
+        try atomicWrite(buffer, to: url, fileManager: fileManager)
     }
 
     private func atomicWrite(_ data: Data, to url: URL) throws {

@@ -3,10 +3,17 @@
 `Sources/KnowTypeAI/AIAcceptedLearning.swift` owns local learning from AI
 recommendations the user explicitly accepts.
 
-It appends full accepted-AI history to Application Support JSONL, builds a
-bounded language summary, and writes a readable diagnostics mirror. The full
-history is local-only; provider requests receive only the accepted summary after
-`LexicalProfileRuntime` merges it into `LEXICAL_PROFILE.md`.
+It appends accepted-AI history to Application Support JSONL under a bounded
+sliding-window capacity (`maxRecordCount`, defaulting to
+`AIAcceptedLearningStore.defaultMaxRecordCount = 500` and clamped to at least
+`1`), builds a bounded language summary over the retained window, and writes a
+readable diagnostics mirror. When `append(_:)` or startup loading observes more
+than `maxRecordCount` records, the store trims `records` to the latest
+`maxRecordCount` entries, atomically rewrites the compacted
+`accepted-ai-learning.jsonl` file, and marks any evicted schemas alongside the
+appended schema for summary rebuild. The full history is local-only; provider
+requests receive only the accepted summary after `LexicalProfileRuntime` merges
+it into `LEXICAL_PROFILE.md`.
 If the accepted text is also present in the current recent-commits slice that
 triggered the refresh, `LexicalContextBuilder` keeps the accepted summary as the
 canonical source and filters that duplicate current commit before rendering the
@@ -19,7 +26,9 @@ It emits ready events only for schemas whose accepted history changed since the
 previous rebuild, so schema-specific lexical profile refreshes are not retriggered
 by unchanged cached summaries.
 
-Runtime store construction is read-only. Missing history, summary, mirror, and
+Runtime store construction is read-only when history is missing or within
+`maxRecordCount` (only compacting on disk when an existing JSONL file exceeds
+`maxRecordCount`). Missing history, summary, mirror, and
 clear-marker files do not create the AI directory, lock file, or markdown
 mirror. If a persisted summary is stale, startup may rebuild the in-memory
 snapshot, but persistent repair is left to explicit record/rebuild paths.
