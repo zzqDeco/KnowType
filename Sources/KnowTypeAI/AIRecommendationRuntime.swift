@@ -544,12 +544,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             )
             return .unavailable(reason: reason)
         }
-        var drainedAttemptIDs: Set<UUID> = []
         let drainDeadlineNanoseconds = DispatchTime.now().uptimeNanoseconds &+ hardTimeoutNanoseconds
-        await drainCancellingAttempts(
-            alreadyDrained: &drainedAttemptIDs,
-            deadlineNanoseconds: drainDeadlineNanoseconds
-        )
         switch await requestGate.preflight(
             providerIdentity: providerIdentity,
             generation: providerGeneration
@@ -653,6 +648,12 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 return .ready(cached.candidate)
             }
             record(.cacheMiss, request: request, providerName: provider.providerName, elapsedSince: startedAt)
+            var drainedAttemptIDs: Set<UUID> = []
+            await drainCancellingAttempts(
+                alreadyDrained: &drainedAttemptIDs,
+                deadlineNanoseconds: drainDeadlineNanoseconds
+            )
+            try Task.checkCancellation()
             record(
                 .structuredSchemaRequest,
                 request: request,

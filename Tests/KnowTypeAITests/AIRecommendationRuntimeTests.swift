@@ -1963,19 +1963,82 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(candidate.displayText, "fast provider B")
         XCTAssertLessThan(elapsedB, 0.5)
     }
+
+    func testCancellingAttemptDoesNotDelayCacheHitOnSameProvider() async {
+        let provider = CancellationAwareBlockedFirstLLMProvider(
+            providerName: "cache-hit-while-cancelling-\(UUID().uuidString)",
+            cancellationUnwindDelayNanoseconds: 800_000_000,
+            blockedRawInput: "blockedinput"
+        )
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: ProviderRequestGate()
+        )
+        let cachedRequest = AIRecommendationRequest(rawInput: "cachedinput", compositionID: 1)
+        let blockedRequest = AIRecommendationRequest(rawInput: "blockedinput", compositionID: 2)
+
+        let initialCachedState = await runtime.recommendation(for: cachedRequest)
+        guard case .ready(let initialCandidate) = initialCachedState else {
+            return XCTFail("expected initial cache population to succeed, got \(initialCachedState)")
+        }
+        XCTAssertEqual(initialCandidate.displayText, "shared gate completed")
+
+        let blockedStarts = await provider.firstRequestStartStream()
+        let blockedCompletions = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let blockedTask = Task {
+            let state = await runtime.recommendation(for: blockedRequest)
+            blockedCompletions.continuation.yield(())
+            blockedCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: blockedStarts,
+            firstTaskCompletions: blockedCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            blockedTask.cancel()
+            _ = await blockedTask.value
+            return XCTFail("blocked request did not enter provider: \(startResult)")
+        }
+
+        blockedTask.cancel()
+        let cacheHitStart = Date()
+        let cachedHitState = await runtime.recommendation(for: cachedRequest)
+        let cacheHitElapsed = Date().timeIntervalSince(cacheHitStart)
+        _ = await blockedTask.value
+
+        guard case .ready(let candidate) = cachedHitState else {
+            return XCTFail("expected immediate cache hit while cancelled transport unwinds, got \(cachedHitState)")
+        }
+        XCTAssertEqual(candidate.displayText, "shared gate completed")
+        XCTAssertLessThan(cacheHitElapsed, 0.3)
+    }
 }
 
 private actor CancellationAwareBlockedFirstLLMProvider: LLMProvider {
     nonisolated let providerName: String
     private let cancellationUnwindDelayNanoseconds: UInt64
+    private let blockedRawInput: String?
     private var recordedRequests: [LLMRequest] = []
     private let firstRequestStarts: AsyncStream<Void>
     private let firstRequestStartContinuation: AsyncStream<Void>.Continuation
     private var firstRequestStartStreamFinished = false
 
-    init(providerName: String, cancellationUnwindDelayNanoseconds: UInt64 = 300_000_000) {
+    init(
+        providerName: String,
+        cancellationUnwindDelayNanoseconds: UInt64 = 300_000_000,
+        blockedRawInput: String? = nil
+    ) {
         self.providerName = providerName
         self.cancellationUnwindDelayNanoseconds = cancellationUnwindDelayNanoseconds
+        self.blockedRawInput = blockedRawInput
         let startEvents = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         self.firstRequestStarts = startEvents.stream
         self.firstRequestStartContinuation = startEvents.continuation
@@ -1983,7 +2046,10 @@ private actor CancellationAwareBlockedFirstLLMProvider: LLMProvider {
 
     func complete(_ request: LLMRequest) async throws -> LLMResponse {
         recordedRequests.append(request)
-        if recordedRequests.count == 1 {
+        let shouldBlock = blockedRawInput != nil
+            ? (request.rawInput == blockedRawInput)
+            : (recordedRequests.count == 1)
+        if shouldBlock {
             if !firstRequestStartStreamFinished {
                 firstRequestStartStreamFinished = true
                 firstRequestStartContinuation.yield(())
