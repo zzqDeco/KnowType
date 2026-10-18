@@ -197,6 +197,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         private let lock = NSLock()
         private var completed = false
         private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+        private var cancelledWaiterIDs: Set<UUID> = []
 
         func markCompleted() {
             lock.lock()
@@ -207,6 +208,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             completed = true
             let currentWaiters = Array(waiters.values)
             waiters.removeAll()
+            cancelledWaiterIDs.removeAll()
             lock.unlock()
             currentWaiters.forEach { $0.resume() }
         }
@@ -228,12 +230,12 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     }
                 }
             } onCancel: {
-                self.removeWaiter(waiterID)?.resume()
+                self.cancelWaiter(waiterID)?.resume()
             }
             return isCompleted()
         }
 
-        private func isCompleted() -> Bool {
+        func isCompleted() -> Bool {
             lock.lock()
             defer { lock.unlock() }
             return completed
@@ -245,14 +247,30 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         ) -> Bool {
             lock.lock()
             defer { lock.unlock() }
-            guard !completed else { return false }
+            guard !completed, !cancelledWaiterIDs.contains(id) else {
+                cancelledWaiterIDs.remove(id)
+                return false
+            }
             waiters[id] = continuation
             return true
+        }
+
+        private func cancelWaiter(_ id: UUID) -> CheckedContinuation<Void, Never>? {
+            lock.lock()
+            defer { lock.unlock() }
+            if let continuation = waiters.removeValue(forKey: id) {
+                return continuation
+            }
+            if !completed {
+                cancelledWaiterIDs.insert(id)
+            }
+            return nil
         }
 
         private func removeWaiter(_ id: UUID) -> CheckedContinuation<Void, Never>? {
             lock.lock()
             defer { lock.unlock() }
+            cancelledWaiterIDs.remove(id)
             return waiters.removeValue(forKey: id)
         }
     }
@@ -360,7 +378,25 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
 
         func track(key: CancellingTrackerKey, attemptID: UUID, signal: AttemptCompletionSignal) {
             lock.lock()
+            guard !signal.isCompleted() else {
+                lock.unlock()
+                return
+            }
             signalsByKey[key, default: [:]][attemptID] = signal
+            lock.unlock()
+        }
+
+        func completeAndRemove(
+            key: CancellingTrackerKey,
+            attemptID: UUID,
+            signal: AttemptCompletionSignal
+        ) {
+            lock.lock()
+            signal.markCompleted()
+            signalsByKey[key]?[attemptID] = nil
+            if signalsByKey[key]?.isEmpty == true {
+                signalsByKey[key] = nil
+            }
             lock.unlock()
         }
 
@@ -900,8 +936,11 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     generation: generation,
                     timeoutNanoseconds: timeout,
                     onAttemptCompletion: {
-                        completionSignal.markCompleted()
-                        Self.cancellingAttemptTracker.remove(key: trackerKey, attemptID: attemptID)
+                        Self.cancellingAttemptTracker.completeAndRemove(
+                            key: trackerKey,
+                            attemptID: attemptID,
+                            signal: completionSignal
+                        )
                     }
                 ) {
                     try await provider.complete(request)
