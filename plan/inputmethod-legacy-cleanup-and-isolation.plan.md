@@ -13,8 +13,8 @@
 
 ## Docs Absorbed By
 
-- `doc/src/Sources/KnowTypeInputMethod/InputControllerCoordinator.swift.plan.md`
-- `doc/src/Sources/KnowTypeInputMethod/InputCommitDecisionRuntime.swift.plan.md`
+- `doc/src/Sources/KnowTypeInputMethod/InputControllerCoordinator.plan.md`
+- `doc/src/Sources/KnowTypeInputMethod/InputCommitDecisionRuntime.plan.md`
 
 ## Retirement Criteria
 
