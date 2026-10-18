@@ -179,6 +179,7 @@ when converting a shipped plan into a short record.
 | [input-client-host-profile-preedit.plan.md](input-client-host-profile-preedit.plan.md) | Host profile carrier table and commit-only candidate-panel preedit row | Delivered |
 | [input-client-placeholder-composition.plan.md](input-client-placeholder-composition.plan.md) | Commit-only host placeholder composition and owned marked-text cleanup | Delivered |
 | [imk-server-stable-connection.plan.md](imk-server-stable-connection.plan.md) | Stable IMK server connection name aligned across plist, Swift constants, shell scripts, and installed endpoint verification | Delivered |
+| [inputmethod-legacy-cleanup-and-isolation.plan.md](inputmethod-legacy-cleanup-and-isolation.plan.md) | Isolate legacy `CompositionBuffer` segment branches from the Rime-only hot path and harden main-thread callback confinement | Delivered |
 | [imk-session-architecture.plan.md](imk-session-architecture.plan.md) | Thin IMK controller and explicit session separation | Delivered |
 | [inputmethod-native-candidates-fix.plan.md](inputmethod-native-candidates-fix.plan.md) | Native-style candidate panel behavior | Delivered |
 | [native-candidate-panel-style.plan.md](native-candidate-panel-style.plan.md) | Compact macOS candidate panel styling | Delivered |

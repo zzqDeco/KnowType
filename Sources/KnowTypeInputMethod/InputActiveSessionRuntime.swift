@@ -136,6 +136,13 @@ enum SymbolCompositionTransitionPlan: Sendable, Equatable {
     )
 }
 
+/// Owns mutually exclusive text and symbol session state and monotonic composition IDs.
+///
+/// Concurrency contract:
+/// - Main-thread / `MainActor` confined: all session queries and mutations must run on the
+///   `InputControllerCoordinator` synchronous turn path or `MainActor` callbacks.
+/// - Marked `@unchecked Sendable` so `InputControllerCoordinator` can reference it from
+///   `@MainActor` closures without forcing `@MainActor` isolation onto synchronous IMK entry points.
 final class InputActiveSessionRuntime: @unchecked Sendable {
     private let textRuntime: InputCompositionStateRuntime
     private var symbolComposition: SymbolComposition?

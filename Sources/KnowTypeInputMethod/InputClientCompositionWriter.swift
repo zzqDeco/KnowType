@@ -20,6 +20,13 @@ struct InputClientCompositionPresentationResult: Sendable, Equatable {
     )
 }
 
+/// Centralizes host-client compatibility write modes, marked-text ownership tracking, and text insertion.
+///
+/// Concurrency contract:
+/// - Main-thread / `MainActor` confined: `ownedMarkedText` and all `InputControllerClient` writes
+///   (`setMarkedText`, `insertText`) must execute on the IMK main-thread turn path.
+/// - Marked `@unchecked Sendable` to participate in `InputControllerCoordinator` without forcing
+///   `@MainActor` onto synchronous IMK responder methods.
 final class InputClientCompositionWriter: @unchecked Sendable {
     private static let commitOnlyCompositionPlaceholder = "\u{3000}"
 

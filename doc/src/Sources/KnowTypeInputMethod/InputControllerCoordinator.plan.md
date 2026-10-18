@@ -276,5 +276,7 @@ Current behavior:
 - keeps suggestion freshness checks guarded by `SuggestionPublicationGuard`
   through `InputSuggestionStateRuntime`
 - suppresses AI recommendation while the composition is only partially resolved, so half-pinyin marked text is not sent as a locked prefix
+- isolates legacy `CompositionBuffer` resolved-segment fallback paths into guard-first helpers (`legacyResolvedCompositionCommitText`, `legacyResolutionFlags`, `legacyPartialSegmentedSymbolCommitResult`, `legacySegmentedSymbolFallbackCommitResult`, and `legacySegmentedSuggestionIfNeeded`) that return `nil` or fast-path on the Rime-only hot path (`!compositionBuffer.hasResolvedSegments`), avoiding redundant `SuggestionResponse` reconstruction while preserving compatibility with segment-candidate unit tests
+- confines mutable coordinator and child-runtime state to the main thread / `MainActor`; asynchronous callbacks (AI state updates via `@MainActor applyAIRecommendationStateUpdate(_:)`, delayed re-anchor, and post-insert caret verification via `performOnMainThreadOrMainActor`) hop onto `MainActor` before reading or mutating coordinator state
 
 The coordinator remains IMK-free. Production host/client adapters live beside the IMK wrapper, while tests use fake clients, fake host scheduling, fake panel capture, and fake history persistence.
