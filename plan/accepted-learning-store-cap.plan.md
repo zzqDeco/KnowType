@@ -11,13 +11,17 @@
   `accepted-ai-learning.jsonl` on disk under the interprocess file lock when
   historical records exceed capacity, while keeping within-capacity and
   missing-history cold starts read-only.
-- Updated `AIAcceptedLearningStore.append(_:)` to reload locked on-disk history
-  before compacting, fast-path append when within `maxRecordCount`, emit
-  zero-count summary invalidation events for fully evicted schemas, and persist
-  evicted commit text variants so `AIAcceptedLearningMaintenance.clear(confirm:)`
-  can still scrub evicted accepted commits from `LEXICAL_PROFILE.md`.
-- Updated `AIAcceptedLearningMaintenance` (`status`, `rebuild`, `clear`) and
-  `README.md` / `README_CN.md` to enforce and document the 500-record window.
+- Updated `AIAcceptedLearningStore.append(_:)` and `rebuildSummary()` to reload
+  locked on-disk history before compacting or rebuilding summaries, fast-path
+  append when within `maxRecordCount`, emit zero-count summary invalidation
+  events for fully evicted schemas, and persist SHA-256 digests of evicted
+  commit text variants (`accepted-ai-learning.evicted-commits.json`, bounded to
+  4,096 digests) so `AIAcceptedLearningMaintenance.clear(confirm:)` can still
+  scrub evicted accepted commits from `LEXICAL_PROFILE.md` without retaining raw
+  evicted commit text on disk.
+- Updated `AIAcceptedLearningMaintenance` (`status`, `rebuild`, `clear`, and
+  `maxRecordCount` mutation clamping) and `README.md` / `README_CN.md` to
+  enforce and document the 500-record window and evicted-commit digest ledger.
 - Documented the current-state contract in
   `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.plan.md`.
 

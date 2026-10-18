@@ -23,6 +23,13 @@ func acceptedLearningNormalizedCommitText(_ text: String) -> String {
         .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
 }
 
+func acceptedLearningCommitTextDigest(_ text: String) -> String {
+    let clean = acceptedLearningNormalizedCommitText(text)
+    return SHA256.hash(data: Data(clean.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
+}
+
 func acceptedLearningCommitTextVariants(from records: [AIAcceptedLearningRecord]) -> Set<String> {
     Set(
         records.flatMap { record in
@@ -36,6 +43,10 @@ func acceptedLearningCommitTextVariants(from records: [AIAcceptedLearningRecord]
             return [clean, String(clean.prefix(48)) + "..."]
         }
     )
+}
+
+func acceptedLearningCommitDigestVariants(from records: [AIAcceptedLearningRecord]) -> Set<String> {
+    Set(acceptedLearningCommitTextVariants(from: records).map(acceptedLearningCommitTextDigest))
 }
 
 func loadAcceptedLearningEvictedCommits(
@@ -59,12 +70,12 @@ func recordAcceptedLearningEvictedCommits(
     guard let evictedURL = acceptedLearningEvictedCommitsURL(historyURL: historyURL) else {
         return
     }
-    let newVariants = acceptedLearningCommitTextVariants(from: evictedRecords)
-    guard !newVariants.isEmpty else {
+    let newDigests = acceptedLearningCommitDigestVariants(from: evictedRecords)
+    guard !newDigests.isEmpty else {
         return
     }
     let existing = loadAcceptedLearningEvictedCommits(from: evictedURL, fileManager: fileManager)
-    let merged = Array(existing.union(newVariants)).sorted().suffix(4_096)
+    let merged = Array(existing.union(newDigests)).sorted().suffix(4_096)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let data = try encoder.encode(Array(merged))
@@ -742,9 +753,45 @@ public final class AIAcceptedLearningStore:
                 fileManager: fileManager
             ) { () -> [AIAcceptedLearningSummaryReadyEvent] in
                 syncRecordsAfterExternalClearLocked()
+                let currentRecords: [AIAcceptedLearningRecord]
+                if let historyURL, fileManager.fileExists(atPath: historyURL.path) {
+                    let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+                    if loadedRecords.count > maxRecordCount {
+                        let overflowCount = loadedRecords.count - maxRecordCount
+                        let evictedRecords = Array(loadedRecords.prefix(overflowCount))
+                        currentRecords = Array(loadedRecords.suffix(maxRecordCount))
+                        try recordAcceptedLearningEvictedCommits(
+                            evictedRecords,
+                            historyURL: historyURL,
+                            fileManager: fileManager
+                        )
+                        try Self.writeRecords(
+                            currentRecords,
+                            to: historyURL,
+                            encoder: encoder,
+                            fileManager: fileManager
+                        )
+                    } else {
+                        currentRecords = loadedRecords
+                    }
+                } else {
+                    lock.lock()
+                    currentRecords = records
+                    lock.unlock()
+                }
+
                 lock.lock()
-                let currentRecords = records
-                let changedSchemaIDs = pendingSummarySchemaIDs
+                let previousRecords = records
+                records = currentRecords
+                var changedSchemaIDs = pendingSummarySchemaIDs
+                if previousRecords != currentRecords {
+                    let allSchemas = Set(previousRecords.map(\.schemaID)).union(currentRecords.map(\.schemaID))
+                    for schemaID in allSchemas {
+                        if previousRecords.filter({ $0.schemaID == schemaID }) != currentRecords.filter({ $0.schemaID == schemaID }) {
+                            changedSchemaIDs.insert(schemaID)
+                        }
+                    }
+                }
                 changedSchemaIDsForRetry = changedSchemaIDs
                 pendingSummarySchemaIDs.removeAll()
                 lock.unlock()

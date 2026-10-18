@@ -375,6 +375,11 @@ final class AIAcceptedLearningTests: XCTestCase {
             )
         )
 
+        let evictedCommitsURL = directory.appendingPathComponent("accepted-ai-learning.evicted-commits.json")
+        let evictedCommitsContent = try String(contentsOf: evictedCommitsURL, encoding: .utf8)
+        XCTAssertFalse(evictedCommitsContent.contains("EvictedAICommit"))
+        XCTAssertFalse(evictedCommitsContent.contains("被淘汰的提交"))
+
         let context = LexicalContextSnapshot(
             terms: [
                 LexicalContextTerm(text: "RetainedAICommitOne", score: 1, source: "accepted-ai"),
@@ -424,6 +429,140 @@ final class AIAcceptedLearningTests: XCTestCase {
         XCTAssertFalse(scrubbedMarkdown.contains("RetainedAICommitOne 保留提交一"))
         XCTAssertFalse(scrubbedMarkdown.contains("RetainedAICommitTwo 保留提交二"))
         XCTAssertTrue(scrubbedMarkdown.contains("普通传统输入提交"))
+    }
+
+    func testDelayedSummaryRebuildReloadsCompactedHistoryFromConcurrentStore() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+
+        let storeA = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 250_000_000,
+            maxRecordCount: 2
+        )
+        let storeB = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 2
+        )
+
+        await storeA.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 1),
+                schemaID: "pinyin_simp",
+                rawInput: "one",
+                acceptedText: "StaleRecordOne 旧记录一",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await storeB.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 2),
+                schemaID: "pinyin_simp",
+                rawInput: "two",
+                acceptedText: "RetainedRecordTwo 保留记录二",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await storeB.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 3),
+                schemaID: "pinyin_simp",
+                rawInput: "three",
+                acceptedText: "RetainedRecordThree 保留记录三",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        // Wait for storeA's delayed rebuild to fire after storeB already compacted historyURL.
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let persistedSummary = try decoder.decode(
+            AIAcceptedLanguageSummary.self,
+            from: Data(contentsOf: summaryURL)
+        )
+        XCTAssertEqual(persistedSummary.acceptedCount, 2)
+        XCTAssertFalse(persistedSummary.recentAcceptedCommits.contains("StaleRecordOne 旧记录一"))
+        XCTAssertTrue(persistedSummary.recentAcceptedCommits.contains("RetainedRecordTwo 保留记录二"))
+        XCTAssertTrue(persistedSummary.recentAcceptedCommits.contains("RetainedRecordThree 保留记录三"))
+        XCTAssertEqual(storeA.snapshot()?.historyHash, persistedSummary.historyHash)
+    }
+
+    func testMaintenanceClampsMutatedMaxRecordCountToPositiveMinimum() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let feedbackHistoryURL = directory.appendingPathComponent("accepted-ai-feedback.jsonl")
+        let feedbackSummaryURL = directory.appendingPathComponent("accepted-ai-feedback-summary.json")
+        let feedbackMirrorURL = directory.appendingPathComponent("AI_FEEDBACK.md")
+        let lexicalJSONURL = directory.appendingPathComponent("lexical-profile.json")
+        let lexicalMarkdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 2
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 1),
+                schemaID: "pinyin_simp",
+                rawInput: "one",
+                acceptedText: "FirstCommit 第一条",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 2),
+                schemaID: "pinyin_simp",
+                rawInput: "two",
+                acceptedText: "SecondCommit 第二条",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        var maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            feedbackHistoryURL: feedbackHistoryURL,
+            feedbackSummaryURL: feedbackSummaryURL,
+            feedbackMirrorURL: feedbackMirrorURL,
+            lexicalJSONURL: lexicalJSONURL,
+            lexicalMarkdownURL: lexicalMarkdownURL,
+            maxRecordCount: 2
+        )
+        maintenance.maxRecordCount = 0
+        XCTAssertEqual(maintenance.maxRecordCount, 1)
+
+        let rebuiltStatus = try maintenance.rebuild()
+        XCTAssertEqual(rebuiltStatus.history.recordCount, 1)
+        XCTAssertEqual(rebuiltStatus.summary.acceptedCount, 1)
+        XCTAssertTrue(rebuiltStatus.summary.isCurrentWithHistory)
     }
 }
 

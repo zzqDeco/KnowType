@@ -10,19 +10,22 @@ sliding-window capacity (`maxRecordCount`, defaulting to
 readable diagnostics mirror. When `append(_:)` or startup loading observes more
 than `maxRecordCount` records, the store reloads the authoritative locked
 on-disk history before trimming `records` to the latest `maxRecordCount`
-entries, records evicted commit text variants in
-`accepted-ai-learning.evicted-commits.json` so maintenance `clear` can still
-scrub older accepted commits from `LEXICAL_PROFILE.md`, atomically rewrites the
-compacted `accepted-ai-learning.jsonl` file, and marks any evicted schemas
-alongside the appended schema for summary rebuild. The full history is
-local-only; provider requests receive only the accepted summary after
-`LexicalProfileRuntime` merges it into `LEXICAL_PROFILE.md`.
+entries, records SHA-256 digests of evicted commit text variants in
+`accepted-ai-learning.evicted-commits.json` (bounded to 4,096 entries, never raw
+text) so maintenance `clear` can still scrub older accepted commits from
+`LEXICAL_PROFILE.md`, atomically rewrites the compacted
+`accepted-ai-learning.jsonl` file, and marks any evicted schemas alongside the
+appended schema for summary rebuild. The full history is local-only; provider
+requests receive only the accepted summary after `LexicalProfileRuntime` merges
+it into `LEXICAL_PROFILE.md`.
 If the accepted text is also present in the current recent-commits slice that
 triggered the refresh, `LexicalContextBuilder` keeps the accepted summary as the
 canonical source and filters that duplicate current commit before rendering the
 request or persistent lexical context.
 
-Summary rebuilds are delayed and run on a utility task. After a rebuild is
+Summary rebuilds are delayed and run on a utility task. Each rebuild reloads the
+authoritative on-disk history under the interprocess file lock so a delayed
+rebuild cannot overwrite a newer store's compacted state. After a rebuild is
 persisted, the store emits summary-ready metadata containing only schema id,
 history hash, and counts (including a zero-count invalidation event when a
 schema's last record is evicted by compaction). It does not emit raw input or

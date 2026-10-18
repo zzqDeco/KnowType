@@ -319,15 +319,18 @@ and selections plus bounded summaries of AI recommendations the user explicitly
 accepted. Verified edits made immediately after accepting AI recommendations
 are summarized separately as local AI feedback; ordinary Backspace is ignored
 unless the cursor range proves the edit is inside the just-accepted AI span.
-The accepted-AI history (bounded to the latest 500 records) and feedback history
-are stored locally under Application Support and are not injected directly into
-provider requests. The canonical lexical profile JSON lives under
-`~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
-on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
-`clear --yes` to inspect, rebuild, or delete accepted-AI learning and feedback
-data. Clear removes accepted-learning/feedback history, summary, and mirror
-files and scrubs accepted-AI context from the lexical profile without deleting
-Rime, provider, Keychain, ENV, or CORRECTION data.
+The accepted-AI history (a sliding window of the latest 500 records, plus a
+bounded ledger of up to 4,096 SHA-256 digests for evicted commits in
+`accepted-ai-learning.evicted-commits.json` so `clear` can still scrub them) and
+feedback history are stored locally under Application Support and are not
+injected directly into provider requests. The canonical lexical profile JSON
+lives under `~/Library/Application Support/KnowType/AI/`. Traditional input does
+not depend on these files. Use `./scripts/accepted-learning.sh status`,
+`rebuild`, or `clear --yes` to inspect, rebuild, or delete accepted-AI learning
+and feedback data. Clear removes accepted-learning/feedback history, evicted
+commit digests, summary, and mirror files and scrubs accepted-AI context from
+the lexical profile without deleting Rime, provider, Keychain, ENV, or
+CORRECTION data.
 Committed Context Digest events are queued locally as JSONL under
 `~/.knowtype/events/`. Event text fields are limited to 2,048 Unicode scalars;
 raw input and locked prefixes over 4 KiB UTF-8 skip an AI request without
