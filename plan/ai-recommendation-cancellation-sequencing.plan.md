@@ -48,7 +48,7 @@ Non-goals:
 - `AIRecommendationRuntime` registers cancellation tracking and cancels its
   in-flight attempt task before resuming the final cancelled waiter, and drains
   any tracked cancelling attempt after a cache miss (before gate
-  preflight/dispatch), returning `.idle` for `CancellationError` and
+  admission/dispatch), returning `.idle` for `CancellationError` and
   `URLError(.cancelled)` / `NSURLErrorCancelled` without updating provider
   health or cooldown.
 - Hard timeout and real provider/decode/HTTP failures keep existing failure and

@@ -118,6 +118,16 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             )
             if case .skip(let skip) = decision {
                 cancelDeferredOnly(context: context, reason: "new_schedule")
+                if transportTask != nil, !shouldKeepInFlightTransportOnInputChange() {
+                    if let activeRequestID = activeWork?.requestID {
+                        markTransportStale(context: context, requestID: activeRequestID, reason: "new_schedule")
+                        AIRecommendationRuntime.clearDispatchedRequest(requestID: activeRequestID)
+                    }
+                    transportTask?.cancel()
+                    transportTask = nil
+                    activeWork = nil
+                    state = .idle
+                }
                 trailingWork = nil
                 generation += 1
                 record(skip.diagnosticStage, requestID: requestID, context: context, reason: skip.reason)
@@ -156,10 +166,16 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             }
 
             if transportTask != nil, let activeRequestID = activeWork?.requestID {
+                if shouldKeepInFlightTransportOnInputChange() {
+                    markTransportStale(context: context, requestID: activeRequestID, reason: "new_schedule")
+                    trailingWork = work
+                    state = .trailing
+                    return context.isProviderAvailabilityProbe ? .idle : .pending(requestID: requestID)
+                }
                 markTransportStale(context: context, requestID: activeRequestID, reason: "new_schedule")
-                trailingWork = work
-                state = .trailing
-                return context.isProviderAvailabilityProbe ? .idle : .pending(requestID: requestID)
+                AIRecommendationRuntime.clearDispatchedRequest(requestID: activeRequestID)
+                transportTask?.cancel()
+                transportTask = nil
             }
 
             activeWork = work
@@ -195,9 +211,15 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
     private func beginTransport(work: Work, provider: any AIRecommendationProviding) {
         withStateLock {
             state = .inFlight
+            if provider is AIRecommendationRuntime || provider is LazyDefaultAIRecommendationRuntime {
+                AIRecommendationRuntime.noteTransportDispatched(requestID: work.requestID)
+            }
             diagnosticSink.record(AIRecommendationDiagnosticEvent(stage: .transportStarted, requestID: work.requestID, compositionID: work.context.compositionID, rawLength: work.context.rawInput.count, rawRevision: work.context.rawRevision, prefixLength: work.context.lockedPrefix?.count, appBundleID: work.context.appBundleID, elapsedMilliseconds: elapsedMilliseconds(since: work.scheduledAt)))
             let transportStartedAt = Date()
             transportTask = Task.detached(priority: .utility) { [weak self, provider, diagnosticSink] in
+                defer {
+                    AIRecommendationRuntime.clearDispatchedRequest(requestID: work.requestID)
+                }
                 let result = await provider.recommendation(for: work.request)
                 let elapsed = Self.elapsedMilliseconds(since: transportStartedAt)
                 await MainActor.run { [weak self, diagnosticSink] in
@@ -325,13 +347,18 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
     @discardableResult
     func reset(compositionID: Int?, rawLength: Int?, reason: String) -> AIRecommendationState {
         withStateLock {
+            let activeRequestID = activeWork?.requestID
+            let keepsInFlightForImmediateReschedule =
+                reason == "input_changed"
+                && (rawLength ?? 0) > 0
+                && shouldKeepInFlightTransportOnInputChange()
             cancelActiveForDiagnostics(compositionID: compositionID, rawLength: rawLength, reason: reason)
             generation += 1
             deferredTask?.cancel()
             deferredTask = nil
             trailingWork = nil
-            let keepsInFlightForImmediateReschedule = reason == "input_changed" && (rawLength ?? 0) > 0
             if !keepsInFlightForImmediateReschedule {
+                AIRecommendationRuntime.clearDispatchedRequest(requestID: activeRequestID)
                 transportTask?.cancel()
                 transportTask = nil
                 activeWork = nil
@@ -342,6 +369,13 @@ final class InputAIRecommendationRuntime: @unchecked Sendable {
             }
             return .idle
         }
+    }
+
+    private func shouldKeepInFlightTransportOnInputChange() -> Bool {
+        guard transportTask != nil, let activeWork else {
+            return false
+        }
+        return !AIRecommendationRuntime.isWaitingForGateDrainage(requestID: activeWork.requestID)
     }
 
     func cancelActiveForDiagnostics(compositionID: Int?, rawLength: Int?, reason: String) {

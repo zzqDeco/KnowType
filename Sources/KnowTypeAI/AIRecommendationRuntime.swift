@@ -102,6 +102,10 @@ public actor LazyDefaultAIRecommendationRuntime: AIRecommendationProviding {
     }
 
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        AIRecommendationRuntime.noteTransportDispatched(requestID: request.requestID)
+        defer {
+            AIRecommendationRuntime.clearDispatchedRequest(requestID: request.requestID)
+        }
         guard AIRecommendationRuntime.isEligibleForProviderDispatch(request) else {
             return await makeRuntime(provider: nil).recommendation(for: request)
         }
@@ -289,6 +293,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         private var waiterIDs: Set<UUID>
         private var waiterContinuations: [UUID: CheckedContinuation<LLMResponse, Error>] = [:]
         private var completedResult: Result<LLMResponse, Error>?
+        private var cancelledAllWaiters = false
 
         init(
             attemptID: UUID,
@@ -311,22 +316,32 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
         var hasActiveWaiters: Bool {
             lock.lock()
             defer { lock.unlock() }
-            return completedResult == nil && !waiterIDs.isEmpty
+            return !cancelledAllWaiters && !waiterIDs.isEmpty
         }
 
         func addWaiter(_ waiterID: UUID) -> Bool {
             lock.lock()
             defer { lock.unlock() }
-            guard completedResult == nil, !waiterIDs.isEmpty else { return false }
+            guard !cancelledAllWaiters, !waiterIDs.isEmpty else { return false }
+            if case .failure(let error) = completedResult,
+               error is CancellationError || AIRecommendationRuntime.isCancellation(error) {
+                return false
+            }
             waiterIDs.insert(waiterID)
             return true
+        }
+
+        func removeWaiter(_ waiterID: UUID) {
+            lock.lock()
+            defer { lock.unlock() }
+            waiterIDs.remove(waiterID)
+            waiterContinuations.removeValue(forKey: waiterID)
         }
 
         func waitForResponse(waiterID: UUID) async throws -> LLMResponse {
             let response = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LLMResponse, Error>) in
                 lock.lock()
                 if let completedResult {
-                    waiterIDs.remove(waiterID)
                     lock.unlock()
                     continuation.resume(with: completedResult)
                     return
@@ -351,7 +366,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             lock.lock()
             waiterIDs.remove(waiterID)
             let cancelledContinuation = waiterContinuations.removeValue(forKey: waiterID)
-            let shouldCancel = completedResult == nil && waiterIDs.isEmpty
+            let shouldCancel = !cancelledAllWaiters && completedResult == nil && waiterIDs.isEmpty
+            if shouldCancel {
+                cancelledAllWaiters = true
+            }
             lock.unlock()
             if shouldCancel {
                 task.cancel()
@@ -368,7 +386,6 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 return
             }
             completedResult = result
-            waiterIDs.removeAll()
             let continuations = Array(waiterContinuations.values)
             waiterContinuations.removeAll()
             lock.unlock()
@@ -379,6 +396,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     private final class CancellingAttemptTracker: @unchecked Sendable {
         private let lock = NSLock()
         private var signalsByKey: [CancellingTrackerKey: [UUID: AttemptCompletionSignal]] = [:]
+        private var dispatchedRequestIDs: Set<UUID> = []
+        private var keyByRequestID: [UUID: CancellingTrackerKey] = [:]
+        private var drainingRequestIDs: Set<UUID> = []
+        private var admittedRequestIDs: Set<UUID> = []
 
         func track(key: CancellingTrackerKey, attemptID: UUID, signal: AttemptCompletionSignal) {
             lock.lock()
@@ -418,9 +439,89 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             defer { lock.unlock() }
             return signalsByKey[key] ?? [:]
         }
+
+        func noteDispatched(requestID: UUID?) {
+            guard let requestID else { return }
+            lock.lock()
+            if !admittedRequestIDs.contains(requestID) {
+                dispatchedRequestIDs.insert(requestID)
+            }
+            lock.unlock()
+        }
+
+        func bindRequest(requestID: UUID?, key: CancellingTrackerKey) {
+            guard let requestID else { return }
+            lock.lock()
+            if !admittedRequestIDs.contains(requestID) {
+                dispatchedRequestIDs.insert(requestID)
+                keyByRequestID[requestID] = key
+            }
+            lock.unlock()
+        }
+
+        func beginDraining(requestID: UUID?) {
+            guard let requestID else { return }
+            lock.lock()
+            if !admittedRequestIDs.contains(requestID) {
+                drainingRequestIDs.insert(requestID)
+            }
+            lock.unlock()
+        }
+
+        func markAdmitted(requestID: UUID?) {
+            guard let requestID else { return }
+            lock.lock()
+            dispatchedRequestIDs.remove(requestID)
+            keyByRequestID.removeValue(forKey: requestID)
+            drainingRequestIDs.remove(requestID)
+            admittedRequestIDs.insert(requestID)
+            lock.unlock()
+        }
+
+        func clearRequest(requestID: UUID?) {
+            guard let requestID else { return }
+            lock.lock()
+            dispatchedRequestIDs.remove(requestID)
+            keyByRequestID.removeValue(forKey: requestID)
+            drainingRequestIDs.remove(requestID)
+            admittedRequestIDs.remove(requestID)
+            lock.unlock()
+        }
+
+        func isWaitingForGateDrainage(requestID: UUID) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if admittedRequestIDs.contains(requestID) {
+                return false
+            }
+            if drainingRequestIDs.contains(requestID) {
+                return true
+            }
+            if let key = keyByRequestID[requestID] {
+                return signalsByKey[key]?.values.contains { !$0.isCompleted() } ?? false
+            }
+            if dispatchedRequestIDs.contains(requestID) {
+                return signalsByKey.values.contains { attempts in
+                    attempts.values.contains { !$0.isCompleted() }
+                }
+            }
+            return false
+        }
     }
 
     private static let cancellingAttemptTracker = CancellingAttemptTracker()
+
+    public static func noteTransportDispatched(requestID: UUID?) {
+        cancellingAttemptTracker.noteDispatched(requestID: requestID)
+    }
+
+    public static func clearDispatchedRequest(requestID: UUID?) {
+        cancellingAttemptTracker.clearRequest(requestID: requestID)
+    }
+
+    public static func isWaitingForGateDrainage(requestID: UUID) -> Bool {
+        cancellingAttemptTracker.isWaitingForGateDrainage(requestID: requestID)
+    }
 
     private struct CacheKey: Hashable {
         var lockedPrefix: String?
@@ -482,6 +583,15 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     public func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
         let startedAt = Date()
         var request = request
+        let requestID = request.requestID
+        let trackerKey = CancellingTrackerKey(
+            gateID: ObjectIdentifier(requestGate),
+            providerIdentity: providerIdentity
+        )
+        Self.cancellingAttemptTracker.bindRequest(requestID: requestID, key: trackerKey)
+        defer {
+            Self.cancellingAttemptTracker.clearRequest(requestID: requestID)
+        }
         request.candidateHints = []
         guard !request.rawInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               Self.hasUsableRecommendationContext(in: request) else {
@@ -654,6 +764,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             record(.cacheMiss, request: request, providerName: provider.providerName, elapsedSince: startedAt)
             var drainedAttemptIDs: Set<UUID> = []
             await drainCancellingAttempts(
+                requestID: requestID,
                 alreadyDrained: &drainedAttemptIDs,
                 deadlineNanoseconds: drainDeadlineNanoseconds
             )
@@ -672,13 +783,22 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                 elapsedSince: startedAt
             )
             let providerStartedAt = Date()
-            let response = try await performOrJoinInFlight(
+            let joined = try await performOrJoinInFlight(
+                requestID: requestID,
                 payloadFingerprint: payloadFingerprint,
                 provider: provider,
                 request: llmRequest,
                 alreadyDrained: &drainedAttemptIDs,
                 drainDeadlineNanoseconds: drainDeadlineNanoseconds
             )
+            defer {
+                finishInFlightWaiter(
+                    payloadFingerprint: payloadFingerprint,
+                    attemptID: joined.attemptID,
+                    waiterID: joined.waiterID
+                )
+            }
+            let response = joined.response
             record(
                 .providerResponse,
                 request: request,
@@ -832,6 +952,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     }
 
     private func drainCancellingAttempts(
+        requestID: UUID?,
         alreadyDrained: inout Set<UUID>,
         deadlineNanoseconds: UInt64
     ) async {
@@ -840,7 +961,10 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             providerIdentity: providerIdentity
         )
         let snapshot = Self.cancellingAttemptTracker.takeSnapshot(key: trackerKey)
-        for (attemptID, signal) in snapshot where !alreadyDrained.contains(attemptID) {
+        let pendingSignals = snapshot.filter { !alreadyDrained.contains($0.key) && !$0.value.isCompleted() }
+        guard !pendingSignals.isEmpty else { return }
+        Self.cancellingAttemptTracker.beginDraining(requestID: requestID)
+        for (attemptID, signal) in pendingSignals {
             guard !Task.isCancelled else { break }
             let now = DispatchTime.now().uptimeNanoseconds
             guard deadlineNanoseconds > now else { break }
@@ -853,17 +977,20 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
     }
 
     private func performOrJoinInFlight(
+        requestID: UUID?,
         payloadFingerprint: String,
         provider: any LLMProvider,
         request: LLMRequest,
         alreadyDrained: inout Set<UUID>,
         drainDeadlineNanoseconds: UInt64
-    ) async throws -> LLMResponse {
+    ) async throws -> (response: LLMResponse, attemptID: UUID, waiterID: UUID) {
         await drainCancellingAttempts(
+            requestID: requestID,
             alreadyDrained: &alreadyDrained,
             deadlineNanoseconds: drainDeadlineNanoseconds
         )
         try Task.checkCancellation()
+        Self.cancellingAttemptTracker.markAdmitted(requestID: requestID)
 
         let waiterID = UUID()
         let trackerKey = CancellingTrackerKey(
@@ -906,18 +1033,28 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
                     )
                 }
             }
-            removeInFlightIfMatching(payloadFingerprint: payloadFingerprint, attemptID: attempt.attemptID)
-            return response
+            return (response: response, attemptID: attempt.attemptID, waiterID: waiterID)
         } catch {
-            removeInFlightIfMatching(payloadFingerprint: payloadFingerprint, attemptID: attempt.attemptID)
+            finishInFlightWaiter(
+                payloadFingerprint: payloadFingerprint,
+                attemptID: attempt.attemptID,
+                waiterID: waiterID
+            )
             throw error
         }
     }
 
-    private func removeInFlightIfMatching(payloadFingerprint: String, attemptID: UUID) {
-        if let current = inFlight[payloadFingerprint],
-           current.attemptID == attemptID,
-           !current.hasActiveWaiters {
+    private func finishInFlightWaiter(
+        payloadFingerprint: String,
+        attemptID: UUID,
+        waiterID: UUID
+    ) {
+        guard let current = inFlight[payloadFingerprint],
+              current.attemptID == attemptID else {
+            return
+        }
+        current.removeWaiter(waiterID)
+        if !current.hasActiveWaiters {
             inFlight[payloadFingerprint] = nil
         }
     }

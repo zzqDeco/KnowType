@@ -2020,6 +2020,66 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertEqual(candidate.displayText, "shared gate completed")
         XCTAssertLessThan(cacheHitElapsed, 0.3)
     }
+
+    func testConcurrentIdenticalRequestsCoalesceAcrossCompletionAndCachePublicationBoundary() async {
+        let provider = ControlledLegacySharedGateLLMProvider(
+            providerName: "coalesce-completion-boundary-\(UUID().uuidString)"
+        )
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: ProviderRequestGate()
+        )
+        let request = AIRecommendationRequest(rawInput: "samepayload", compositionID: 1)
+        let firstStarts = await provider.firstRequestStartStream()
+        let firstCompletions = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let firstTask = Task {
+            let state = await runtime.recommendation(for: request)
+            firstCompletions.continuation.yield(())
+            firstCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: firstStarts,
+            firstTaskCompletions: firstCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            firstTask.cancel()
+            _ = await firstTask.value
+            return XCTFail("first request did not enter provider: \(startResult)")
+        }
+
+        let followerTasks = (0..<8).map { _ in
+            Task {
+                await runtime.recommendation(for: request)
+            }
+        }
+        await provider.releaseAllRequests()
+        let postReleaseTask = Task {
+            await runtime.recommendation(for: request)
+        }
+
+        var states: [AIRecommendationState] = [await firstTask.value]
+        for task in followerTasks {
+            states.append(await task.value)
+        }
+        states.append(await postReleaseTask.value)
+
+        for state in states {
+            guard case .ready(let candidate) = state else {
+                return XCTFail("expected ready state, got \(state)")
+            }
+            XCTAssertEqual(candidate.displayText, "shared gate completed")
+        }
+        let providerRequestCount = await provider.requestCount
+        XCTAssertEqual(providerRequestCount, 1)
+    }
 }
 
 private actor CancellationAwareBlockedFirstLLMProvider: LLMProvider {

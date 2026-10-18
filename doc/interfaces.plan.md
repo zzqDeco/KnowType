@@ -749,15 +749,16 @@ Runtime behavior is represented by `InputMethodRuntimePreferences`: legacy input
   second debounce on top of `InputAIRecommendationRuntime`'s 450 ms input-method
   debounce (callers may still pass an explicit positive `debounceMilliseconds`
   when standalone runtime debouncing is desired); during non-empty
-  `input_changed` updates `InputAIRecommendationRuntime` leaves an already-started
+  `input_changed` updates `InputAIRecommendationRuntime` leaves an already-admitted
   transport running as stale and keeps at most one trailing revision that
   re-enters the 450 ms `startDeferred` debounce on completion, whereas
-  session-ending resets (`reset`, empty input, commit, Escape, deactivate, or
-  close) cancel the in-flight transport task immediately
+  pre-admission requests still waiting for gate drainage and session-ending
+  resets (`reset`, empty input, commit, Escape, deactivate, or close) cancel the
+  in-flight transport task immediately
 - propagates waiter cancellation to the underlying attempt task when the final
   waiter cancels, tracks the cancelling attempt before resuming the waiter, and
   drains any tracked cancelling attempt after a cache miss (before gate
-  preflight/dispatch) so a cancelled session's transport releases the shared
+  admission/dispatch) so a cancelled session's transport releases the shared
   `ProviderRequestGate` lease without blocking cache hits or new sessions
 - returns a caller-visible hard timeout after 10 seconds by default, independent
   of the provider profile's network timeout; for an uncancelled request that

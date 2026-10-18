@@ -1,6 +1,7 @@
 import KnowTypeAI
 import KnowTypeCore
 @testable import KnowTypeInputMethod
+import KnowTypeProviders
 import XCTest
 
 final class InputAIRecommendationRuntimeTests: XCTestCase {
@@ -835,6 +836,93 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(finalReady)
     }
 
+    @MainActor
+    func testInputChangedWhileWaitingForGateDrainageCancelsPreAdmissionRequestWithoutDispatchingStaleInput() async {
+        let llmProvider = DrainageBlockingTestLLMProvider(
+            providerName: "drainage-blocking-\(UUID().uuidString)",
+            blockedRawInput: "sessionone",
+            cancellationUnwindDelayNanoseconds: 350_000_000
+        )
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KnowTypeDrainageTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let aiRuntime = AIRecommendationRuntime(
+            provider: llmProvider,
+            environmentStore: EnvironmentDocumentStore(fileURL: tempDir.appendingPathComponent("ENV.md")),
+            correctionStore: CorrectionInstructionStore(fileURL: tempDir.appendingPathComponent("CORRECTION.md")),
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: ProviderRequestGate()
+        )
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: aiRuntime,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let currentSnapshot = RuntimeSnapshotBox(
+            snapshot(rawInput: "sessionone", compositionID: 1, rawRevision: 1)
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        _ = runtime.schedule(
+            context: context(rawInput: "sessionone", compositionID: 1, rawRevision: 1),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let firstStarted = await waitUntilAsync {
+            await llmProvider.dispatchedRawInputs == ["sessionone"]
+        }
+        XCTAssertTrue(firstStarted)
+
+        // End session 1; its transport is cancelled and enters CancellingAttemptTracker for 350ms.
+        XCTAssertEqual(
+            runtime.reset(compositionID: 1, rawLength: 0, reason: "commit"),
+            .idle
+        )
+
+        // Start session 2 with "nihao". Its transportTask starts and suspends in drainCancellingAttempts.
+        currentSnapshot.update(snapshot(rawInput: "nihao", compositionID: 2, rawRevision: 1))
+        let intermediate = runtime.schedule(
+            context: context(rawInput: "nihao", compositionID: 2, rawRevision: 1),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let intermediateRequestID = pendingRequestID(intermediate)
+        XCTAssertNotNil(intermediateRequestID)
+
+        let waitingForDrainage = await waitUntil {
+            guard let intermediateRequestID else { return false }
+            return AIRecommendationRuntime.isWaitingForGateDrainage(requestID: intermediateRequestID)
+        }
+        XCTAssertTrue(waitingForDrainage)
+
+        // User types more during gate drainage ("nihaoma"). The pre-admission "nihao" request must be cancelled.
+        currentSnapshot.update(snapshot(rawInput: "nihaoma", compositionID: 2, rawRevision: 2))
+        _ = runtime.reset(compositionID: 2, rawLength: 7, reason: "input_changed")
+        let latest = runtime.schedule(
+            context: context(rawInput: "nihaoma", compositionID: 2, rawRevision: 2),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(latest))
+
+        let latestReady = await waitUntil(timeout: 3) {
+            publishedStates.contains { state in
+                if case .ready(let candidate) = state {
+                    return candidate.displayText == "drainage-completed-nihaoma"
+                }
+                return false
+            }
+        }
+        XCTAssertTrue(latestReady, "\(publishedStates)")
+        let dispatchedRawInputs = await llmProvider.dispatchedRawInputs
+        XCTAssertEqual(dispatchedRawInputs, ["sessionone", "nihaoma"])
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil
@@ -1053,5 +1141,46 @@ private final class RecordingRuntimeDiagnosticSink: AIRecommendationDiagnosticSi
         let events = recordedEvents
         lock.unlock()
         return events
+    }
+}
+
+private actor DrainageBlockingTestLLMProvider: LLMProvider {
+    nonisolated let providerName: String
+    private let blockedRawInput: String
+    private let cancellationUnwindDelayNanoseconds: UInt64
+    private var recordedRawInputs: [String] = []
+
+    init(
+        providerName: String,
+        blockedRawInput: String,
+        cancellationUnwindDelayNanoseconds: UInt64
+    ) {
+        self.providerName = providerName
+        self.blockedRawInput = blockedRawInput
+        self.cancellationUnwindDelayNanoseconds = cancellationUnwindDelayNanoseconds
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        let rawInput = request.rawInput ?? ""
+        recordedRawInputs.append(rawInput)
+        if rawInput == blockedRawInput {
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                if cancellationUnwindDelayNanoseconds > 0 {
+                    await Task.detached {
+                        try? await Task.sleep(nanoseconds: self.cancellationUnwindDelayNanoseconds)
+                    }.value
+                }
+                throw error
+            }
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "drainage-completed-\(rawInput)", confidence: 0.9)
+        ])
+    }
+
+    var dispatchedRawInputs: [String] {
+        recordedRawInputs
     }
 }
