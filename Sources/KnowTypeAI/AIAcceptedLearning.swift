@@ -30,36 +30,59 @@ func acceptedLearningCommitTextDigest(_ text: String) -> String {
         .joined()
 }
 
-func acceptedLearningCommitTextVariants(from records: [AIAcceptedLearningRecord]) -> Set<String> {
-    Set(
-        records.flatMap { record in
-            let clean = acceptedLearningNormalizedCommitText(record.acceptedText)
-            guard !clean.isEmpty else {
-                return [String]()
-            }
-            if clean.count <= 48 {
-                return [clean]
-            }
-            return [clean, String(clean.prefix(48)) + "..."]
+func acceptedLearningCommitTextVariants(from records: [AIAcceptedLearningRecord]) -> [String] {
+    var orderedReversed: [String] = []
+    var seen: Set<String> = []
+    for record in records.reversed() {
+        let clean = acceptedLearningNormalizedCommitText(record.acceptedText)
+        guard !clean.isEmpty else {
+            continue
         }
-    )
+        let variants = clean.count <= 48
+            ? [clean]
+            : [clean, String(clean.prefix(48)) + "..."]
+        for variant in variants.reversed() where seen.insert(variant).inserted {
+            orderedReversed.append(variant)
+        }
+    }
+    return orderedReversed.reversed()
 }
 
-func acceptedLearningCommitDigestVariants(from records: [AIAcceptedLearningRecord]) -> Set<String> {
-    Set(acceptedLearningCommitTextVariants(from: records).map(acceptedLearningCommitTextDigest))
+func acceptedLearningCommitDigestVariants(from records: [AIAcceptedLearningRecord]) -> [String] {
+    var orderedReversed: [String] = []
+    var seen: Set<String> = []
+    for variant in acceptedLearningCommitTextVariants(from: records).reversed() {
+        let digest = acceptedLearningCommitTextDigest(variant)
+        if seen.insert(digest).inserted {
+            orderedReversed.append(digest)
+        }
+    }
+    return orderedReversed.reversed()
 }
 
-func loadAcceptedLearningEvictedCommits(
+func loadAcceptedLearningEvictedCommitList(
     from url: URL?,
     fileManager: FileManager = .default
-) -> Set<String> {
+) -> [String] {
     guard let url,
           fileManager.fileExists(atPath: url.path),
           let data = try? Data(contentsOf: url),
           let decoded = try? JSONDecoder().decode([String].self, from: data) else {
         return []
     }
-    return Set(decoded)
+    var orderedReversed: [String] = []
+    var seen: Set<String> = []
+    for entry in decoded.reversed() where seen.insert(entry).inserted {
+        orderedReversed.append(entry)
+    }
+    return orderedReversed.reversed()
+}
+
+func loadAcceptedLearningEvictedCommits(
+    from url: URL?,
+    fileManager: FileManager = .default
+) -> Set<String> {
+    Set(loadAcceptedLearningEvictedCommitList(from: url, fileManager: fileManager))
 }
 
 func recordAcceptedLearningEvictedCommits(
@@ -74,8 +97,9 @@ func recordAcceptedLearningEvictedCommits(
     guard !newDigests.isEmpty else {
         return
     }
-    let existing = loadAcceptedLearningEvictedCommits(from: evictedURL, fileManager: fileManager)
-    let merged = Array(existing.union(newDigests)).sorted().suffix(4_096)
+    let newDigestSet = Set(newDigests)
+    let existing = loadAcceptedLearningEvictedCommitList(from: evictedURL, fileManager: fileManager)
+    let merged = (existing.filter { !newDigestSet.contains($0) } + newDigests).suffix(4_096)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let data = try encoder.encode(Array(merged))
