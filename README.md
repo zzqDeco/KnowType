@@ -319,9 +319,9 @@ and selections plus bounded summaries of AI recommendations the user explicitly
 accepted. Verified edits made immediately after accepting AI recommendations
 are summarized separately as local AI feedback; ordinary Backspace is ignored
 unless the cursor range proves the edit is inside the just-accepted AI span.
-The full accepted-AI and feedback history is stored locally under Application
-Support and is not injected directly into provider requests. The canonical
-lexical profile JSON lives under
+The accepted-AI history (bounded to the latest 500 records) and feedback history
+are stored locally under Application Support and are not injected directly into
+provider requests. The canonical lexical profile JSON lives under
 `~/Library/Application Support/KnowType/AI/`. Traditional input does not depend
 on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
 `clear --yes` to inspect, rebuild, or delete accepted-AI learning and feedback

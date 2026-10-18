@@ -8,12 +8,15 @@ sliding-window capacity (`maxRecordCount`, defaulting to
 `AIAcceptedLearningStore.defaultMaxRecordCount = 500` and clamped to at least
 `1`), builds a bounded language summary over the retained window, and writes a
 readable diagnostics mirror. When `append(_:)` or startup loading observes more
-than `maxRecordCount` records, the store trims `records` to the latest
-`maxRecordCount` entries, atomically rewrites the compacted
-`accepted-ai-learning.jsonl` file, and marks any evicted schemas alongside the
-appended schema for summary rebuild. The full history is local-only; provider
-requests receive only the accepted summary after `LexicalProfileRuntime` merges
-it into `LEXICAL_PROFILE.md`.
+than `maxRecordCount` records, the store reloads the authoritative locked
+on-disk history before trimming `records` to the latest `maxRecordCount`
+entries, records evicted commit text variants in
+`accepted-ai-learning.evicted-commits.json` so maintenance `clear` can still
+scrub older accepted commits from `LEXICAL_PROFILE.md`, atomically rewrites the
+compacted `accepted-ai-learning.jsonl` file, and marks any evicted schemas
+alongside the appended schema for summary rebuild. The full history is
+local-only; provider requests receive only the accepted summary after
+`LexicalProfileRuntime` merges it into `LEXICAL_PROFILE.md`.
 If the accepted text is also present in the current recent-commits slice that
 triggered the refresh, `LexicalContextBuilder` keeps the accepted summary as the
 canonical source and filters that duplicate current commit before rendering the
@@ -21,19 +24,20 @@ request or persistent lexical context.
 
 Summary rebuilds are delayed and run on a utility task. After a rebuild is
 persisted, the store emits summary-ready metadata containing only schema id,
-history hash, and counts. It does not emit raw input or accepted text.
-It emits ready events only for schemas whose accepted history changed since the
-previous rebuild, so schema-specific lexical profile refreshes are not retriggered
-by unchanged cached summaries.
+history hash, and counts (including a zero-count invalidation event when a
+schema's last record is evicted by compaction). It does not emit raw input or
+accepted text. It emits ready events only for schemas whose accepted history
+changed since the previous rebuild, so schema-specific lexical profile refreshes
+are not retriggered by unchanged cached summaries.
 
 Runtime store construction is read-only when history is missing or within
-`maxRecordCount` (only compacting on disk when an existing JSONL file exceeds
-`maxRecordCount`). Missing history, summary, mirror, and
-clear-marker files do not create the AI directory, lock file, or markdown
-mirror. If a persisted summary is stale, startup may rebuild the in-memory
-snapshot, but persistent repair is left to explicit record/rebuild paths.
-Startup reads always participate in the in-process accepted-learning lock and
-also join an existing accepted-learning maintenance file lock when another
+`maxRecordCount` (acquiring the interprocess file lock and compacting on disk
+only when an existing JSONL file exceeds `maxRecordCount`). Missing history,
+summary, mirror, and clear-marker files do not create the AI directory, lock
+file, or markdown mirror. If a persisted summary is stale, startup may rebuild
+the in-memory snapshot, but persistent repair is left to explicit record/rebuild
+paths. Startup reads always participate in the in-process accepted-learning lock
+and also join an existing accepted-learning maintenance file lock when another
 process has already created one, so concurrent append/rebuild/clear operations
 are observed consistently without making cold start create a lock file of its
 own.
@@ -41,12 +45,13 @@ own.
 `AIAcceptedLearningMaintenance` is the non-runtime control surface for this
 data. It powers `knowtype-accepted-learning-tool` and the
 `scripts/accepted-learning.sh` wrapper with read-only status, explicit rebuild,
-and guarded clear operations. Rebuild reuses the same summary builder used by
-runtime learning. Maintenance writes share an interprocess lock file. Clear
-removes accepted-learning history, summary, and
-mirror files, writes a clear marker so a running store drops stale in-memory
-records before the next snapshot, append, or rebuild, and scrubs accepted-AI
-terms/source lines plus matching accepted recent commits from the persistent
+and guarded clear operations. Rebuild applies the same `maxRecordCount` sliding
+window and summary builder used by runtime learning. Maintenance writes share an
+interprocess lock file. Clear removes accepted-learning history, evicted-commits
+ledger, summary, and mirror files, writes a clear marker so a running store drops
+stale in-memory records before the next snapshot, append, or rebuild, and scrubs
+accepted-AI terms/source lines plus matching accepted recent commits (including
+any previously evicted commits recorded in the ledger) from the persistent
 lexical profile while preserving non-AI recent commits and tone data. If only
 the markdown mirror can be scrubbed and accepted history is unavailable, clear
 removes accepted-AI marker/source lines but leaves unknown recent commits alone

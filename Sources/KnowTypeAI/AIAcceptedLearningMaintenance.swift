@@ -93,8 +93,10 @@ public struct AIAcceptedLearningMaintenance {
     public var lexicalJSONURL: URL
     public var lexicalMarkdownURL: URL
     public var clearMarkerURL: URL
+    public var evictedCommitsURL: URL
     public var feedbackClearMarkerURL: URL
     public var lockURL: URL
+    public var maxRecordCount: Int
     public var fileManager: FileManager
 
     public init(
@@ -106,6 +108,7 @@ public struct AIAcceptedLearningMaintenance {
         feedbackMirrorURL: URL = AIUserDirectory.defaultDirectory().acceptedFeedbackMirrorURL,
         lexicalJSONURL: URL = LexicalProfileStore.defaultJSONURL(),
         lexicalMarkdownURL: URL = AIUserDirectory.defaultDirectory().lexicalProfileURL,
+        maxRecordCount: Int = AIAcceptedLearningStore.defaultMaxRecordCount,
         fileManager: FileManager = .default
     ) {
         self.historyURL = historyURL
@@ -118,10 +121,13 @@ public struct AIAcceptedLearningMaintenance {
         self.lexicalMarkdownURL = lexicalMarkdownURL
         self.clearMarkerURL = acceptedLearningClearMarkerURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+        self.evictedCommitsURL = acceptedLearningEvictedCommitsURL(historyURL: historyURL)
+            ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.evicted-commits.json")
         self.feedbackClearMarkerURL = acceptedFeedbackClearMarkerURL(historyURL: feedbackHistoryURL)
             ?? feedbackHistoryURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-feedback.clear.json")
         self.lockURL = acceptedLearningLockURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
+        self.maxRecordCount = max(1, maxRecordCount)
         self.fileManager = fileManager
     }
 
@@ -140,7 +146,8 @@ public struct AIAcceptedLearningMaintenance {
         if records.isEmpty, !loadedSummary.exists {
             summaryIsCurrent = summary == nil
         } else {
-            summaryIsCurrent = summary?.acceptedCount == records.count
+            summaryIsCurrent = records.count <= maxRecordCount
+                && summary?.acceptedCount == records.count
                 && summary?.historyHash == historyHash
         }
 
@@ -233,7 +240,20 @@ public struct AIAcceptedLearningMaintenance {
     @discardableResult
     public func rebuild() throws -> AIAcceptedLearningMaintenanceStatus {
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
-            let records = loadRecords().records
+            let loadedRecords = loadRecords().records
+            let records: [AIAcceptedLearningRecord]
+            if loadedRecords.count > maxRecordCount {
+                let overflowCount = loadedRecords.count - maxRecordCount
+                try recordAcceptedLearningEvictedCommits(
+                    Array(loadedRecords.prefix(overflowCount)),
+                    historyURL: historyURL,
+                    fileManager: fileManager
+                )
+                records = Array(loadedRecords.suffix(maxRecordCount))
+                try writeHistoryRecords(records)
+            } else {
+                records = loadedRecords
+            }
             let summary = AIAcceptedLearningStore.buildSummary(records: records, generatedAt: Date())
             if let summary {
                 try atomicWrite(encode(summary), to: summaryURL)
@@ -267,7 +287,9 @@ public struct AIAcceptedLearningMaintenance {
         }
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
             let acceptedCommitTexts = acceptedCommitTextVariants(from: loadRecords().records)
+                .union(loadAcceptedLearningEvictedCommits(from: evictedCommitsURL, fileManager: fileManager))
             try removeIfExists(historyURL)
+            try removeIfExists(evictedCommitsURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
             try withAcceptedFeedbackFileLock(
@@ -361,6 +383,18 @@ public struct AIAcceptedLearningMaintenance {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(value)
+    }
+
+    private func writeHistoryRecords(_ records: [AIAcceptedLearningRecord]) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var buffer = Data()
+        for record in records {
+            let data = try encoder.encode(record)
+            buffer.append(data)
+            buffer.append(0x0A)
+        }
+        try atomicWrite(buffer, to: historyURL)
     }
 
     private func atomicWrite(_ data: Data, to url: URL) throws {

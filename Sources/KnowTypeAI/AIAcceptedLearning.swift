@@ -13,6 +13,68 @@ func acceptedLearningClearMarkerURL(historyURL: URL?) -> URL? {
     historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
 }
 
+func acceptedLearningEvictedCommitsURL(historyURL: URL?) -> URL? {
+    historyURL?.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.evicted-commits.json")
+}
+
+func acceptedLearningNormalizedCommitText(_ text: String) -> String {
+    text
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+}
+
+func acceptedLearningCommitTextVariants(from records: [AIAcceptedLearningRecord]) -> Set<String> {
+    Set(
+        records.flatMap { record in
+            let clean = acceptedLearningNormalizedCommitText(record.acceptedText)
+            guard !clean.isEmpty else {
+                return [String]()
+            }
+            if clean.count <= 48 {
+                return [clean]
+            }
+            return [clean, String(clean.prefix(48)) + "..."]
+        }
+    )
+}
+
+func loadAcceptedLearningEvictedCommits(
+    from url: URL?,
+    fileManager: FileManager = .default
+) -> Set<String> {
+    guard let url,
+          fileManager.fileExists(atPath: url.path),
+          let data = try? Data(contentsOf: url),
+          let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+        return []
+    }
+    return Set(decoded)
+}
+
+func recordAcceptedLearningEvictedCommits(
+    _ evictedRecords: [AIAcceptedLearningRecord],
+    historyURL: URL?,
+    fileManager: FileManager = .default
+) throws {
+    guard let evictedURL = acceptedLearningEvictedCommitsURL(historyURL: historyURL) else {
+        return
+    }
+    let newVariants = acceptedLearningCommitTextVariants(from: evictedRecords)
+    guard !newVariants.isEmpty else {
+        return
+    }
+    let existing = loadAcceptedLearningEvictedCommits(from: evictedURL, fileManager: fileManager)
+    let merged = Array(existing.union(newVariants)).sorted().suffix(4_096)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let data = try encoder.encode(Array(merged))
+    try fileManager.createDirectory(
+        at: evictedURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try data.write(to: evictedURL, options: .atomic)
+}
+
 func withAcceptedLearningFileLock<T>(
     lockURL: URL?,
     fileManager: FileManager = .default,
@@ -357,6 +419,7 @@ public final class AIAcceptedLearningStore:
         var summary: AIAcceptedLanguageSummary?
         var schemaSummaries: [String: AIAcceptedLanguageSummary]
         var lastClearMarkerModifiedAt: Date?
+        var needsCompaction: Bool = false
     }
 
     public init(
@@ -376,7 +439,7 @@ public final class AIAcceptedLearningStore:
         let startupState: StartupState
         let startupRepairErrorReason: String?
         do {
-            startupState = try withExistingAcceptedLearningFileLock(
+            let initialState = try withExistingAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) {
@@ -388,9 +451,29 @@ public final class AIAcceptedLearningStore:
                     encoder: configuredEncoder,
                     decoder: configuredDecoder,
                     maxRecordCount: clampedMaxRecordCount,
-                    compactPersistentHistory: true,
+                    compactPersistentHistory: false,
                     repairPersistentSummary: false
                 )
+            }
+            if initialState.needsCompaction, historyURL != nil {
+                startupState = try withAcceptedLearningFileLock(
+                    lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                    fileManager: fileManager
+                ) {
+                    try Self.loadStartupState(
+                        historyURL: historyURL,
+                        summaryURL: summaryURL,
+                        mirrorURL: mirrorURL,
+                        fileManager: fileManager,
+                        encoder: configuredEncoder,
+                        decoder: configuredDecoder,
+                        maxRecordCount: clampedMaxRecordCount,
+                        compactPersistentHistory: true,
+                        repairPersistentSummary: false
+                    )
+                }
+            } else {
+                startupState = initialState
             }
             startupRepairErrorReason = nil
         } catch {
@@ -557,25 +640,38 @@ public final class AIAcceptedLearningStore:
     private func append(_ record: AIAcceptedLearningRecord) throws {
         try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
             syncRecordsAfterExternalClearLocked()
-            lock.lock()
-            var nextRecords = records
-            lock.unlock()
+            var nextRecords: [AIAcceptedLearningRecord]
+            if let historyURL, fileManager.fileExists(atPath: historyURL.path) {
+                nextRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+            } else {
+                lock.lock()
+                nextRecords = records
+                lock.unlock()
+            }
 
             nextRecords.append(record)
             let didCompact: Bool
+            let evictedRecords: [AIAcceptedLearningRecord]
             let evictedSchemaIDs: Set<String>
             if nextRecords.count > maxRecordCount {
                 let overflowCount = nextRecords.count - maxRecordCount
-                evictedSchemaIDs = Set(nextRecords.prefix(overflowCount).map(\.schemaID))
+                evictedRecords = Array(nextRecords.prefix(overflowCount))
+                evictedSchemaIDs = Set(evictedRecords.map(\.schemaID))
                 nextRecords = Array(nextRecords.suffix(maxRecordCount))
                 didCompact = true
             } else {
+                evictedRecords = []
                 evictedSchemaIDs = []
                 didCompact = false
             }
 
             if let historyURL {
                 if didCompact {
+                    try recordAcceptedLearningEvictedCommits(
+                        evictedRecords,
+                        historyURL: historyURL,
+                        fileManager: fileManager
+                    )
                     try Self.writeRecords(
                         nextRecords,
                         to: historyURL,
@@ -699,8 +795,15 @@ public final class AIAcceptedLearningStore:
         let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
         let reloadedRecords: [AIAcceptedLearningRecord]
         if loadedRecords.count > maxRecordCount {
+            let overflowCount = loadedRecords.count - maxRecordCount
+            let evictedRecords = Array(loadedRecords.prefix(overflowCount))
             reloadedRecords = Array(loadedRecords.suffix(maxRecordCount))
             if let historyURL {
+                try? recordAcceptedLearningEvictedCommits(
+                    evictedRecords,
+                    historyURL: historyURL,
+                    fileManager: fileManager
+                )
                 try? Self.writeRecords(
                     reloadedRecords,
                     to: historyURL,
@@ -837,10 +940,9 @@ public final class AIAcceptedLearningStore:
         from schemaSummaries: [String: AIAcceptedLanguageSummary],
         changedSchemaIDs: Set<String>
     ) -> [AIAcceptedLearningSummaryReadyEvent] {
-        schemaSummaries
-            .filter { changedSchemaIDs.contains($0.key) }
-            .map { schemaID, summary in
-                AIAcceptedLearningSummaryReadyEvent(
+        changedSchemaIDs.sorted().map { schemaID in
+            if let summary = schemaSummaries[schemaID] {
+                return AIAcceptedLearningSummaryReadyEvent(
                     schemaID: schemaID,
                     historyHash: summary.historyHash,
                     acceptedCount: summary.acceptedCount,
@@ -848,7 +950,14 @@ public final class AIAcceptedLearningStore:
                     recentCommitCount: summary.recentAcceptedCommits.count
                 )
             }
-            .sorted { $0.schemaID < $1.schemaID }
+            return AIAcceptedLearningSummaryReadyEvent(
+                schemaID: schemaID,
+                historyHash: "",
+                acceptedCount: 0,
+                termCount: 0,
+                recentCommitCount: 0
+            )
+        }
     }
 
     private static func summary(
@@ -973,10 +1082,18 @@ public final class AIAcceptedLearningStore:
         repairPersistentSummary: Bool
     ) throws -> StartupState {
         let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+        let needsCompaction = loadedRecords.count > maxRecordCount
         let records: [AIAcceptedLearningRecord]
-        if loadedRecords.count > maxRecordCount {
+        if needsCompaction {
+            let overflowCount = loadedRecords.count - maxRecordCount
+            let evictedRecords = Array(loadedRecords.prefix(overflowCount))
             records = Array(loadedRecords.suffix(maxRecordCount))
             if compactPersistentHistory, let historyURL {
+                try recordAcceptedLearningEvictedCommits(
+                    evictedRecords,
+                    historyURL: historyURL,
+                    fileManager: fileManager
+                )
                 try Self.writeRecords(
                     records,
                     to: historyURL,
@@ -1009,7 +1126,8 @@ public final class AIAcceptedLearningStore:
             lastClearMarkerModifiedAt: Self.fileModificationDate(
                 acceptedLearningClearMarkerURL(historyURL: historyURL),
                 fileManager: fileManager
-            )
+            ),
+            needsCompaction: needsCompaction
         )
     }
 

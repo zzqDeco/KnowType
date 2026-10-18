@@ -8,28 +8,35 @@
   `rebuildSummary()` remain bounded instead of growing `O(N)` over full history.
 - Updated `AIAcceptedLearningStore.init` (and external-clear reload) to retain
   only the most recent `maxRecordCount` records and compact
-  `accepted-ai-learning.jsonl` on disk when historical records exceed capacity,
-  while keeping within-capacity and missing-history cold starts read-only.
-- Updated `AIAcceptedLearningStore.append(_:)` to fast-path append when within
-  `maxRecordCount` and atomically rewrite the compacted JSONL history when
-  appending exceeds `maxRecordCount`.
+  `accepted-ai-learning.jsonl` on disk under the interprocess file lock when
+  historical records exceed capacity, while keeping within-capacity and
+  missing-history cold starts read-only.
+- Updated `AIAcceptedLearningStore.append(_:)` to reload locked on-disk history
+  before compacting, fast-path append when within `maxRecordCount`, emit
+  zero-count summary invalidation events for fully evicted schemas, and persist
+  evicted commit text variants so `AIAcceptedLearningMaintenance.clear(confirm:)`
+  can still scrub evicted accepted commits from `LEXICAL_PROFILE.md`.
+- Updated `AIAcceptedLearningMaintenance` (`status`, `rebuild`, `clear`) and
+  `README.md` / `README_CN.md` to enforce and document the 500-record window.
 - Documented the current-state contract in
-  `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.swift.plan.md`.
+  `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.plan.md`.
 
 ## Verification
 
 - `swift test --filter AIAcceptedLearningTests`
 - Verified in `Tests/KnowTypeAITests/AIAcceptedLearningTests.swift` that:
   - Appending beyond `maxRecordCount` retains only the latest `maxRecordCount`
-    records in memory and on disk after reload.
-  - Initializing from an oversized JSONL file trims to the latest
-    `maxRecordCount` records and compacts the file on disk.
-  - `rebuildSummary()` reflects only the retained sliding window of records and
-    evicts stale terms, commits, and schema summaries.
+    records in memory and on disk after reload, including across two store
+    instances sharing the same `historyURL`.
+  - Initializing from an oversized JSONL file acquires the file lock, trims to
+    the latest `maxRecordCount` records, and compacts the file on disk.
+  - `rebuildSummary()` reflects only the retained sliding window of records,
+    emits invalidation events for fully evicted schemas, and maintenance
+    `rebuild` / `clear` honor the window and scrub evicted commits.
 
 ## Docs Absorbed By
 
-- `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.swift.plan.md`
+- `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.plan.md`
 
 ## Retirement Criteria
 

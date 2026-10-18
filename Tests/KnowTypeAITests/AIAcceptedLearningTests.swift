@@ -97,6 +97,11 @@ final class AIAcceptedLearningTests: XCTestCase {
 
         let expectedTexts = ["InitToken4 历史记录 4", "InitToken5 历史记录 5"]
         XCTAssertEqual(store.allRecords().map(\.acceptedText), expectedTexts)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("accepted-ai-learning.lock").path
+            )
+        )
 
         let compactedContent = try String(contentsOf: historyURL, encoding: .utf8)
         let compactedLines = compactedContent.split(whereSeparator: \.isNewline)
@@ -208,6 +213,240 @@ final class AIAcceptedLearningTests: XCTestCase {
 
         XCTAssertEqual(store.allRecords().map(\.acceptedText), ["SecondToken 第二条"])
         XCTAssertEqual(store.snapshot()?.acceptedCount, 1)
+    }
+
+    func testCompactionReloadsOnDiskHistoryAcrossMultipleStoreInstances() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+
+        let storeA = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 2
+        )
+        let storeB = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 2
+        )
+
+        await storeA.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 1),
+                schemaID: "pinyin_simp",
+                rawInput: "a1",
+                acceptedText: "StoreA 第一条",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await storeB.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 2),
+                schemaID: "pinyin_simp",
+                rawInput: "b1",
+                acceptedText: "StoreB 第二条",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await storeA.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 3),
+                schemaID: "pinyin_simp",
+                rawInput: "a2",
+                acceptedText: "StoreA 第三条",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let reloaded = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 2
+        )
+        XCTAssertEqual(reloaded.allRecords().map(\.acceptedText), ["StoreB 第二条", "StoreA 第三条"])
+    }
+
+    func testEvictedSchemaEmitsZeroCountSummaryReadyInvalidationEvent() async {
+        let store = AIAcceptedLearningStore.inMemory(maxRecordCount: 1)
+        let collector = SummaryReadyEventCollector()
+        _ = store.addSummaryReadyObserver { event in
+            collector.record(event)
+        }
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 1),
+                schemaID: "double_pinyin",
+                rawInput: "dp",
+                acceptedText: "DoublePinyin 旧方案",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        collector.reset()
+
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 2),
+                schemaID: "pinyin_simp",
+                rawInput: "ps",
+                acceptedText: "PinyinSimp 新方案",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let events = collector.snapshot()
+        XCTAssertEqual(events.map(\.schemaID), ["double_pinyin", "pinyin_simp"])
+        let evictedEvent = events.first { $0.schemaID == "double_pinyin" }
+        XCTAssertEqual(evictedEvent?.acceptedCount, 0)
+        XCTAssertEqual(evictedEvent?.historyHash, "")
+        XCTAssertEqual(evictedEvent?.termCount, 0)
+        XCTAssertEqual(evictedEvent?.recentCommitCount, 0)
+    }
+
+    func testMaintenanceRebuildAppliesMaxRecordCountAndClearScrubsEvictedCommits() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = directory.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = directory.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let feedbackHistoryURL = directory.appendingPathComponent("accepted-ai-feedback.jsonl")
+        let feedbackSummaryURL = directory.appendingPathComponent("accepted-ai-feedback-summary.json")
+        let feedbackMirrorURL = directory.appendingPathComponent("AI_FEEDBACK.md")
+        let lexicalJSONURL = directory.appendingPathComponent("lexical-profile.json")
+        let lexicalMarkdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 2
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 1),
+                schemaID: "pinyin_simp",
+                rawInput: "one",
+                acceptedText: "EvictedAICommit 被淘汰的提交",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 2),
+                schemaID: "pinyin_simp",
+                rawInput: "two",
+                acceptedText: "RetainedAICommitOne 保留提交一",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        await store.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 3),
+                schemaID: "pinyin_simp",
+                rawInput: "three",
+                acceptedText: "RetainedAICommitTwo 保留提交二",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+
+        let context = LexicalContextSnapshot(
+            terms: [
+                LexicalContextTerm(text: "RetainedAICommitOne", score: 1, source: "accepted-ai"),
+                LexicalContextTerm(text: "长期高频", score: 0.9, source: "rime-userdb")
+            ],
+            recentCommits: [
+                "EvictedAICommit 被淘汰的提交",
+                "RetainedAICommitOne 保留提交一",
+                "普通传统输入提交"
+            ],
+            toneProfile: ToneProfile(codeSwitchingRatio: 0.5),
+            sourceSummary: [
+                "accepted-ai-summary: terms=1 commits=2 history=abc123",
+                "rime-userdb: 1"
+            ]
+        )
+        let profile = PersistentLexicalProfile(
+            schemaID: "pinyin_simp",
+            rimeSnapshotPath: "/tmp/pinyin_simp.userdb.txt",
+            rimeSnapshotModifiedAt: Date(timeIntervalSince1970: 1),
+            lexicalContext: context
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(profile).write(to: lexicalJSONURL, options: .atomic)
+        try Data(context.markdown.utf8).write(to: lexicalMarkdownURL, options: .atomic)
+
+        let maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            feedbackHistoryURL: feedbackHistoryURL,
+            feedbackSummaryURL: feedbackSummaryURL,
+            feedbackMirrorURL: feedbackMirrorURL,
+            lexicalJSONURL: lexicalJSONURL,
+            lexicalMarkdownURL: lexicalMarkdownURL,
+            maxRecordCount: 1
+        )
+        let rebuiltStatus = try maintenance.rebuild()
+        XCTAssertEqual(rebuiltStatus.history.recordCount, 1)
+        XCTAssertEqual(rebuiltStatus.summary.acceptedCount, 1)
+        XCTAssertTrue(rebuiltStatus.summary.isCurrentWithHistory)
+
+        _ = try maintenance.clear(confirm: true)
+        let scrubbedMarkdown = try String(contentsOf: lexicalMarkdownURL, encoding: .utf8)
+        XCTAssertFalse(scrubbedMarkdown.contains("EvictedAICommit 被淘汰的提交"))
+        XCTAssertFalse(scrubbedMarkdown.contains("RetainedAICommitOne 保留提交一"))
+        XCTAssertFalse(scrubbedMarkdown.contains("RetainedAICommitTwo 保留提交二"))
+        XCTAssertTrue(scrubbedMarkdown.contains("普通传统输入提交"))
+    }
+}
+
+private final class SummaryReadyEventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [AIAcceptedLearningSummaryReadyEvent] = []
+
+    func record(_ event: AIAcceptedLearningSummaryReadyEvent) {
+        lock.withLock {
+            events.append(event)
+        }
+    }
+
+    func reset() {
+        lock.withLock {
+            events.removeAll()
+        }
+    }
+
+    func snapshot() -> [AIAcceptedLearningSummaryReadyEvent] {
+        lock.withLock {
+            events
+        }
     }
 }
 

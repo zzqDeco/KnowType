@@ -271,7 +271,7 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 是由 Rime userdb 词频、KnowType 近期提交、选择历史，以及用户明确接受过的
 AI 推荐摘要合成的本地 top-K 词汇画像镜像。用户接受 AI 推荐后立即发生、
 且光标范围可验证的编辑会单独汇总为本地 AI feedback；普通 Backspace 不会
-自动当成负反馈。完整 accepted-AI 和 feedback 历史只保存在本机
+自动当成负反馈。accepted-AI 历史（滑窗保留最近 500 条记录）和 feedback 历史只保存在本机
 Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
 这些文件。可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或
