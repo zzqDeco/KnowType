@@ -66,14 +66,25 @@ and publishes matching `AIRecommendationState` updates back to the coordinator.
 - AI diagnostic elapsed fields separate debounce wait from provider transport
   time: `transport_started` reports time since scheduling, and returned,
   stale-dropped, or applied transport results report elapsed provider time.
-- Started transport remains a gate-owned provider operation; continued typing
-  produces at most one trailing dispatch, and stale completion is dropped
-  without provider-failure accounting. A provider-generation `.stale` result
-  clears its own pending UI slot to `.idle` only when it still owns the active
-  request, no trailing work is queued, and the request is not an availability
-  probe; a trailing request starts before any UI idle callback. `Reset` and
-  `close` discard UI and trailing state while the real transport remains tracked
-  to completion or hard timeout.
+- Started transport remains a gate-owned provider operation during active
+  mid-composition typing (`reason == "input_changed"` with non-empty
+  `rawLength`): continued typing keeps the in-flight transport tracked as stale
+  and stores at most one trailing request, which dispatches through
+  `startDeferred` (`dispatchDebounceMilliseconds`, 450 ms by default) once the
+  in-flight transport finishes so trailing requests still wait for stable input.
+- Explicit session termination or buffer-emptied resets (`composition_invalidated`,
+  `input_controller_will_close`, `symbol_candidate`,
+  `runtime_preferences_changed`, or empty-buffer `input_changed`) cancel both
+  `deferredTask` and `transportTask` immediately and clear `activeWork` and
+  `trailingWork` so the next composition session is not blocked behind a stale
+  in-flight request.
+- Mutable runtime state (`state`, `generation`, `activeWork`, `trailingWork`,
+  `deferredTask`, and `transportTask`) is synchronized with a recursive lock so
+  background debounce/transport tasks and `@MainActor` callbacks cannot race
+  with synchronous `schedule` or `reset` calls.
+- A provider-generation `.stale` result clears its own pending UI slot to
+  `.idle` only when it still owns the active request, no trailing work is
+  queued, and the request is not an availability probe.
 - A detached transport completion never retains the runtime. If the runtime is
   still alive, `finishTransport` exclusively owns terminal diagnostics and UI
   publication; if it has been released, the detached task records exactly one

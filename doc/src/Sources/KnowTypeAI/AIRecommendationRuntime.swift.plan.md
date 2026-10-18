@@ -12,8 +12,16 @@
 
 ## Behavior Notes
 
+- `Defaults.debounceMilliseconds` is `0` so the provider runtime does not add a
+  second 350 ms sleep after `InputAIRecommendationRuntime`'s 450 ms input-method
+  debounce; callers that want standalone provider-layer debounce can still pass
+  an explicit `debounceMilliseconds`.
 - The single-flight owner uses the gate's hard-timeout execution seam. Waiters
   share that attempt and cannot multiply timeout failures.
+- When all waiters for an in-flight payload fingerprint are cancelled, the
+  shared attempt task is cancelled immediately and tracked until its
+  `ProviderRequestGate` lease unwinds, preventing a cancelled composition
+  session from holding the gate busy until hard timeout.
 - The shared attempt task owns `AIHealthMonitor` observation, so one physical
   provider success or qualifying failure is observed once; waiters only consume
   the shared result.
@@ -27,6 +35,8 @@
 
 ## Tests
 
-- `AIRecommendationRuntimeTests` covers shared-payload timeout ownership and
-  lease retention through cancellation-resistant completion, plus
-  repeated blocked preflights and same-instance persistence recovery.
+- `AIRecommendationRuntimeTests` covers zero default provider debounce,
+  in-flight task cancellation releasing `ProviderRequestGate` for the next
+  session, shared-payload timeout ownership, lease retention through
+  cancellation-resistant completion, repeated blocked preflights, and
+  same-instance persistence recovery.

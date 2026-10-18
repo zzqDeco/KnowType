@@ -719,6 +719,122 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertFalse(publishedStates.contains(.idle))
     }
 
+    @MainActor
+    func testResetCancelsInFlightTransportAndUnblocksNextSessionImmediately() async {
+        let provider = CancellationTrackingRuntimeAIRecommendationProvider()
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let first = runtime.schedule(
+            context: context(rawInput: "abc", compositionID: 1, rawRevision: 1),
+            currentSnapshot: { snapshot(rawInput: "abc", compositionID: 1, rawRevision: 1) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(first))
+        let firstStarted = await waitUntilAsync { await provider.requests.count == 1 }
+        XCTAssertTrue(firstStarted)
+
+        XCTAssertEqual(
+            runtime.reset(compositionID: 1, rawLength: 0, reason: "composition_invalidated"),
+            .idle
+        )
+        let firstCancelled = await waitUntilAsync {
+            await provider.cancelledRawInputs.contains("abc")
+        }
+        XCTAssertTrue(firstCancelled)
+
+        let second = runtime.schedule(
+            context: context(rawInput: "def", compositionID: 2, rawRevision: 1),
+            currentSnapshot: { snapshot(rawInput: "def", compositionID: 2, rawRevision: 1) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(second))
+        let secondStarted = await waitUntilAsync { await provider.requests.count == 2 }
+        XCTAssertTrue(secondStarted)
+
+        await provider.finish(rawInput: "def", state: readyState("第二会话结果"))
+        let secondReady = await waitUntil {
+            publishedStates == [readyState("第二会话结果")]
+        }
+        XCTAssertTrue(secondReady)
+    }
+
+    @MainActor
+    func testTrailingWorkRespectsDispatchDebounceAndCancelsIfReplacedDuringDebounce() async {
+        let provider = ControlledRuntimeAIRecommendationProvider()
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 150,
+            diagnosticSink: diagnosticSink
+        )
+        let currentSnapshot = RuntimeSnapshotBox(
+            snapshot(rawInput: "abc", compositionID: 1, rawRevision: 1)
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let first = runtime.schedule(
+            context: context(rawInput: "abc", compositionID: 1, rawRevision: 1),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(first))
+        let firstStarted = await waitUntilAsync { await provider.requests.count == 1 }
+        XCTAssertTrue(firstStarted)
+
+        currentSnapshot.update(snapshot(rawInput: "abcd", compositionID: 1, rawRevision: 2))
+        let second = runtime.schedule(
+            context: context(rawInput: "abcd", compositionID: 1, rawRevision: 2),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let secondRequestID = pendingRequestID(second)
+        XCTAssertNotNil(secondRequestID)
+
+        // Complete the first in-flight request; trailing request ("abcd") must enter debounce rather than immediately starting transport.
+        await provider.finish(rawInput: "abc", state: readyState("旧结果"))
+        let trailingDeferred = await waitUntil {
+            diagnosticSink.events.contains {
+                $0.stage == .dispatchDeferred && $0.requestID == secondRequestID
+            }
+        }
+        XCTAssertTrue(trailingDeferred, "\(diagnosticSink.events)")
+        let countDuringTrailingDebounce = await provider.requests.count
+        XCTAssertEqual(countDuringTrailingDebounce, 1)
+
+        // Replace during the trailing debounce window; "abcd" must be cancelled before hitting the provider.
+        currentSnapshot.update(snapshot(rawInput: "abcde", compositionID: 1, rawRevision: 3))
+        let third = runtime.schedule(
+            context: context(rawInput: "abcde", compositionID: 1, rawRevision: 3),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(third))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .dispatchCancelledByNewInput && $0.requestID == secondRequestID
+        })
+
+        let thirdStarted = await waitUntilAsync { await provider.requests.count == 2 }
+        XCTAssertTrue(thirdStarted)
+        let dispatchedInputs = await provider.requests.map(\.rawInput)
+        XCTAssertEqual(dispatchedInputs, ["abc", "abcde"])
+
+        await provider.finish(rawInput: "abcde", state: readyState("最终结果"))
+        let finalReady = await waitUntil {
+            publishedStates == [readyState("最终结果")]
+        }
+        XCTAssertTrue(finalReady)
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil
@@ -856,6 +972,47 @@ private actor ControlledRuntimeAIRecommendationProvider: AIRecommendationProvidi
 
     var requests: [AIRecommendationRequest] {
         recordedRequests
+    }
+}
+
+private actor CancellationTrackingRuntimeAIRecommendationProvider: AIRecommendationProviding {
+    private var recordedRequests: [AIRecommendationRequest] = []
+    private var cancelledInputs: Set<String> = []
+    private var continuations: [String: CheckedContinuation<AIRecommendationState, Never>] = [:]
+
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        recordedRequests.append(request)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    cancelledInputs.insert(request.rawInput)
+                    continuation.resume(returning: .idle)
+                } else {
+                    continuations[request.rawInput] = continuation
+                }
+            }
+        } onCancel: {
+            Task {
+                await self.markCancelled(rawInput: request.rawInput)
+            }
+        }
+    }
+
+    private func markCancelled(rawInput: String) {
+        cancelledInputs.insert(rawInput)
+        continuations.removeValue(forKey: rawInput)?.resume(returning: .idle)
+    }
+
+    func finish(rawInput: String, state: AIRecommendationState) {
+        continuations.removeValue(forKey: rawInput)?.resume(returning: state)
+    }
+
+    var requests: [AIRecommendationRequest] {
+        recordedRequests
+    }
+
+    var cancelledRawInputs: Set<String> {
+        cancelledInputs
     }
 }
 

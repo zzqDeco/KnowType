@@ -61,11 +61,17 @@ of already-started recommendations, and independent provider failure budgets.
 - The shared recommendation attempt task owns `AIHealthMonitor` observation:
   one physical provider success or qualifying failure is recorded once, while
   waiters consume the same result without repeating health observation.
-- Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Debounce is
-  450 ms, new input replaces debounce work, and started transport keeps running
-  while only the latest trailing revision may dispatch. Caller hard timeout is
-  outside the shared gate, so cancellation-resistant transport retains its
-  identity lease until actual completion and late success does not erase the
+- Recommendation is `idle`, `debouncing`, `inFlight`, or `trailing`. Input-method
+  debounce is 450 ms (`AIRecommendationRuntime.Defaults.debounceMilliseconds` is
+  `0` so provider dispatch does not add a second 350 ms sleep), new input
+  replaces debounce work, and during mid-composition typing a started transport
+  keeps running while the latest revision is held in `trailingWork` and enters
+  `startDeferred` debounce when the in-flight request completes. Explicit
+  session reset, commit, Escape, or close cancels the in-flight transport task
+  and propagates cancellation through `AIRecommendationRuntime` to release the
+  `ProviderRequestGate` lease for the next session. Caller hard timeout is
+  outside the shared gate, so an uncancelled timeout-exceeding transport retains
+  its identity lease until actual completion and late success does not erase the
   timeout cooldown.
 - Digest uses one actor-owned deadline task. A successful commit starts the
   600-second interval; batch, cooldown, and interval wakeups cannot bypass it.

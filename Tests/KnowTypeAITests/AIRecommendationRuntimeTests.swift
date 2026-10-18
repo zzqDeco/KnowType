@@ -10,7 +10,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     }
 
     func testDefaultDebounceIsThreeHundredFiftyMilliseconds() {
-        XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 350)
+        XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 0)
     }
 
     func testDiagnosticFormatterPreservesPrefixLength() {
@@ -1784,6 +1784,97 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: environmentURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: correctionURL.path))
         XCTAssertFalse(String(describing: diagnostics.events).contains(sensitiveInput))
+    }
+
+    func testCancellingInFlightRecommendationTaskReleasesRequestGateForImmediateNextSession() async {
+        let provider = CancellationAwareBlockedFirstLLMProvider(
+            providerName: "cancelled-inflight-gate-\(UUID().uuidString)"
+        )
+        let documents = temporaryRecommendationDocumentStores()
+        let requestGate = ProviderRequestGate()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: requestGate
+        )
+        let firstRequest = AIRecommendationRequest(rawInput: "firstsession", compositionID: 1)
+        let secondRequest = AIRecommendationRequest(rawInput: "secondsession", compositionID: 2)
+        let firstRequestStarts = await provider.firstRequestStartStream()
+        let firstTaskCompletions = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+
+        let firstTask = Task {
+            let state = await runtime.recommendation(for: firstRequest)
+            firstTaskCompletions.continuation.yield(())
+            firstTaskCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: firstRequestStarts,
+            firstTaskCompletions: firstTaskCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            firstTask.cancel()
+            _ = await firstTask.value
+            return XCTFail("first request did not enter provider before cancellation: \(startResult)")
+        }
+
+        // Cancel the first task while the first provider call is suspended; cancellation must propagate to the underlying attempt task and release ProviderRequestGate.
+        firstTask.cancel()
+        let secondState = await runtime.recommendation(for: secondRequest)
+        let firstState = await firstTask.value
+
+        XCTAssertEqual(firstState, .idle)
+        guard case .ready(let candidate) = secondState else {
+            return XCTFail("expected immediate second session request to succeed after first task cancellation, got \(secondState)")
+        }
+        XCTAssertEqual(candidate.displayText, "shared gate completed")
+        let finalRequestCount = await provider.requestCount
+        XCTAssertEqual(finalRequestCount, 2)
+    }
+}
+
+private actor CancellationAwareBlockedFirstLLMProvider: LLMProvider {
+    nonisolated let providerName: String
+    private var recordedRequests: [LLMRequest] = []
+    private let firstRequestStarts: AsyncStream<Void>
+    private let firstRequestStartContinuation: AsyncStream<Void>.Continuation
+    private var firstRequestStartStreamFinished = false
+
+    init(providerName: String) {
+        self.providerName = providerName
+        let startEvents = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.firstRequestStarts = startEvents.stream
+        self.firstRequestStartContinuation = startEvents.continuation
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        if recordedRequests.count == 1 {
+            if !firstRequestStartStreamFinished {
+                firstRequestStartStreamFinished = true
+                firstRequestStartContinuation.yield(())
+                firstRequestStartContinuation.finish()
+            }
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "shared gate completed", confidence: 0.9)
+        ])
+    }
+
+    func firstRequestStartStream() -> AsyncStream<Void> {
+        firstRequestStarts
+    }
+
+    var requestCount: Int {
+        recordedRequests.count
     }
 }
 
