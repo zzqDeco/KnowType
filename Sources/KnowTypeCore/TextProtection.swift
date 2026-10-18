@@ -497,7 +497,9 @@ public enum TextProtection {
 
     private static func isLikelyDottedIdentifierOrProseToken(_ token: String) -> Bool {
         let lowercased = token.lowercased()
-        if lowercased.contains("://")
+        if lowercased == "localhost"
+            || !token.contains(".")
+            || lowercased.contains("://")
             || lowercased.hasPrefix("www.")
             || token.contains(":")
             || token.contains("/") {

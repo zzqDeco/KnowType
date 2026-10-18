@@ -13,6 +13,7 @@ final class KnowTypeCoreTests: XCTestCase {
             "api.local:8080",
             "service.internal",
             "dev.localhost:3000",
+            "localhost",
             "example.eu",
             "example.name",
             "example.aero",
