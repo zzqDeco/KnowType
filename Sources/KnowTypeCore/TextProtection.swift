@@ -280,10 +280,10 @@ public enum TextProtection {
         ) != nil {
             return true
         }
-        if text.range(of: #"^[A-Za-z_][A-Za-z0-9_.]*\("#, options: .regularExpression) != nil {
+        if text.range(of: #"^[A-Za-z_][A-Za-z0-9_]*\("#, options: .regularExpression) != nil {
             return true
         }
-        if text.range(of: #"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\("#, options: .regularExpression) != nil {
+        if text.range(of: #"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\s*\("#, options: .regularExpression) != nil {
             return true
         }
         let tokens = text.split(whereSeparator: { $0.isWhitespace })
