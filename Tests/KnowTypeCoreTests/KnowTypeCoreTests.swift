@@ -12,7 +12,11 @@ final class KnowTypeCoreTests: XCTestCase {
             "github.io/repo",
             "api.local:8080",
             "service.internal",
-            "dev.localhost:3000"
+            "dev.localhost:3000",
+            "example.eu",
+            "example.name",
+            "example.aero",
+            "example.xn--p1ai"
         ]
 
         for bareURL in bareURLs {

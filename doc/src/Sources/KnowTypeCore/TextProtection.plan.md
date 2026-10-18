@@ -17,13 +17,15 @@ credential detection for cloud AI hard blocks.
   command-like text, code-like snippets, and protected app contexts such as
   Terminal, iTerm, and Xcode. These rules keep correction from rewriting text
   that should usually commit unchanged.
-- Unschemed bare-domain URL detection requires the final domain label to match a
-  recognized TLD (including common generic/country-code TLDs and local/reserved
-  TLDs such as `local`, `lan`, `internal`, `test`, `example`, `invalid`, and
-  `localhost`) so dotted code identifiers and prose tokens such as `foo.bar`,
-  `user.name`, `self.coordinator`, `System.out.println`, and `hello.world` do
-  not falsely match `reason: "url"` or trigger Level 0 protection, while inner
-  `camelCase` and `snake_case` segments still keep normal token protection.
+- Unschemed bare-domain URL detection retains coverage across general ASCII TLDs
+  (such as `.eu`, `.name`, `.aero`), Punycode IDN suffixes (`xn--...`), and
+  local/reserved suffixes (`local`, `lan`, `internal`, `test`, `example`,
+  `invalid`, `localhost`), while disambiguating and excluding unschemed,
+  pathless, portless dotted code identifiers and prose mistakes such as
+  `foo.bar`, `user.name`, `self.coordinator`, `System.out.println`,
+  `com.apple.Xcode`, and `hello.world` so they do not falsely match
+  `reason: "url"` or trigger Level 0 protection (inner `camelCase` and
+  `snake_case` segments still keep normal token protection).
 - Real-time cloud AI recommendation uses `containsSecretLikeContent` as its
   only hard block. Normal technical text, commands, paths, URLs, and protected
   app contexts do not directly produce `AI 已禁用`.

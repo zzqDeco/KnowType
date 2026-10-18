@@ -2,19 +2,21 @@
 
 ## Delivered Behavior
 
-- Tightened unschemed bare-domain URL matching in `TextProtection` so a dotted
-  ASCII token without `http://`, `https://`, or `www.` only matches
-  `reason: "url"` and triggers Level 0 protection when its final domain label is
-  a recognized TLD (such as `com`, `cn`, `org`, `net`, `edu`, `gov`, `io`, `co`,
-  `ai`, `dev`, `app`, `sh`, `local`, `lan`, `internal`, `localhost`, etc.) and is
-  not followed by another dotted domain label.
-- Prevented dotted code identifiers and prose mistakes such as `foo.bar`,
-  `user.name`, `self.coordinator`, `System.out.println`, and `hello.world` from
-  matching `reason: "url"` or triggering `TextProtection.requiresNoCorrection`,
-  while preserving normal token-level protection for inner `camelCase` and
+- Tightened unschemed bare-domain URL detection in `TextProtection` so valid
+  bare domains—including general ASCII TLDs (`.com`, `.cn`, `.eu`, `.name`,
+  `.aero`, etc.), Punycode IDN TLDs (`xn--...`), and local/reserved suffixes
+  (`local`, `lan`, `internal`, `localhost`)—continue to match `reason: "url"`
+  and trigger Level 0 protection without restricting URLs to a tiny hardcoded
+  TLD shortlist.
+- Added dotted identifier/prose disambiguation (`isLikelyDottedIdentifierOrProseToken`)
+  and boundary guards so unschemed, pathless, portless code identifiers and
+  prose mistakes such as `foo.bar`, `user.name`, `self.coordinator`,
+  `System.out.println`, `com.apple.Xcode`, and `hello.world` do not match
+  `reason: "url"` or trigger `TextProtection.requiresNoCorrection`, while
+  preserving normal token-level protection for inner `camelCase` and
   `snake_case` tokens.
 - Current-state behavior is documented in
-  [`doc/src/Sources/KnowTypeCore/TextProtection.swift.plan.md`](../doc/src/Sources/KnowTypeCore/TextProtection.swift.plan.md).
+  [`doc/src/Sources/KnowTypeCore/TextProtection.plan.md`](../doc/src/Sources/KnowTypeCore/TextProtection.plan.md).
 
 ## Verification
 
@@ -26,7 +28,7 @@
 
 ## Docs Absorbed By
 
-- [`doc/src/Sources/KnowTypeCore/TextProtection.swift.plan.md`](../doc/src/Sources/KnowTypeCore/TextProtection.swift.plan.md)
+- [`doc/src/Sources/KnowTypeCore/TextProtection.plan.md`](../doc/src/Sources/KnowTypeCore/TextProtection.plan.md)
 
 ## Retirement Criteria
 
