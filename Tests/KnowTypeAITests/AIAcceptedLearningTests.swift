@@ -617,7 +617,7 @@ final class AIAcceptedLearningTests: XCTestCase {
 
         let context = LexicalContextSnapshot(
             terms: [
-                LexicalContextTerm(text: "EvictedNewestLedgerCommit", score: 0.9, source: "accepted-ai")
+                LexicalContextTerm(text: "普通词条", score: 0.9, source: "rime-userdb")
             ],
             recentCommits: [
                 evictedCommitText,
@@ -626,7 +626,7 @@ final class AIAcceptedLearningTests: XCTestCase {
             ],
             toneProfile: ToneProfile(),
             sourceSummary: [
-                "accepted-ai-summary: terms=1 commits=2 history=deadbeef"
+                "rime-userdb: 1"
             ]
         )
         let profile = PersistentLexicalProfile(
@@ -653,6 +653,13 @@ final class AIAcceptedLearningTests: XCTestCase {
         )
         _ = try maintenance.clear(confirm: true)
 
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let scrubbedProfile = try decoder.decode(
+            PersistentLexicalProfile.self,
+            from: Data(contentsOf: lexicalJSONURL)
+        )
+        XCTAssertEqual(scrubbedProfile.lexicalContext.recentCommits, ["NormalUserCommit 普通提交"])
         let scrubbedMarkdown = try String(contentsOf: lexicalMarkdownURL, encoding: .utf8)
         XCTAssertFalse(scrubbedMarkdown.contains(evictedCommitText))
         XCTAssertFalse(scrubbedMarkdown.contains(retainedCommitText))

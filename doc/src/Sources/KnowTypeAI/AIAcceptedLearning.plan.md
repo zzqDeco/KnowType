@@ -15,9 +15,10 @@ entries, records SHA-256 digests of evicted commit text variants in
 text) so maintenance `clear` can still scrub older accepted commits from
 `LEXICAL_PROFILE.md`, atomically rewrites the compacted
 `accepted-ai-learning.jsonl` file, and marks any evicted schemas alongside the
-appended schema for summary rebuild. The full history is local-only; provider
-requests receive only the accepted summary after `LexicalProfileRuntime` merges
-it into `LEXICAL_PROFILE.md`.
+appended schema for summary rebuild. The retained sliding-window history and
+evicted-commit digest ledger are local-only; provider requests receive only the
+accepted summary after `LexicalProfileRuntime` merges it into
+`LEXICAL_PROFILE.md`.
 If the accepted text is also present in the current recent-commits slice that
 triggered the refresh, `LexicalContextBuilder` keeps the accepted summary as the
 canonical source and filters that duplicate current commit before rendering the

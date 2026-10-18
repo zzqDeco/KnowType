@@ -23,6 +23,7 @@
   `maxRecordCount` mutation clamping) and `README.md` / `README_CN.md` to
   enforce and document the 500-record window and evicted-commit digest ledger.
 - Documented the current-state contract in
+  `doc/interfaces.plan.md` and
   `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.plan.md`.
 
 ## Verification
@@ -40,6 +41,9 @@
 
 ## Docs Absorbed By
 
+- `README.md`
+- `README_CN.md`
+- `doc/interfaces.plan.md`
 - `doc/src/Sources/KnowTypeAI/AIAcceptedLearning.plan.md`
 
 ## Retirement Criteria

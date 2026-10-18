@@ -461,7 +461,15 @@ public struct AIAcceptedLearningMaintenance {
         let hadAcceptedSource = profile.lexicalContext.sourceSummary.contains {
             $0.hasPrefix("accepted-ai")
         } || profile.lexicalContext.terms.contains { $0.source == "accepted-ai" }
-        guard hadAcceptedSource else {
+        let scrubbedRecentCommits = profile.lexicalContext.recentCommits.filter {
+            !matchesAcceptedCommit(
+                $0,
+                acceptedCommitTexts: acceptedCommitTexts,
+                evictedCommitEntries: evictedCommitEntries
+            )
+        }
+        let hadMatchingRecentCommit = scrubbedRecentCommits.count != profile.lexicalContext.recentCommits.count
+        guard hadAcceptedSource || hadMatchingRecentCommit else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
                 try scrubAcceptedAIFromLexicalMarkdownOnly(
                     acceptedCommitTexts: acceptedCommitTexts,
@@ -469,14 +477,6 @@ public struct AIAcceptedLearningMaintenance {
                 )
             }
             return
-        }
-
-        let scrubbedRecentCommits = profile.lexicalContext.recentCommits.filter {
-            !matchesAcceptedCommit(
-                $0,
-                acceptedCommitTexts: acceptedCommitTexts,
-                evictedCommitEntries: evictedCommitEntries
-            )
         }
         let scrubbedContext = LexicalContextSnapshot(
             terms: profile.lexicalContext.terms.filter { $0.source != "accepted-ai" },
