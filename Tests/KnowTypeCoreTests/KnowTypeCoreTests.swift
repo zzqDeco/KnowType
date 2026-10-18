@@ -16,6 +16,11 @@ final class KnowTypeCoreTests: XCTestCase {
             "localhost",
             "example.eu",
             "example.name",
+            "Example.name",
+            "Example.academy",
+            "self.com",
+            "this.dev",
+            "super.ai",
             "example.aero",
             "example.xn--p1ai"
         ]

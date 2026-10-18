@@ -95,7 +95,8 @@ public enum TextProtection {
         "json", "yaml", "yml", "toml", "xml", "csv", "md", "txt", "log", "lock",
         "conf", "ini", "swift", "py", "js", "ts", "jsx", "tsx", "rs", "go", "rb",
         "php", "java", "kt", "c", "cpp", "h", "hpp", "cs", "m", "mm", "zsh",
-        "bash", "fish", "html", "htm", "css", "scss", "less", "sql", "wasm", "proto"
+        "bash", "fish", "html", "htm", "css", "scss", "less", "sql", "wasm", "proto",
+        "xcode", "textedit", "iterm2", "terminal", "vscode"
     ]
     private static let bareDomainURLPattern =
         #"(?<![a-z0-9_-]|\.[a-z0-9_-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:xn--[a-z0-9-]{2,59}|[a-z]{2,63})\b(?![a-z0-9_-]|\.[a-z0-9_-])(?::\d+)?(?:/[^\s]*)?"#
@@ -506,19 +507,15 @@ public enum TextProtection {
             return false
         }
 
-        let labels = token.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        let labels = lowercased.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
         guard labels.count >= 2,
-              let firstLabel = labels.first?.lowercased(),
-              let lastLabel = labels.last?.lowercased() else {
+              let firstLabel = labels.first,
+              let lastLabel = labels.last else {
             return true
         }
 
         if unambiguousBareDomainTLDs.contains(lastLabel) || lastLabel.hasPrefix("xn--") {
-            return firstLabel == "self" || firstLabel == "this" || firstLabel == "super"
-        }
-
-        if token != lowercased && token != token.uppercased() {
-            return true
+            return false
         }
 
         if likelyCodeIdentifierPrefixes.contains(firstLabel) {
