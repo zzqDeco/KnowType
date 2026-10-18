@@ -154,6 +154,7 @@ when converting a shipped plan into a short record.
 |---|---|---|
 | [context-digest-backlog-performance.plan.md](context-digest-backlog-performance.plan.md) | Earlier backlog bounds now absorbed by the Issue #212 request-amplification contract | Absorbed |
 | [option-r-polish-removal.plan.md](option-r-polish-removal.plan.md) | Remove the Option+R rewrite workflow and make locked-prefix rewriting unsupported | Delivered |
+| [text-protection-bare-url-regex.plan.md](text-protection-bare-url-regex.plan.md) | Tighten bare-domain URL matching to recognized TLDs so dotted code identifiers do not trigger Level 0 protection | Delivered |
 | [release-0.2.9.plan.md](release-0.2.9.plan.md) | Prepare and publish the KnowType v0.2.9 Developer Preview release | Delivered |
 | [release-0.2.8.plan.md](release-0.2.8.plan.md) | Prepare and publish the KnowType v0.2.8 Developer Preview release | Delivered |
 | [release-0.2.7.plan.md](release-0.2.7.plan.md) | Prepare and publish the KnowType v0.2.7 Developer Preview release | Delivered |

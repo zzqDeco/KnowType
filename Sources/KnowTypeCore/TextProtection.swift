@@ -62,10 +62,13 @@ public enum TextProtection {
         "ssh": "SSH",
         "inputmethodkit": "InputMethodKit"
     ]
+    private static let recognizedBareDomainTLDs =
+        "com|cn|org|net|edu|gov|mil|int|io|co|ai|dev|app|me|tv|cc|gg|sh|fm|ly|to|gl|xyz|top|tech|online|site|store|cloud|info|biz|pro|mobi|asia|hk|tw|mo|sg|jp|kr|uk|us|ca|au|nz|de|fr|it|es|nl|ru|br|in|ch|se|no|dk|fi|pl|be|at|cz|gr|pt|ie|hu|ro|tr|il|za|mx|ar|cl|id|my|ph|th|vn|local|lan|internal|test|example|invalid|localhost"
+    private static let bareDomainURLPattern =
+        #"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:"# + recognizedBareDomainTLDs + #")\b(?!\.[a-z0-9-])(?::\d+)?(?:/[^\s]*)?"#
     private static let protectedRangePatterns: [TextProtectionRegexPattern] = [
         TextProtectionRegexPattern(#"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s]+"#, reason: "url"),
-        TextProtectionRegexPattern(#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
-        TextProtectionRegexPattern(#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
+        TextProtectionRegexPattern(#"(?i)\b"# + bareDomainURLPattern, reason: "url"),
         TextProtectionRegexPattern(#"(?i)\blocalhost(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
         TextProtectionRegexPattern(#"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
         TextProtectionRegexPattern(#"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, reason: "email"),
@@ -160,11 +163,7 @@ public enum TextProtection {
     private static func isURL(_ text: String) -> Bool {
         text.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
             || text.range(
-                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?$"#,
-                options: .regularExpression
-            ) != nil
-            || text.range(
-                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?$"#,
+                of: #"(?i)^"# + bareDomainURLPattern + #"$"#,
                 options: .regularExpression
             ) != nil
             || text.range(
@@ -243,9 +242,6 @@ public enum TextProtection {
             return true
         }
         if text.range(of: #"^[A-Za-z_][A-Za-z0-9_]*\("#, options: .regularExpression) != nil {
-            return true
-        }
-        if text.range(of: #"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$"#, options: .regularExpression) != nil {
             return true
         }
         let tokens = text.split(whereSeparator: { $0.isWhitespace })
