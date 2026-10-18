@@ -512,11 +512,11 @@ commands, code-like text, and protected app contexts.
 
 Correction-protected examples include:
 
-- URLs and `www.` addresses
+- URLs and `www.` addresses (unschemed bare domains retain Level 0 URL protection while pathless, portless dotted identifiers and prose tokens such as `foo.bar` or `self.coordinator` are excluded from URL classification so normal correction and inner `camelCase`/`snake_case` token protection still apply)
 - email-like input
 - absolute, home-relative, and relative file paths
 - command-like input such as `swift test` or `git status`
-- code-like snippets containing braces, semicolons, or `=>`
+- code-like snippets containing braces, semicolons, `=>`, or callable expressions such as `console.log("x")`
 - Terminal, iTerm, and Xcode sessions by bundle identifier
 
 Real-time AI recommendation uses a narrower cloud privacy gate: `AI 已禁用`

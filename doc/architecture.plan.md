@@ -53,8 +53,8 @@ degraded conversion state instead of synthesizing hidden local candidates.
 
 `KnowTypeCore` owns model-neutral behavior:
 
-- `TextProtection` detects Level 0 correction-protection input such as URLs,
-  emails, paths, commands, code-like snippets, and protected app contexts, and
+- `TextProtection` detects Level 0 correction-protection input such as URLs (including bare domains while excluding pathless, portless dotted identifiers and prose tokens such as `foo.bar` or `self.coordinator` from URL classification),
+  emails, paths, commands, code-like snippets (including callable expressions such as `console.log("x")`), and protected app contexts, and
   separately detects secret-like credentials for cloud AI hard blocks.
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
 - `TraditionalInputEngine` is retained for core/offline tests, package-level demos, and lexicon tooling, but it is retired from the production IMK key path.

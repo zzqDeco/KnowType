@@ -424,11 +424,11 @@ Level 0 纠错保护用于避免把本应原样提交的文本改写，例如 UR
 
 纠错保护输入包括：
 
-- URL 和 `www.` 地址
+- URL 和 `www.` 地址（无协议裸域名保留 Level 0 URL 保护；无路径、无端口的点分代码标识符或语句粘连如 `foo.bar`、`self.coordinator` 不误判为 URL，仍可走普通纠错并保留内部 `camelCase`/`snake_case` token 保护）
 - 邮箱格式输入
 - 绝对路径、`~/` 路径和相对路径
 - `swift test`、`git status` 等命令类输入
-- 包含大括号、分号或 `=>` 的代码片段
+- 包含大括号、分号、`=>` 或函数/方法调用（如 `console.log("x")`）的代码片段
 - 通过 bundle identifier 识别的 Terminal、iTerm 和 Xcode 会话
 
 实时 AI 推荐使用更窄的云端隐私门禁：只有 raw input 或已确认前缀疑似包含

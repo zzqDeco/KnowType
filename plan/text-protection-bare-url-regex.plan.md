@@ -14,8 +14,14 @@
   `System.out.println`, `com.apple.Xcode`, and `hello.world` do not match
   `reason: "url"` or trigger `TextProtection.requiresNoCorrection`, while
   preserving normal token-level protection for inner `camelCase` and
-  `snake_case` tokens.
+  `snake_case` tokens and keeping callable dotted expressions such as
+  `console.log("x")` and `System.out.println()` under Level 0 code-like
+  protection.
 - Current-state behavior is documented in
+  [`README.md`](../README.md),
+  [`README_CN.md`](../README_CN.md),
+  [`doc/architecture.plan.md`](../doc/architecture.plan.md),
+  [`doc/interfaces.plan.md`](../doc/interfaces.plan.md), and
   [`doc/src/Sources/KnowTypeCore/TextProtection.plan.md`](../doc/src/Sources/KnowTypeCore/TextProtection.plan.md).
 
 ## Verification
@@ -28,6 +34,10 @@
 
 ## Docs Absorbed By
 
+- [`README.md`](../README.md)
+- [`README_CN.md`](../README_CN.md)
+- [`doc/architecture.plan.md`](../doc/architecture.plan.md)
+- [`doc/interfaces.plan.md`](../doc/interfaces.plan.md)
 - [`doc/src/Sources/KnowTypeCore/TextProtection.plan.md`](../doc/src/Sources/KnowTypeCore/TextProtection.plan.md)
 
 ## Retirement Criteria

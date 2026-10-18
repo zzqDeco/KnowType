@@ -127,5 +127,16 @@ final class KnowTypeCoreTests: XCTestCase {
         )
         XCTAssertEqual(candidates.first?.text, "I think self.coordinator works")
         XCTAssertNotEqual(candidates.first?.source, "local-protection")
+
+        for dottedCall in [#"console.log("x")"#, "System.out.println()"] {
+            XCTAssertFalse(
+                TextProtection.detectProtectedRanges(in: dottedCall).contains { $0.reason == "url" },
+                "\(dottedCall) should not match reason: \"url\""
+            )
+            XCTAssertTrue(
+                TextProtection.requiresNoCorrection(dottedCall),
+                "\(dottedCall) should stay protected as code-like"
+            )
+        }
     }
 }

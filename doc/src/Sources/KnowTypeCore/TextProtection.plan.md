@@ -25,7 +25,9 @@ credential detection for cloud AI hard blocks.
   `foo.bar`, `user.name`, `self.coordinator`, `System.out.println`,
   `com.apple.Xcode`, and `hello.world` so they do not falsely match
   `reason: "url"` or trigger Level 0 protection (inner `camelCase` and
-  `snake_case` segments still keep normal token protection).
+  `snake_case` segments still keep normal token protection, while callable
+  dotted expressions such as `console.log("x")` and `System.out.println()`
+  remain under Level 0 code-like protection).
 - Real-time cloud AI recommendation uses `containsSecretLikeContent` as its
   only hard block. Normal technical text, commands, paths, URLs, and protected
   app contexts do not directly produce `AI 已禁用`.
