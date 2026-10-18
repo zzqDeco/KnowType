@@ -614,6 +614,9 @@ final class AIAcceptedLearningTests: XCTestCase {
                 candidateSource: "ai:ai-test"
             )
         )
+        let mirrorMarkdown = try String(contentsOf: mirrorURL, encoding: .utf8)
+        XCTAssertTrue(mirrorMarkdown.contains("Retained history (a sliding window of the latest 500 records"))
+        XCTAssertFalse(mirrorMarkdown.contains("Full history stays local"))
 
         let context = LexicalContextSnapshot(
             terms: [

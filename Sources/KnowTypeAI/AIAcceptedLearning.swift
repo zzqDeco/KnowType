@@ -1072,7 +1072,7 @@ public final class AIAcceptedLearningStore:
         var lines: [String] = [
             "# KnowType Accepted AI Learning",
             "",
-            "This is a local summary of AI recommendations the user explicitly accepted. Full history stays local and is not injected into provider requests.",
+            "This is a local summary of AI recommendations the user explicitly accepted. Retained history (a sliding window of the latest 500 records, plus a bounded ledger of up to 4,096 SHA-256 digests for evicted commits in accepted-ai-learning.evicted-commits.json) stays local and is not injected into provider requests.",
             "",
             "## Stats",
             "- Accepted count: \(summary.acceptedCount)",
