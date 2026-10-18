@@ -260,7 +260,14 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
             appliedNativeInputModeSnapshot = nil
             synchronizeNativeInputModeIfNeeded()
             replayNativeRawInputMirrorIfNeeded(into: session)
-            currentSnapshot = nativeSession?.snapshot() ?? currentSnapshot
+            if var replayedSnapshot = nativeSession?.snapshot() {
+                if !replayedSnapshot.rawInput.isEmpty {
+                    nativeRawInputMirror = replayedSnapshot.rawInput
+                } else if replayedSnapshot.hasComposition, !nativeRawInputMirror.isEmpty {
+                    replayedSnapshot.rawInput = nativeRawInputMirror
+                }
+                currentSnapshot = replayedSnapshot
+            }
             success = true
             details = "schema=\(configuredSchemaID) success=true"
         case .preemptedBySpeculativePrewarm:
@@ -318,9 +325,13 @@ public struct RimeConversionEngine: KnowTypeConversionEngine {
         guard !nativeRawInputMirror.isEmpty else {
             return
         }
-        for scalar in nativeRawInputMirror.unicodeScalars {
+        for scalar in nativeRawInputMirror.unicodeScalars where Self.isPrintableASCIIScalar(scalar) {
             _ = nativeSession.process(.text(String(scalar)))
         }
+    }
+
+    private static func isPrintableASCIIScalar(_ scalar: UnicodeScalar) -> Bool {
+        (0x20...0x7e).contains(scalar.value)
     }
 
     private static func traceStartupEvent(_ event: String, elapsed: TimeInterval, details: String = "") {
@@ -467,11 +478,14 @@ enum NativeRawInputMirrorPolicy {
         key: ConversionEngineKey,
         result: ConversionEngineResult
     ) -> String {
+        if !result.snapshot.hasComposition {
+            return ""
+        }
+        if !result.snapshot.rawInput.isEmpty {
+            return result.snapshot.rawInput
+        }
         guard result.handled else {
             return current
-        }
-        if !result.snapshot.rawInput.isEmpty || !result.snapshot.hasComposition {
-            return result.snapshot.rawInput
         }
 
         switch key {
@@ -679,14 +693,15 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
         case failed
     }
 
-    private enum SessionPointerCreationResult {
-        case created(OpaquePointer)
+    private enum SessionCreationResult {
+        case created(NativeRimeSession)
         case preemptedBySpeculativePrewarm
         case failed
     }
 
     private enum CreationSlotAcquireResult {
         case acquired
+        case reusedPrewarmed(NativeRimeSession)
         case preemptedBySpeculativePrewarm
         case unavailable
     }
@@ -695,21 +710,31 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
         let condition = NSCondition()
         var activeCreationMode: CreationLockMode?
         var foregroundCreationRequested = false
+        var prewarmedSession: (configuration: NativeRimeConfiguration, session: NativeRimeSession)?
+        var sessionCreateCalls = 0
+        var prewarmCacheHits = 0
+        var sessionPointerFactoryOverride: (@Sendable (NativeRimeConfiguration) -> OpaquePointer?)?
+        var sessionPointerDestroyerOverride: (@Sendable (OpaquePointer) -> Void)?
     }
 
     private static let creationState = CreationState()
 
-    private let session: OpaquePointer
+    private var session: OpaquePointer!
+    private let sessionPointerDestroyer: (@Sendable (OpaquePointer) -> Void)?
 
     convenience init?(configuration: NativeRimeConfiguration, fileManager: FileManager = .default) {
-        switch Self.makeSessionPointer(
+        switch Self.makeSession(
             configuration: configuration,
             fileManager: fileManager,
             lockMode: .blocking,
             foregroundMayPreemptSpeculative: false
         ) {
-        case .created(let session):
-            self.init(session: session)
+        case .created(let createdSession):
+            if let pointer = createdSession.detachSessionPointer() {
+                self.init(session: pointer, sessionPointerDestroyer: createdSession.sessionPointerDestroyer)
+            } else {
+                return nil
+            }
         case .preemptedBySpeculativePrewarm,
              .failed:
             return nil
@@ -721,14 +746,14 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
         fileManager: FileManager = .default,
         foregroundMayPreemptSpeculative: Bool = true
     ) -> ForegroundCreationResult {
-        switch makeSessionPointer(
+        switch makeSession(
             configuration: configuration,
             fileManager: fileManager,
             lockMode: .blocking,
             foregroundMayPreemptSpeculative: foregroundMayPreemptSpeculative
         ) {
         case .created(let session):
-            return .created(NativeRimeSession(session: session))
+            return .created(session)
         case .preemptedBySpeculativePrewarm:
             return .preemptedBySpeculativePrewarm
         case .failed:
@@ -740,30 +765,103 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
         configuration: NativeRimeConfiguration,
         fileManager: FileManager = .default
     ) -> NativeRimeSession? {
-        switch makeSessionPointer(
+        switch makeSession(
             configuration: configuration,
             fileManager: fileManager,
             lockMode: .speculative,
             foregroundMayPreemptSpeculative: false
         ) {
         case .created(let session):
-            return NativeRimeSession(session: session)
+            return session
         case .preemptedBySpeculativePrewarm,
              .failed:
             return nil
         }
     }
 
-    private init(session: OpaquePointer) {
-        self.session = session
+    static func prewarmMetricsForTesting() -> (sessionCreateCalls: Int, prewarmCacheHits: Int, hasCachedSession: Bool) {
+        creationState.condition.lock()
+        defer {
+            creationState.condition.unlock()
+        }
+        return (
+            creationState.sessionCreateCalls,
+            creationState.prewarmCacheHits,
+            creationState.prewarmedSession != nil
+        )
     }
 
-    private static func makeSessionPointer(
+    static func resetPrewarmStateForTesting() {
+        var staleSession: NativeRimeSession?
+        creationState.condition.lock()
+        while creationState.activeCreationMode != nil {
+            creationState.condition.wait()
+        }
+        staleSession = creationState.prewarmedSession?.session
+        creationState.prewarmedSession = nil
+        creationState.foregroundCreationRequested = false
+        creationState.sessionCreateCalls = 0
+        creationState.prewarmCacheHits = 0
+        creationState.condition.unlock()
+        _ = staleSession
+    }
+
+    static func withSessionPointerHooksForTesting<T>(
+        create: @escaping @Sendable (NativeRimeConfiguration) -> OpaquePointer?,
+        destroy: @escaping @Sendable (OpaquePointer) -> Void,
+        body: () throws -> T
+    ) rethrows -> T {
+        resetPrewarmStateForTesting()
+        creationState.condition.lock()
+        creationState.sessionPointerFactoryOverride = create
+        creationState.sessionPointerDestroyerOverride = destroy
+        creationState.condition.unlock()
+        defer {
+            var staleSession: NativeRimeSession?
+            creationState.condition.lock()
+            while creationState.activeCreationMode != nil {
+                creationState.condition.wait()
+            }
+            staleSession = creationState.prewarmedSession?.session
+            creationState.prewarmedSession = nil
+            creationState.foregroundCreationRequested = false
+            creationState.sessionPointerFactoryOverride = nil
+            creationState.sessionPointerDestroyerOverride = nil
+            creationState.condition.unlock()
+            _ = staleSession
+        }
+        return try body()
+    }
+
+    private init(
+        session: OpaquePointer,
+        sessionPointerDestroyer: (@Sendable (OpaquePointer) -> Void)? = nil
+    ) {
+        self.session = session
+        self.sessionPointerDestroyer = sessionPointerDestroyer
+    }
+
+    private func detachSessionPointer() -> OpaquePointer? {
+        guard let pointer = session else {
+            return nil
+        }
+        session = nil
+        return pointer
+    }
+
+    private static func makeSession(
         configuration: NativeRimeConfiguration,
         fileManager: FileManager,
         lockMode: CreationLockMode,
         foregroundMayPreemptSpeculative: Bool
-    ) -> SessionPointerCreationResult {
+    ) -> SessionCreationResult {
+        if let cached = claimOrInspectPrewarmedSessionBeforeDirectorySetup(
+            lockMode: lockMode,
+            configuration: configuration
+        ) {
+            return .created(cached)
+        }
+
         do {
             try fileManager.createDirectory(at: configuration.userDataURL, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: configuration.logURL, withIntermediateDirectories: true)
@@ -771,34 +869,105 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
             return .failed
         }
 
-        switch acquireCreationSlot(lockMode, foregroundMayPreemptSpeculative: foregroundMayPreemptSpeculative) {
+        switch acquireCreationSlot(
+            lockMode,
+            configuration: configuration,
+            foregroundMayPreemptSpeculative: foregroundMayPreemptSpeculative
+        ) {
         case .acquired:
             break
+        case .reusedPrewarmed(let prewarmed):
+            return .created(prewarmed)
         case .preemptedBySpeculativePrewarm:
             return .preemptedBySpeculativePrewarm
         case .unavailable:
             return .failed
         }
+
+        var createdSessionForPrewarmCache: NativeRimeSession?
+        var replacedPrewarmedSession: NativeRimeSession?
         defer {
-            releaseCreationSlot(lockMode)
+            releaseCreationSlot(
+                lockMode,
+                configuration: configuration,
+                createdPrewarmedSession: createdSessionForPrewarmCache,
+                replacedPrewarmedSession: &replacedPrewarmedSession
+            )
+            _ = replacedPrewarmedSession
         }
 
-        guard let session = ktb_rime_session_create(
-            configuration.libraryURL.path,
-            configuration.sharedDataURL.path,
-            configuration.userDataURL.path,
-            configuration.logURL.path,
-            configuration.distributionVersion,
-            configuration.appName,
-            configuration.schemaID
-        ) else {
+        let (factoryOverride, destroyerOverride) = currentSessionPointerHooks()
+        let pointer: OpaquePointer?
+        if let factoryOverride {
+            pointer = factoryOverride(configuration)
+        } else {
+            pointer = ktb_rime_session_create(
+                configuration.libraryURL.path,
+                configuration.sharedDataURL.path,
+                configuration.userDataURL.path,
+                configuration.logURL.path,
+                configuration.distributionVersion,
+                configuration.appName,
+                configuration.schemaID
+            )
+        }
+        guard let pointer else {
             return .failed
+        }
+        recordSessionCreated()
+        let session = NativeRimeSession(
+            session: pointer,
+            sessionPointerDestroyer: destroyerOverride
+        )
+        if lockMode == .speculative {
+            createdSessionForPrewarmCache = session
         }
         return .created(session)
     }
 
+    private static func claimOrInspectPrewarmedSessionBeforeDirectorySetup(
+        lockMode: CreationLockMode,
+        configuration: NativeRimeConfiguration
+    ) -> NativeRimeSession? {
+        creationState.condition.lock()
+        defer {
+            creationState.condition.unlock()
+        }
+        switch lockMode {
+        case .blocking:
+            return takePrewarmedSessionLocked(matching: configuration)
+        case .speculative:
+            guard let cached = creationState.prewarmedSession,
+                  cached.configuration == configuration else {
+                return nil
+            }
+            return cached.session
+        }
+    }
+
+    private static func currentSessionPointerHooks() -> (
+        factory: (@Sendable (NativeRimeConfiguration) -> OpaquePointer?)?,
+        destroyer: (@Sendable (OpaquePointer) -> Void)?
+    ) {
+        creationState.condition.lock()
+        defer {
+            creationState.condition.unlock()
+        }
+        return (
+            creationState.sessionPointerFactoryOverride,
+            creationState.sessionPointerDestroyerOverride
+        )
+    }
+
+    private static func recordSessionCreated() {
+        creationState.condition.lock()
+        creationState.sessionCreateCalls += 1
+        creationState.condition.unlock()
+    }
+
     private static func acquireCreationSlot(
         _ mode: CreationLockMode,
+        configuration: NativeRimeConfiguration,
         foregroundMayPreemptSpeculative: Bool
     ) -> CreationSlotAcquireResult {
         creationState.condition.lock()
@@ -808,6 +977,10 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
 
         switch mode {
         case .speculative:
+            if let cached = creationState.prewarmedSession,
+               cached.configuration == configuration {
+                return .reusedPrewarmed(cached.session)
+            }
             guard creationState.activeCreationMode == nil,
                   !creationState.foregroundCreationRequested else {
                 return .unavailable
@@ -815,6 +988,9 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
             creationState.activeCreationMode = .speculative
             return .acquired
         case .blocking:
+            if let prewarmed = takePrewarmedSessionLocked(matching: configuration) {
+                return .reusedPrewarmed(prewarmed)
+            }
             if foregroundMayPreemptSpeculative,
                creationState.activeCreationMode == .speculative {
                 creationState.foregroundCreationRequested = true
@@ -823,14 +999,41 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
             while creationState.activeCreationMode != nil {
                 creationState.condition.wait()
             }
+            if let prewarmed = takePrewarmedSessionLocked(matching: configuration) {
+                return .reusedPrewarmed(prewarmed)
+            }
             creationState.foregroundCreationRequested = false
             creationState.activeCreationMode = .blocking
             return .acquired
         }
     }
 
-    private static func releaseCreationSlot(_ mode: CreationLockMode) {
+    private static func takePrewarmedSessionLocked(
+        matching configuration: NativeRimeConfiguration
+    ) -> NativeRimeSession? {
+        guard let cached = creationState.prewarmedSession,
+              cached.configuration == configuration else {
+            return nil
+        }
+        creationState.prewarmedSession = nil
+        creationState.foregroundCreationRequested = false
+        creationState.prewarmCacheHits += 1
+        return cached.session
+    }
+
+    private static func releaseCreationSlot(
+        _ mode: CreationLockMode,
+        configuration: NativeRimeConfiguration,
+        createdPrewarmedSession: NativeRimeSession?,
+        replacedPrewarmedSession: inout NativeRimeSession?
+    ) {
         creationState.condition.lock()
+        if mode == .speculative,
+           let createdPrewarmedSession,
+           creationState.prewarmedSession == nil || creationState.prewarmedSession?.configuration != configuration {
+            replacedPrewarmedSession = creationState.prewarmedSession?.session
+            creationState.prewarmedSession = (configuration, createdPrewarmedSession)
+        }
         creationState.activeCreationMode = nil
         if mode == .blocking {
             creationState.foregroundCreationRequested = false
@@ -840,7 +1043,14 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
     }
 
     deinit {
-        ktb_rime_session_destroy(session)
+        guard let session else {
+            return
+        }
+        if let sessionPointerDestroyer {
+            sessionPointerDestroyer(session)
+        } else {
+            ktb_rime_session_destroy(session)
+        }
     }
 
     func reset() {
@@ -944,11 +1154,12 @@ final class NativeRimeSession: RimeUserDBMaintenanceSession, @unchecked Sendable
     }
 
     private func processText(_ text: String) -> Bool {
+        guard !text.isEmpty,
+              text.unicodeScalars.allSatisfy({ (0x20...0x7e).contains($0.value) }) else {
+            return false
+        }
         var handled = false
         for scalar in text.unicodeScalars {
-            guard scalar.isASCII else {
-                return false
-            }
             handled = ktb_rime_process_key(session, Int32(scalar.value), 0) || handled
         }
         return handled
@@ -1042,17 +1253,16 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotSyncProviding
     private let configuration: NativeRimeConfiguration?
     private let fileManager: FileManager
     private let locator: RimeUserDBSnapshotLocator
-    private let sessionFactory: @Sendable (NativeRimeConfiguration) -> (any RimeUserDBSnapshotSession)?
+    private let customSessionFactory: (@Sendable (NativeRimeConfiguration) -> (any RimeUserDBSnapshotSession)?)?
 
     public init(
         configuration: NativeRimeConfiguration? = NativeRimeConfiguration.defaultConfiguration(),
         fileManager: FileManager = .default
     ) {
-        self.init(
-            configuration: configuration,
-            fileManager: fileManager,
-            sessionFactory: { NativeRimeSession(configuration: $0) }
-        )
+        self.configuration = configuration
+        self.fileManager = fileManager
+        self.locator = RimeUserDBSnapshotLocator(fileManager: fileManager)
+        self.customSessionFactory = nil
     }
 
     init(
@@ -1063,7 +1273,7 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotSyncProviding
         self.configuration = configuration
         self.fileManager = fileManager
         self.locator = RimeUserDBSnapshotLocator(fileManager: fileManager)
-        self.sessionFactory = sessionFactory
+        self.customSessionFactory = sessionFactory
     }
 
     public func userDBTextSnapshot(schemaID: String) async throws -> RimeUserDBTextSnapshot {
@@ -1078,18 +1288,48 @@ public actor RimeUserDBTextSnapshotProvider: RimeUserDBTextSnapshotSyncProviding
         schemaID: String,
         syncBeforeRead: Bool
     ) async throws -> RimeUserDBTextSnapshot {
-        guard let configuration,
-              let session = sessionFactory(configuration) else {
+        guard let configuration else {
             throw RimeUserDBTextSnapshotProviderError.unavailable
         }
-        let syncSucceeded = syncBeforeRead
-            ? (session as? any RimeUserDBMaintenanceSession)?.syncUserData() ?? false
-            : true
-        let roots = snapshotSearchRoots(
-            syncDirectory: session.userDataSyncDirectory(),
-            userDataDirectory: session.userDataDirectory() ?? configuration.userDataURL
-        )
-        let userDictionaryName = session.userDictionaryName(schemaID: schemaID) ?? schemaID
+        let syncSucceeded: Bool
+        let roots: [URL]
+        let userDictionaryName: String
+        if let customSessionFactory {
+            guard let session = customSessionFactory(configuration) else {
+                throw RimeUserDBTextSnapshotProviderError.unavailable
+            }
+            syncSucceeded = syncBeforeRead
+                ? (session as? any RimeUserDBMaintenanceSession)?.syncUserData() ?? false
+                : true
+            roots = snapshotSearchRoots(
+                syncDirectory: session.userDataSyncDirectory(),
+                userDataDirectory: session.userDataDirectory() ?? configuration.userDataURL
+            )
+            userDictionaryName = session.userDictionaryName(schemaID: schemaID) ?? schemaID
+        } else if syncBeforeRead {
+            guard let session = NativeRimeSession(configuration: configuration, fileManager: fileManager) else {
+                throw RimeUserDBTextSnapshotProviderError.unavailable
+            }
+            syncSucceeded = session.syncUserData()
+            roots = snapshotSearchRoots(
+                syncDirectory: session.userDataSyncDirectory(),
+                userDataDirectory: session.userDataDirectory() ?? configuration.userDataURL
+            )
+            userDictionaryName = session.userDictionaryName(schemaID: schemaID) ?? schemaID
+        } else {
+            syncSucceeded = true
+            let userDataDirectory = configuration.userDataURL
+            let syncDirectory = locator.syncDirectory(in: userDataDirectory)
+            roots = snapshotSearchRoots(
+                syncDirectory: syncDirectory,
+                userDataDirectory: userDataDirectory
+            )
+            userDictionaryName = locator.userDictionaryName(
+                schemaID: schemaID,
+                userDataDirectory: userDataDirectory,
+                sharedDataDirectory: configuration.sharedDataURL
+            ) ?? schemaID
+        }
         guard let snapshotURL = locator.findUserDBTextSnapshot(userDBName: userDictionaryName, roots: roots) else {
             if !syncSucceeded {
                 throw RimeUserDBTextSnapshotProviderError.syncFailed
@@ -1165,13 +1405,49 @@ struct RimeUserDBSnapshotLocator: @unchecked Sendable {
     }
 
     func installationID(in userDataDirectory: URL) -> String? {
+        installationScalarValue(forKey: "installation_id", in: userDataDirectory)
+    }
+
+    func syncDirectory(in userDataDirectory: URL) -> URL? {
+        guard let rawValue = installationScalarValue(forKey: "sync_dir", in: userDataDirectory) else {
+            return nil
+        }
+        return NativeRimeConfiguration.environmentFileURL(path: rawValue, isDirectory: true)
+    }
+
+    func userDictionaryName(
+        schemaID: String,
+        userDataDirectory: URL,
+        sharedDataDirectory: URL
+    ) -> String? {
+        guard !schemaID.isEmpty else {
+            return nil
+        }
+        let candidates = [
+            userDataDirectory.appendingPathComponent("build/\(schemaID).schema.yaml", isDirectory: false),
+            userDataDirectory.appendingPathComponent("\(schemaID).schema.yaml", isDirectory: false),
+            sharedDataDirectory.appendingPathComponent("build/\(schemaID).schema.yaml", isDirectory: false),
+            sharedDataDirectory.appendingPathComponent("\(schemaID).schema.yaml", isDirectory: false)
+        ]
+        for candidateURL in candidates {
+            guard let content = try? String(contentsOf: candidateURL, encoding: .utf8),
+                  let dictName = Self.parseTranslatorDictionaryName(from: content) else {
+                continue
+            }
+            return dictName
+        }
+        return nil
+    }
+
+    private func installationScalarValue(forKey key: String, in userDataDirectory: URL) -> String? {
         let installationURL = userDataDirectory.appendingPathComponent("installation.yaml", isDirectory: false)
         guard let content = try? String(contentsOf: installationURL, encoding: .utf8) else {
             return nil
         }
+        let prefix = "\(key):"
         for line in content.split(whereSeparator: \.isNewline) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.hasPrefix("installation_id:"),
+            guard trimmed.hasPrefix(prefix),
                   let separator = trimmed.firstIndex(of: ":") else {
                 continue
             }
@@ -1181,6 +1457,48 @@ struct RimeUserDBSnapshotLocator: @unchecked Sendable {
             return rawValue.isEmpty ? nil : rawValue
         }
         return nil
+    }
+
+    private static func parseTranslatorDictionaryName(from content: String) -> String? {
+        var inTranslatorSection = false
+        var translatorIndent = 0
+        var userDict: String?
+        var dictionary: String?
+
+        for line in content.split(whereSeparator: \.isNewline) {
+            let uncommented = line.prefix { $0 != "#" }
+            let trimmed = uncommented.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+            let indent = uncommented.prefix { $0 == " " || $0 == "\t" }.count
+            if !inTranslatorSection {
+                if indent == 0, trimmed == "translator:" {
+                    inTranslatorSection = true
+                    translatorIndent = indent
+                }
+                continue
+            }
+            if indent <= translatorIndent {
+                break
+            }
+            guard let separator = trimmed.firstIndex(of: ":") else {
+                continue
+            }
+            let key = trimmed[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = trimmed[trimmed.index(after: separator)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            guard !value.isEmpty else {
+                continue
+            }
+            if key == "user_dict" {
+                userDict = value
+            } else if key == "dictionary" {
+                dictionary = value
+            }
+        }
+        return userDict ?? dictionary
     }
 
     private func appendCandidate(

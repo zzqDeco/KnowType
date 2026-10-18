@@ -540,6 +540,133 @@ final class RimeConversionEngineTests: XCTestCase {
         XCTAssertFalse(RimeConversionEngine.prewarmNativeSession(configuration: nil))
     }
 
+    func testPrewarmCachesAndReusesSessionOnMatchingForegroundCreation() throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-prewarm-cache-reuse")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: root.appendingPathComponent("share", isDirectory: true),
+            userDataURL: root.appendingPathComponent("user", isDirectory: true),
+            logURL: root.appendingPathComponent("logs", isDirectory: true),
+            schemaID: "pinyin_simp"
+        )
+        let counterLock = NSLock()
+        nonisolated(unsafe) var nextTag = 1
+        nonisolated(unsafe) var destroyedTags: [Int] = []
+
+        NativeRimeSession.withSessionPointerHooksForTesting(
+            create: { _ in
+                counterLock.lock()
+                defer { counterLock.unlock() }
+                let tag = nextTag
+                nextTag += 1
+                return OpaquePointer(bitPattern: tag)
+            },
+            destroy: { pointer in
+                counterLock.lock()
+                defer { counterLock.unlock() }
+                destroyedTags.append(Int(bitPattern: pointer))
+            }
+        ) {
+            XCTAssertTrue(RimeConversionEngine.prewarmNativeSession(configuration: configuration))
+            let afterPrewarm = NativeRimeSession.prewarmMetricsForTesting()
+            XCTAssertEqual(afterPrewarm.sessionCreateCalls, 1)
+            XCTAssertEqual(afterPrewarm.prewarmCacheHits, 0)
+            XCTAssertTrue(afterPrewarm.hasCachedSession)
+            XCTAssertTrue(destroyedTags.isEmpty)
+
+            let firstForeground = NativeRimeSession.createForeground(configuration: configuration)
+            guard case .created(let claimedSession) = firstForeground else {
+                XCTFail("Expected foreground creation to claim cached prewarmed session")
+                return
+            }
+            let afterFirstClaim = NativeRimeSession.prewarmMetricsForTesting()
+            XCTAssertEqual(afterFirstClaim.sessionCreateCalls, 1)
+            XCTAssertEqual(afterFirstClaim.prewarmCacheHits, 1)
+            XCTAssertFalse(afterFirstClaim.hasCachedSession)
+            XCTAssertTrue(destroyedTags.isEmpty)
+
+            let secondForeground = NativeRimeSession.createForeground(configuration: configuration)
+            guard case .created(let secondSession) = secondForeground else {
+                XCTFail("Expected second foreground creation to create a new session")
+                return
+            }
+            XCTAssertFalse(claimedSession === secondSession)
+            let afterSecondClaim = NativeRimeSession.prewarmMetricsForTesting()
+            XCTAssertEqual(afterSecondClaim.sessionCreateCalls, 2)
+            XCTAssertEqual(afterSecondClaim.prewarmCacheHits, 1)
+        }
+        XCTAssertEqual(destroyedTags.sorted(), [1, 2])
+    }
+
+    func testDefaultUserDBTextSnapshotProviderReadsSnapshotWithoutCreatingNativeSession() async throws {
+        let fileManager = FileManager.default
+        let root = temporaryDirectory(name: "rime-userdb-no-session")
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        let sharedData = root.appendingPathComponent("share", isDirectory: true)
+        let userData = root.appendingPathComponent("user", isDirectory: true)
+        let sync = userData.appendingPathComponent("sync", isDirectory: true)
+        let logs = root.appendingPathComponent("logs", isDirectory: true)
+        try fileManager.createDirectory(at: sharedData, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: sync, withIntermediateDirectories: true)
+        try """
+        schema:
+          schema_id: custom_schema
+        translator:
+          dictionary: fallback_dict
+          user_dict: custom_user_dict
+        reverse_lookup:
+          dictionary: stroke
+        """.write(
+            to: sharedData.appendingPathComponent("custom_schema.schema.yaml"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let snapshotURL = sync.appendingPathComponent("custom_user_dict.userdb.txt")
+        try "ceshi\t测试\tc=8 d=0\n".write(to: snapshotURL, atomically: true, encoding: .utf8)
+
+        let configuration = NativeRimeConfiguration(
+            libraryURL: root.appendingPathComponent("missing-librime.dylib"),
+            sharedDataURL: sharedData,
+            userDataURL: userData,
+            logURL: logs,
+            schemaID: "custom_schema"
+        )
+        NativeRimeSession.resetPrewarmStateForTesting()
+        let provider = RimeUserDBTextSnapshotProvider(
+            configuration: configuration
+        )
+
+        let snapshot = try await provider.userDBTextSnapshot(schemaID: "custom_schema")
+        let metrics = NativeRimeSession.prewarmMetricsForTesting()
+
+        XCTAssertEqual(snapshot.fileURL.standardizedFileURL.path, snapshotURL.standardizedFileURL.path)
+        XCTAssertTrue(snapshot.content.contains("测试"))
+        XCTAssertEqual(metrics.sessionCreateCalls, 0)
+        XCTAssertFalse(fileManager.fileExists(atPath: logs.path))
+    }
+
+    func testNativeRawInputMirrorClearsWhenUnhandledNativeActionHasNoComposition() {
+        let emptyResult = ConversionEngineResult(
+            handled: false,
+            snapshot: ConversionEngineSnapshot(rawInput: "", preedit: "", engineName: "rime-native")
+        )
+
+        XCTAssertEqual(
+            NativeRawInputMirrorPolicy.updatedMirror(
+                current: "stale",
+                key: .space,
+                result: emptyResult
+            ),
+            ""
+        )
+    }
+
     func testNativeRimePrewarmKeepsFirstProcessUsableWhenArtifactsAreAvailable() throws {
         let environment = ["KNOWTYPE_RIME_ENABLED": "1"]
         guard var configuration = NativeRimeConfiguration.defaultConfiguration(environment: environment) else {
@@ -552,7 +679,10 @@ final class RimeConversionEngineTests: XCTestCase {
         // librime keeps process-global state after a session is destroyed, so do
         // not remove this sandbox before the test process exits.
 
+        NativeRimeSession.resetPrewarmStateForTesting()
         XCTAssertTrue(RimeConversionEngine.prewarmNativeSession(configuration: configuration))
+        XCTAssertEqual(NativeRimeSession.prewarmMetricsForTesting().sessionCreateCalls, 1)
+        XCTAssertTrue(NativeRimeSession.prewarmMetricsForTesting().hasCachedSession)
 
         var engine = RimeConversionEngine(
             traditionalInputEngine: TraditionalInputEngine(),
@@ -562,6 +692,10 @@ final class RimeConversionEngineTests: XCTestCase {
         guard engine.isNativeActive else {
             throw XCTSkip("librime could not create a native session")
         }
+        let metricsAfterFirstKey = NativeRimeSession.prewarmMetricsForTesting()
+        XCTAssertEqual(metricsAfterFirstKey.sessionCreateCalls, 1)
+        XCTAssertEqual(metricsAfterFirstKey.prewarmCacheHits, 1)
+        XCTAssertFalse(metricsAfterFirstKey.hasCachedSession)
         XCTAssertTrue(engine.process(.text("i")).handled)
         XCTAssertFalse(engine.snapshot.candidates.isEmpty)
     }

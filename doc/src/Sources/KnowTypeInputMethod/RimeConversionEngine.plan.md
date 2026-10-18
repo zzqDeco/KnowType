@@ -13,9 +13,11 @@ input.
   configuration but does not create the `NativeRimeSession`, user data
   directory, or log directory until the first real `process(_:)` call.
 - `RimeConversionEngine.prewarmNativeSession(configuration:)` is the explicit
-  exception used after the IMK controller is live. It creates and releases a
-  temporary native session to move cold Rime/dyld cost off the user's first
-  key, while normal engine construction, `snapshot`, `activeSchemaID`,
+  exception used after the IMK controller is live. It prewarms and caches a
+  `NativeRimeSession` for the configuration so the first matching foreground
+  `createForeground(configuration:...)` or `NativeRimeSession(configuration:)`
+  claims and reuses the prewarmed session without calling `ktb_rime_session_create`
+  again, while normal engine construction, `snapshot`, `activeSchemaID`,
   `isNativeActive`, and `reset()` remain read-only.
 - Source-tree artifacts under `Vendor/Rime` require explicit `KNOWTYPE_RIME_ENABLED=1`; installed app bundles use bundled Frameworks/Resources automatically.
 - xctest processes use temporary Rime user/log directories to avoid locking the user's live Rime DB.
@@ -42,12 +44,15 @@ input.
   preedit text, candidate text, or commit text.
 - Native session creation serializes entry into the C bridge because librime
   setup and the cached API handle are process-global. The background prewarm
-  uses a speculative creation slot and skips prewarm when foreground creation is
-  already in progress. Foreground lazy creation does not wait behind an active
-  speculative prewarm for text/delete keys; if a first text key collides with
-  prewarm it records `prewarm_busy` and falls back to raw input for that key.
-  Commit and navigation keys with existing raw input block for a native retry
-  and replay the mirrored raw input, avoiding raw commits while prewarm is busy.
+  uses a speculative creation slot, skips prewarm when foreground creation is
+  already in progress, and stores the created `(NativeRimeConfiguration, NativeRimeSession)`
+  in a thread-safe static prewarm cache. Foreground lazy creation claims a cached
+  prewarmed session when configurations match without calling `ktb_rime_session_create`
+  again, and does not wait behind an active speculative prewarm for text/delete
+  keys; if a first text key collides with prewarm it records `prewarm_busy` and
+  falls back to raw input for that key. Commit and navigation keys with existing
+  raw input block for a native retry, claim the newly prewarmed session when
+  configurations match, and replay the mirrored printable ASCII raw input.
 - Native sessions initially select the configured schema, but
   `activeSchemaID` is read back from the live Rime session through
   `get_current_schema`/status so runtime schema switches feed the correct
@@ -68,10 +73,14 @@ input.
   candidates only; they do not set `lockedPrefix` from the first unselected
   candidate.
 - Native snapshots copy only the current Rime menu page on the synchronous key path; full candidate-list iteration is intentionally absent from the bridge.
-- Userdb snapshot reads resolve the live active schema's user dictionary name,
-  then scan deterministically for that dictionary's existing `*.userdb.txt`
-  export; they never parse `.ldb` files and are not called from the synchronous
-  key path.
+- Default unsynced `RimeUserDBTextSnapshotProvider.userDBTextSnapshot(schemaID:)`
+  reads resolve the user data/sync directories and schema dictionary name directly
+  from disk (`installation.yaml` and `<schemaID>.schema.yaml`) without creating or
+  destroying a `NativeRimeSession`; they scan deterministically for that
+  dictionary's existing `*.userdb.txt` export, never parse `.ldb` files, and are
+  not called from the synchronous key path. Only
+  `syncedUserDBTextSnapshot(schemaID:)` (or injected test session factories)
+  creates a session to invoke `sync_user_data`.
 - `sync_user_data` is no longer part of the default snapshot read. It is exposed
   only through the explicit synced snapshot path owned by
   `RimeMaintenanceService`.
@@ -99,7 +108,8 @@ input.
 - Non-ASCII composition text bypasses the native session until reset and keeps raw input without producing local fallback candidates, preventing Rime's ASCII key API from silently diverging from the coordinator raw buffer.
 - While native Rime is active, the Swift engine mirrors text/delete edits so a
   later non-ASCII bypass can preserve the existing raw preedit without invoking
-  the retired local converter.
+  the retired local converter, and replays only printable ASCII scalars
+  (`0x20...0x7e`) when a deferred session attaches.
 - When a host librime ABI does not expose `get_input`, handled native actions
   that can change composition text (`Space`, candidate selection, and
   composition commit) rebuild the raw-input mirror from Rime preedit instead of
