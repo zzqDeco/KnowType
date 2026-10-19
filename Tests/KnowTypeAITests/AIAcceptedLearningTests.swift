@@ -1142,6 +1142,10 @@ final class AIAcceptedLearningTests: XCTestCase {
             summaryDelayNanoseconds: 0,
             maxRecordCount: 5
         )
+        let mirrorRepairEvents = SummaryReadyEventCollector()
+        _ = mirrorRepairStore.addSummaryReadyObserver { event in
+            mirrorRepairEvents.record(event)
+        }
         await mirrorRepairStore.recordAcceptedAI(
             AIAcceptedLearningRecord(
                 acceptedAt: Date(timeIntervalSince1970: 3),
@@ -1155,6 +1159,7 @@ final class AIAcceptedLearningTests: XCTestCase {
         )
         XCTAssertEqual(mirrorRepairStore.allRecords().count, 2)
         XCTAssertEqual(mirrorRepairStore.snapshot()?.acceptedCount, 2)
+        XCTAssertEqual(mirrorRepairEvents.snapshot(), [])
         XCTAssertEqual(
             try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
             2
@@ -1162,6 +1167,8 @@ final class AIAcceptedLearningTests: XCTestCase {
 
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: mirrorDir.path)
         XCTAssertEqual(mirrorRepairStore.snapshot()?.acceptedCount, 2)
+        XCTAssertEqual(mirrorRepairEvents.snapshot().map(\.schemaID), ["pinyin_simp"])
+        XCTAssertEqual(mirrorRepairEvents.snapshot().last?.acceptedCount, 2)
         XCTAssertTrue(
             try String(contentsOf: isolatedMirrorURL, encoding: .utf8)
                 .contains("Accepted count: 2")

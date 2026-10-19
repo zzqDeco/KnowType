@@ -972,12 +972,14 @@ public final class AIAcceptedLearningStore:
 
     private func rebuildSummary() {
         var changedSchemaIDsForRetry: Set<String> = []
+        var didCompactHistoryInRebuild = false
         do {
             let events = try withAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) { () -> [AIAcceptedLearningSummaryReadyEvent] in
                 let externalEvents = try syncRecordsAfterExternalClearLocked()
+                changedSchemaIDsForRetry.formUnion(externalEvents.map(\.schemaID))
                 let currentRecords: [AIAcceptedLearningRecord]
                 if let historyURL, fileManager.fileExists(atPath: historyURL.path) {
                     let loadedRecords = try Self.loadRecordsOrThrow(
@@ -988,6 +990,8 @@ public final class AIAcceptedLearningStore:
                     if loadedRecords.count > maxRecordCount {
                         let overflowCount = loadedRecords.count - maxRecordCount
                         let evictedRecords = Array(loadedRecords.prefix(overflowCount))
+                        let evictedSchemas = Set(evictedRecords.map(\.schemaID))
+                        changedSchemaIDsForRetry.formUnion(evictedSchemas)
                         currentRecords = Array(loadedRecords.suffix(maxRecordCount))
                         try recordAcceptedLearningEvictedCommits(
                             evictedRecords,
@@ -1000,6 +1004,7 @@ public final class AIAcceptedLearningStore:
                             encoder: encoder,
                             fileManager: fileManager
                         )
+                        didCompactHistoryInRebuild = true
                     } else {
                         currentRecords = loadedRecords
                     }
@@ -1017,7 +1022,7 @@ public final class AIAcceptedLearningStore:
                 let previousRecords = records
                 records = currentRecords
                 lastDiskStateMetadata = updatedMetadata
-                var changedSchemaIDs = pendingSummarySchemaIDs.union(externalEvents.map(\.schemaID))
+                var changedSchemaIDs = pendingSummarySchemaIDs.union(changedSchemaIDsForRetry)
                 if previousRecords != currentRecords {
                     let allSchemas = Set(previousRecords.map(\.schemaID)).union(currentRecords.map(\.schemaID))
                     for schemaID in allSchemas {
@@ -1055,6 +1060,9 @@ public final class AIAcceptedLearningStore:
             notifySummaryReady(events)
             synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
         } catch {
+            if didCompactHistoryInRebuild {
+                synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
+            }
             let failedStamp = Self.repairEnvironmentStamp(
                 historyURL: historyURL,
                 summaryURL: summaryURL,
@@ -1064,7 +1072,8 @@ public final class AIAcceptedLearningStore:
             lock.lock()
             isSummaryRebuildScheduled = false
             pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
-            if pendingStartupRepair {
+            if historyURL != nil || summaryURL != nil || mirrorURL != nil {
+                pendingStartupRepair = true
                 pendingStartupSummaryWrite = true
                 nextStartupRepairRetryAt = ContinuousClock.now.advanced(by: Self.startupRepairRetryInterval)
                 lastFailedRepairEnvironmentStamp = failedStamp
