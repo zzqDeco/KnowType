@@ -10,7 +10,7 @@ final class AIRecommendationRuntimeTests: XCTestCase {
     }
 
     func testDefaultDebounceIsThreeHundredFiftyMilliseconds() {
-        XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 350)
+        XCTAssertEqual(AIRecommendationRuntime.Defaults.debounceMilliseconds, 0)
     }
 
     func testDiagnosticFormatterPreservesPrefixLength() {
@@ -1784,6 +1784,359 @@ final class AIRecommendationRuntimeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: environmentURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: correctionURL.path))
         XCTAssertFalse(String(describing: diagnostics.events).contains(sensitiveInput))
+    }
+
+    func testCancellingInFlightRecommendationTaskReleasesRequestGateForImmediateNextSession() async {
+        let provider = CancellationAwareBlockedFirstLLMProvider(
+            providerName: "cancelled-inflight-gate-\(UUID().uuidString)"
+        )
+        let documents = temporaryRecommendationDocumentStores()
+        let requestGate = ProviderRequestGate()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: requestGate
+        )
+        let firstRequest = AIRecommendationRequest(rawInput: "firstsession", compositionID: 1)
+        let secondRequest = AIRecommendationRequest(rawInput: "secondsession", compositionID: 2)
+        let firstRequestStarts = await provider.firstRequestStartStream()
+        let firstTaskCompletions = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+
+        let firstTask = Task {
+            let state = await runtime.recommendation(for: firstRequest)
+            firstTaskCompletions.continuation.yield(())
+            firstTaskCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: firstRequestStarts,
+            firstTaskCompletions: firstTaskCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            firstTask.cancel()
+            _ = await firstTask.value
+            return XCTFail("first request did not enter provider before cancellation: \(startResult)")
+        }
+
+        // Cancel the first task while the first provider call is suspended; cancellation must propagate to the underlying attempt task and wait for its slow (>200ms) unwind to release ProviderRequestGate.
+        firstTask.cancel()
+        let secondState = await runtime.recommendation(for: secondRequest)
+        let firstState = await firstTask.value
+
+        XCTAssertEqual(firstState, .idle)
+        guard case .ready(let candidate) = secondState else {
+            return XCTFail("expected immediate second session request to succeed after first task cancellation, got \(secondState)")
+        }
+        XCTAssertEqual(candidate.displayText, "shared gate completed")
+        let finalRequestCount = await provider.requestCount
+        XCTAssertEqual(finalRequestCount, 2)
+    }
+
+    func testCancellingOneCoalescedWaiterUnblocksImmediatelyWhileSurvivingWaiterCompletes() async {
+        let provider = ControlledLegacySharedGateLLMProvider(
+            providerName: "coalesced-waiters-\(UUID().uuidString)"
+        )
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: ProviderRequestGate()
+        )
+        let sharedRequest = AIRecommendationRequest(rawInput: "sharedinput", compositionID: 1)
+        let firstRequestStarts = await provider.firstRequestStartStream()
+        let firstTaskCompletions = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+
+        let waiterA = Task {
+            let state = await runtime.recommendation(for: sharedRequest)
+            firstTaskCompletions.continuation.yield(())
+            firstTaskCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: firstRequestStarts,
+            firstTaskCompletions: firstTaskCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            waiterA.cancel()
+            await provider.releaseAllRequests()
+            _ = await waiterA.value
+            return XCTFail("shared request did not enter provider: \(startResult)")
+        }
+
+        let waiterB = Task {
+            await runtime.recommendation(for: sharedRequest)
+        }
+        try? await Task.sleep(nanoseconds: 25_000_000)
+
+        // Cancel waiterA while provider is still blocked; waiterA must return .idle promptly without waiting for provider release.
+        waiterA.cancel()
+        let waiterAState = await waiterA.value
+        XCTAssertEqual(waiterAState, .idle)
+
+        await provider.releaseAllRequests()
+        let waiterBState = await waiterB.value
+        guard case .ready(let candidate) = waiterBState else {
+            return XCTFail("expected surviving coalesced waiter to succeed, got \(waiterBState)")
+        }
+        XCTAssertEqual(candidate.displayText, "shared gate completed")
+        let finalRequestCount = await provider.requestCount
+        XCTAssertEqual(finalRequestCount, 1)
+    }
+
+    func testCancellingAttemptOnOneProviderDoesNotDelayDifferentProviderOnSharedGate() async {
+        let slowProviderA = CancellationAwareBlockedFirstLLMProvider(
+            providerName: "provider-a-\(UUID().uuidString)",
+            cancellationUnwindDelayNanoseconds: 800_000_000
+        )
+        let fastProviderB = RecordingLLMProvider(response: LLMResponse(candidates: [
+            LLMCandidate(text: "fast provider B", confidence: 0.9)
+        ]))
+        let documents = temporaryRecommendationDocumentStores()
+        let sharedGate = ProviderRequestGate()
+        let runtimeA = AIRecommendationRuntime(
+            provider: slowProviderA,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: sharedGate,
+            providerIdentity: "provider-a"
+        )
+        let runtimeB = AIRecommendationRuntime(
+            provider: fastProviderB,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: sharedGate,
+            providerIdentity: "provider-b"
+        )
+        let firstRequest = AIRecommendationRequest(rawInput: "providerainput", compositionID: 1)
+        let secondRequest = AIRecommendationRequest(rawInput: "providerbinput", compositionID: 2)
+        let firstRequestStarts = await slowProviderA.firstRequestStartStream()
+        let firstTaskCompletions = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+
+        let taskA = Task {
+            let state = await runtimeA.recommendation(for: firstRequest)
+            firstTaskCompletions.continuation.yield(())
+            firstTaskCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: firstRequestStarts,
+            firstTaskCompletions: firstTaskCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            taskA.cancel()
+            _ = await taskA.value
+            return XCTFail("provider A request did not enter provider: \(startResult)")
+        }
+
+        taskA.cancel()
+        let startB = Date()
+        let stateB = await runtimeB.recommendation(for: secondRequest)
+        let elapsedB = Date().timeIntervalSince(startB)
+        _ = await taskA.value
+
+        guard case .ready(let candidate) = stateB else {
+            return XCTFail("expected provider B request to succeed immediately, got \(stateB)")
+        }
+        XCTAssertEqual(candidate.displayText, "fast provider B")
+        XCTAssertLessThan(elapsedB, 0.5)
+    }
+
+    func testCancellingAttemptDoesNotDelayCacheHitOnSameProvider() async {
+        let provider = CancellationAwareBlockedFirstLLMProvider(
+            providerName: "cache-hit-while-cancelling-\(UUID().uuidString)",
+            cancellationUnwindDelayNanoseconds: 800_000_000,
+            blockedRawInput: "blockedinput"
+        )
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: ProviderRequestGate()
+        )
+        let cachedRequest = AIRecommendationRequest(rawInput: "cachedinput", compositionID: 1)
+        let blockedRequest = AIRecommendationRequest(rawInput: "blockedinput", compositionID: 2)
+
+        let initialCachedState = await runtime.recommendation(for: cachedRequest)
+        guard case .ready(let initialCandidate) = initialCachedState else {
+            return XCTFail("expected initial cache population to succeed, got \(initialCachedState)")
+        }
+        XCTAssertEqual(initialCandidate.displayText, "shared gate completed")
+
+        let blockedStarts = await provider.firstRequestStartStream()
+        let blockedCompletions = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let blockedTask = Task {
+            let state = await runtime.recommendation(for: blockedRequest)
+            blockedCompletions.continuation.yield(())
+            blockedCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: blockedStarts,
+            firstTaskCompletions: blockedCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            blockedTask.cancel()
+            _ = await blockedTask.value
+            return XCTFail("blocked request did not enter provider: \(startResult)")
+        }
+
+        blockedTask.cancel()
+        let cacheHitStart = Date()
+        let cachedHitState = await runtime.recommendation(for: cachedRequest)
+        let cacheHitElapsed = Date().timeIntervalSince(cacheHitStart)
+        _ = await blockedTask.value
+
+        guard case .ready(let candidate) = cachedHitState else {
+            return XCTFail("expected immediate cache hit while cancelled transport unwinds, got \(cachedHitState)")
+        }
+        XCTAssertEqual(candidate.displayText, "shared gate completed")
+        XCTAssertLessThan(cacheHitElapsed, 0.3)
+    }
+
+    func testConcurrentIdenticalRequestsCoalesceAcrossCompletionAndCachePublicationBoundary() async {
+        let provider = ControlledLegacySharedGateLLMProvider(
+            providerName: "coalesce-completion-boundary-\(UUID().uuidString)"
+        )
+        let documents = temporaryRecommendationDocumentStores()
+        let runtime = AIRecommendationRuntime(
+            provider: provider,
+            environmentStore: documents.environment,
+            correctionStore: documents.correction,
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: ProviderRequestGate()
+        )
+        let request = AIRecommendationRequest(rawInput: "samepayload", compositionID: 1)
+        let firstStarts = await provider.firstRequestStartStream()
+        let firstCompletions = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let firstTask = Task {
+            let state = await runtime.recommendation(for: request)
+            firstCompletions.continuation.yield(())
+            firstCompletions.continuation.finish()
+            return state
+        }
+        let startResult = await waitForLegacyProviderStart(
+            providerStarts: firstStarts,
+            firstTaskCompletions: firstCompletions.stream,
+            timeoutNanoseconds: 5_000_000_000
+        )
+        guard case .started = startResult else {
+            firstTask.cancel()
+            _ = await firstTask.value
+            return XCTFail("first request did not enter provider: \(startResult)")
+        }
+
+        let followerTasks = (0..<8).map { _ in
+            Task {
+                await runtime.recommendation(for: request)
+            }
+        }
+        await provider.releaseAllRequests()
+        let postReleaseTask = Task {
+            await runtime.recommendation(for: request)
+        }
+
+        var states: [AIRecommendationState] = [await firstTask.value]
+        for task in followerTasks {
+            states.append(await task.value)
+        }
+        states.append(await postReleaseTask.value)
+
+        for state in states {
+            guard case .ready(let candidate) = state else {
+                return XCTFail("expected ready state, got \(state)")
+            }
+            XCTAssertEqual(candidate.displayText, "shared gate completed")
+        }
+        let providerRequestCount = await provider.requestCount
+        XCTAssertEqual(providerRequestCount, 1)
+    }
+}
+
+private actor CancellationAwareBlockedFirstLLMProvider: LLMProvider {
+    nonisolated let providerName: String
+    private let cancellationUnwindDelayNanoseconds: UInt64
+    private let blockedRawInput: String?
+    private var recordedRequests: [LLMRequest] = []
+    private let firstRequestStarts: AsyncStream<Void>
+    private let firstRequestStartContinuation: AsyncStream<Void>.Continuation
+    private var firstRequestStartStreamFinished = false
+
+    init(
+        providerName: String,
+        cancellationUnwindDelayNanoseconds: UInt64 = 300_000_000,
+        blockedRawInput: String? = nil
+    ) {
+        self.providerName = providerName
+        self.cancellationUnwindDelayNanoseconds = cancellationUnwindDelayNanoseconds
+        self.blockedRawInput = blockedRawInput
+        let startEvents = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.firstRequestStarts = startEvents.stream
+        self.firstRequestStartContinuation = startEvents.continuation
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        recordedRequests.append(request)
+        let shouldBlock = blockedRawInput != nil
+            ? (request.rawInput == blockedRawInput)
+            : (recordedRequests.count == 1)
+        if shouldBlock {
+            if !firstRequestStartStreamFinished {
+                firstRequestStartStreamFinished = true
+                firstRequestStartContinuation.yield(())
+                firstRequestStartContinuation.finish()
+            }
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                if cancellationUnwindDelayNanoseconds > 0 {
+                    await Task.detached {
+                        try? await Task.sleep(nanoseconds: self.cancellationUnwindDelayNanoseconds)
+                    }.value
+                }
+                throw error
+            }
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "shared gate completed", confidence: 0.9)
+        ])
+    }
+
+    func firstRequestStartStream() -> AsyncStream<Void> {
+        firstRequestStarts
+    }
+
+    var requestCount: Int {
+        recordedRequests.count
     }
 }
 

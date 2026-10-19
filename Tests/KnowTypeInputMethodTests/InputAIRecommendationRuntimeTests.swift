@@ -1,6 +1,7 @@
 import KnowTypeAI
 import KnowTypeCore
 @testable import KnowTypeInputMethod
+import KnowTypeProviders
 import XCTest
 
 final class InputAIRecommendationRuntimeTests: XCTestCase {
@@ -719,6 +720,209 @@ final class InputAIRecommendationRuntimeTests: XCTestCase {
         XCTAssertFalse(publishedStates.contains(.idle))
     }
 
+    @MainActor
+    func testResetCancelsInFlightTransportAndUnblocksNextSessionImmediately() async {
+        let provider = CancellationTrackingRuntimeAIRecommendationProvider()
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let first = runtime.schedule(
+            context: context(rawInput: "abc", compositionID: 1, rawRevision: 1),
+            currentSnapshot: { snapshot(rawInput: "abc", compositionID: 1, rawRevision: 1) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(first))
+        let firstStarted = await waitUntilAsync { await provider.requests.count == 1 }
+        XCTAssertTrue(firstStarted)
+
+        XCTAssertEqual(
+            runtime.reset(compositionID: 1, rawLength: 0, reason: "composition_invalidated"),
+            .idle
+        )
+        let firstCancelled = await waitUntilAsync {
+            await provider.cancelledRawInputs.contains("abc")
+        }
+        XCTAssertTrue(firstCancelled)
+
+        let second = runtime.schedule(
+            context: context(rawInput: "def", compositionID: 2, rawRevision: 1),
+            currentSnapshot: { snapshot(rawInput: "def", compositionID: 2, rawRevision: 1) },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(second))
+        let secondStarted = await waitUntilAsync { await provider.requests.count == 2 }
+        XCTAssertTrue(secondStarted)
+
+        await provider.finish(rawInput: "def", state: readyState("第二会话结果"))
+        let secondReady = await waitUntil {
+            publishedStates == [readyState("第二会话结果")]
+        }
+        XCTAssertTrue(secondReady)
+    }
+
+    @MainActor
+    func testTrailingWorkRespectsDispatchDebounceAndCancelsIfReplacedDuringDebounce() async {
+        let provider = ControlledRuntimeAIRecommendationProvider()
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: provider,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 150,
+            diagnosticSink: diagnosticSink
+        )
+        let currentSnapshot = RuntimeSnapshotBox(
+            snapshot(rawInput: "abc", compositionID: 1, rawRevision: 1)
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        let first = runtime.schedule(
+            context: context(rawInput: "abc", compositionID: 1, rawRevision: 1),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(first))
+        let firstStarted = await waitUntilAsync { await provider.requests.count == 1 }
+        XCTAssertTrue(firstStarted)
+
+        currentSnapshot.update(snapshot(rawInput: "abcd", compositionID: 1, rawRevision: 2))
+        let second = runtime.schedule(
+            context: context(rawInput: "abcd", compositionID: 1, rawRevision: 2),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let secondRequestID = pendingRequestID(second)
+        XCTAssertNotNil(secondRequestID)
+
+        // Complete the first in-flight request; trailing request ("abcd") must enter debounce rather than immediately starting transport.
+        await provider.finish(rawInput: "abc", state: readyState("旧结果"))
+        let trailingDeferred = await waitUntil {
+            diagnosticSink.events.contains {
+                $0.stage == .dispatchDeferred && $0.requestID == secondRequestID
+            }
+        }
+        XCTAssertTrue(trailingDeferred, "\(diagnosticSink.events)")
+        let countDuringTrailingDebounce = await provider.requests.count
+        XCTAssertEqual(countDuringTrailingDebounce, 1)
+
+        // Replace during the trailing debounce window; "abcd" must be cancelled before hitting the provider.
+        currentSnapshot.update(snapshot(rawInput: "abcde", compositionID: 1, rawRevision: 3))
+        let third = runtime.schedule(
+            context: context(rawInput: "abcde", compositionID: 1, rawRevision: 3),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(third))
+        XCTAssertTrue(diagnosticSink.events.contains {
+            $0.stage == .dispatchCancelledByNewInput && $0.requestID == secondRequestID
+        })
+
+        let thirdStarted = await waitUntilAsync { await provider.requests.count == 2 }
+        XCTAssertTrue(thirdStarted)
+        let dispatchedInputs = await provider.requests.map(\.rawInput)
+        XCTAssertEqual(dispatchedInputs, ["abc", "abcde"])
+
+        await provider.finish(rawInput: "abcde", state: readyState("最终结果"))
+        let finalReady = await waitUntil {
+            publishedStates == [readyState("最终结果")]
+        }
+        XCTAssertTrue(finalReady)
+    }
+
+    @MainActor
+    func testInputChangedWhileWaitingForGateDrainageCancelsPreAdmissionRequestWithoutDispatchingStaleInput() async {
+        let llmProvider = DrainageBlockingTestLLMProvider(
+            providerName: "drainage-blocking-\(UUID().uuidString)",
+            blockedRawInput: "sessionone",
+            cancellationUnwindDelayNanoseconds: 350_000_000
+        )
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KnowTypeDrainageTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let aiRuntime = AIRecommendationRuntime(
+            provider: llmProvider,
+            environmentStore: EnvironmentDocumentStore(fileURL: tempDir.appendingPathComponent("ENV.md")),
+            correctionStore: CorrectionInstructionStore(fileURL: tempDir.appendingPathComponent("CORRECTION.md")),
+            debounceMilliseconds: 0,
+            hardTimeoutMilliseconds: 10_000,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            requestGate: ProviderRequestGate()
+        )
+        let diagnosticSink = RecordingRuntimeDiagnosticSink()
+        let runtime = InputAIRecommendationRuntime(
+            provider: aiRuntime,
+            providerAvailability: nil,
+            hasEagerProvider: true,
+            dispatchDebounceMilliseconds: 0,
+            diagnosticSink: diagnosticSink
+        )
+        let currentSnapshot = RuntimeSnapshotBox(
+            snapshot(rawInput: "sessionone", compositionID: 1, rawRevision: 1)
+        )
+        var publishedStates: [AIRecommendationState] = []
+
+        _ = runtime.schedule(
+            context: context(rawInput: "sessionone", compositionID: 1, rawRevision: 1),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let firstStarted = await waitUntilAsync {
+            await llmProvider.dispatchedRawInputs == ["sessionone"]
+        }
+        XCTAssertTrue(firstStarted)
+
+        // End session 1; its transport is cancelled and enters CancellingAttemptTracker for 350ms.
+        XCTAssertEqual(
+            runtime.reset(compositionID: 1, rawLength: 0, reason: "commit"),
+            .idle
+        )
+
+        // Start session 2 with "nihao". Its transportTask starts and suspends in drainCancellingAttempts.
+        currentSnapshot.update(snapshot(rawInput: "nihao", compositionID: 2, rawRevision: 1))
+        let intermediate = runtime.schedule(
+            context: context(rawInput: "nihao", compositionID: 2, rawRevision: 1),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        let intermediateRequestID = pendingRequestID(intermediate)
+        XCTAssertNotNil(intermediateRequestID)
+
+        let waitingForDrainage = await waitUntil {
+            guard let intermediateRequestID else { return false }
+            return AIRecommendationRuntime.isWaitingForGateDrainage(requestID: intermediateRequestID)
+        }
+        XCTAssertTrue(waitingForDrainage)
+
+        // User types more during gate drainage ("nihaoma"). The pre-admission "nihao" request must be cancelled.
+        currentSnapshot.update(snapshot(rawInput: "nihaoma", compositionID: 2, rawRevision: 2))
+        _ = runtime.reset(compositionID: 2, rawLength: 7, reason: "input_changed")
+        let latest = runtime.schedule(
+            context: context(rawInput: "nihaoma", compositionID: 2, rawRevision: 2),
+            currentSnapshot: { currentSnapshot.snapshot },
+            onStateChange: { publishedStates.append($0) }
+        )
+        XCTAssertNotNil(pendingRequestID(latest))
+
+        let latestReady = await waitUntil(timeout: 3) {
+            publishedStates.contains { state in
+                if case .ready(let candidate) = state {
+                    return candidate.displayText == "drainage-completed-nihaoma"
+                }
+                return false
+            }
+        }
+        XCTAssertTrue(latestReady, "\(publishedStates)")
+        let dispatchedRawInputs = await llmProvider.dispatchedRawInputs
+        XCTAssertEqual(dispatchedRawInputs, ["sessionone", "nihaoma"])
+    }
+
     private func pendingRequestID(_ state: AIRecommendationState) -> UUID? {
         guard case .pending(let requestID) = state else {
             return nil
@@ -859,6 +1063,47 @@ private actor ControlledRuntimeAIRecommendationProvider: AIRecommendationProvidi
     }
 }
 
+private actor CancellationTrackingRuntimeAIRecommendationProvider: AIRecommendationProviding {
+    private var recordedRequests: [AIRecommendationRequest] = []
+    private var cancelledInputs: Set<String> = []
+    private var continuations: [String: CheckedContinuation<AIRecommendationState, Never>] = [:]
+
+    func recommendation(for request: AIRecommendationRequest) async -> AIRecommendationState {
+        recordedRequests.append(request)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    cancelledInputs.insert(request.rawInput)
+                    continuation.resume(returning: .idle)
+                } else {
+                    continuations[request.rawInput] = continuation
+                }
+            }
+        } onCancel: {
+            Task {
+                await self.markCancelled(rawInput: request.rawInput)
+            }
+        }
+    }
+
+    private func markCancelled(rawInput: String) {
+        cancelledInputs.insert(rawInput)
+        continuations.removeValue(forKey: rawInput)?.resume(returning: .idle)
+    }
+
+    func finish(rawInput: String, state: AIRecommendationState) {
+        continuations.removeValue(forKey: rawInput)?.resume(returning: state)
+    }
+
+    var requests: [AIRecommendationRequest] {
+        recordedRequests
+    }
+
+    var cancelledRawInputs: Set<String> {
+        cancelledInputs
+    }
+}
+
 private final class RuntimeSnapshotBox: @unchecked Sendable {
     private let lock = NSLock()
     private var currentSnapshot: InputAIRecommendationRuntimeCompositionSnapshot
@@ -896,5 +1141,46 @@ private final class RecordingRuntimeDiagnosticSink: AIRecommendationDiagnosticSi
         let events = recordedEvents
         lock.unlock()
         return events
+    }
+}
+
+private actor DrainageBlockingTestLLMProvider: LLMProvider {
+    nonisolated let providerName: String
+    private let blockedRawInput: String
+    private let cancellationUnwindDelayNanoseconds: UInt64
+    private var recordedRawInputs: [String] = []
+
+    init(
+        providerName: String,
+        blockedRawInput: String,
+        cancellationUnwindDelayNanoseconds: UInt64
+    ) {
+        self.providerName = providerName
+        self.blockedRawInput = blockedRawInput
+        self.cancellationUnwindDelayNanoseconds = cancellationUnwindDelayNanoseconds
+    }
+
+    func complete(_ request: LLMRequest) async throws -> LLMResponse {
+        let rawInput = request.rawInput ?? ""
+        recordedRawInputs.append(rawInput)
+        if rawInput == blockedRawInput {
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                if cancellationUnwindDelayNanoseconds > 0 {
+                    await Task.detached {
+                        try? await Task.sleep(nanoseconds: self.cancellationUnwindDelayNanoseconds)
+                    }.value
+                }
+                throw error
+            }
+        }
+        return LLMResponse(candidates: [
+            LLMCandidate(text: "drainage-completed-\(rawInput)", confidence: 0.9)
+        ])
+    }
+
+    var dispatchedRawInputs: [String] {
+        recordedRawInputs
     }
 }

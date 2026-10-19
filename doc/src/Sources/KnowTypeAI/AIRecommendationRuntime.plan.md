@@ -36,6 +36,17 @@ construction, cache interaction, health reporting, and the final
 - Cache keys use the actual budgeted request payload fingerprint. The shared
   `ProviderRequestGate` enforces one in-flight request per hashed provider
   identity and applies generation fencing and bounded cooldowns.
+- `Defaults.debounceMilliseconds` is `0` so the provider runtime does not add a
+  second 350 ms sleep after `InputAIRecommendationRuntime`'s 450 ms input-method
+  debounce; callers that want standalone provider-layer debounce can still pass
+  an explicit `debounceMilliseconds`.
+- When an individual waiter for an in-flight payload fingerprint is cancelled,
+  that caller unblocks immediately with `.idle` while any surviving waiter keeps
+  the shared attempt alive; when all waiters are cancelled, the shared attempt
+  task is cancelled immediately and tracked per `(requestGate, providerIdentity)`
+  until its `ProviderRequestGate` lease unwinds, preventing a cancelled
+  composition session from holding the same provider's gate busy until hard
+  timeout without delaying other providers sharing the gate.
 - The shared payload task owns provider-health observation for its physical
   attempt: it records one successful result or one qualifying failure. Awaiting
   callers only consume that result and do not repeat health observation or

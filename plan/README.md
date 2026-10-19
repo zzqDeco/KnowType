@@ -162,7 +162,7 @@ when converting a shipped plan into a short record.
 | [release-0.2.5.plan.md](release-0.2.5.plan.md) | Prepare and publish the KnowType v0.2.5 Developer Preview release | Delivered |
 | [release-0.2.4.plan.md](release-0.2.4.plan.md) | Prepare and publish the KnowType v0.2.4 Developer Preview release | Delivered |
 | [release-0.2.3.plan.md](release-0.2.3.plan.md) | Prepare and publish the KnowType v0.2.3 Developer Preview release | Delivered |
-| [ai-recommendation-cancellation-sequencing.plan.md](ai-recommendation-cancellation-sequencing.plan.md) | Restore best-effort cancellation for stale started AI transports without poisoning provider health, validated by local debug-log summary | Delivered |
+| [ai-recommendation-cancellation-sequencing.plan.md](ai-recommendation-cancellation-sequencing.plan.md) | Cancel in-flight AI transport on session-ending resets, debounce trailing dispatch, and remove double-debounce defaults | Delivered |
 | [input-commit-decision-runtime-refactor.plan.md](input-commit-decision-runtime-refactor.plan.md) | Extract Space, Tab, Option-number, selected-row, AI acceptance, and prefix-learning commit decisions from the coordinator | Delivered |
 | [ai-recommendation-stability-latency.plan.md](ai-recommendation-stability-latency.plan.md) | Original AI dispatch debounce and stale-drop stabilization; later follow-up restores stale transport cancellation | Delivered |
 | [input-composition-lifecycle-runtime-refactor.plan.md](input-composition-lifecycle-runtime-refactor.plan.md) | Extract composition begin/finish lifecycle planning and trace-once state from the coordinator | Delivered |

@@ -11,13 +11,21 @@ provider request run to completion by design.
 
 ## Scope
 
-- `InputAIRecommendationRuntime` cancels active provider tasks after transport
-  starts when the request becomes stale.
-- `AIRecommendationRuntime` treats task cancellation and URL-session
-  cancellation as normal cancellation, not provider failure.
-- AI diagnostics distinguish cancellation requested, new-input cancellation,
-  stale result drops, provider errors, and hard timeouts without logging raw
-  input, prompt/context bodies, candidate text, or provider output.
+- `InputAIRecommendationRuntime` keeps an in-flight transport during
+  mid-composition input changes (`reason == "input_changed"` with non-empty
+  input) and coalesces newer keystrokes into `trailingWork`, while explicit
+  session reset, commit, Escape, deactivate, or close cancels both deferred and
+  in-flight transport tasks immediately.
+- `dispatchTrailingIfNeeded()` routes trailing work through `startDeferred` so
+  trailing requests still wait for the 450 ms input-method debounce window.
+- `AIRecommendationRuntime` defaults `debounceMilliseconds` to `0` (avoiding a
+  second 350 ms debounce layer), propagates task cancellation to in-flight
+  provider attempt tasks when all waiters cancel so `ProviderRequestGate` is
+  released immediately, and treats task/URL cancellation as normal cancellation
+  rather than provider failure.
+- AI diagnostics distinguish cancellation, stale result drops, provider errors,
+  and hard timeouts without logging raw input, prompt/context bodies, candidate
+  text, or provider output.
 
 Non-goals:
 
@@ -29,17 +37,23 @@ Non-goals:
 
 - Pre-dispatch `dispatchDeferred` tasks remain cheaply cancellable before the
   provider is called.
-- Once `transportStarted`, a newer input turn records
-  `transport_left_stale`, `transport_cancellation_requested`, and
-  `transport_cancelled_by_new_input`, then cancels the active task
-  best-effort.
-- Reset, deactivate, and close record the stale/cancellation request and cancel
-  the active task without showing `AI 暂不可用`.
-- `AIRecommendationRuntime` returns `.idle` for `CancellationError` and
-  `URLError(.cancelled)` / `NSURLErrorCancelled`; these paths do not update
-  provider health or cooldown.
+- During active composition typing, an already-started transport records
+  `transport_left_stale` and queues the latest revision in `trailingWork`; when
+  the active transport finishes, `dispatchTrailingIfNeeded()` starts a fresh
+  debounce window via `startDeferred`.
+- Session reset, commit, Escape, deactivate, and close record `cancel_previous`
+  and `transport_left_stale`, cancel `transportTask`, clear `activeWork` and
+  `trailingWork`, and release the single-flight slot without showing
+  `AI 暂不可用`.
+- `AIRecommendationRuntime` registers cancellation tracking and cancels its
+  in-flight attempt task before resuming the final cancelled waiter, and drains
+  any tracked cancelling attempt after a cache miss (before gate
+  admission/dispatch), returning `.idle` for `CancellationError` and
+  `URLError(.cancelled)` / `NSURLErrorCancelled` without updating provider
+  health or cooldown.
 - Hard timeout and real provider/decode/HTTP failures keep existing failure and
-  cooldown behavior.
+  cooldown behavior, and `doc/architecture.plan.md` / `doc/interfaces.plan.md`
+  record the updated cancellation and debounce contracts.
 
 ## Validation
 
