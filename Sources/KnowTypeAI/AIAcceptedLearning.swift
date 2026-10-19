@@ -175,23 +175,24 @@ func withAcceptedLearningFileLock<T>(
     return try body()
 }
 
-func withExistingAcceptedLearningFileLock<T>(
+func withExistingAcceptedLearningFileLock<T, R>(
     lockURL: URL?,
     fileManager: FileManager = .default,
-    _ body: () throws -> T
-) throws -> T {
+    _ body: () throws -> T,
+    commit: (T) throws -> R
+) throws -> R {
     acceptedLearningFileLock.lock()
     defer {
         acceptedLearningFileLock.unlock()
     }
 
     guard let lockURL else {
-        return try body()
+        return try commit(body())
     }
     if !fileManager.fileExists(atPath: lockURL.path) {
         let initialResult = try body()
         guard fileManager.fileExists(atPath: lockURL.path) else {
-            return initialResult
+            return try commit(initialResult)
         }
     }
     let handle = try FileHandle(forWritingTo: lockURL)
@@ -204,7 +205,20 @@ func withExistingAcceptedLearningFileLock<T>(
     defer {
         flock(handle.fileDescriptor, LOCK_UN)
     }
-    return try body()
+    return try commit(body())
+}
+
+func withExistingAcceptedLearningFileLock<T>(
+    lockURL: URL?,
+    fileManager: FileManager = .default,
+    _ body: () throws -> T
+) throws -> T {
+    try withExistingAcceptedLearningFileLock(
+        lockURL: lockURL,
+        fileManager: fileManager,
+        body,
+        commit: { $0 }
+    )
 }
 
 public struct AIAcceptedLearningRecord: Codable, Sendable, Equatable {
@@ -1010,10 +1024,15 @@ public final class AIAcceptedLearningStore:
         }
     }
 
-    @discardableResult
-    private func syncRecordsAfterExternalClearLocked() throws -> [AIAcceptedLearningSummaryReadyEvent] {
+    private struct DiskSyncCandidate {
+        let reloadedRecords: [AIAcceptedLearningRecord]
+        let finalMetadata: DiskStateMetadata?
+        let markerModifiedAt: Date?
+    }
+
+    private func loadDiskSyncCandidate() throws -> DiskSyncCandidate? {
         guard historyURL != nil else {
-            return []
+            return nil
         }
         let currentMetadata = Self.diskStateMetadata(
             historyURL: historyURL,
@@ -1027,7 +1046,7 @@ public final class AIAcceptedLearningStore:
         let shouldReload = markerChanged || metadataChanged
         lock.unlock()
         guard shouldReload else {
-            return []
+            return nil
         }
         let loaded = try Self.loadRecordsWithMetadata(
             from: historyURL,
@@ -1037,7 +1056,22 @@ public final class AIAcceptedLearningStore:
         let reloadedRecords = loaded.records.count > maxRecordCount
             ? Array(loaded.records.suffix(maxRecordCount))
             : loaded.records
-        let finalMetadata = loaded.metadata
+        return DiskSyncCandidate(
+            reloadedRecords: reloadedRecords,
+            finalMetadata: loaded.metadata,
+            markerModifiedAt: markerModifiedAt
+        )
+    }
+
+    private func applyDiskSyncCandidate(
+        _ candidate: DiskSyncCandidate?
+    ) -> [AIAcceptedLearningSummaryReadyEvent] {
+        guard let candidate else {
+            return []
+        }
+        let reloadedRecords = candidate.reloadedRecords
+        let finalMetadata = candidate.finalMetadata
+        let markerModifiedAt = candidate.markerModifiedAt
         let generatedAt = Date()
         let reloadedSummary = Self.buildSummary(records: reloadedRecords, generatedAt: generatedAt)
         let reloadedSchemaSummaries = Self.buildSchemaSummaries(records: reloadedRecords, generatedAt: generatedAt)
@@ -1073,6 +1107,12 @@ public final class AIAcceptedLearningStore:
         )
     }
 
+    @discardableResult
+    private func syncRecordsAfterExternalClearLocked() throws -> [AIAcceptedLearningSummaryReadyEvent] {
+        let candidate = try loadDiskSyncCandidate()
+        return applyDiskSyncCandidate(candidate)
+    }
+
     fileprivate func synchronizeWithDiskState() {
         syncRecordsAfterExternalClear()
     }
@@ -1082,10 +1122,14 @@ public final class AIAcceptedLearningStore:
         do {
             events = try withExistingAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
-                fileManager: fileManager
-            ) {
-                try syncRecordsAfterExternalClearLocked()
-            }
+                fileManager: fileManager,
+                {
+                    try loadDiskSyncCandidate()
+                },
+                commit: { candidate in
+                    applyDiskSyncCandidate(candidate)
+                }
+            )
         } catch {
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(

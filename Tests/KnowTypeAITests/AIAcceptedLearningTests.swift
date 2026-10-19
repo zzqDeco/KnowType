@@ -952,8 +952,9 @@ final class AIAcceptedLearningTests: XCTestCase {
             maxRecordCount: 1
         )
 
-        _ = try maintenance.clear(confirm: true)
+        XCTAssertThrowsError(try maintenance.clear(confirm: true))
         XCTAssertTrue(FileManager.default.fileExists(atPath: evictedCommitsURL.path))
+        XCTAssertNil(store.snapshot())
 
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: lexicalJSONURL.path)
         _ = try maintenance.clear(confirm: true)
@@ -1034,6 +1035,27 @@ final class AIAcceptedLearningTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: historyURL.path)
         XCTAssertEqual(reader.snapshot(schemaID: "pinyin_simp")?.acceptedCount, 2)
         XCTAssertEqual(reader.allRecords().count, 2)
+
+        let lockURL = dir.appendingPathComponent("test-optimistic.lock")
+        var bodyCalls = 0
+        var commitCalls = 0
+        let committedValue: Int = try withExistingAcceptedLearningFileLock(
+            lockURL: lockURL,
+            {
+                bodyCalls += 1
+                if bodyCalls == 1 {
+                    FileManager.default.createFile(atPath: lockURL.path, contents: nil)
+                }
+                return bodyCalls
+            },
+            commit: { candidate in
+                commitCalls += 1
+                return candidate * 10
+            }
+        )
+        XCTAssertEqual(bodyCalls, 2)
+        XCTAssertEqual(commitCalls, 1)
+        XCTAssertEqual(committedValue, 20)
     }
 }
 
