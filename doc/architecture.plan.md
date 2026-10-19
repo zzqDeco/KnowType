@@ -258,17 +258,20 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   append, startup compaction, or delayed rebuild can proceed; undecodable rows
   keep their original bytes rather than being silently dropped. Existing cached
   state survives failed reads, and fully decodable repaired history resumes
-  normal bounded retention. Applied peer changes emit schema invalidations,
-  including nonempty surviving schemas, even if the subsequent local append
+  normal bounded retention. A complete EOF row without LF is safely separated
+  on append; a truncated tail remains untouched. Applied peer changes emit schema
+  invalidations, including nonempty surviving schemas, even if the subsequent local append
   fails. Callbacks run outside both the store and file locks, without replaying
   unchanged metadata-current events, so lexical-profile observers can refresh.
 - `AIAcceptedLearningMaintenance` shares the history lock and refuses rebuild
   on undecodable rows; read-only status reports invalid-row warnings. Confirmed
-  clear remains destructive, including undecodable rows. Before deleting
-  history, clear pins prior retry entries, the eviction ledger, and active-record
-  digests in optional `pendingEvictedCommitEntries` within the existing
-  schema-version-1 `accepted-ai-learning.clear.json` marker. No new sidecar is
+  clear remains destructive, including undecodable rows. Before changing the
+  ledger or deleting history, clear pins prior retry entries, the ledger, and
+  active-record digests in optional `pendingEvictedCommitEntries` within the
+  existing schema-version-1 `accepted-ai-learning.clear.json` marker. No new sidecar is
   added. Ordinary appends may rotate the ledger but do not change these pins.
+  Pin-write failure leaves ledger/history unchanged; after a successful pin,
+  later failures still synchronize peers against actual retained disk history.
   Clear removes the ledger only after lexical JSON/markdown scrub succeeds,
   then rewrites the marker without the pending field. Old markers without that
   field remain readable; old maintenance writers do not retain it, so mixed

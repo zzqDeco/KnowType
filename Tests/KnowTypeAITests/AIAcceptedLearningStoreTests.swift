@@ -3,6 +3,86 @@ import XCTest
 @testable import KnowTypeAI
 
 final class AIAcceptedLearningStoreTests: XCTestCase {
+    func testAppendSeparatesValidFinalRecordWithoutLineFeed() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let records = acceptedHistoryRecords(3)
+        var original = try acceptedHistoryData(Array(records.prefix(2)))
+        original.removeLast()
+        XCTAssertEqual(original.last, 0x7D)
+        try original.write(to: historyURL, options: .atomic)
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        XCTAssertEqual(store.snapshot()?.acceptedCount, 2)
+
+        await store.recordAcceptedAI(records[2])
+
+        let appended = try Data(contentsOf: historyURL)
+        XCTAssertEqual(Data(appended.prefix(original.count)), original)
+        XCTAssertEqual(appended.dropFirst(original.count).first, 0x0A)
+        let lines = appended.split(separator: 0x0A)
+        XCTAssertEqual(lines.count, 3)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try lines.map { try decoder.decode(AIAcceptedLearningRecord.self, from: Data($0)) }
+        XCTAssertEqual(decoded.map(\.textHash), records.map(\.textHash))
+        let reloaded = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        XCTAssertEqual(reloaded.allRecords().map(\.textHash), records.map(\.textHash))
+        XCTAssertEqual(reloaded.snapshot()?.acceptedCount, 3)
+    }
+
+    func testAppendPreservesTruncatedFinalRecordWithoutLineFeed() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let records = acceptedHistoryRecords(3)
+        let firstRow = try acceptedHistoryData([records[0]])
+        try firstRow.write(to: historyURL, options: .atomic)
+        let diagnostics = RecordingDiagnosticSink()
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: nil,
+            mirrorURL: nil,
+            diagnosticSink: diagnostics,
+            summaryDelayNanoseconds: 0
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var truncatedRow = try encoder.encode(records[1])
+        XCTAssertEqual(truncatedRow.removeLast(), 0x7D)
+        var original = firstRow
+        original.append(truncatedRow)
+        XCTAssertNotEqual(original.last, 0x0A)
+        try original.write(to: historyURL, options: .atomic)
+
+        await store.recordAcceptedAI(records[2])
+
+        XCTAssertEqual(try Data(contentsOf: historyURL), original)
+        XCTAssertEqual(store.allRecords().map(\.textHash), [records[0].textHash])
+        XCTAssertTrue(diagnostics.events.contains { $0.reason?.hasPrefix("accepted_learning_write_failed:") == true })
+        let reloaded = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        _ = reloaded.snapshot()
+        XCTAssertEqual(try Data(contentsOf: historyURL), original)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("accepted-ai-learning.evicted-commits.json").path
+        ))
+    }
+
     func testAppendRefusesUndecodableHistoryRowsAndRecoversAfterRepair() async throws {
         for undecodableRow in try undecodableHistoryRows() {
             let directory = temporaryDirectory()

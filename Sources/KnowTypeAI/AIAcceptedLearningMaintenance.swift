@@ -328,6 +328,12 @@ public struct AIAcceptedLearningMaintenance {
             )
             let pendingClearEntries = try pendingClearEvictedCommitEntries()
             let currentRecordDigests = acceptedLearningCommitDigestVariants(from: currentRecords)
+            let evictedCommitEntries = pendingClearEntries
+                .union(preClearEvictedEntries)
+                .union(currentRecordDigests)
+            // Persist scrub inputs before any ledger or history mutation.
+            try atomicWrite(clearMarkerPayload(pendingEvictedCommitEntries: evictedCommitEntries), to: clearMarkerURL)
+            didWriteClearMarkers = true
             if !currentRecords.isEmpty {
                 try recordAcceptedLearningEvictedCommits(
                     currentRecords,
@@ -337,12 +343,6 @@ public struct AIAcceptedLearningMaintenance {
                     fileManager: fileManager
                 )
             }
-            let evictedCommitEntries = pendingClearEntries
-                .union(preClearEvictedEntries)
-                .union(currentRecordDigests)
-            // Pin scrub inputs separately from the ordinary, rotating eviction ledger.
-            try atomicWrite(clearMarkerPayload(pendingEvictedCommitEntries: evictedCommitEntries), to: clearMarkerURL)
-            didWriteClearMarkers = true
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)

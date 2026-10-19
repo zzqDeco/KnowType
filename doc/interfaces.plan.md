@@ -948,6 +948,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   than rewriting only the decoded subset. Cached state survives failed reads;
   cold-start repair retries after repaired file metadata changes. Blank and
   whitespace-only lines are ignored, and diagnostics do not include row text
+- accepts a complete final JSON row without LF. Under the file lock, fast
+  append prefixes its new row with LF when needed, preserving existing bytes;
+  a truncated EOF row is undecodable and remains untouched, not auto-repaired
 - emits summary-ready metadata after persisted rebuilds and applied external
   history changes, only for changed schemas. Events contain schema id, history
   hash, and counts, never user text; they cover nonempty surviving schemas and
@@ -980,10 +983,14 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   ENV, CORRECTION, provider profiles, Keychain secrets, or Rime userdb
 - retry protection extends the existing `accepted-ai-learning.clear.json`
   marker, not a new sidecar. Schema version remains `1`, with `clearedAt` and
-  optional `[String]` field `pendingEvictedCommitEntries`. Before deleting
-  history, clear atomically pins the union of prior pending entries, the
-  pre-clear eviction ledger, and active-record commit digests. New entries are
-  digests; inherited legacy ledger entries retain their matching semantics
+  optional `[String]` field `pendingEvictedCommitEntries`. Before changing the
+  ledger or deleting history, clear atomically pins the union of prior pending
+  entries, the pre-clear ledger, and active-record commit digests. Pin-write
+  failure leaves ledger/history and other learning files unchanged; no new
+  durable protection can be assumed against future ordinary rotation. Once the pin
+  is durable, later failures still synchronize peers with actual disk history
+  outside the file lock. New entries are digests; inherited legacy ledger
+  entries retain their matching semantics
 - ordinary append/compaction never rewrites the clear marker, so required
   scrub inputs remain available even after more accepts rotate the ledger back
   to 4,096 entries. Retry reloads those pins from disk. Only after lexical

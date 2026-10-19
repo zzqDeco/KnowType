@@ -3,6 +3,7 @@
 Status: Active
 
 Implementation base: `64aa62dde195b539d2e5540b7736aef9975f1ef3`.
+Review remediation base: `b147966d8048507e5255b847d6560acc04418fad`.
 The four fixes and regression tests are present for independent review;
 CI-only functional validation is pending. This is not a delivery or merge record.
 
@@ -21,10 +22,12 @@ CI-only functional validation is pending. This is not a delivery or merge record
 
 - Implementation: `AIAcceptedLearningStore`,
   `AIAcceptedLearningMaintenance`, and `TextProtection`, with focused AI, core,
-  and lexical-profile runtime regression tests. Their code/tests and
-  module-specific notes are frozen during this shared-documentation step.
+  and lexical-profile runtime regression tests. Core code/tests and its module
+  notes remain frozen; review remediation is limited to accepted-learning
+  persistence ordering and EOF append boundaries.
 - Shared documentation: README / README_CN, architecture, interfaces, this
-  plan, and its single entry in the plan index. No workflow or setup changes.
+  plan, and its single entry in the plan index. Review follow-up updates only
+  affected contracts, with no workflow, setup, or additional index changes.
 - Non-goals: new sidecars, full-history retention, cloud/provider policy,
   input-method UI or production runtime edits, installation, release, or
   mixed-old-writer recovery guarantees.
@@ -33,14 +36,18 @@ CI-only functional validation is pending. This is not a delivery or merge record
 
 ### Failed Clear Recovery
 
-- Keep the ordinary eviction ledger capped at 4,096 entries. Before deleting
-  history, atomically pin all required scrub inputs in optional
-  `pendingEvictedCommitEntries: [String]` in the existing schema-version-1
-  `accepted-ai-learning.clear.json` marker; no new sidecar is added.
+- Keep the ordinary eviction ledger capped at 4,096 entries. Before changing
+  the ledger or deleting history, atomically pin required scrub inputs in the
+  existing schema-version-1 `accepted-ai-learning.clear.json` marker using
+  optional `pendingEvictedCommitEntries: [String]`; no new sidecar is added.
 - Retry unions prior pins, the current ledger, and active-record digests.
   Ordinary compaction can rotate the ledger but cannot discard the marker's
   pins. Successful lexical JSON/markdown scrub precedes ledger deletion and
   removal of the pending marker field; failures leave retry inputs available.
+- If pin persistence fails, leave ledger/history and other learning files
+  unchanged; an unwritable marker cannot create durable recovery state. After
+  pin persistence succeeds, later failures must still synchronize peer stores
+  with the actual disk records, not assume history was deleted.
 - Old markers without the field remain readable. Old maintenance writers do
   not retain the new field when replacing the marker, so pending clears must
   use the current writer; this is not seamless mixed-version write support.
@@ -61,6 +68,9 @@ CI-only functional validation is pending. This is not a delivery or merge record
 - Maintenance rebuild reports `undecodableHistoryRows` before data rewrites;
   read-only status reports `invalid_history_lines:<count>`. Repairing the data
   restores normal bounded compaction. Blank/whitespace-only rows are ignored.
+- Accept complete final JSON without LF and insert a delimiter before the next
+  fast append under the file lock. A truncated EOF row, including one without
+  LF, remains byte-for-byte unchanged and blocks append instead.
 - Explicit confirmed clear remains destructive and may delete undecodable
   rows; it does not claim to interpret unknown row contents.
 
@@ -88,6 +98,10 @@ CI-only functional validation is pending. This is not a delivery or merge record
   append/startup/maintenance using malformed and genuinely incompatible
   complete JSON rows; confirmed clear's destructive exception and legacy-marker
   reading; `.bar` URL ranges, local-protection metadata, and code exclusions.
+- Review-remediation regressions: marker-write failure leaves ledger/history
+  unchanged; ledger-write failure after a successful pin preserves retry state
+  and synchronizes peers; append/reload accepts a complete EOF row without LF,
+  while a genuinely truncated EOF row without LF keeps its original bytes.
 - Focused CI diagnostic selectors, not a replacement for the full suite:
   `AIAcceptedLearningTests`, `AIAcceptedLearningStoreTests`,
   `LexicalProfileRuntimeTests`, and `KnowTypeCoreTests` via `swift test --filter`.
@@ -96,8 +110,8 @@ CI-only functional validation is pending. This is not a delivery or merge record
 
 ## Assumptions
 
-- The source at the implementation base is authoritative for these contracts;
-  this serial step changes documentation only and does not reopen frozen code.
+- Current source is authoritative for these contracts. Review remediation does
+  not reopen frozen core behavior or pre-existing Markdown scrub-filter policy.
 - `.bar` classification is a lexical heuristic, not domain ownership or intent
   detection: otherwise unrecognized `venue.bar` favors a domain, while known
   code prefixes and `nic.bar (details)` favor code-like interpretation.

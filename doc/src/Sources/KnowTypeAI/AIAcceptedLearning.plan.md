@@ -71,18 +71,27 @@ on a failed read; a cold start without cached records defers repair instead of
 learning from a partial history. After an external repair restores decodable
 rows, normal sliding-window compaction resumes (startup repair also retries
 when the file metadata changes). Blank and whitespace-only lines are ignored.
+A complete final JSON row may lack LF. After the whole history decodes, fast
+append checks the final byte under the file lock and prefixes the new row with
+LF when needed, without rewriting existing bytes. A genuinely truncated EOF row
+still blocks append unchanged, with or without a trailing LF.
 
 `AIAcceptedLearningMaintenance` is the non-runtime control surface for this
 data. It powers `knowtype-accepted-learning-tool` and the
 `scripts/accepted-learning.sh` wrapper with read-only status, explicit rebuild,
 and guarded clear operations. Rebuild applies the same `maxRecordCount` sliding
 window and summary builder used by runtime learning. Maintenance writes share an
-interprocess lock file. Clear folds active accepted-learning records into the
-evicted-commits digest ledger (temporarily allowing the ledger to hold the
-pre-clear 4,096 evicted digests plus the active-window digests until the scrub
-completes). Before deleting history, it also atomically snapshots all required
-scrub entries into the optional `pendingEvictedCommitEntries` array in
-`accepted-ai-learning.clear.json`. This extends the existing schema-version-1
+interprocess lock file. Before changing the ledger or deleting history, clear
+atomically snapshots all required scrub entries into the optional
+`pendingEvictedCommitEntries` array in `accepted-ai-learning.clear.json`.
+Failure to persist that pin leaves ledger, history, and other learning files
+unchanged; it creates no new durable recovery snapshot, and subsequent ordinary
+ledger rotation still follows the normal bounded policy. Once the pin is durable,
+clear folds active records into the eviction ledger (temporarily allowing the
+pre-clear 4,096 digests plus active-window digests until scrub completes). A
+later failure still synchronizes peer stores outside the file lock; the marker
+requests a reload of actual disk history, not an assumption that clear completed.
+This extends the existing schema-version-1
 marker (`schemaVersion`, `clearedAt`); older markers without the array remain
 readable. New entries are commit digests, while inherited legacy ledger entries
 retain their matching semantics. Ordinary appends never mutate the marker, so

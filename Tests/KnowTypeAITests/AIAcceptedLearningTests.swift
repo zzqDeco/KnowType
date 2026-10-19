@@ -810,6 +810,138 @@ final class AIAcceptedLearningTests: XCTestCase {
         XCTAssertEqual(scrubbedProfile.lexicalContext.recentCommits, ["NormalUserCommit 普通提交"])
     }
 
+    func testClearMarkerWriteFailureLeavesLedgerAndHistoryUnchanged() async throws {
+        let dir = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let historyURL = dir.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = dir.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = dir.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let evictedURL = dir.appendingPathComponent("accepted-ai-learning.evicted-commits.json")
+        let markerDirectory = dir.appendingPathComponent("marker", isDirectory: true)
+        let ledger = (0..<4_096).map { String(format: "%064x", $0) }
+        try JSONEncoder().encode(ledger).write(to: evictedURL, options: .atomic)
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0
+        )
+        await store.recordAcceptedAI(AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            acceptedText: "ActiveBeforeMarkerFailure " + String(repeating: "long accepted text ", count: 4),
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test",
+            extractedTerms: []
+        ))
+        var maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            feedbackHistoryURL: dir.appendingPathComponent("feedback.jsonl"),
+            feedbackSummaryURL: dir.appendingPathComponent("feedback-summary.json"),
+            feedbackMirrorURL: dir.appendingPathComponent("FEEDBACK.md"),
+            lexicalJSONURL: dir.appendingPathComponent("lexical-profile.json"),
+            lexicalMarkdownURL: dir.appendingPathComponent("LEXICAL_PROFILE.md"),
+            fileManager: DirectoryWriteFailingFileManager(blockedDirectory: markerDirectory)
+        )
+        maintenance.clearMarkerURL = markerDirectory.appendingPathComponent("accepted-ai-learning.clear.json")
+        let otherURLs = [
+            maintenance.feedbackHistoryURL, maintenance.feedbackSummaryURL, maintenance.feedbackMirrorURL,
+            maintenance.lexicalJSONURL, maintenance.lexicalMarkdownURL
+        ]
+        for url in otherURLs {
+            try Data("{}".utf8).write(to: url, options: .atomic)
+        }
+        let preservedURLs = [historyURL, evictedURL, summaryURL, mirrorURL] + otherURLs
+        let originalBytes = try preservedURLs.map { try Data(contentsOf: $0) }
+
+        XCTAssertThrowsError(try maintenance.clear(confirm: true))
+
+        for (url, original) in zip(preservedURLs, originalBytes) {
+            XCTAssertEqual(try Data(contentsOf: url), original, url.lastPathComponent)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: maintenance.clearMarkerURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: maintenance.feedbackClearMarkerURL.path))
+        XCTAssertEqual(store.snapshot()?.acceptedCount, 1)
+
+        maintenance.fileManager = .default
+        _ = try maintenance.clear(confirm: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: historyURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: evictedURL.path))
+        XCTAssertNil(store.snapshot())
+    }
+
+    func testClearLedgerWriteFailureRetainsPinsAndSynchronizesPeers() async throws {
+        let dir = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let historyURL = dir.appendingPathComponent("accepted-ai-learning.jsonl")
+        let ledgerDirectory = dir.appendingPathComponent("ledger", isDirectory: true)
+        let first = AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            acceptedText: "First persisted commit",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let second = AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            acceptedText: "Peer persisted commit",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0
+        )
+        await store.recordAcceptedAI(first)
+        let events = SummaryReadyEventCollector()
+        let observerID = store.addSummaryReadyObserver { event in
+            events.record(event)
+            XCTAssertEqual(store.snapshot(schemaID: event.schemaID)?.acceptedCount ?? 0, event.acceptedCount)
+        }
+        defer { store.removeSummaryReadyObserver(observerID) }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let peerHistory = try [first, second].reduce(into: Data()) { data, record in
+            data.append(try encoder.encode(record))
+            data.append(0x0A)
+        }
+        try peerHistory.write(to: historyURL, options: .atomic)
+        var maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: dir.appendingPathComponent("accepted-ai-summary.json"),
+            mirrorURL: dir.appendingPathComponent("ACCEPTED_AI_LEARNING.md"),
+            feedbackHistoryURL: dir.appendingPathComponent("feedback.jsonl"),
+            feedbackSummaryURL: dir.appendingPathComponent("feedback-summary.json"),
+            feedbackMirrorURL: dir.appendingPathComponent("FEEDBACK.md"),
+            lexicalJSONURL: dir.appendingPathComponent("lexical-profile.json"),
+            lexicalMarkdownURL: dir.appendingPathComponent("LEXICAL_PROFILE.md"),
+            fileManager: DirectoryWriteFailingFileManager(blockedDirectory: ledgerDirectory)
+        )
+        maintenance.evictedCommitsURL = ledgerDirectory.appendingPathComponent("accepted-ai-learning.evicted-commits.json")
+
+        XCTAssertThrowsError(try maintenance.clear(confirm: true))
+
+        // Check delivery before a snapshot could independently discover the peer write.
+        XCTAssertEqual(events.snapshot().map(\.acceptedCount), [2])
+        XCTAssertEqual(try Data(contentsOf: historyURL), peerHistory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: maintenance.evictedCommitsURL.path))
+        let marker = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: maintenance.clearMarkerURL)) as? [String: Any]
+        )
+        let pinned = Set(try XCTUnwrap(marker["pendingEvictedCommitEntries"] as? [String]))
+        XCTAssertEqual(pinned, Set(acceptedLearningCommitDigestVariants(from: [first, second])))
+
+        maintenance.fileManager = .default
+        _ = try maintenance.clear(confirm: true)
+        XCTAssertEqual(events.snapshot().map(\.acceptedCount), [2, 0])
+        XCTAssertNil(store.snapshot())
+    }
+
     func testFailedClearPinsScrubEntriesAcrossFurtherCompactionAndReload() async throws {
         let dir = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }

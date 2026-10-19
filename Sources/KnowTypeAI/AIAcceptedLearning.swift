@@ -908,9 +908,19 @@ public final class AIAcceptedLearningStore:
                     var line = data
                     line.append(0x0A)
                     if fileManager.fileExists(atPath: historyURL.path) {
-                        let handle = try FileHandle(forWritingTo: historyURL)
+                        let handle = try FileHandle(forUpdating: historyURL)
                         defer { try? handle.close() }
-                        try handle.seekToEnd()
+                        let endOffset = try handle.seekToEnd()
+                        if endOffset > 0 {
+                            try handle.seek(toOffset: endOffset - 1)
+                            guard let finalByte = try handle.read(upToCount: 1)?.first else {
+                                throw CocoaError(.fileReadCorruptFile)
+                            }
+                            // A valid last JSON row need not already have a delimiter.
+                            if finalByte != 0x0A {
+                                line.insert(0x0A, at: line.startIndex)
+                            }
+                        }
                         try handle.write(contentsOf: line)
                     } else {
                         try line.write(to: historyURL, options: .atomic)
