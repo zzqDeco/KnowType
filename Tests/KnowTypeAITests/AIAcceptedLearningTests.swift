@@ -1125,6 +1125,47 @@ final class AIAcceptedLearningTests: XCTestCase {
             1
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: deferredEvictedURL.path))
+
+        let mirrorDir = dir.appendingPathComponent("unwritable-mirror", isDirectory: true)
+        try FileManager.default.createDirectory(at: mirrorDir, withIntermediateDirectories: true)
+        let isolatedMirrorURL = mirrorDir.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        try Data("# Stale Mirror\n".utf8).write(to: isolatedMirrorURL, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: mirrorDir.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: mirrorDir.path)
+        }
+
+        let mirrorRepairStore = AIAcceptedLearningStore(
+            historyURL: deferredHistoryURL,
+            summaryURL: deferredSummaryURL,
+            mirrorURL: isolatedMirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 5
+        )
+        await mirrorRepairStore.recordAcceptedAI(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 3),
+                schemaID: "pinyin_simp",
+                rawInput: "three",
+                acceptedText: "AppendedWhileMirrorUnwritable 第三条",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        XCTAssertEqual(mirrorRepairStore.allRecords().count, 2)
+        XCTAssertEqual(mirrorRepairStore.snapshot()?.acceptedCount, 2)
+        XCTAssertEqual(
+            try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
+            2
+        )
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: mirrorDir.path)
+        XCTAssertEqual(mirrorRepairStore.snapshot()?.acceptedCount, 2)
+        XCTAssertTrue(
+            try String(contentsOf: isolatedMirrorURL, encoding: .utf8)
+                .contains("Accepted count: 2")
+        )
     }
 }
 

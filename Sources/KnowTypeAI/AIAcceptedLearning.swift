@@ -586,10 +586,12 @@ public final class AIAcceptedLearningStore:
     private var schemaSummaries: [String: AIAcceptedLanguageSummary]
     private var pendingSummarySchemaIDs: Set<String>
     private var summaryTask: Task<Void, Never>?
+    private var isSummaryRebuildScheduled = false
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
     private var lastClearMarkerModifiedAt: Date?
     private var lastDiskStateMetadata: DiskStateMetadata?
     private var pendingStartupRepair: Bool
+    private var pendingStartupSummaryWrite: Bool
     private var lastStartupRepairAttemptAt: Date?
     private var lastFailedRepairEnvironmentStamp: RepairEnvironmentStamp?
 
@@ -600,7 +602,10 @@ public final class AIAcceptedLearningStore:
         var lastClearMarkerModifiedAt: Date?
         var lastDiskStateMetadata: DiskStateMetadata?
         var needsCompaction: Bool = false
+        var needsSummaryFileRepair: Bool = false
         var needsMirrorRefresh: Bool = false
+        var didCompactHistoryOnDisk: Bool = false
+        var repairError: (any Error)? = nil
     }
 
     public init(
@@ -638,44 +643,36 @@ public final class AIAcceptedLearningStore:
                 )
             }
             if (initialState.needsCompaction && historyURL != nil) || initialState.needsMirrorRefresh {
-                startupState = try withAcceptedLearningFileLock(
-                    lockURL: acceptedLearningLockURL(historyURL: historyURL),
-                    fileManager: fileManager
-                ) {
-                    try Self.loadStartupState(
-                        historyURL: historyURL,
-                        summaryURL: summaryURL,
-                        mirrorURL: mirrorURL,
-                        fileManager: fileManager,
-                        encoder: configuredEncoder,
-                        decoder: configuredDecoder,
-                        maxRecordCount: clampedMaxRecordCount,
-                        compactPersistentHistory: true,
-                        repairPersistentSummary: true
-                    )
+                do {
+                    startupState = try withAcceptedLearningFileLock(
+                        lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                        fileManager: fileManager
+                    ) {
+                        try Self.loadStartupState(
+                            historyURL: historyURL,
+                            summaryURL: summaryURL,
+                            mirrorURL: mirrorURL,
+                            fileManager: fileManager,
+                            encoder: configuredEncoder,
+                            decoder: configuredDecoder,
+                            maxRecordCount: clampedMaxRecordCount,
+                            compactPersistentHistory: true,
+                            repairPersistentSummary: true,
+                            forceSummaryFileRepair: initialState.needsCompaction && historyURL != nil
+                        )
+                    }
+                    didCompactOnStartup = startupState.didCompactHistoryOnDisk
+                    startupRepairErrorReason = startupState.repairError.map { String(describing: type(of: $0)) }
+                } catch {
+                    startupState = initialState
+                    startupRepairErrorReason = String(describing: type(of: error))
                 }
-                didCompactOnStartup = startupState.needsCompaction && historyURL != nil
             } else {
                 startupState = initialState
+                startupRepairErrorReason = nil
             }
-            startupRepairErrorReason = nil
         } catch {
-            startupState = (try? withExistingAcceptedLearningFileLock(
-                lockURL: acceptedLearningLockURL(historyURL: historyURL),
-                fileManager: fileManager
-            ) {
-                try Self.loadStartupState(
-                    historyURL: historyURL,
-                    summaryURL: summaryURL,
-                    mirrorURL: mirrorURL,
-                    fileManager: fileManager,
-                    encoder: configuredEncoder,
-                    decoder: configuredDecoder,
-                    maxRecordCount: clampedMaxRecordCount,
-                    compactPersistentHistory: false,
-                    repairPersistentSummary: false
-                )
-            }) ?? StartupState(
+            startupState = StartupState(
                 records: [],
                 summary: Self.loadSummary(from: summaryURL, decoder: configuredDecoder),
                 schemaSummaries: [:],
@@ -690,6 +687,7 @@ public final class AIAcceptedLearningStore:
 
         let requiresDeferredStartupRepair = startupRepairErrorReason != nil
             && ((startupState.needsCompaction && historyURL != nil)
+                || startupState.needsSummaryFileRepair
                 || startupState.needsMirrorRefresh
                 || startupState.lastDiskStateMetadata == nil)
         self.maxRecordCount = clampedMaxRecordCount
@@ -705,6 +703,8 @@ public final class AIAcceptedLearningStore:
         self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
         self.lastDiskStateMetadata = startupState.lastDiskStateMetadata
         self.pendingStartupRepair = requiresDeferredStartupRepair
+        self.pendingStartupSummaryWrite = startupState.needsSummaryFileRepair
+            || (startupState.needsCompaction && historyURL != nil)
         self.lastStartupRepairAttemptAt = requiresDeferredStartupRepair ? Date() : nil
         self.lastFailedRepairEnvironmentStamp = requiresDeferredStartupRepair
             ? Self.repairEnvironmentStamp(
@@ -929,7 +929,7 @@ public final class AIAcceptedLearningStore:
             lock.unlock()
         }
         notifySummaryReady(externalEvents)
-        if didCompact, summaryDelayNanoseconds > 0 {
+        if didCompact {
             synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
         }
         scheduleSummaryRebuild()
@@ -938,6 +938,7 @@ public final class AIAcceptedLearningStore:
     private func scheduleSummaryRebuild() {
         lock.lock()
         summaryTask?.cancel()
+        isSummaryRebuildScheduled = summaryDelayNanoseconds > 0
         lock.unlock()
 
         if summaryDelayNanoseconds == 0 {
@@ -1035,7 +1036,9 @@ public final class AIAcceptedLearningStore:
 
                 try persistSummary(nextSummary)
                 lock.lock()
+                isSummaryRebuildScheduled = false
                 pendingStartupRepair = false
+                pendingStartupSummaryWrite = false
                 lastStartupRepairAttemptAt = nil
                 lastFailedRepairEnvironmentStamp = nil
                 lock.unlock()
@@ -1047,15 +1050,27 @@ public final class AIAcceptedLearningStore:
             notifySummaryReady(events)
             synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
         } catch {
+            let failedStamp = Self.repairEnvironmentStamp(
+                historyURL: historyURL,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager
+            )
+            lock.lock()
+            isSummaryRebuildScheduled = false
+            pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
+            if pendingStartupRepair {
+                pendingStartupSummaryWrite = true
+                lastStartupRepairAttemptAt = Date()
+                lastFailedRepairEnvironmentStamp = failedStamp
+            }
+            lock.unlock()
             diagnosticSink.record(
                 AIRecommendationDiagnosticEvent(
                     stage: .lexicalProfileFallback,
                     reason: "accepted_learning_summary_write_failed:\(String(describing: type(of: error)))"
                 )
             )
-            lock.lock()
-            pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
-            lock.unlock()
         }
     }
 
@@ -1137,6 +1152,7 @@ public final class AIAcceptedLearningStore:
         }
         if markStartupRepairComplete {
             pendingStartupRepair = false
+            pendingStartupSummaryWrite = false
             lastStartupRepairAttemptAt = nil
             lastFailedRepairEnvironmentStamp = nil
         }
@@ -1150,41 +1166,13 @@ public final class AIAcceptedLearningStore:
         )
     }
 
-    private func retryPendingStartupRepairLocked() throws -> [AIAcceptedLearningSummaryReadyEvent]? {
-        lock.lock()
-        let needsRepair = pendingStartupRepair
-        lock.unlock()
-        guard needsRepair else {
-            return nil
-        }
-        let repairedState = try Self.loadStartupState(
-            historyURL: historyURL,
-            summaryURL: summaryURL,
-            mirrorURL: mirrorURL,
-            fileManager: fileManager,
-            encoder: encoder,
-            decoder: decoder,
-            maxRecordCount: maxRecordCount,
-            compactPersistentHistory: true,
-            repairPersistentSummary: true
-        )
-        return applyDiskSyncCandidate(
-            DiskSyncCandidate(
-                reloadedRecords: repairedState.records,
-                finalMetadata: repairedState.lastDiskStateMetadata,
-                markerModifiedAt: repairedState.lastClearMarkerModifiedAt
-            ),
-            markStartupRepairComplete: true
-        )
-    }
-
     private func retryPendingStartupRepair() throws -> [AIAcceptedLearningSummaryReadyEvent] {
         lock.lock()
         let hasCachedDiskMetadata = lastDiskStateMetadata != nil
+        let forceSummaryFileRepair = pendingStartupSummaryWrite
         lock.unlock()
 
         let repairedState: StartupState
-        let didCompact: Bool
         if hasCachedDiskMetadata {
             repairedState = try withAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
@@ -1199,10 +1187,10 @@ public final class AIAcceptedLearningStore:
                     decoder: decoder,
                     maxRecordCount: maxRecordCount,
                     compactPersistentHistory: true,
-                    repairPersistentSummary: true
+                    repairPersistentSummary: true,
+                    forceSummaryFileRepair: forceSummaryFileRepair
                 )
             }
-            didCompact = repairedState.needsCompaction && historyURL != nil
         } else {
             let initialState = try withExistingAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
@@ -1217,10 +1205,14 @@ public final class AIAcceptedLearningStore:
                     decoder: decoder,
                     maxRecordCount: maxRecordCount,
                     compactPersistentHistory: false,
-                    repairPersistentSummary: false
+                    repairPersistentSummary: false,
+                    forceSummaryFileRepair: forceSummaryFileRepair
                 )
             }
-            if (initialState.needsCompaction && historyURL != nil) || initialState.needsMirrorRefresh {
+            if (initialState.needsCompaction && historyURL != nil)
+                || initialState.needsSummaryFileRepair
+                || initialState.needsMirrorRefresh
+            {
                 repairedState = try withAcceptedLearningFileLock(
                     lockURL: acceptedLearningLockURL(historyURL: historyURL),
                     fileManager: fileManager
@@ -1234,16 +1226,35 @@ public final class AIAcceptedLearningStore:
                         decoder: decoder,
                         maxRecordCount: maxRecordCount,
                         compactPersistentHistory: true,
-                        repairPersistentSummary: true
+                        repairPersistentSummary: true,
+                        forceSummaryFileRepair: forceSummaryFileRepair
+                            || (initialState.needsCompaction && historyURL != nil)
                     )
                 }
-                didCompact = repairedState.needsCompaction && historyURL != nil
             } else {
                 repairedState = initialState
-                didCompact = false
             }
         }
-        let events = applyDiskSyncCandidate(
+        if repairedState.didCompactHistoryOnDisk {
+            synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
+        }
+        if let repairError = repairedState.repairError {
+            let partialEvents = applyDiskSyncCandidate(
+                DiskSyncCandidate(
+                    reloadedRecords: repairedState.records,
+                    finalMetadata: repairedState.lastDiskStateMetadata,
+                    markerModifiedAt: repairedState.lastClearMarkerModifiedAt
+                ),
+                markStartupRepairComplete: false
+            )
+            lock.lock()
+            pendingStartupSummaryWrite = repairedState.needsSummaryFileRepair
+                || (repairedState.needsCompaction && historyURL != nil)
+            lock.unlock()
+            notifySummaryReady(partialEvents)
+            throw repairError
+        }
+        return applyDiskSyncCandidate(
             DiskSyncCandidate(
                 reloadedRecords: repairedState.records,
                 finalMetadata: repairedState.lastDiskStateMetadata,
@@ -1251,17 +1262,10 @@ public final class AIAcceptedLearningStore:
             ),
             markStartupRepairComplete: true
         )
-        if didCompact {
-            synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
-        }
-        return events
     }
 
     @discardableResult
     private func syncRecordsAfterExternalClearLocked() throws -> [AIAcceptedLearningSummaryReadyEvent] {
-        if let repairedEvents = try retryPendingStartupRepairLocked() {
-            return repairedEvents
-        }
         let candidate = try loadDiskSyncCandidate()
         return applyDiskSyncCandidate(candidate)
     }
@@ -1272,7 +1276,7 @@ public final class AIAcceptedLearningStore:
 
     private func syncRecordsAfterExternalClear() {
         lock.lock()
-        let needsStartupRepair = pendingStartupRepair
+        let needsStartupRepair = pendingStartupRepair && !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil)
         lock.unlock()
         if needsStartupRepair {
             let now = Date()
@@ -1284,6 +1288,7 @@ public final class AIAcceptedLearningStore:
             )
             lock.lock()
             let shouldRetryRepair = pendingStartupRepair
+                && !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil)
                 && (lastFailedRepairEnvironmentStamp == nil
                     || currentStamp != lastFailedRepairEnvironmentStamp
                     || now.timeIntervalSince(lastStartupRepairAttemptAt ?? .distantPast) >= Self.startupRepairRetryInterval)
@@ -1636,7 +1641,8 @@ public final class AIAcceptedLearningStore:
         decoder: JSONDecoder,
         maxRecordCount: Int,
         compactPersistentHistory: Bool,
-        repairPersistentSummary: Bool
+        repairPersistentSummary: Bool,
+        forceSummaryFileRepair: Bool = false
     ) throws -> StartupState {
         let loaded = try Self.loadRecordsWithMetadata(
             from: historyURL,
@@ -1646,23 +1652,34 @@ public final class AIAcceptedLearningStore:
         let loadedRecords = loaded.records
         var diskMetadata = loaded.metadata
         let needsCompaction = loadedRecords.count > maxRecordCount
+        var didCompactHistoryOnDisk = false
+        var repairError: (any Error)?
         let records: [AIAcceptedLearningRecord]
         if needsCompaction {
             let overflowCount = loadedRecords.count - maxRecordCount
             let evictedRecords = Array(loadedRecords.prefix(overflowCount))
             records = Array(loadedRecords.suffix(maxRecordCount))
             if compactPersistentHistory, let historyURL {
-                try recordAcceptedLearningEvictedCommits(
-                    evictedRecords,
-                    historyURL: historyURL,
-                    fileManager: fileManager
-                )
-                try Self.writeRecords(
-                    records,
-                    to: historyURL,
-                    encoder: encoder,
-                    fileManager: fileManager
-                )
+                do {
+                    try recordAcceptedLearningEvictedCommits(
+                        evictedRecords,
+                        historyURL: historyURL,
+                        fileManager: fileManager
+                    )
+                    try Self.writeRecords(
+                        records,
+                        to: historyURL,
+                        encoder: encoder,
+                        fileManager: fileManager
+                    )
+                    didCompactHistoryOnDisk = true
+                    diskMetadata = Self.diskStateMetadata(
+                        historyURL: historyURL,
+                        fileManager: fileManager
+                    )
+                } catch {
+                    repairError = error
+                }
             }
         } else {
             records = loadedRecords
@@ -1674,41 +1691,45 @@ public final class AIAcceptedLearningStore:
             && Self.summary(loadedSummary, matches: records)
             && (!summaryFileExists || loadedSummary != nil)
         let nextSummary = summaryMatchesRecords ? loadedSummary : rebuiltSummary
+        let shouldRepairSummaryFile = (needsCompaction || forceSummaryFileRepair) && summaryURL != nil
+        var needsSummaryFileRepair = shouldRepairSummaryFile && !summaryMatchesRecords
         let mirrorFileExists = mirrorURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
         let mirrorIsCurrent: Bool
-        if !mirrorFileExists {
+        if mirrorURL == nil {
             mirrorIsCurrent = true
+        } else if !mirrorFileExists {
+            mirrorIsCurrent = !(needsCompaction || forceSummaryFileRepair) || nextSummary == nil
         } else if let nextSummary,
                   let loadedMirror = mirrorURL.flatMap({ try? String(contentsOf: $0, encoding: .utf8) }) {
             mirrorIsCurrent = loadedMirror == Self.renderMarkdown(nextSummary, maxRecordCount: maxRecordCount)
         } else {
             mirrorIsCurrent = false
         }
-        let summaryIsCurrent = summaryMatchesRecords && mirrorIsCurrent
-        if repairPersistentSummary, !summaryIsCurrent {
-            if needsCompaction {
-                try persistSummary(
-                    nextSummary,
-                    summaryURL: summaryURL,
-                    mirrorURL: mirrorURL,
-                    encoder: encoder,
-                    fileManager: fileManager,
-                    maxRecordCount: maxRecordCount
-                )
-            } else {
-                try persistMirror(
-                    nextSummary,
-                    mirrorURL: mirrorURL,
-                    fileManager: fileManager,
-                    maxRecordCount: maxRecordCount
-                )
+        var needsMirrorRefresh = !mirrorIsCurrent
+        if repairPersistentSummary, repairError == nil, (needsSummaryFileRepair || needsMirrorRefresh) {
+            do {
+                if needsSummaryFileRepair {
+                    if let nextSummary {
+                        if let summaryURL {
+                            try atomicWrite(try encoder.encode(nextSummary), to: summaryURL, fileManager: fileManager)
+                        }
+                    } else if let summaryURL, fileManager.fileExists(atPath: summaryURL.path) {
+                        try fileManager.removeItem(at: summaryURL)
+                    }
+                    needsSummaryFileRepair = false
+                }
+                if needsMirrorRefresh {
+                    try persistMirror(
+                        nextSummary,
+                        mirrorURL: mirrorURL,
+                        fileManager: fileManager,
+                        maxRecordCount: maxRecordCount
+                    )
+                    needsMirrorRefresh = false
+                }
+            } catch {
+                repairError = error
             }
-        }
-        if compactPersistentHistory, needsCompaction {
-            diskMetadata = Self.diskStateMetadata(
-                historyURL: historyURL,
-                fileManager: fileManager
-            )
         }
         return StartupState(
             records: records,
@@ -1716,8 +1737,11 @@ public final class AIAcceptedLearningStore:
             schemaSummaries: Self.buildSchemaSummaries(records: records, generatedAt: Date()),
             lastClearMarkerModifiedAt: diskMetadata?.clearMarker.modificationDate,
             lastDiskStateMetadata: diskMetadata,
-            needsCompaction: needsCompaction,
-            needsMirrorRefresh: !mirrorIsCurrent
+            needsCompaction: needsCompaction && !didCompactHistoryOnDisk,
+            needsSummaryFileRepair: needsSummaryFileRepair,
+            needsMirrorRefresh: needsMirrorRefresh,
+            didCompactHistoryOnDisk: didCompactHistoryOnDisk,
+            repairError: repairError
         )
     }
 
