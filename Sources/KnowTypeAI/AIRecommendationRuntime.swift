@@ -308,7 +308,7 @@ public actor AIRecommendationRuntime: AIRecommendationProviding {
             self.completionSignal = completionSignal
             self.waiterIDs = [initialWaiterID]
             Task { [weak self] in
-                let result = await Result { try await task.value }
+                let result = await task.result
                 self?.finish(with: result)
             }
         }
