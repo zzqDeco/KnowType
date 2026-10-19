@@ -545,17 +545,29 @@ public final class AIAcceptedLearningStore:
     @unchecked Sendable
 {
     public static let defaultMaxRecordCount = 500
+    private static let startupRepairRetryInterval: TimeInterval = 5.0
 
     private struct FileMetadataStamp: Equatable, Sendable {
         var exists: Bool
         var fileNumber: UInt64?
         var size: UInt64?
         var modificationDate: Date?
+        var permissions: UInt16?
     }
 
     private struct DiskStateMetadata: Equatable, Sendable {
         var history: FileMetadataStamp
         var clearMarker: FileMetadataStamp
+        var evictedCommits: FileMetadataStamp
+    }
+
+    private struct RepairEnvironmentStamp: Equatable, Sendable {
+        var directory: FileMetadataStamp
+        var summaryDirectory: FileMetadataStamp
+        var mirrorDirectory: FileMetadataStamp
+        var history: FileMetadataStamp
+        var summary: FileMetadataStamp
+        var mirror: FileMetadataStamp
         var evictedCommits: FileMetadataStamp
     }
 
@@ -578,6 +590,8 @@ public final class AIAcceptedLearningStore:
     private var lastClearMarkerModifiedAt: Date?
     private var lastDiskStateMetadata: DiskStateMetadata?
     private var pendingStartupRepair: Bool
+    private var lastStartupRepairAttemptAt: Date?
+    private var lastFailedRepairEnvironmentStamp: RepairEnvironmentStamp?
 
     private struct StartupState {
         var records: [AIAcceptedLearningRecord]
@@ -689,8 +703,17 @@ public final class AIAcceptedLearningStore:
         self.decoder = configuredDecoder
         self.records = startupState.records
         self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
-        self.lastDiskStateMetadata = requiresDeferredStartupRepair ? nil : startupState.lastDiskStateMetadata
+        self.lastDiskStateMetadata = startupState.lastDiskStateMetadata
         self.pendingStartupRepair = requiresDeferredStartupRepair
+        self.lastStartupRepairAttemptAt = requiresDeferredStartupRepair ? Date() : nil
+        self.lastFailedRepairEnvironmentStamp = requiresDeferredStartupRepair
+            ? Self.repairEnvironmentStamp(
+                historyURL: historyURL,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager
+            )
+            : nil
         self.summary = startupState.summary
         self.schemaSummaries = startupState.schemaSummaries
         self.pendingSummarySchemaIDs = []
@@ -1013,6 +1036,8 @@ public final class AIAcceptedLearningStore:
                 try persistSummary(nextSummary)
                 lock.lock()
                 pendingStartupRepair = false
+                lastStartupRepairAttemptAt = nil
+                lastFailedRepairEnvironmentStamp = nil
                 lock.unlock()
                 return Self.summaryReadyEvents(
                     from: nextSchemaSummaries,
@@ -1112,8 +1137,12 @@ public final class AIAcceptedLearningStore:
         }
         if markStartupRepairComplete {
             pendingStartupRepair = false
+            lastStartupRepairAttemptAt = nil
+            lastFailedRepairEnvironmentStamp = nil
         }
-        lastDiskStateMetadata = pendingStartupRepair ? nil : finalMetadata
+        if let finalMetadata {
+            lastDiskStateMetadata = finalMetadata
+        }
         lock.unlock()
         return Self.summaryReadyEvents(
             from: reloadedSchemaSummaries,
@@ -1150,25 +1179,13 @@ public final class AIAcceptedLearningStore:
     }
 
     private func retryPendingStartupRepair() throws -> [AIAcceptedLearningSummaryReadyEvent] {
-        let initialState = try withExistingAcceptedLearningFileLock(
-            lockURL: acceptedLearningLockURL(historyURL: historyURL),
-            fileManager: fileManager
-        ) {
-            try Self.loadStartupState(
-                historyURL: historyURL,
-                summaryURL: summaryURL,
-                mirrorURL: mirrorURL,
-                fileManager: fileManager,
-                encoder: encoder,
-                decoder: decoder,
-                maxRecordCount: maxRecordCount,
-                compactPersistentHistory: false,
-                repairPersistentSummary: false
-            )
-        }
+        lock.lock()
+        let hasCachedDiskMetadata = lastDiskStateMetadata != nil
+        lock.unlock()
+
         let repairedState: StartupState
         let didCompact: Bool
-        if (initialState.needsCompaction && historyURL != nil) || initialState.needsMirrorRefresh {
+        if hasCachedDiskMetadata {
             repairedState = try withAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
@@ -1187,8 +1204,44 @@ public final class AIAcceptedLearningStore:
             }
             didCompact = repairedState.needsCompaction && historyURL != nil
         } else {
-            repairedState = initialState
-            didCompact = false
+            let initialState = try withExistingAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                try Self.loadStartupState(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    encoder: encoder,
+                    decoder: decoder,
+                    maxRecordCount: maxRecordCount,
+                    compactPersistentHistory: false,
+                    repairPersistentSummary: false
+                )
+            }
+            if (initialState.needsCompaction && historyURL != nil) || initialState.needsMirrorRefresh {
+                repairedState = try withAcceptedLearningFileLock(
+                    lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                    fileManager: fileManager
+                ) {
+                    try Self.loadStartupState(
+                        historyURL: historyURL,
+                        summaryURL: summaryURL,
+                        mirrorURL: mirrorURL,
+                        fileManager: fileManager,
+                        encoder: encoder,
+                        decoder: decoder,
+                        maxRecordCount: maxRecordCount,
+                        compactPersistentHistory: true,
+                        repairPersistentSummary: true
+                    )
+                }
+                didCompact = repairedState.needsCompaction && historyURL != nil
+            } else {
+                repairedState = initialState
+                didCompact = false
+            }
         }
         let events = applyDiskSyncCandidate(
             DiskSyncCandidate(
@@ -1222,17 +1275,54 @@ public final class AIAcceptedLearningStore:
         let needsStartupRepair = pendingStartupRepair
         lock.unlock()
         if needsStartupRepair {
-            do {
-                let repairedEvents = try retryPendingStartupRepair()
-                notifySummaryReady(repairedEvents)
-                return
-            } catch {
-                diagnosticSink.record(
-                    AIRecommendationDiagnosticEvent(
-                        stage: .lexicalProfileFallback,
-                        reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
+            let now = Date()
+            let currentStamp = Self.repairEnvironmentStamp(
+                historyURL: historyURL,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager
+            )
+            lock.lock()
+            let shouldRetryRepair = pendingStartupRepair
+                && (lastFailedRepairEnvironmentStamp == nil
+                    || currentStamp != lastFailedRepairEnvironmentStamp
+                    || now.timeIntervalSince(lastStartupRepairAttemptAt ?? .distantPast) >= Self.startupRepairRetryInterval)
+            if shouldRetryRepair {
+                lastStartupRepairAttemptAt = now
+            }
+            let shouldSkipUnreadFallback = !shouldRetryRepair
+                && lastDiskStateMetadata == nil
+                && currentStamp == lastFailedRepairEnvironmentStamp
+            lock.unlock()
+            if shouldRetryRepair {
+                do {
+                    let repairedEvents = try retryPendingStartupRepair()
+                    notifySummaryReady(repairedEvents)
+                    return
+                } catch {
+                    let failedStamp = Self.repairEnvironmentStamp(
+                        historyURL: historyURL,
+                        summaryURL: summaryURL,
+                        mirrorURL: mirrorURL,
+                        fileManager: fileManager
                     )
-                )
+                    lock.lock()
+                    lastStartupRepairAttemptAt = Date()
+                    lastFailedRepairEnvironmentStamp = failedStamp
+                    let skipUnreadFallbackAfterFailure = lastDiskStateMetadata == nil
+                    lock.unlock()
+                    diagnosticSink.record(
+                        AIRecommendationDiagnosticEvent(
+                            stage: .lexicalProfileFallback,
+                            reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
+                        )
+                    )
+                    if skipUnreadFallbackAfterFailure {
+                        return
+                    }
+                }
+            } else if shouldSkipUnreadFallback {
+                return
             }
         }
         let events: [AIAcceptedLearningSummaryReadyEvent]
@@ -1637,16 +1727,44 @@ public final class AIAcceptedLearningStore:
     ) -> FileMetadataStamp {
         guard let url,
               let attributes = try? fileManager.attributesOfItem(atPath: url.path) else {
-            return FileMetadataStamp(exists: false, fileNumber: nil, size: nil, modificationDate: nil)
+            return FileMetadataStamp(
+                exists: false,
+                fileNumber: nil,
+                size: nil,
+                modificationDate: nil,
+                permissions: nil
+            )
         }
         let fileNumber = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
         let size = (attributes[.size] as? NSNumber)?.uint64Value
         let modificationDate = attributes[.modificationDate] as? Date
+        let permissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value
         return FileMetadataStamp(
             exists: true,
             fileNumber: fileNumber,
             size: size,
-            modificationDate: modificationDate
+            modificationDate: modificationDate,
+            permissions: permissions
+        )
+    }
+
+    private static func repairEnvironmentStamp(
+        historyURL: URL?,
+        summaryURL: URL?,
+        mirrorURL: URL?,
+        fileManager: FileManager
+    ) -> RepairEnvironmentStamp {
+        RepairEnvironmentStamp(
+            directory: fileMetadataStamp(historyURL?.deletingLastPathComponent(), fileManager: fileManager),
+            summaryDirectory: fileMetadataStamp(summaryURL?.deletingLastPathComponent(), fileManager: fileManager),
+            mirrorDirectory: fileMetadataStamp(mirrorURL?.deletingLastPathComponent(), fileManager: fileManager),
+            history: fileMetadataStamp(historyURL, fileManager: fileManager),
+            summary: fileMetadataStamp(summaryURL, fileManager: fileManager),
+            mirror: fileMetadataStamp(mirrorURL, fileManager: fileManager),
+            evictedCommits: fileMetadataStamp(
+                acceptedLearningEvictedCommitsURL(historyURL: historyURL),
+                fileManager: fileManager
+            )
         )
     }
 

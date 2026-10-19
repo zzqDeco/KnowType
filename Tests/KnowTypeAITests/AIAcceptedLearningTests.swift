@@ -1090,14 +1090,29 @@ final class AIAcceptedLearningTests: XCTestCase {
             try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unwritableDir.path)
         }
 
+        let diagnostics = DiagnosticEventCollector()
         let deferredStore = AIAcceptedLearningStore(
             historyURL: deferredHistoryURL,
             summaryURL: deferredSummaryURL,
             mirrorURL: deferredMirrorURL,
+            diagnosticSink: diagnostics,
             summaryDelayNanoseconds: 0,
             maxRecordCount: 1
         )
+        let initialRepairFailures = diagnostics.reasons().filter {
+            $0.hasPrefix("accepted_learning_summary_repair_failed:")
+        }
+        XCTAssertEqual(initialRepairFailures.count, 1)
+        XCTAssertEqual(deferredStore.snapshot()?.acceptedCount, 1)
+        XCTAssertEqual(deferredStore.snapshot(schemaID: "pinyin_simp")?.acceptedCount, 1)
         XCTAssertEqual(deferredStore.allRecords().count, 1)
+        XCTAssertEqual(
+            diagnostics.reasons().filter {
+                $0.hasPrefix("accepted_learning_summary_repair_failed:")
+                    || $0.hasPrefix("accepted_learning_clear_sync_failed:")
+            }.count,
+            1
+        )
         XCTAssertEqual(
             try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
             2
@@ -1110,6 +1125,23 @@ final class AIAcceptedLearningTests: XCTestCase {
             1
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: deferredEvictedURL.path))
+    }
+}
+
+private final class DiagnosticEventCollector: AIRecommendationDiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [AIRecommendationDiagnosticEvent] = []
+
+    func record(_ event: AIRecommendationDiagnosticEvent) {
+        lock.withLock {
+            events.append(event)
+        }
+    }
+
+    func reasons() -> [String] {
+        lock.withLock {
+            events.compactMap(\.reason)
+        }
     }
 }
 
