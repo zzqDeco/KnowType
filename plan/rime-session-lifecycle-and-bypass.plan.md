@@ -30,7 +30,6 @@
 
 ## Docs Absorbed By
 
-- [RimeConversionEngine.swift](../doc/src/Sources/KnowTypeInputMethod/RimeConversionEngine.swift.plan.md)
 - [RimeConversionEngine](../doc/src/Sources/KnowTypeInputMethod/RimeConversionEngine.plan.md)
 
 ## Retirement Criteria
