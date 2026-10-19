@@ -4,6 +4,18 @@ import KnowTypeAI
 import KnowTypeCore
 import KnowTypeProviders
 
+/// Testable state machine and side-effect ordering coordinator behind `KnowTypeInputController`.
+///
+/// Concurrency contract:
+/// - All mutable coordinator state and child runtime mutations are main-thread / `MainActor` confined.
+/// - Synchronous IMK responder entry points (`handle`, `composedString`, `candidates`, `commitComposition`,
+///   `deactivateServer`) execute on the host main thread without requiring `@MainActor` annotations on
+///   Objective-C / IMK overrides or synchronous unit tests.
+/// - Asynchronous callbacks (AI recommendation state updates, candidate-panel async publications,
+///   mode-status auto-clear, delayed re-anchor, and post-insert caret verification) hop onto `MainActor`
+///   before reading or mutating coordinator state.
+/// - Detached background work (`publishRuntimeEvent`) captures only immutable value snapshots and
+///   actor-isolated dependencies (`InputEventBus`).
 final class InputControllerCoordinator: @unchecked Sendable {
     private let canRequestAIRecommendations: Bool
     private var conversionEngine: any KnowTypeConversionEngine
@@ -198,7 +210,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         if let symbol = activeSessionRuntime.currentSymbolComposition?.selectedCandidate {
             return symbol.text
         }
-        return nativeMarkedText() ?? compositionBuffer.displayText
+        return currentMarkedDisplayText()
     }
 
     func originalString() -> NSAttributedString {
@@ -348,7 +360,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 return
             }
         }
-        let text = compositionBuffer.hasResolvedSegments ? compositionBuffer.commitText : rawBuffer
+        let text = commitResolvedText()
         guard !text.isEmpty else {
             _ = finishCompositionLifecycle(reason: .commit, client: client, commitPolicy: .none)
             return
@@ -950,24 +962,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return true
         }
 
-        if compositionBuffer.hasResolvedSegments,
-           !compositionBuffer.isFullyResolved {
-            return applyCommitResult(
-                .commit(compositionBuffer.commitText + symbol),
-                client: client
-            )
+        if let legacyPartialResult = legacyPartialSegmentedSymbolCommitResult(symbol: symbol) {
+            return applyCommitResult(legacyPartialResult, client: client)
         }
 
         let baseResultPlan = latencyTracer.trace("commit_decision") {
             commitDecisionRuntime.resultPlan(context: commitDecisionContext(action: .space, client: client))
         }
         let baseResult = executeCommitDecisionResultPlan(baseResultPlan, client: client)
-        if case .noAction = baseResult,
-           compositionBuffer.hasResolvedSegments {
-            return applyCommitResult(
-                .commit(compositionBuffer.commitText + symbol),
-                client: client
-            )
+        if let legacyFallbackResult = legacySegmentedSymbolFallbackCommitResult(
+            symbol: symbol,
+            baseResult: baseResult
+        ) {
+            return applyCommitResult(legacyFallbackResult, client: client)
         }
         return applyCommitResult(
             InputSymbolCommitPolicy.result(
@@ -1334,7 +1341,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             return
         }
 
-        let rimeSuggestion = augmentedSuggestion(suggestion)
+        let rimeSuggestion = rebuildCandidates(from: suggestion)
         suggestionStateRuntime.store(suggestion: rimeSuggestion, rawInput: rawBuffer)
         refreshComposition(client: client)
         updateCandidatePanelImmediately(suggestion: rimeSuggestion, client: client)
@@ -1373,11 +1380,12 @@ final class InputControllerCoordinator: @unchecked Sendable {
         let lockedPrefixText = Self.confirmedLockedPrefixText(for: suggestion)
         let shouldScheduleRecommendationRequest = aiRecommendationRuntime.shouldScheduleRecommendationRequest
         let canBuildRecommendationContext = aiRecommendationRuntime.shouldBuildRecommendationContext
+        let legacyFlags = legacyResolutionFlags()
         let scheduleDecision = aiRecommendationSchedulePolicy.decision(
             for: InputAIRecommendationScheduleContext(
                 rawInput: rawBuffer,
-                hasResolvedSegments: compositionBuffer.hasResolvedSegments,
-                isFullyResolved: compositionBuffer.isFullyResolved,
+                hasResolvedSegments: legacyFlags.hasResolvedSegments,
+                isFullyResolved: legacyFlags.isFullyResolved,
                 lockedPrefix: lockedPrefixText,
                 cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
                 canRequestAIRecommendations: canRequestAIRecommendations,
@@ -1398,8 +1406,8 @@ final class InputControllerCoordinator: @unchecked Sendable {
         }
         let context = InputAIRecommendationRuntimeContext(
             rawInput: rawBuffer,
-            hasResolvedSegments: compositionBuffer.hasResolvedSegments,
-            isFullyResolved: compositionBuffer.isFullyResolved,
+            hasResolvedSegments: legacyFlags.hasResolvedSegments,
+            isFullyResolved: legacyFlags.isFullyResolved,
             lockedPrefix: lockedPrefixText,
             cloudContinuationEnabled: runtimePreferences.cloudContinuationEnabled,
             canRequestAIRecommendations: canRequestAIRecommendations,
@@ -1416,7 +1424,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         )
         aiRecommendationState = aiRecommendationRuntime.schedule(
             context: context,
-            currentSnapshot: { [weak self] in
+            currentSnapshot: { @MainActor [weak self] in
                 guard let self else {
                     return nil
                 }
@@ -1426,25 +1434,73 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     rawInput: self.rawBuffer
                 )
             },
-            onStateChange: { [weak self] state in
+            onStateChange: { @MainActor [weak self] state in
                 guard let self else {
                     return
                 }
-                self.aiRecommendationState = state
-                self.clearNoProviderFallbackContinuationsIfProviderIsKnown()
-                self.updateCandidatePanel(
-                    suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
-                    client: self.host?.currentClient
-                )
+                self.applyAIRecommendationStateUpdate(state)
             }
         )
         updateCandidatePanel(suggestion: suggestion, client: client)
+    }
+
+    @MainActor
+    private func applyAIRecommendationStateUpdate(_ state: AIRecommendationState) {
+        aiRecommendationState = state
+        clearNoProviderFallbackContinuationsIfProviderIsKnown()
+        updateCandidatePanel(
+            suggestion: suggestionStateRuntime.currentSnapshot().suggestion,
+            client: host?.currentClient
+        )
     }
 
     private func clearNoProviderFallbackContinuationsIfProviderIsKnown() {
         _ = suggestionStateRuntime.clearNoProviderFallbackContinuationsIfNeeded(
             hasKnownProvider: aiRecommendationRuntime.hasKnownProvider
         )
+    }
+
+    private func rebuildCandidates(from suggestion: SuggestionResponse) -> SuggestionResponse {
+        augmentedSuggestion(suggestion)
+    }
+
+    // MARK: - Legacy CompositionBuffer & Segment Fallback Helpers
+
+    private func commitResolvedText() -> String {
+        legacyResolvedCompositionCommitText() ?? rawBuffer
+    }
+
+    private func legacyResolvedCompositionCommitText() -> String? {
+        guard compositionBuffer.hasResolvedSegments else {
+            return nil
+        }
+        return compositionBuffer.commitText
+    }
+
+    private func legacyResolutionFlags() -> (hasResolvedSegments: Bool, isFullyResolved: Bool) {
+        guard compositionBuffer.hasResolvedSegments else {
+            return (false, false)
+        }
+        return (true, compositionBuffer.isFullyResolved)
+    }
+
+    private func legacyPartialSegmentedSymbolCommitResult(symbol: String) -> InputCommitResult? {
+        guard compositionBuffer.hasResolvedSegments,
+              !compositionBuffer.isFullyResolved else {
+            return nil
+        }
+        return .commit(compositionBuffer.commitText + symbol)
+    }
+
+    private func legacySegmentedSymbolFallbackCommitResult(
+        symbol: String,
+        baseResult: InputCommitResult
+    ) -> InputCommitResult? {
+        guard case .noAction = baseResult,
+              compositionBuffer.hasResolvedSegments else {
+            return nil
+        }
+        return .commit(compositionBuffer.commitText + symbol)
     }
 
     private func augmentedSuggestion(_ suggestion: SuggestionResponse) -> SuggestionResponse {
@@ -1460,30 +1516,52 @@ final class InputControllerCoordinator: @unchecked Sendable {
         compositionBuffer: CompositionBuffer,
         rawBuffer: String
     ) -> SuggestionResponse {
-        var prefixCandidates: [CorrectionCandidate]
-        if compositionBuffer.isFullyResolved {
-            prefixCandidates = [resolvedCompositionCandidate(compositionBuffer: compositionBuffer, rawBuffer: rawBuffer)]
-        } else if compositionBuffer.hasResolvedSegments {
-            prefixCandidates = []
-        } else {
-            prefixCandidates = suggestion.prefixCandidates
+        if let legacySuggestion = legacySegmentedSuggestionIfNeeded(
+            suggestion,
+            compositionBuffer: compositionBuffer,
+            rawBuffer: rawBuffer
+        ) {
+            return legacySuggestion
         }
+        guard !suggestion.continuationCandidates.isEmpty,
+              shouldSuppressContinuations(
+                  prefixCandidates: suggestion.prefixCandidates,
+                  compositionBuffer: compositionBuffer
+              ) else {
+            return suggestion
+        }
+        return SuggestionResponse(
+            prefixCandidates: suggestion.prefixCandidates,
+            lockedPrefix: suggestion.lockedPrefix,
+            continuationCandidates: [],
+            latencyMs: suggestion.latencyMs
+        )
+    }
+
+    private static func legacySegmentedSuggestionIfNeeded(
+        _ suggestion: SuggestionResponse,
+        compositionBuffer: CompositionBuffer,
+        rawBuffer: String
+    ) -> SuggestionResponse? {
+        guard compositionBuffer.hasResolvedSegments else {
+            return nil
+        }
+        let prefixCandidates: [CorrectionCandidate] = compositionBuffer.isFullyResolved
+            ? [resolvedCompositionCandidate(compositionBuffer: compositionBuffer, rawBuffer: rawBuffer)]
+            : []
         let continuations = shouldSuppressContinuations(
             prefixCandidates: prefixCandidates,
             compositionBuffer: compositionBuffer
         )
             ? []
             : suggestion.continuationCandidates
-        let lockedPrefix: LockedPrefix?
-        if compositionBuffer.isFullyResolved {
-            lockedPrefix = LockedPrefix(
+        let lockedPrefix: LockedPrefix? = compositionBuffer.isFullyResolved
+            ? LockedPrefix(
                 text: compositionBuffer.commitText,
                 rawInput: rawBuffer,
                 candidateID: "composition-buffer"
             )
-        } else {
-            lockedPrefix = suggestion.lockedPrefix
-        }
+            : suggestion.lockedPrefix
         return SuggestionResponse(
             prefixCandidates: prefixCandidates,
             lockedPrefix: lockedPrefix,
@@ -1951,7 +2029,9 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     return
                 }
                 host?.schedulePostInsertCaretVerification { [weak self, client] in
-                    self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
+                    self?.performOnMainThreadOrMainActor { [weak self, client] in
+                        self?.aiAcceptanceRuntime.verifyPostInsertCaret(client: client)
+                    }
                 }
             case .refreshComposition:
                 refreshComposition(client: client)
@@ -2354,7 +2434,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 return self.candidatePanelPublicationSnapshot(suggestion: suggestion)
             },
             locale: locale,
-            onPublication: { [weak self] result in
+            onPublication: { @MainActor [weak self] result in
                 self?.applyCandidatePanelPublicationResult(result)
             }
         ) {
@@ -2536,7 +2616,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
             inputClientCompositionWriter.refreshComposition(
                 client: client,
                 state: writeState(),
-                markedDisplayText: nativeMarkedText() ?? compositionBuffer.displayText
+                markedDisplayText: currentMarkedDisplayText()
             )
         }
         guard didWriteMarkedText,
@@ -2548,6 +2628,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
             rawInput: rawBuffer,
             compositionID: compositionID
         )
+    }
+
+    private func currentMarkedDisplayText() -> String {
+        nativeMarkedText() ?? compositionBuffer.displayText
     }
 
     private func nativeMarkedText() -> String? {
@@ -2568,7 +2652,7 @@ final class InputControllerCoordinator: @unchecked Sendable {
         inputClientCompositionWriter.candidatePanelPreeditDisplayText(
             client: client,
             state: writeState(),
-            markedDisplayText: nativeMarkedText() ?? compositionBuffer.displayText
+            markedDisplayText: currentMarkedDisplayText()
         )
     }
 
@@ -2595,13 +2679,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 )
             },
             publish: { [weak self, client] in
-                guard let self else {
-                    return
+                self?.performOnMainThreadOrMainActor { [weak self, client] in
+                    guard let self else {
+                        return
+                    }
+                    self.updateCandidatePanelImmediately(
+                        suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
+                        client: client
+                    )
                 }
-                self.updateCandidatePanelImmediately(
-                    suggestion: self.suggestionStateRuntime.currentSnapshot().suggestion,
-                    client: client
-                )
             }
         )
     }
@@ -2628,19 +2714,31 @@ final class InputControllerCoordinator: @unchecked Sendable {
                 )
             },
             publish: { [weak self, client] in
-                guard let self,
-                      let current = self.activeSessionRuntime.currentSymbolComposition,
-                      current.compositionID == composition.compositionID,
-                      current.revision == composition.revision,
-                      self.hostCursorSnapshot(client: client) == current.presentation?.hostCursorSnapshot else {
-                    return
+                self?.performOnMainThreadOrMainActor { [weak self, client] in
+                    guard let self,
+                          let current = self.activeSessionRuntime.currentSymbolComposition,
+                          current.compositionID == composition.compositionID,
+                          current.revision == composition.revision,
+                          self.hostCursorSnapshot(client: client) == current.presentation?.hostCursorSnapshot else {
+                        return
+                    }
+                    self.publishSymbolPanel(
+                        composition: current,
+                        client: client
+                    )
                 }
-                self.publishSymbolPanel(
-                    composition: current,
-                    client: client
-                )
             }
         )
+    }
+
+    private func performOnMainThreadOrMainActor(_ operation: @escaping @Sendable () -> Void) {
+        if Thread.isMainThread {
+            operation()
+        } else {
+            Task { @MainActor in
+                operation()
+            }
+        }
     }
 
     private static let textOnlyKeyCode = -1
@@ -2707,6 +2805,7 @@ private extension InputKeyIntent {
     }
 }
 
+/// Lock-synchronized generation counter used to drop stale background lexical profile refreshes.
 final class LexicalProfileRefreshGate: @unchecked Sendable {
     private let lock = NSLock()
     private var generation = 0

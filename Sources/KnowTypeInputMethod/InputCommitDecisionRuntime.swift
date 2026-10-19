@@ -37,6 +37,13 @@ enum InputCommitDecisionResultPlan: Sendable, Equatable {
     case processNativeSpace
 }
 
+/// Pure value-in/value-out decision runtime for commit and candidate-selection planning.
+///
+/// Concurrency contract:
+/// - Contains no mutable stored state.
+/// - Invoked synchronously on the `InputControllerCoordinator` main-thread turn path.
+/// - Marked `@unchecked Sendable` to align with the coordinator runtime boundary without
+///   requiring `@MainActor` propagation into synchronous IMK entry points.
 final class InputCommitDecisionRuntime: @unchecked Sendable {
     func commitPlan(context: InputCommitDecisionContext) -> InputCommitDecisionPlan {
         if context.action == .space,
@@ -64,119 +71,108 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
     }
 
     func resultPlan(context: InputCommitDecisionContext) -> InputCommitDecisionResultPlan {
-        if context.action == .commitRaw {
-            return .result(context.rawInput.isEmpty ? .noAction : .commit(context.rawInput))
+        switch context.action {
+        case .commitRaw:
+            return decideReturn(context: context)
+        case .space:
+            return decideSpace(context: context)
+        case .tab:
+            return decideTab(context: context)
+        case .optionNumber:
+            return decideOptionNumber(context: context)
+        case .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth:
+            return sessionCommitResultPlan(
+                context: context,
+                selectedCandidate: context.selectedCandidate
+            )
         }
+    }
+
+    private func decideReturn(context: InputCommitDecisionContext) -> InputCommitDecisionResultPlan {
+        if let legacyDecision = resolveLegacySegmentedReturnDecisionIfNeeded(context: context) {
+            return legacyDecision
+        }
+        return .result(context.rawInput.isEmpty ? .noAction : .commit(context.rawInput))
+    }
+
+    private func decideSpace(context: InputCommitDecisionContext) -> InputCommitDecisionResultPlan {
+        let selectedCandidate = context.selectedCandidate
+        if let selectedCandidate,
+           case .aiRecommendation = selectedCandidate.kind {
+            return .result(aiRecommendationCommitResult(state: context.aiRecommendationState))
+        }
+        if let selectedCandidate,
+           case .continuationCandidate = selectedCandidate.kind {
+            return sessionCommitResultPlan(
+                context: context,
+                selectedCandidate: selectedCandidate,
+                respectsPendingFallback: false
+            )
+        }
+        if let legacyDecision = resolveLegacySegmentedSpaceDecisionIfNeeded(context: context) {
+            return legacyDecision
+        }
+        if context.isNativeActive,
+           let selectedCandidate,
+           context.selectedCandidateShouldSelectBeforeSpace {
+            return numberSelectionPlan(selection: selectedCandidate, context: context)
+        }
+        if context.isNativeActive,
+           let selectedCandidate,
+           InputNativeCandidateNavigationRuntime.isNativeSelectablePrefixOrFull(selectedCandidate),
+           !context.selectedCandidateHasNativeIndex {
+            return numberSelectionPlan(selection: selectedCandidate, context: context)
+        }
+        if context.isNativeActive {
+            return .processNativeSpace
+        }
+        return .result(context.rawInput.isEmpty ? .noAction : .commit(context.rawInput))
+    }
+
+    private func decideTab(context: InputCommitDecisionContext) -> InputCommitDecisionResultPlan {
+        if let aiShortcutResult = InputCommitResultPolicy.aiShortcutResult(
+            for: .tab,
+            aiRecommendationState: context.aiRecommendationState
+        ) {
+            return .result(aiShortcutResult)
+        }
+        if let legacyDecision = resolveLegacySegmentedTabDecisionIfNeeded(context: context) {
+            return legacyDecision
+        }
+        if shouldSuppressTabCommitForPartialComposition(context: context) {
+            return .result(.noAction)
+        }
+        if context.enablesAsyncSuggestionRefresh,
+           !hasVisibleContinuationForCurrentSuggestion(context: context) {
+            return .result(.noAction)
+        }
+        return sessionCommitResultPlan(
+            context: context,
+            selectedCandidate: context.selectedCandidate
+        )
+    }
+
+    private func decideOptionNumber(context: InputCommitDecisionContext) -> InputCommitDecisionResultPlan {
         if let aiShortcutResult = InputCommitResultPolicy.aiShortcutResult(
             for: context.action,
             aiRecommendationState: context.aiRecommendationState
         ) {
             return .result(aiShortcutResult)
         }
-        let selectedCandidate = context.selectedCandidate
-        if context.action == .tab,
-           let selectedCandidate,
-           case .segmentCandidate = selectedCandidate.kind {
+        if !context.panelIsVisible {
             return .result(.noAction)
         }
-        if context.action == .tab,
-           shouldSuppressTabCommitForPartialComposition(context: context) {
-            return .result(.noAction)
-        }
-        if context.action == .tab,
-           context.enablesAsyncSuggestionRefresh,
-           !hasVisibleContinuationForCurrentSuggestion(context: context) {
-            return .result(.noAction)
-        }
-        if context.action == .space,
-           let selectedCandidate,
-           case .aiRecommendation = selectedCandidate.kind {
-            return .result(aiRecommendationCommitResult(state: context.aiRecommendationState))
-        }
-        if context.action == .space,
-           let selectedCandidate,
-           case .segmentCandidate(let index) = selectedCandidate.kind {
-            return .applySegmentCandidate(index: index, commitIfFullyResolved: true)
-        }
-        if context.action == .space,
-           let selectedCandidate,
-           case .continuationCandidate = selectedCandidate.kind {
-            let commitSuggestion = context.commitSuggestionSnapshot
-            return .result(
-                InputSessionCommitPolicy.result(
-                    for: context.action,
-                    rawInput: context.rawInput,
-                    suggestion: commitSuggestion.suggestion,
-                    suggestionRawInput: commitSuggestion.rawInput,
-                    selectedCandidate: sessionSelection(from: selectedCandidate),
-                    appBundleID: context.appBundleID,
-                    locale: context.locale,
-                    runtimePreferences: context.runtimePreferences,
-                    allowsSynchronousFallback: false
-                )
-            )
-        }
-        if context.compositionBuffer.hasResolvedSegments,
-           context.compositionBuffer.isFullyResolved {
-            let suggestion = context.suggestionSnapshot.suggestion
-            if let selectedCandidate,
-               case .continuationCandidate(let index) = selectedCandidate.kind,
-               context.action == .space,
-               suggestion?.continuationCandidates.indices.contains(index) == true {
-                return .result(
-                    InputCompositionController().handle(
-                        action: .optionNumber(index + 1),
-                        prefixCandidates: [resolvedCompositionCandidate(context: context)],
-                        continuationCandidates: suggestion?.continuationCandidates ?? [],
-                        originalText: context.rawInput
-                    )
-                )
-            }
-            switch context.action {
-            case .space:
-                return .result(.commit(context.compositionBuffer.commitText))
-            case .tab:
-                guard suggestion?.continuationCandidates.isEmpty == false else {
-                    return .result(.noAction)
-                }
-                return .result(
-                    InputCompositionController().handle(
-                        action: .tab,
-                        prefixCandidates: [resolvedCompositionCandidate(context: context)],
-                        continuationCandidates: suggestion?.continuationCandidates ?? [],
-                        originalText: context.rawInput
-                    )
-                )
-            case .optionNumber, .toggleSymbolMode, .toggleTextMode, .toggleSymbolWidth, .commitRaw:
-                break
-            }
-        }
-        if context.action == .space,
-           context.isNativeActive,
-           let selectedCandidate,
-           context.selectedCandidateShouldSelectBeforeSpace {
-            return numberSelectionPlan(selection: selectedCandidate, context: context)
-        }
-        if context.action == .space,
-           context.isNativeActive,
-           let selectedCandidate,
-           InputNativeCandidateNavigationRuntime.isNativeSelectablePrefixOrFull(selectedCandidate),
-           !context.selectedCandidateHasNativeIndex {
-            return numberSelectionPlan(selection: selectedCandidate, context: context)
-        }
-        if context.action == .space,
-           context.isNativeActive {
-            return .processNativeSpace
-        }
-        if context.action == .space,
-           !context.isNativeActive {
-            return .result(context.rawInput.isEmpty ? .noAction : .commit(context.rawInput))
-        }
-        if case .optionNumber = context.action,
-           !context.panelIsVisible {
-            return .result(.noAction)
-        }
+        return sessionCommitResultPlan(
+            context: context,
+            selectedCandidate: context.selectedCandidate
+        )
+    }
 
+    private func sessionCommitResultPlan(
+        context: InputCommitDecisionContext,
+        selectedCandidate: InputCandidateSelection?,
+        respectsPendingFallback: Bool = true
+    ) -> InputCommitDecisionResultPlan {
         let commitSuggestion = context.commitSuggestionSnapshot
         return .result(
             InputSessionCommitPolicy.result(
@@ -184,13 +180,84 @@ final class InputCommitDecisionRuntime: @unchecked Sendable {
                 rawInput: context.rawInput,
                 suggestion: commitSuggestion.suggestion,
                 suggestionRawInput: commitSuggestion.rawInput,
-                selectedCandidate: commitSuggestion.usesPendingFallback
+                selectedCandidate: (respectsPendingFallback && commitSuggestion.usesPendingFallback)
                     ? nil
                     : sessionSelection(from: selectedCandidate),
                 appBundleID: context.appBundleID,
                 locale: context.locale,
                 runtimePreferences: context.runtimePreferences,
                 allowsSynchronousFallback: false
+            )
+        )
+    }
+
+    // MARK: - Legacy CompositionBuffer Segmented Fallback Helpers
+
+    private func resolveLegacySegmentedReturnDecisionIfNeeded(
+        context: InputCommitDecisionContext
+    ) -> InputCommitDecisionResultPlan? {
+        guard context.compositionBuffer.hasResolvedSegments else {
+            return nil
+        }
+        return .result(context.rawInput.isEmpty ? .noAction : .commit(context.rawInput))
+    }
+
+    private func resolveLegacySegmentedSpaceDecisionIfNeeded(
+        context: InputCommitDecisionContext
+    ) -> InputCommitDecisionResultPlan? {
+        if let selectedCandidate = context.selectedCandidate,
+           case .segmentCandidate(let index) = selectedCandidate.kind {
+            return .applySegmentCandidate(index: index, commitIfFullyResolved: true)
+        }
+        guard context.compositionBuffer.hasResolvedSegments else {
+            return nil
+        }
+        guard context.compositionBuffer.isFullyResolved else {
+            return nil
+        }
+        if let selectedCandidate = context.selectedCandidate,
+           case .continuationCandidate(let index) = selectedCandidate.kind,
+           let suggestion = context.suggestionSnapshot.suggestion,
+           suggestion.continuationCandidates.indices.contains(index) {
+            return .result(
+                InputCompositionController().handle(
+                    action: .optionNumber(index + 1),
+                    prefixCandidates: [resolvedCompositionCandidate(context: context)],
+                    continuationCandidates: suggestion.continuationCandidates,
+                    originalText: context.rawInput
+                )
+            )
+        }
+        return .result(.commit(context.compositionBuffer.commitText))
+    }
+
+    private func resolveLegacySegmentedTabDecisionIfNeeded(
+        context: InputCommitDecisionContext
+    ) -> InputCommitDecisionResultPlan? {
+        if let selectedCandidate = context.selectedCandidate,
+           case .segmentCandidate = selectedCandidate.kind {
+            return .result(.noAction)
+        }
+        guard context.compositionBuffer.hasResolvedSegments else {
+            return nil
+        }
+        guard context.compositionBuffer.isFullyResolved else {
+            return .result(.noAction)
+        }
+        if context.enablesAsyncSuggestionRefresh,
+           !hasVisibleContinuationForCurrentSuggestion(context: context) {
+            return .result(.noAction)
+        }
+        let suggestion = context.suggestionSnapshot.suggestion
+        guard suggestion?.continuationCandidates.isEmpty == false else {
+            return .result(.noAction)
+        }
+        return .result(
+            InputCompositionController().handle(
+                action: .tab,
+                prefixCandidates: [resolvedCompositionCandidate(context: context)],
+                continuationCandidates: suggestion?.continuationCandidates ?? [],
+                originalText: context.rawInput
             )
         )
     }

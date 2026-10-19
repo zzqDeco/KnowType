@@ -201,6 +201,53 @@ final class InputCommitDecisionRuntimeTests: XCTestCase {
         )
     }
 
+    func testRimeHotPathSpaceUsesProcessNativeSpaceWhenNoNonNativeRowIsSelected() {
+        let selected = InputCandidateSelection(text: "你", kind: .fullCandidate(index: 0), nativeCandidateIndex: 0)
+        let context = makeContext(
+            action: .space,
+            rawInput: "ni",
+            suggestion: suggestion(prefixes: [candidate("你")], continuations: []),
+            selectedCandidate: selected,
+            isNativeActive: true,
+            selectedCandidateShouldSelectBeforeSpace: false,
+            selectedCandidateHasNativeIndex: true
+        )
+
+        XCTAssertEqual(runtime.commitPlan(context: context), .processNativeSpace)
+        XCTAssertEqual(runtime.resultPlan(context: context), .processNativeSpace)
+    }
+
+    func testCommitRawCommitsRawInputOnRimeHotPathAndLegacyResolvedSegments() {
+        let hotPathContext = makeContext(action: .commitRaw, rawInput: "nishi", isNativeActive: true)
+        XCTAssertEqual(runtime.commitPlan(context: hotPathContext), .resolve(.result(.commit("nishi"))))
+
+        var resolvedBuffer = CompositionBuffer()
+        resolvedBuffer.updateRawInput("nishi")
+        resolvedBuffer.apply(candidate("你是", rawRange: KnowTypeCore.TextRange(start: 0, length: 5)))
+        let legacyContext = makeContext(
+            action: .commitRaw,
+            rawInput: "nishi",
+            compositionBuffer: resolvedBuffer,
+            isNativeActive: false
+        )
+        XCTAssertEqual(runtime.commitPlan(context: legacyContext), .resolve(.result(.commit("nishi"))))
+    }
+
+    func testLegacyFullyResolvedCompositionSpaceCommitsResolvedText() {
+        var buffer = CompositionBuffer()
+        buffer.updateRawInput("nishi")
+        buffer.apply(candidate("你是", rawRange: KnowTypeCore.TextRange(start: 0, length: 5)))
+        let context = makeContext(
+            action: .space,
+            rawInput: "nishi",
+            compositionBuffer: buffer,
+            suggestion: suggestion(prefixes: [candidate("你是")], continuations: []),
+            isNativeActive: false
+        )
+
+        XCTAssertEqual(runtime.resultPlan(context: context), .result(.commit("你是")))
+    }
+
     private func makeContext(
         action: InputAction,
         rawInput: String,

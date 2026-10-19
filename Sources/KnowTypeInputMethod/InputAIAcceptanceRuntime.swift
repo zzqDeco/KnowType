@@ -27,6 +27,15 @@ struct InputAIAcceptanceCommitEffects: Equatable {
     var shouldRecordLexicalCommit: Bool
 }
 
+/// Coordinates AI accepted-feedback span tracking, accepted-learning records, and typing-event side effects.
+///
+/// Concurrency contract:
+/// - Main-thread / `MainActor` confined for mutable state (`runtimePreferences` and `feedbackTracker`).
+/// - Asynchronous persistence and context-event tasks (`Task.detached`) capture only immutable
+///   value snapshots (`AITypingEvent`, `AIAcceptedLearningRecord`) and `Sendable` recorder protocols,
+///   never mutating `self` off the main thread.
+/// - Marked `@unchecked Sendable` so `InputControllerCoordinator` can invoke post-insert caret
+///   verification from `MainActor` callbacks without breaking synchronous IMK callers.
 final class InputAIAcceptanceRuntime: @unchecked Sendable {
     private let contextEventRecorder: (any AIContextEventRecording)?
     private let acceptedLearningRecorder: (any AIAcceptedLearningRecording)?
