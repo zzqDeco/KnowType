@@ -610,16 +610,26 @@ final class RimeConversionEngineTests: XCTestCase {
         }
         let sharedData = root.appendingPathComponent("share", isDirectory: true)
         let userData = root.appendingPathComponent("user", isDirectory: true)
-        let sync = userData.appendingPathComponent("sync", isDirectory: true)
+        let customSync = root.appendingPathComponent("Rime Sync", isDirectory: true)
+        let installationSync = customSync.appendingPathComponent("mac-local", isDirectory: true)
         let logs = root.appendingPathComponent("logs", isDirectory: true)
         try fileManager.createDirectory(at: sharedData, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: sync, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: userData, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: installationSync, withIntermediateDirectories: true)
+        try """
+        installation_id: "mac-local" # machine id
+        sync_dir: "\(customSync.path)" # shared snapshots
+        """.write(
+            to: userData.appendingPathComponent("installation.yaml"),
+            atomically: true,
+            encoding: .utf8
+        )
         try """
         schema:
           schema_id: custom_schema
         translator:
           dictionary: fallback_dict
-          user_dict: custom_user_dict
+          user_dict: "custom_user_dict" # custom dict comment
         reverse_lookup:
           dictionary: stroke
         """.write(
@@ -627,7 +637,7 @@ final class RimeConversionEngineTests: XCTestCase {
             atomically: true,
             encoding: .utf8
         )
-        let snapshotURL = sync.appendingPathComponent("custom_user_dict.userdb.txt")
+        let snapshotURL = installationSync.appendingPathComponent("custom_user_dict.userdb.txt")
         try "ceshi\t测试\tc=8 d=0\n".write(to: snapshotURL, atomically: true, encoding: .utf8)
 
         let configuration = NativeRimeConfiguration(

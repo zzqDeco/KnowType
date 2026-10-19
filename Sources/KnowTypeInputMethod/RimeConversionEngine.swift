@@ -1412,7 +1412,11 @@ struct RimeUserDBSnapshotLocator: @unchecked Sendable {
         guard let rawValue = installationScalarValue(forKey: "sync_dir", in: userDataDirectory) else {
             return nil
         }
-        return NativeRimeConfiguration.environmentFileURL(path: rawValue, isDirectory: true)
+        let expanded = (rawValue as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") {
+            return URL(fileURLWithPath: expanded, isDirectory: true)
+        }
+        return userDataDirectory.appendingPathComponent(expanded, isDirectory: true).standardizedFileURL
     }
 
     func userDictionaryName(
@@ -1447,14 +1451,16 @@ struct RimeUserDBSnapshotLocator: @unchecked Sendable {
         let prefix = "\(key):"
         for line in content.split(whereSeparator: \.isNewline) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.hasPrefix(prefix),
+            guard !trimmed.hasPrefix("#"),
+                  trimmed.hasPrefix(prefix),
                   let separator = trimmed.firstIndex(of: ":") else {
                 continue
             }
-            let rawValue = trimmed[trimmed.index(after: separator)...]
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-            return rawValue.isEmpty ? nil : rawValue
+            let candidateKey = trimmed[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard candidateKey == key else {
+                continue
+            }
+            return Self.parseYAMLScalar(from: trimmed[trimmed.index(after: separator)...])
         }
         return nil
     }
@@ -1466,14 +1472,14 @@ struct RimeUserDBSnapshotLocator: @unchecked Sendable {
         var dictionary: String?
 
         for line in content.split(whereSeparator: \.isNewline) {
-            let uncommented = line.prefix { $0 != "#" }
-            let trimmed = uncommented.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedLine.isEmpty, !trimmedLine.hasPrefix("#") else {
                 continue
             }
-            let indent = uncommented.prefix { $0 == " " || $0 == "\t" }.count
+            let indent = line.prefix { $0 == " " || $0 == "\t" }.count
             if !inTranslatorSection {
-                if indent == 0, trimmed == "translator:" {
+                let header = line.prefix { $0 != "#" }.trimmingCharacters(in: .whitespacesAndNewlines)
+                if indent == 0, header == "translator:" {
                     inTranslatorSection = true
                     translatorIndent = indent
                 }
@@ -1482,14 +1488,11 @@ struct RimeUserDBSnapshotLocator: @unchecked Sendable {
             if indent <= translatorIndent {
                 break
             }
-            guard let separator = trimmed.firstIndex(of: ":") else {
+            guard let separator = trimmedLine.firstIndex(of: ":") else {
                 continue
             }
-            let key = trimmed[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
-            let value = trimmed[trimmed.index(after: separator)...]
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-            guard !value.isEmpty else {
+            let key = trimmedLine[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let value = Self.parseYAMLScalar(from: trimmedLine[trimmedLine.index(after: separator)...]) else {
                 continue
             }
             if key == "user_dict" {
@@ -1499,6 +1502,74 @@ struct RimeUserDBSnapshotLocator: @unchecked Sendable {
             }
         }
         return userDict ?? dictionary
+    }
+
+    private static func parseYAMLScalar(from rawSlice: Substring) -> String? {
+        let trimmed = rawSlice.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else {
+            return nil
+        }
+        if first == "\"" {
+            var result = ""
+            var escaping = false
+            for character in trimmed.dropFirst() {
+                if escaping {
+                    switch character {
+                    case "n":
+                        result.append("\n")
+                    case "r":
+                        result.append("\r")
+                    case "t":
+                        result.append("\t")
+                    default:
+                        result.append(character)
+                    }
+                    escaping = false
+                    continue
+                }
+                if character == "\\" {
+                    escaping = true
+                    continue
+                }
+                if character == "\"" {
+                    return result.isEmpty ? nil : result
+                }
+                result.append(character)
+            }
+            let fallback = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return fallback.isEmpty ? nil : fallback
+        }
+        if first == "'" {
+            var result = ""
+            let characters = Array(trimmed.dropFirst())
+            var index = 0
+            while index < characters.count {
+                let character = characters[index]
+                if character == "'" {
+                    if index + 1 < characters.count, characters[index + 1] == "'" {
+                        result.append("'")
+                        index += 2
+                        continue
+                    }
+                    return result.isEmpty ? nil : result
+                }
+                result.append(character)
+                index += 1
+            }
+            let fallback = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return fallback.isEmpty ? nil : fallback
+        }
+        var result = ""
+        var previousWasWhitespace = true
+        for character in trimmed {
+            if character == "#", previousWasWhitespace {
+                break
+            }
+            previousWasWhitespace = character == " " || character == "\t"
+            result.append(character)
+        }
+        let cleaned = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
     }
 
     private func appendCandidate(
