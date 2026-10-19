@@ -60,22 +60,50 @@ func acceptedLearningCommitDigestVariants(from records: [AIAcceptedLearningRecor
     return orderedReversed.reversed()
 }
 
-func loadAcceptedLearningEvictedCommitList(
+func isAcceptedLearningNoSuchFileError(_ error: Error) -> Bool {
+    let nsError = error as NSError
+    if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError {
+        return true
+    }
+    if nsError.domain == NSPOSIXErrorDomain && nsError.code == ENOENT {
+        return true
+    }
+    if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+        return isAcceptedLearningNoSuchFileError(underlying)
+    }
+    return false
+}
+
+func loadAcceptedLearningEvictedCommitListOrThrow(
     from url: URL?,
     fileManager: FileManager = .default
-) -> [String] {
-    guard let url,
-          fileManager.fileExists(atPath: url.path),
-          let data = try? Data(contentsOf: url),
-          let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+) throws -> [String] {
+    guard let url else {
         return []
     }
+    let data: Data
+    do {
+        data = try Data(contentsOf: url)
+    } catch {
+        if isAcceptedLearningNoSuchFileError(error) || !fileManager.fileExists(atPath: url.path) {
+            return []
+        }
+        throw error
+    }
+    let decoded = try JSONDecoder().decode([String].self, from: data)
     var orderedReversed: [String] = []
     var seen: Set<String> = []
     for entry in decoded.reversed() where seen.insert(entry).inserted {
         orderedReversed.append(entry)
     }
     return orderedReversed.reversed()
+}
+
+func loadAcceptedLearningEvictedCommitList(
+    from url: URL?,
+    fileManager: FileManager = .default
+) -> [String] {
+    (try? loadAcceptedLearningEvictedCommitListOrThrow(from: url, fileManager: fileManager)) ?? []
 }
 
 func loadAcceptedLearningEvictedCommits(
@@ -100,7 +128,7 @@ func recordAcceptedLearningEvictedCommits(
         return
     }
     let newDigestSet = Set(newDigests)
-    let existing = loadAcceptedLearningEvictedCommitList(from: evictedURL, fileManager: fileManager)
+    let existing = try loadAcceptedLearningEvictedCommitListOrThrow(from: evictedURL, fileManager: fileManager)
     let effectiveMaxEntries = max(4_096, maxEntries)
     let merged = (existing.filter { !newDigestSet.contains($0) } + newDigests).suffix(effectiveMaxEntries)
     let encoder = JSONEncoder()
@@ -619,7 +647,7 @@ public final class AIAcceptedLearningStore:
                 )
             }) ?? StartupState(
                 records: [],
-                summary: nil,
+                summary: Self.loadSummary(from: summaryURL, decoder: configuredDecoder),
                 schemaSummaries: [:],
                 lastClearMarkerModifiedAt: Self.fileModificationDate(
                     acceptedLearningClearMarkerURL(historyURL: historyURL),
@@ -772,10 +800,14 @@ public final class AIAcceptedLearningStore:
         var externalEvents: [AIAcceptedLearningSummaryReadyEvent] = []
         var didCompact = false
         try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
-            externalEvents = syncRecordsAfterExternalClearLocked()
+            externalEvents = try syncRecordsAfterExternalClearLocked()
             var nextRecords: [AIAcceptedLearningRecord]
             if let historyURL, fileManager.fileExists(atPath: historyURL.path) {
-                nextRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+                nextRecords = try Self.loadRecordsOrThrow(
+                    from: historyURL,
+                    decoder: decoder,
+                    fileManager: fileManager
+                )
             } else {
                 lock.lock()
                 nextRecords = records
@@ -895,10 +927,14 @@ public final class AIAcceptedLearningStore:
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) { () -> [AIAcceptedLearningSummaryReadyEvent] in
-                let externalEvents = syncRecordsAfterExternalClearLocked()
+                let externalEvents = try syncRecordsAfterExternalClearLocked()
                 let currentRecords: [AIAcceptedLearningRecord]
                 if let historyURL, fileManager.fileExists(atPath: historyURL.path) {
-                    let loadedRecords = Self.loadRecords(from: historyURL, decoder: decoder)
+                    let loadedRecords = try Self.loadRecordsOrThrow(
+                        from: historyURL,
+                        decoder: decoder,
+                        fileManager: fileManager
+                    )
                     if loadedRecords.count > maxRecordCount {
                         let overflowCount = loadedRecords.count - maxRecordCount
                         let evictedRecords = Array(loadedRecords.prefix(overflowCount))
@@ -975,7 +1011,7 @@ public final class AIAcceptedLearningStore:
     }
 
     @discardableResult
-    private func syncRecordsAfterExternalClearLocked() -> [AIAcceptedLearningSummaryReadyEvent] {
+    private func syncRecordsAfterExternalClearLocked() throws -> [AIAcceptedLearningSummaryReadyEvent] {
         guard historyURL != nil else {
             return []
         }
@@ -993,7 +1029,7 @@ public final class AIAcceptedLearningStore:
         guard shouldReload else {
             return []
         }
-        let loaded = Self.loadRecordsWithMetadata(
+        let loaded = try Self.loadRecordsWithMetadata(
             from: historyURL,
             decoder: decoder,
             fileManager: fileManager
@@ -1048,7 +1084,7 @@ public final class AIAcceptedLearningStore:
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
                 fileManager: fileManager
             ) {
-                syncRecordsAfterExternalClearLocked()
+                try syncRecordsAfterExternalClearLocked()
             }
         } catch {
             diagnosticSink.record(
@@ -1267,13 +1303,22 @@ public final class AIAcceptedLearningStore:
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private static func loadRecords(
+    private static func loadRecordsOrThrow(
         from url: URL?,
-        decoder: JSONDecoder
-    ) -> [AIAcceptedLearningRecord] {
-        guard let url,
-              let content = try? String(contentsOf: url, encoding: .utf8) else {
+        decoder: JSONDecoder,
+        fileManager: FileManager = .default
+    ) throws -> [AIAcceptedLearningRecord] {
+        guard let url else {
             return []
+        }
+        let content: String
+        do {
+            content = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            if isAcceptedLearningNoSuchFileError(error) || !fileManager.fileExists(atPath: url.path) {
+                return []
+            }
+            throw error
         }
         return content
             .split(whereSeparator: \.isNewline)
@@ -1285,23 +1330,38 @@ public final class AIAcceptedLearningStore:
             }
     }
 
+    private static func loadRecords(
+        from url: URL?,
+        decoder: JSONDecoder
+    ) -> [AIAcceptedLearningRecord] {
+        (try? loadRecordsOrThrow(from: url, decoder: decoder)) ?? []
+    }
+
     private static func loadRecordsWithMetadata(
         from historyURL: URL?,
         decoder: JSONDecoder,
         fileManager: FileManager
-    ) -> (records: [AIAcceptedLearningRecord], metadata: DiskStateMetadata?) {
+    ) throws -> (records: [AIAcceptedLearningRecord], metadata: DiskStateMetadata?) {
         guard let historyURL else {
             return ([], nil)
         }
         for _ in 0..<3 {
             let before = diskStateMetadata(historyURL: historyURL, fileManager: fileManager)
-            let records = loadRecords(from: historyURL, decoder: decoder)
+            let records = try loadRecordsOrThrow(
+                from: historyURL,
+                decoder: decoder,
+                fileManager: fileManager
+            )
             let after = diskStateMetadata(historyURL: historyURL, fileManager: fileManager)
             if before == after {
                 return (records, before)
             }
         }
-        let fallbackRecords = loadRecords(from: historyURL, decoder: decoder)
+        let fallbackRecords = try loadRecordsOrThrow(
+            from: historyURL,
+            decoder: decoder,
+            fileManager: fileManager
+        )
         return (fallbackRecords, nil)
     }
 
@@ -1327,7 +1387,7 @@ public final class AIAcceptedLearningStore:
         compactPersistentHistory: Bool,
         repairPersistentSummary: Bool
     ) throws -> StartupState {
-        let loaded = Self.loadRecordsWithMetadata(
+        let loaded = try Self.loadRecordsWithMetadata(
             from: historyURL,
             decoder: decoder,
             fileManager: fileManager
