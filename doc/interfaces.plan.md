@@ -1077,11 +1077,11 @@ block: only secret-like raw input or confirmed locked prefixes produce
 
 Level 0 includes:
 
-- URL-like input
+- URL-like input (including bare domains across general ASCII, Punycode IDN, and local/reserved TLDs, while excluding pathless, portless dotted identifiers and prose tokens such as `foo.bar` or `self.coordinator` so normal correction and inner `camelCase`/`snake_case` token protection still apply)
 - email-like input
 - file paths
 - command-like input
-- code-like snippets
+- code-like snippets (including callable expressions such as `console.log("x")` and `System.out.println()`)
 - protected Terminal, iTerm, and Xcode contexts
 
 Technical-token preservation is separate from Level 0 routing. A mixed prose input can preserve `API` or `macOS` while still being eligible for provider continuation.

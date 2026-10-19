@@ -17,6 +17,17 @@ credential detection for cloud AI hard blocks.
   command-like text, code-like snippets, and protected app contexts such as
   Terminal, iTerm, and Xcode. These rules keep correction from rewriting text
   that should usually commit unchanged.
+- Unschemed bare-domain URL detection retains coverage across general ASCII TLDs
+  (such as `.eu`, `.name`, `.aero`), Punycode IDN suffixes (`xn--...`), and
+  local/reserved suffixes (`local`, `lan`, `internal`, `test`, `example`,
+  `invalid`, `localhost`), while disambiguating and excluding unschemed,
+  pathless, portless dotted code identifiers and prose mistakes such as
+  `foo.bar`, `user.name`, `self.coordinator`, `System.out.println`,
+  `com.apple.Xcode`, and `hello.world` so they do not falsely match
+  `reason: "url"` or trigger Level 0 protection (inner `camelCase` and
+  `snake_case` segments still keep normal token protection, while callable
+  dotted expressions such as `console.log("x")` and `System.out.println()`
+  remain under Level 0 code-like protection).
 - Real-time cloud AI recommendation uses `containsSecretLikeContent` as its
   only hard block. Normal technical text, commands, paths, URLs, and protected
   app contexts do not directly produce `AI 已禁用`.
@@ -30,6 +41,7 @@ credential detection for cloud AI hard blocks.
 
 ## Tests
 
+- `KnowTypeCoreTests`
 - `CorrectionEngineTests`
 - `PrefixContinuationEngineTests`
 - `MVPAcceptanceTests`

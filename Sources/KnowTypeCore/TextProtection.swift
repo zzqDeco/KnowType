@@ -62,10 +62,47 @@ public enum TextProtection {
         "ssh": "SSH",
         "inputmethodkit": "InputMethodKit"
     ]
+    private static let unambiguousBareDomainTLDs: Set<String> = [
+        "com", "cn", "org", "net", "edu", "gov", "mil", "int", "arpa",
+        "io", "co", "ai", "dev", "app", "me", "tv", "cc", "gg", "sh", "fm", "ly",
+        "to", "gl", "xyz", "top", "tech", "online", "site", "store", "cloud",
+        "eu", "uk", "de", "jp", "fr", "ru", "br", "au", "ca",
+        "hk", "tw", "mo", "sg", "kr", "us", "nz", "it", "es", "nl", "ch", "se",
+        "no", "dk", "fi", "pl", "be", "at", "cz", "gr", "pt", "ie", "hu", "ro",
+        "tr", "il", "za", "mx", "ar", "cl", "my", "ph", "th", "vn",
+        "aero", "asia", "biz", "cat", "coop", "info", "jobs", "mobi", "museum",
+        "post", "pro", "tel", "travel", "xxx",
+        "local", "lan", "internal", "test", "example", "invalid", "localhost", "onion"
+    ]
+    private static let likelyCodeIdentifierPrefixes: Set<String> = [
+        "self", "this", "super", "user", "users", "item", "items", "elem", "element",
+        "node", "object", "obj", "model", "view", "controller", "state", "props",
+        "context", "ctx", "req", "res", "request", "response", "err", "error",
+        "result", "data", "config", "cfg", "settings", "options", "opts", "params",
+        "args", "env", "process", "system", "window", "document", "console", "math",
+        "json", "file", "path", "bundle", "foo", "bar", "baz", "qux", "hello",
+        "my", "current", "next", "prev", "previous", "first", "last"
+    ]
+    private static let likelyCodeIdentifierSuffixes: Set<String> = [
+        "bar", "baz", "qux", "coordinator", "delegate", "manager", "controller",
+        "handler", "listener", "observer", "provider", "runtime", "engine", "store",
+        "builder", "factory", "helper", "service", "client", "server", "out", "err",
+        "println", "print", "printf", "read", "write", "append", "remove", "delete",
+        "insert", "update", "get", "set", "init", "deinit", "main", "value", "values",
+        "key", "keys", "count", "length", "size", "first", "last", "next", "prev",
+        "shared", "default", "current", "body", "text", "title", "type", "kind",
+        "state", "status", "result", "error", "code", "path", "url", "uri",
+        "json", "yaml", "yml", "toml", "xml", "csv", "md", "txt", "log", "lock",
+        "conf", "ini", "swift", "py", "js", "ts", "jsx", "tsx", "rs", "go", "rb",
+        "php", "java", "kt", "c", "cpp", "h", "hpp", "cs", "m", "mm", "zsh",
+        "bash", "fish", "html", "htm", "css", "scss", "less", "sql", "wasm", "proto",
+        "xcode", "textedit", "iterm2", "terminal", "vscode"
+    ]
+    private static let bareDomainURLPattern =
+        #"(?<![a-z0-9_-]|\.[a-z0-9_-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:xn--[a-z0-9-]{2,59}|[a-z]{2,63})\b(?![a-z0-9_-]|\.[a-z0-9_-])(?::\d+)?(?:/[^\s]*)?"#
     private static let protectedRangePatterns: [TextProtectionRegexPattern] = [
         TextProtectionRegexPattern(#"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)[^\s]+"#, reason: "url"),
-        TextProtectionRegexPattern(#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
-        TextProtectionRegexPattern(#"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
+        TextProtectionRegexPattern(#"(?i)"# + bareDomainURLPattern, reason: "url"),
         TextProtectionRegexPattern(#"(?i)\blocalhost(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
         TextProtectionRegexPattern(#"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?"#, reason: "url"),
         TextProtectionRegexPattern(#"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, reason: "email"),
@@ -158,15 +195,7 @@ public enum TextProtection {
     }
 
     private static func isURL(_ text: String) -> Bool {
-        text.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
-            || text.range(
-                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|org|net|edu|gov|io|ai|app|dev|co|us|uk|cn|jp|de|fr|me|info|biz|site|tech)(?::\d+)?(?:/[^\s]*)?$"#,
-                options: .regularExpression
-            ) != nil
-            || text.range(
-                of: #"(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d+)?(?:/[^\s]*)?$"#,
-                options: .regularExpression
-            ) != nil
+        if text.range(of: #"(?i)^(?:[a-z][a-z0-9+.-]*://|www\.)\S+$"#, options: .regularExpression) != nil
             || text.range(
                 of: #"(?i)^localhost(?::\d+)?(?:/[^\s]*)?$"#,
                 options: .regularExpression
@@ -174,7 +203,16 @@ public enum TextProtection {
             || text.range(
                 of: #"^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d+)?(?:/[^\s]*)?$"#,
                 options: .regularExpression
-            ) != nil
+            ) != nil {
+            return true
+        }
+        guard text.range(
+            of: #"(?i)^"# + bareDomainURLPattern + #"$"#,
+            options: .regularExpression
+        ) != nil else {
+            return false
+        }
+        return !isLikelyDottedIdentifierOrProseToken(text)
     }
 
     private static func isEmail(_ text: String) -> Bool {
@@ -245,7 +283,7 @@ public enum TextProtection {
         if text.range(of: #"^[A-Za-z_][A-Za-z0-9_]*\("#, options: .regularExpression) != nil {
             return true
         }
-        if text.range(of: #"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$"#, options: .regularExpression) != nil {
+        if text.range(of: #"\b[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+\s*\("#, options: .regularExpression) != nil {
             return true
         }
         let tokens = text.split(whereSeparator: { $0.isWhitespace })
@@ -461,10 +499,46 @@ public enum TextProtection {
         return trimmed.range(of: #"^(?:(?:~|\.|\.\.)/)?\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$"#, options: .regularExpression) != nil
     }
 
+    private static func isLikelyDottedIdentifierOrProseToken(_ token: String) -> Bool {
+        let lowercased = token.lowercased()
+        if lowercased == "localhost"
+            || !token.contains(".")
+            || lowercased.contains("://")
+            || lowercased.hasPrefix("www.")
+            || token.contains(":")
+            || token.contains("/") {
+            return false
+        }
+
+        let labels = lowercased.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard labels.count >= 2,
+              let firstLabel = labels.first,
+              let lastLabel = labels.last else {
+            return true
+        }
+
+        if unambiguousBareDomainTLDs.contains(lastLabel) || lastLabel.hasPrefix("xn--") {
+            return false
+        }
+
+        if likelyCodeIdentifierPrefixes.contains(firstLabel) {
+            return true
+        }
+
+        if likelyCodeIdentifierSuffixes.contains(lastLabel) {
+            return true
+        }
+
+        return false
+    }
+
     private static func ranges(matching pattern: TextProtectionRegexPattern, in text: String) -> [ProtectedRange] {
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
         return pattern.regex.matches(in: text, options: [], range: nsRange).compactMap { match in
             guard let range = Range(match.range, in: text) else {
+                return nil
+            }
+            if pattern.reason == "url" && isLikelyDottedIdentifierOrProseToken(String(text[range])) {
                 return nil
             }
             let start = text.distance(from: text.startIndex, to: range.lowerBound)
