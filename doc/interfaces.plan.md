@@ -927,8 +927,14 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 
 `AIAcceptedLearningStore`:
 
-- appends full accepted AI commit history to
-  `~/Library/Application Support/KnowType/AI/accepted-ai-learning.jsonl`
+- appends accepted AI commit history to
+  `~/Library/Application Support/KnowType/AI/accepted-ai-learning.jsonl` under a
+  bounded sliding window (`defaultMaxRecordCount = 500`, clamped to at least 1)
+  and records SHA-256 digests of evicted commit text variants in
+  `~/Library/Application Support/KnowType/AI/accepted-ai-learning.evicted-commits.json`
+  (bounded to the latest 4,096 digest entries during normal compaction, or
+  temporarily retaining those 4,096 entries plus active-record digests if a
+  clear retry is pending; never raw text)
 - writes bounded language-habit summary JSON to
   `~/Library/Application Support/KnowType/AI/accepted-ai-summary.json`
 - mirrors summary diagnostics to `~/.knowtype/ACCEPTED_AI_LEARNING.md`
@@ -936,7 +942,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - feeds only bounded summary terms and recent short accepted commits into
   `LEXICAL_PROFILE.md`; it never writes Rime userdb or calls `sync_user_data`
 - emits summary-ready metadata after a delayed summary rebuild is persisted; the
-  event contains only schema id, history hash, and counts, not user text
+  event contains only schema id, history hash, and counts (including a zero-count
+  invalidation event when a schema's last record is evicted by compaction), not
+  user text
 - emits summary-ready metadata only for schemas changed by the current rebuild
 
 `knowtype-accepted-learning-tool` and `scripts/accepted-learning.sh`:
@@ -944,15 +952,18 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
 - expose read-only `status`, explicit `rebuild`, and guarded `clear --yes`
   maintenance commands for accepted AI learning
 - report only paths, counts, hashes, mtimes, and freshness state; they never
-  print raw input, accepted text, locked prefix, or full history
+  print raw input, accepted text, locked prefix, or history records
 - `clear --yes` deletes only `accepted-ai-learning.jsonl`,
+  `accepted-ai-learning.evicted-commits.json`,
   `accepted-ai-summary.json`, and `ACCEPTED_AI_LEARNING.md`, writes a clear
   marker for running stores, and scrubs accepted-AI terms/source lines and
-  matching accepted recent commits from the persistent lexical profile while
-  preserving non-AI recent commits and tone data; when accepted history is
-  unavailable, markdown-only scrub removes accepted-AI marker/source lines but
-  preserves unknown recent commits; it does not delete ENV, CORRECTION,
-  provider profiles, Keychain secrets, or Rime userdb
+  matching accepted recent commits (including commits matched via the evicted-commit
+  digest ledger even after `accepted-ai` markers have disappeared) from the
+  persistent lexical profile while preserving non-AI recent commits and tone
+  data; when accepted history and the digest ledger are unavailable,
+  markdown-only scrub removes accepted-AI marker/source lines but preserves
+  unknown recent commits; it does not delete ENV, CORRECTION, provider profiles,
+  Keychain secrets, or Rime userdb
 - runtime and maintenance writes, including startup summary repair, use a shared
   lock file so rebuild, clear, startup repair, and accepted-record appends do not
   publish stale summaries across processes

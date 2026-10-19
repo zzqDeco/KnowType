@@ -93,8 +93,16 @@ public struct AIAcceptedLearningMaintenance {
     public var lexicalJSONURL: URL
     public var lexicalMarkdownURL: URL
     public var clearMarkerURL: URL
+    public var evictedCommitsURL: URL
     public var feedbackClearMarkerURL: URL
     public var lockURL: URL
+    public var maxRecordCount: Int {
+        didSet {
+            if maxRecordCount < 1 {
+                maxRecordCount = 1
+            }
+        }
+    }
     public var fileManager: FileManager
 
     public init(
@@ -106,6 +114,7 @@ public struct AIAcceptedLearningMaintenance {
         feedbackMirrorURL: URL = AIUserDirectory.defaultDirectory().acceptedFeedbackMirrorURL,
         lexicalJSONURL: URL = LexicalProfileStore.defaultJSONURL(),
         lexicalMarkdownURL: URL = AIUserDirectory.defaultDirectory().lexicalProfileURL,
+        maxRecordCount: Int = AIAcceptedLearningStore.defaultMaxRecordCount,
         fileManager: FileManager = .default
     ) {
         self.historyURL = historyURL
@@ -118,14 +127,18 @@ public struct AIAcceptedLearningMaintenance {
         self.lexicalMarkdownURL = lexicalMarkdownURL
         self.clearMarkerURL = acceptedLearningClearMarkerURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.clear.json")
+        self.evictedCommitsURL = acceptedLearningEvictedCommitsURL(historyURL: historyURL)
+            ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.evicted-commits.json")
         self.feedbackClearMarkerURL = acceptedFeedbackClearMarkerURL(historyURL: feedbackHistoryURL)
             ?? feedbackHistoryURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-feedback.clear.json")
         self.lockURL = acceptedLearningLockURL(historyURL: historyURL)
             ?? historyURL.deletingLastPathComponent().appendingPathComponent("accepted-ai-learning.lock")
+        self.maxRecordCount = max(1, maxRecordCount)
         self.fileManager = fileManager
     }
 
     public func status(action: String? = nil) -> AIAcceptedLearningMaintenanceStatus {
+        let effectiveMaxRecordCount = max(1, maxRecordCount)
         let loaded = loadRecords()
         let records = loaded.records
         let historyHash = records.isEmpty ? nil : AIAcceptedLearningStore.historyHash(records)
@@ -140,7 +153,8 @@ public struct AIAcceptedLearningMaintenance {
         if records.isEmpty, !loadedSummary.exists {
             summaryIsCurrent = summary == nil
         } else {
-            summaryIsCurrent = summary?.acceptedCount == records.count
+            summaryIsCurrent = records.count <= effectiveMaxRecordCount
+                && summary?.acceptedCount == records.count
                 && summary?.historyHash == historyHash
         }
 
@@ -232,12 +246,30 @@ public struct AIAcceptedLearningMaintenance {
 
     @discardableResult
     public func rebuild() throws -> AIAcceptedLearningMaintenanceStatus {
+        let effectiveMaxRecordCount = max(1, maxRecordCount)
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
-            let records = loadRecords().records
+            let loadedRecords = try loadRecordsOrThrow().records
+            let records: [AIAcceptedLearningRecord]
+            if loadedRecords.count > effectiveMaxRecordCount {
+                let overflowCount = loadedRecords.count - effectiveMaxRecordCount
+                try recordAcceptedLearningEvictedCommits(
+                    Array(loadedRecords.prefix(overflowCount)),
+                    historyURL: historyURL,
+                    evictedCommitsURL: evictedCommitsURL,
+                    fileManager: fileManager
+                )
+                records = Array(loadedRecords.suffix(effectiveMaxRecordCount))
+                try writeHistoryRecords(records)
+            } else {
+                records = loadedRecords
+            }
             let summary = AIAcceptedLearningStore.buildSummary(records: records, generatedAt: Date())
             if let summary {
                 try atomicWrite(encode(summary), to: summaryURL)
-                try atomicWrite(Data(AIAcceptedLearningStore.renderMarkdown(summary).utf8), to: mirrorURL)
+                try atomicWrite(
+                    Data(AIAcceptedLearningStore.renderMarkdown(summary, maxRecordCount: effectiveMaxRecordCount).utf8),
+                    to: mirrorURL
+                )
             } else {
                 try removeIfExists(summaryURL)
                 try removeIfExists(mirrorURL)
@@ -257,6 +289,7 @@ public struct AIAcceptedLearningMaintenance {
                 }
             }
         }
+        synchronizePeerAcceptedLearningStores(for: historyURL)
         return status(action: "rebuilt")
     }
 
@@ -265,8 +298,32 @@ public struct AIAcceptedLearningMaintenance {
         guard confirm else {
             throw Error.clearRequiresConfirmation
         }
+        var didWriteClearMarkers = false
+        defer {
+            if didWriteClearMarkers {
+                synchronizePeerAcceptedLearningStores(for: historyURL)
+            }
+        }
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
-            let acceptedCommitTexts = acceptedCommitTextVariants(from: loadRecords().records)
+            let currentRecords = try loadRecordsOrThrow().records
+            let acceptedCommitTexts = acceptedCommitTextVariants(from: currentRecords)
+            let preClearEvictedEntries = Set(
+                try loadAcceptedLearningEvictedCommitListOrThrow(
+                    from: evictedCommitsURL,
+                    fileManager: fileManager
+                )
+            )
+            let currentRecordDigests = acceptedLearningCommitDigestVariants(from: currentRecords)
+            if !currentRecords.isEmpty {
+                try recordAcceptedLearningEvictedCommits(
+                    currentRecords,
+                    historyURL: historyURL,
+                    evictedCommitsURL: evictedCommitsURL,
+                    maxEntries: preClearEvictedEntries.count + currentRecordDigests.count,
+                    fileManager: fileManager
+                )
+            }
+            let evictedCommitEntries = preClearEvictedEntries.union(currentRecordDigests)
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
@@ -280,14 +337,25 @@ public struct AIAcceptedLearningMaintenance {
                 try atomicWrite(clearMarkerPayload(), to: feedbackClearMarkerURL)
             }
             try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
-            try scrubAcceptedAIFromLexicalProfile(acceptedCommitTexts: acceptedCommitTexts)
+            didWriteClearMarkers = true
+            try scrubAcceptedAIFromLexicalProfile(
+                acceptedCommitTexts: acceptedCommitTexts,
+                evictedCommitEntries: evictedCommitEntries
+            )
+            try removeIfExists(evictedCommitsURL)
         }
         return status(action: "cleared")
     }
 
-    private func loadRecords() -> (records: [AIAcceptedLearningRecord], warnings: [String]) {
-        guard let content = try? String(contentsOf: historyURL, encoding: .utf8) else {
-            return ([], [])
+    private func loadRecordsOrThrow() throws -> (records: [AIAcceptedLearningRecord], warnings: [String]) {
+        let content: String
+        do {
+            content = try String(contentsOf: historyURL, encoding: .utf8)
+        } catch {
+            if isAcceptedLearningNoSuchFileError(error) || !fileManager.fileExists(atPath: historyURL.path) {
+                return ([], [])
+            }
+            throw error
         }
 
         let decoder = JSONDecoder()
@@ -305,6 +373,10 @@ public struct AIAcceptedLearningMaintenance {
 
         let warnings = invalidLineCount > 0 ? ["invalid_history_lines:\(invalidLineCount)"] : []
         return (records, warnings)
+    }
+
+    private func loadRecords() -> (records: [AIAcceptedLearningRecord], warnings: [String]) {
+        (try? loadRecordsOrThrow()) ?? ([], [])
     }
 
     private func loadSummary() -> (exists: Bool, summary: AIAcceptedLanguageSummary?) {
@@ -363,6 +435,18 @@ public struct AIAcceptedLearningMaintenance {
         return try encoder.encode(value)
     }
 
+    private func writeHistoryRecords(_ records: [AIAcceptedLearningRecord]) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var buffer = Data()
+        for record in records {
+            let data = try encoder.encode(record)
+            buffer.append(data)
+            buffer.append(0x0A)
+        }
+        try atomicWrite(buffer, to: historyURL)
+    }
+
     private func atomicWrite(_ data: Data, to url: URL) throws {
         try fileManager.createDirectory(
             at: url.deletingLastPathComponent(),
@@ -387,35 +471,75 @@ public struct AIAcceptedLearningMaintenance {
         return data ?? Data()
     }
 
-    private func scrubAcceptedAIFromLexicalProfile(acceptedCommitTexts: Set<String>) throws {
-        guard fileManager.fileExists(atPath: lexicalJSONURL.path),
-              let data = try? Data(contentsOf: lexicalJSONURL) else {
+    private func scrubAcceptedAIFromLexicalProfile(
+        acceptedCommitTexts: Set<String>,
+        evictedCommitEntries: Set<String>
+    ) throws {
+        guard fileManager.fileExists(atPath: lexicalJSONURL.path) else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly(acceptedCommitTexts: acceptedCommitTexts)
+                try scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    evictedCommitEntries: evictedCommitEntries
+                )
             }
             return
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let profile = try? decoder.decode(PersistentLexicalProfile.self, from: data) else {
+        let data: Data
+        do {
+            data = try Data(contentsOf: lexicalJSONURL)
+        } catch {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly(acceptedCommitTexts: acceptedCommitTexts)
+                try? scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    evictedCommitEntries: evictedCommitEntries
+                )
+            }
+            throw error
+        }
+        if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           jsonObject.isEmpty {
+            if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
+                try scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    evictedCommitEntries: evictedCommitEntries
+                )
             }
             return
+        }
+        let profile: PersistentLexicalProfile
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            profile = try decoder.decode(PersistentLexicalProfile.self, from: data)
+        } catch {
+            if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
+                try? scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    evictedCommitEntries: evictedCommitEntries
+                )
+            }
+            throw error
         }
 
         let hadAcceptedSource = profile.lexicalContext.sourceSummary.contains {
             $0.hasPrefix("accepted-ai")
         } || profile.lexicalContext.terms.contains { $0.source == "accepted-ai" }
-        guard hadAcceptedSource else {
+        let scrubbedRecentCommits = profile.lexicalContext.recentCommits.filter {
+            !matchesAcceptedCommit(
+                $0,
+                acceptedCommitTexts: acceptedCommitTexts,
+                evictedCommitEntries: evictedCommitEntries
+            )
+        }
+        let hadMatchingRecentCommit = scrubbedRecentCommits.count != profile.lexicalContext.recentCommits.count
+        guard hadAcceptedSource || hadMatchingRecentCommit else {
             if fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
-                try scrubAcceptedAIFromLexicalMarkdownOnly(acceptedCommitTexts: acceptedCommitTexts)
+                try scrubAcceptedAIFromLexicalMarkdownOnly(
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    evictedCommitEntries: evictedCommitEntries
+                )
             }
             return
-        }
-
-        let scrubbedRecentCommits = profile.lexicalContext.recentCommits.filter {
-            !acceptedCommitTexts.contains(normalizedCommitText($0))
         }
         let scrubbedContext = LexicalContextSnapshot(
             terms: profile.lexicalContext.terms.filter { $0.source != "accepted-ai" },
@@ -435,10 +559,22 @@ public struct AIAcceptedLearningMaintenance {
     }
 
     private func scrubAcceptedAIFromLexicalMarkdownOnly(
-        acceptedCommitTexts: Set<String>
+        acceptedCommitTexts: Set<String>,
+        evictedCommitEntries: Set<String>
     ) throws {
-        guard let content = try? String(contentsOf: lexicalMarkdownURL, encoding: .utf8),
-              content.contains("accepted-ai") || !acceptedCommitTexts.isEmpty else {
+        guard fileManager.fileExists(atPath: lexicalMarkdownURL.path) else {
+            return
+        }
+        let content: String
+        do {
+            content = try String(contentsOf: lexicalMarkdownURL, encoding: .utf8)
+        } catch {
+            if isAcceptedLearningNoSuchFileError(error) || !fileManager.fileExists(atPath: lexicalMarkdownURL.path) {
+                return
+            }
+            throw error
+        }
+        guard content.contains("accepted-ai") || !acceptedCommitTexts.isEmpty || !evictedCommitEntries.isEmpty else {
             return
         }
         var output: [String] = []
@@ -465,8 +601,12 @@ public struct AIAcceptedLearningMaintenance {
                 continue
             }
             if inRecentCommits, line.hasPrefix("- ") {
-                let commit = normalizedCommitText(String(line.dropFirst(2)))
-                if acceptedCommitTexts.contains(commit) {
+                let commit = String(line.dropFirst(2))
+                if matchesAcceptedCommit(
+                    commit,
+                    acceptedCommitTexts: acceptedCommitTexts,
+                    evictedCommitEntries: evictedCommitEntries
+                ) {
                     removedRecentCommit = true
                     continue
                 }
@@ -481,6 +621,21 @@ public struct AIAcceptedLearningMaintenance {
             return
         }
         try atomicWrite(Data((output.joined(separator: "\n") + "\n").utf8), to: lexicalMarkdownURL)
+    }
+
+    private func matchesAcceptedCommit(
+        _ text: String,
+        acceptedCommitTexts: Set<String>,
+        evictedCommitEntries: Set<String>
+    ) -> Bool {
+        let normalized = normalizedCommitText(text)
+        guard !normalized.isEmpty else {
+            return false
+        }
+        if acceptedCommitTexts.contains(normalized) || evictedCommitEntries.contains(normalized) {
+            return true
+        }
+        return evictedCommitEntries.contains(acceptedLearningCommitTextDigest(normalized))
     }
 
     private func acceptedCommitTextVariants(from records: [AIAcceptedLearningRecord]) -> Set<String> {

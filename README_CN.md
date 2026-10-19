@@ -271,14 +271,17 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 是由 Rime userdb 词频、KnowType 近期提交、选择历史，以及用户明确接受过的
 AI 推荐摘要合成的本地 top-K 词汇画像镜像。用户接受 AI 推荐后立即发生、
 且光标范围可验证的编辑会单独汇总为本地 AI feedback；普通 Backspace 不会
-自动当成负反馈。完整 accepted-AI 和 feedback 历史只保存在本机
+自动当成负反馈。Accepted-AI 历史（滑窗保留最近 500 条记录，并在
+`accepted-ai-learning.evicted-commits.json` 中记录最多 4096 条被淘汰提交的
+SHA-256 摘要；若 `clear` 在清理词库画像前中断待重试，还会临时一并保留当前
+活跃记录的摘要以便 `clear` 清理）和 feedback 历史只保存在本机
 Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
 这些文件。可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或
 `clear --yes` 查看、重建或删除 accepted-AI learning/feedback 数据；clear 会
-删除 accepted-learning/feedback history/summary/mirror，并从 lexical profile
-中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、ENV 或
-CORRECTION 数据。
+删除 accepted-learning/feedback history/evicted-commits/summary/mirror，并从
+lexical profile 中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、
+ENV 或 CORRECTION 数据。
 已提交的 Context Digest 事件会先以 JSONL 保存在本机
 `~/.knowtype/events/`。事件文本字段最多保留 2048 个 Unicode scalar；raw input
 或 locked prefix 超过 4 KiB UTF-8 时跳过 AI 且不做语义截断。pending 最多保留
