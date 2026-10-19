@@ -932,20 +932,30 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   bounded sliding window (`defaultMaxRecordCount = 500`, clamped to at least 1)
   and records SHA-256 digests of evicted commit text variants in
   `~/Library/Application Support/KnowType/AI/accepted-ai-learning.evicted-commits.json`
-  (bounded to the latest 4,096 digest entries during normal compaction, or
-  temporarily retaining those 4,096 entries plus active-record digests if a
-  clear retry is pending; never raw text)
+  (bounded to the latest 4,096 entries during ordinary compaction; clear can
+  temporarily fold in active-record digests, but retry protection lives in the
+  clear marker rather than depending on this rotating ledger; new entries are
+  SHA-256 digests, not raw text)
 - writes bounded language-habit summary JSON to
   `~/Library/Application Support/KnowType/AI/accepted-ai-summary.json`
 - mirrors summary diagnostics to `~/.knowtype/ACCEPTED_AI_LEARNING.md`
 - skips records containing secret-like raw input, locked prefix, or accepted text
 - feeds only bounded summary terms and recent short accepted commits into
   `LEXICAL_PROFILE.md`; it never writes Rime userdb or calls `sync_user_data`
-- emits summary-ready metadata after a delayed summary rebuild is persisted; the
-  event contains only schema id, history hash, and counts (including a zero-count
-  invalidation event when a schema's last record is evicted by compaction), not
-  user text
-- emits summary-ready metadata only for schemas changed by the current rebuild
+- requires every nonblank JSONL row to decode before append, startup cap, or
+  delayed rebuild; a malformed or forward-incompatible complete row preserves
+  the original history bytes and blocks those writes until repaired, rather
+  than rewriting only the decoded subset. Cached state survives failed reads;
+  cold-start repair retries after repaired file metadata changes. Blank and
+  whitespace-only lines are ignored, and diagnostics do not include row text
+- emits summary-ready metadata after persisted rebuilds and applied external
+  history changes, only for changed schemas. Events contain schema id, history
+  hash, and counts, never user text; they cover nonempty surviving schemas and
+  zero-count invalidations when a schema's last record is evicted
+- delivers already-applied external invalidations even if the following local
+  append or compaction fails. Callbacks run outside both the store lock and the
+  interprocess file lock, may reenter snapshot reads, and are not replayed merely
+  because later reads see already-current disk metadata
 
 `knowtype-accepted-learning-tool` and `scripts/accepted-learning.sh`:
 
@@ -953,17 +963,38 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   maintenance commands for accepted AI learning
 - report only paths, counts, hashes, mtimes, and freshness state; they never
   print raw input, accepted text, locked prefix, or history records
-- `clear --yes` deletes only `accepted-ai-learning.jsonl`,
-  `accepted-ai-learning.evicted-commits.json`,
-  `accepted-ai-summary.json`, and `ACCEPTED_AI_LEARNING.md`, writes a clear
-  marker for running stores, and scrubs accepted-AI terms/source lines and
-  matching accepted recent commits (including commits matched via the evicted-commit
-  digest ledger even after `accepted-ai` markers have disappeared) from the
-  persistent lexical profile while preserving non-AI recent commits and tone
-  data; when accepted history and the digest ledger are unavailable,
-  markdown-only scrub removes accepted-AI marker/source lines but preserves
-  unknown recent commits; it does not delete ENV, CORRECTION, provider profiles,
-  Keychain secrets, or Rime userdb
+- `rebuild` refuses nonblank undecodable accepted-history rows with
+  `AIAcceptedLearningMaintenance.Error.undecodableHistoryRows` before changing
+  history, ledger, or summaries. `status` still reports
+  `invalid_history_lines:<count>`; restoring decodable history permits ordinary
+  bounded rebuild again
+- `clear --yes` remains explicitly destructive: it removes accepted-learning
+  and feedback history, summary, and mirror files, including undecodable
+  history rows. It writes a clear marker for running stores and scrubs
+  accepted-AI terms/source lines and matching accepted recent commits
+  (including eviction-ledger and pinned-retry matches even after `accepted-ai`
+  markers have disappeared) from the persistent lexical profile while preserving
+  non-AI recent commits and tone data; when accepted history, the ledger, and
+  pinned retry entries are unavailable, markdown-only scrub removes accepted-AI
+  marker/source lines but preserves unknown recent commits; it does not delete
+  ENV, CORRECTION, provider profiles, Keychain secrets, or Rime userdb
+- retry protection extends the existing `accepted-ai-learning.clear.json`
+  marker, not a new sidecar. Schema version remains `1`, with `clearedAt` and
+  optional `[String]` field `pendingEvictedCommitEntries`. Before deleting
+  history, clear atomically pins the union of prior pending entries, the
+  pre-clear eviction ledger, and active-record commit digests. New entries are
+  digests; inherited legacy ledger entries retain their matching semantics
+- ordinary append/compaction never rewrites the clear marker, so required
+  scrub inputs remain available even after more accepts rotate the ledger back
+  to 4,096 entries. Retry reloads those pins from disk. Only after lexical
+  JSON/markdown scrub succeeds is the eviction ledger removed and the marker
+  rewritten without the pending field; a failure finalizing the marker retains
+  the pins for another retry
+- old schema-version-1 markers without the optional field remain readable as
+  having no pending entries. Unreadable retry entries abort clear before history
+  deletion. Old maintenance writers do not retain the new field when replacing
+  the marker; mixed old/new writers are not guaranteed to preserve pending
+  scrub inputs, so use the current maintenance writer for clear retries
 - runtime and maintenance writes, including startup summary repair, use a shared
   lock file so rebuild, clear, startup repair, and accepted-record appends do not
   publish stale summaries across processes
@@ -1101,7 +1132,18 @@ block: only secret-like raw input or confirmed locked prefixes produce
 
 Level 0 includes:
 
-- URL-like input (including bare domains across general ASCII, Punycode IDN, and local/reserved TLDs, while excluding pathless, portless dotted identifiers and prose tokens such as `foo.bar` or `self.coordinator` so normal correction and inner `camelCase`/`snake_case` token protection still apply)
+- URL-like input, including bare domains across general ASCII, Punycode IDN,
+  and local/reserved TLDs. Bare `.bar` hosts such as `nic.bar`, `cocktail.bar`,
+  and subdomains match `reason: "url"` both alone and in prose; case, ports,
+  paths, and queries after a path retain their existing coverage. Unschemed,
+  pathless, portless known code-prefix tokens such as `foo.bar`, `user.bar`,
+  and `self.coordinator` remain excluded. A following `(`, including after
+  whitespace, makes a bare dotted `.bar` call code-like rather than a URL.
+  Explicit schemes, `www.`, paths, and ports keep URL precedence, including
+  `https://foo.bar` and `foo.bar/menu?lang=en`. This is lexical disambiguation,
+  not DNS or intent validation: unrecognized `venue.bar` favors a domain,
+  whereas known code prefixes and `nic.bar (details)` favor code. Inner
+  `camelCase`/`snake_case` protection is unchanged
 - email-like input
 - file paths
 - command-like input
