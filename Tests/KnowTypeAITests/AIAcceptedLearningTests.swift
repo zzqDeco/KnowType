@@ -1166,6 +1166,25 @@ final class AIAcceptedLearningTests: XCTestCase {
             try String(contentsOf: isolatedMirrorURL, encoding: .utf8)
                 .contains("Accepted count: 2")
         )
+
+        let missingMirrorURL = mirrorDir.appendingPathComponent("MISSING_MIRROR.md")
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: mirrorDir.path)
+        let partialCompactionStore = AIAcceptedLearningStore(
+            historyURL: deferredHistoryURL,
+            summaryURL: deferredSummaryURL,
+            mirrorURL: missingMirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 1
+        )
+        XCTAssertEqual(
+            try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
+            1
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingMirrorURL.path))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: mirrorDir.path)
+        XCTAssertEqual(partialCompactionStore.snapshot()?.acceptedCount, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: missingMirrorURL.path))
     }
 }
 

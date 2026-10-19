@@ -545,7 +545,7 @@ public final class AIAcceptedLearningStore:
     @unchecked Sendable
 {
     public static let defaultMaxRecordCount = 500
-    private static let startupRepairRetryInterval: TimeInterval = 5.0
+    private static let startupRepairRetryInterval: Duration = .seconds(5)
 
     private struct FileMetadataStamp: Equatable, Sendable {
         var exists: Bool
@@ -592,7 +592,7 @@ public final class AIAcceptedLearningStore:
     private var lastDiskStateMetadata: DiskStateMetadata?
     private var pendingStartupRepair: Bool
     private var pendingStartupSummaryWrite: Bool
-    private var lastStartupRepairAttemptAt: Date?
+    private var nextStartupRepairRetryAt: ContinuousClock.Instant?
     private var lastFailedRepairEnvironmentStamp: RepairEnvironmentStamp?
 
     private struct StartupState {
@@ -625,6 +625,7 @@ public final class AIAcceptedLearningStore:
         let startupState: StartupState
         let startupRepairErrorReason: String?
         var didCompactOnStartup = false
+        var initialCompactionRequired = false
         do {
             let initialState = try withExistingAcceptedLearningFileLock(
                 lockURL: acceptedLearningLockURL(historyURL: historyURL),
@@ -642,7 +643,8 @@ public final class AIAcceptedLearningStore:
                     repairPersistentSummary: false
                 )
             }
-            if (initialState.needsCompaction && historyURL != nil) || initialState.needsMirrorRefresh {
+            initialCompactionRequired = initialState.needsCompaction && historyURL != nil
+            if initialCompactionRequired || initialState.needsMirrorRefresh {
                 do {
                     startupState = try withAcceptedLearningFileLock(
                         lockURL: acceptedLearningLockURL(historyURL: historyURL),
@@ -658,7 +660,7 @@ public final class AIAcceptedLearningStore:
                             maxRecordCount: clampedMaxRecordCount,
                             compactPersistentHistory: true,
                             repairPersistentSummary: true,
-                            forceSummaryFileRepair: initialState.needsCompaction && historyURL != nil
+                            forceSummaryFileRepair: initialCompactionRequired
                         )
                     }
                     didCompactOnStartup = startupState.didCompactHistoryOnDisk
@@ -705,7 +707,10 @@ public final class AIAcceptedLearningStore:
         self.pendingStartupRepair = requiresDeferredStartupRepair
         self.pendingStartupSummaryWrite = startupState.needsSummaryFileRepair
             || (startupState.needsCompaction && historyURL != nil)
-        self.lastStartupRepairAttemptAt = requiresDeferredStartupRepair ? Date() : nil
+            || ((initialCompactionRequired || startupState.didCompactHistoryOnDisk) && startupState.needsMirrorRefresh)
+        self.nextStartupRepairRetryAt = requiresDeferredStartupRepair
+            ? ContinuousClock.now.advanced(by: Self.startupRepairRetryInterval)
+            : nil
         self.lastFailedRepairEnvironmentStamp = requiresDeferredStartupRepair
             ? Self.repairEnvironmentStamp(
                 historyURL: historyURL,
@@ -1039,7 +1044,7 @@ public final class AIAcceptedLearningStore:
                 isSummaryRebuildScheduled = false
                 pendingStartupRepair = false
                 pendingStartupSummaryWrite = false
-                lastStartupRepairAttemptAt = nil
+                nextStartupRepairRetryAt = nil
                 lastFailedRepairEnvironmentStamp = nil
                 lock.unlock()
                 return Self.summaryReadyEvents(
@@ -1061,7 +1066,7 @@ public final class AIAcceptedLearningStore:
             pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
             if pendingStartupRepair {
                 pendingStartupSummaryWrite = true
-                lastStartupRepairAttemptAt = Date()
+                nextStartupRepairRetryAt = ContinuousClock.now.advanced(by: Self.startupRepairRetryInterval)
                 lastFailedRepairEnvironmentStamp = failedStamp
             }
             lock.unlock()
@@ -1153,7 +1158,7 @@ public final class AIAcceptedLearningStore:
         if markStartupRepairComplete {
             pendingStartupRepair = false
             pendingStartupSummaryWrite = false
-            lastStartupRepairAttemptAt = nil
+            nextStartupRepairRetryAt = nil
             lastFailedRepairEnvironmentStamp = nil
         }
         if let finalMetadata {
@@ -1250,6 +1255,8 @@ public final class AIAcceptedLearningStore:
             lock.lock()
             pendingStartupSummaryWrite = repairedState.needsSummaryFileRepair
                 || (repairedState.needsCompaction && historyURL != nil)
+                || ((forceSummaryFileRepair || repairedState.didCompactHistoryOnDisk)
+                    && repairedState.needsMirrorRefresh)
             lock.unlock()
             notifySummaryReady(partialEvents)
             throw repairError
@@ -1279,7 +1286,7 @@ public final class AIAcceptedLearningStore:
         let needsStartupRepair = pendingStartupRepair && !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil)
         lock.unlock()
         if needsStartupRepair {
-            let now = Date()
+            let now = ContinuousClock.now
             let currentStamp = Self.repairEnvironmentStamp(
                 historyURL: historyURL,
                 summaryURL: summaryURL,
@@ -1291,9 +1298,9 @@ public final class AIAcceptedLearningStore:
                 && !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil)
                 && (lastFailedRepairEnvironmentStamp == nil
                     || currentStamp != lastFailedRepairEnvironmentStamp
-                    || now.timeIntervalSince(lastStartupRepairAttemptAt ?? .distantPast) >= Self.startupRepairRetryInterval)
+                    || nextStartupRepairRetryAt.map { now >= $0 } ?? true)
             if shouldRetryRepair {
-                lastStartupRepairAttemptAt = now
+                nextStartupRepairRetryAt = now.advanced(by: Self.startupRepairRetryInterval)
             }
             let shouldSkipUnreadFallback = !shouldRetryRepair
                 && lastDiskStateMetadata == nil
@@ -1312,7 +1319,7 @@ public final class AIAcceptedLearningStore:
                         fileManager: fileManager
                     )
                     lock.lock()
-                    lastStartupRepairAttemptAt = Date()
+                    nextStartupRepairRetryAt = ContinuousClock.now.advanced(by: Self.startupRepairRetryInterval)
                     lastFailedRepairEnvironmentStamp = failedStamp
                     let skipUnreadFallbackAfterFailure = lastDiskStateMetadata == nil
                     lock.unlock()
