@@ -591,6 +591,7 @@ public final class AIAcceptedLearningStore:
     private var lastClearMarkerModifiedAt: Date?
     private var lastDiskStateMetadata: DiskStateMetadata?
     private var pendingStartupRepair: Bool
+    private var pendingStartupCompaction: Bool
     private var pendingStartupSummaryWrite: Bool
     private var nextStartupRepairRetryAt: ContinuousClock.Instant?
     private var lastFailedRepairEnvironmentStamp: RepairEnvironmentStamp?
@@ -705,6 +706,7 @@ public final class AIAcceptedLearningStore:
         self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
         self.lastDiskStateMetadata = startupState.lastDiskStateMetadata
         self.pendingStartupRepair = requiresDeferredStartupRepair
+        self.pendingStartupCompaction = startupState.needsCompaction && historyURL != nil
         self.pendingStartupSummaryWrite = startupState.needsSummaryFileRepair
             || (startupState.needsCompaction && historyURL != nil)
             || ((initialCompactionRequired || startupState.didCompactHistoryOnDisk) && startupState.needsMirrorRefresh)
@@ -916,6 +918,7 @@ public final class AIAcceptedLearningStore:
             lock.lock()
             records = nextRecords
             lastDiskStateMetadata = updatedMetadata
+            pendingStartupCompaction = false
             if didCompact {
                 let generatedAt = Date()
                 if summary != nil {
@@ -972,6 +975,7 @@ public final class AIAcceptedLearningStore:
 
     private func rebuildSummary() {
         var changedSchemaIDsForRetry: Set<String> = []
+        var sawOverflowInRebuild = false
         var didCompactHistoryInRebuild = false
         do {
             let events = try withAcceptedLearningFileLock(
@@ -988,6 +992,7 @@ public final class AIAcceptedLearningStore:
                         fileManager: fileManager
                     )
                     if loadedRecords.count > maxRecordCount {
+                        sawOverflowInRebuild = true
                         let overflowCount = loadedRecords.count - maxRecordCount
                         let evictedRecords = Array(loadedRecords.prefix(overflowCount))
                         let evictedSchemas = Set(evictedRecords.map(\.schemaID))
@@ -1048,6 +1053,7 @@ public final class AIAcceptedLearningStore:
                 lock.lock()
                 isSummaryRebuildScheduled = false
                 pendingStartupRepair = false
+                pendingStartupCompaction = false
                 pendingStartupSummaryWrite = false
                 nextStartupRepairRetryAt = nil
                 lastFailedRepairEnvironmentStamp = nil
@@ -1072,6 +1078,9 @@ public final class AIAcceptedLearningStore:
             lock.lock()
             isSummaryRebuildScheduled = false
             pendingSummarySchemaIDs.formUnion(changedSchemaIDsForRetry)
+            pendingStartupCompaction = (pendingStartupCompaction || sawOverflowInRebuild)
+                && !didCompactHistoryInRebuild
+                && historyURL != nil
             if historyURL != nil || summaryURL != nil || mirrorURL != nil {
                 pendingStartupRepair = true
                 pendingStartupSummaryWrite = true
@@ -1092,6 +1101,8 @@ public final class AIAcceptedLearningStore:
         let reloadedRecords: [AIAcceptedLearningRecord]
         let finalMetadata: DiskStateMetadata?
         let markerModifiedAt: Date?
+        var needsCompaction: Bool = false
+        var evictedSchemaIDs: Set<String> = []
     }
 
     private func loadDiskSyncCandidate() throws -> DiskSyncCandidate? {
@@ -1117,13 +1128,23 @@ public final class AIAcceptedLearningStore:
             decoder: decoder,
             fileManager: fileManager
         )
-        let reloadedRecords = loaded.records.count > maxRecordCount
-            ? Array(loaded.records.suffix(maxRecordCount))
-            : loaded.records
+        let needsCompaction = loaded.records.count > maxRecordCount
+        let evictedSchemaIDs: Set<String>
+        let reloadedRecords: [AIAcceptedLearningRecord]
+        if needsCompaction {
+            let overflowCount = loaded.records.count - maxRecordCount
+            evictedSchemaIDs = Set(loaded.records.prefix(overflowCount).map(\.schemaID))
+            reloadedRecords = Array(loaded.records.suffix(maxRecordCount))
+        } else {
+            evictedSchemaIDs = []
+            reloadedRecords = loaded.records
+        }
         return DiskSyncCandidate(
             reloadedRecords: reloadedRecords,
             finalMetadata: loaded.metadata,
-            markerModifiedAt: markerModifiedAt
+            markerModifiedAt: markerModifiedAt,
+            needsCompaction: needsCompaction,
+            evictedSchemaIDs: evictedSchemaIDs
         )
     }
 
@@ -1143,7 +1164,7 @@ public final class AIAcceptedLearningStore:
         lock.lock()
         let previousRecords = records
         let previousSchemaSummaries = schemaSummaries
-        var changedSchemaIDs = pendingSummarySchemaIDs
+        var changedSchemaIDs = pendingSummarySchemaIDs.union(candidate.evictedSchemaIDs)
         let allSchemas = Set(previousRecords.map(\.schemaID))
             .union(reloadedRecords.map(\.schemaID))
             .union(previousSchemaSummaries.keys)
@@ -1166,7 +1187,14 @@ public final class AIAcceptedLearningStore:
         }
         if markStartupRepairComplete {
             pendingStartupRepair = false
+            pendingStartupCompaction = false
             pendingStartupSummaryWrite = false
+            nextStartupRepairRetryAt = nil
+            lastFailedRepairEnvironmentStamp = nil
+        } else if candidate.needsCompaction && historyURL != nil {
+            pendingStartupRepair = true
+            pendingStartupCompaction = true
+            pendingStartupSummaryWrite = true
             nextStartupRepairRetryAt = nil
             lastFailedRepairEnvironmentStamp = nil
         }
@@ -1257,11 +1285,13 @@ public final class AIAcceptedLearningStore:
                 DiskSyncCandidate(
                     reloadedRecords: repairedState.records,
                     finalMetadata: repairedState.lastDiskStateMetadata,
-                    markerModifiedAt: repairedState.lastClearMarkerModifiedAt
+                    markerModifiedAt: repairedState.lastClearMarkerModifiedAt,
+                    needsCompaction: repairedState.needsCompaction
                 ),
                 markStartupRepairComplete: false
             )
             lock.lock()
+            pendingStartupCompaction = repairedState.needsCompaction && historyURL != nil
             pendingStartupSummaryWrite = repairedState.needsSummaryFileRepair
                 || (repairedState.needsCompaction && historyURL != nil)
                 || ((forceSummaryFileRepair || repairedState.didCompactHistoryOnDisk)
@@ -1290,62 +1320,80 @@ public final class AIAcceptedLearningStore:
         syncRecordsAfterExternalClear()
     }
 
-    private func syncRecordsAfterExternalClear() {
+    private enum StartupRepairStepOutcome {
+        case notNeeded
+        case repaired([AIAcceptedLearningSummaryReadyEvent])
+        case deferred(skipUnreadFallback: Bool)
+    }
+
+    private func attemptPendingStartupRepairIfNeeded() -> StartupRepairStepOutcome {
         lock.lock()
-        let needsStartupRepair = pendingStartupRepair && !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil)
+        let needsStartupRepair = pendingStartupRepair
+            && (pendingStartupCompaction || !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil))
         lock.unlock()
-        if needsStartupRepair {
-            let now = ContinuousClock.now
-            let currentStamp = Self.repairEnvironmentStamp(
+        guard needsStartupRepair else {
+            return .notNeeded
+        }
+        let now = ContinuousClock.now
+        let currentStamp = Self.repairEnvironmentStamp(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            fileManager: fileManager
+        )
+        lock.lock()
+        let shouldRetryRepair = pendingStartupRepair
+            && (pendingStartupCompaction || !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil))
+            && (lastFailedRepairEnvironmentStamp == nil
+                || currentStamp != lastFailedRepairEnvironmentStamp
+                || nextStartupRepairRetryAt.map { now >= $0 } ?? true)
+        if shouldRetryRepair {
+            nextStartupRepairRetryAt = now.advanced(by: Self.startupRepairRetryInterval)
+        }
+        let shouldSkipUnreadFallback = !shouldRetryRepair
+            && lastDiskStateMetadata == nil
+            && currentStamp == lastFailedRepairEnvironmentStamp
+        lock.unlock()
+        guard shouldRetryRepair else {
+            return .deferred(skipUnreadFallback: shouldSkipUnreadFallback)
+        }
+        do {
+            let repairedEvents = try retryPendingStartupRepair()
+            return .repaired(repairedEvents)
+        } catch {
+            let failedStamp = Self.repairEnvironmentStamp(
                 historyURL: historyURL,
                 summaryURL: summaryURL,
                 mirrorURL: mirrorURL,
                 fileManager: fileManager
             )
             lock.lock()
-            let shouldRetryRepair = pendingStartupRepair
-                && !(isSummaryRebuildScheduled && lastDiskStateMetadata != nil)
-                && (lastFailedRepairEnvironmentStamp == nil
-                    || currentStamp != lastFailedRepairEnvironmentStamp
-                    || nextStartupRepairRetryAt.map { now >= $0 } ?? true)
-            if shouldRetryRepair {
-                nextStartupRepairRetryAt = now.advanced(by: Self.startupRepairRetryInterval)
-            }
-            let shouldSkipUnreadFallback = !shouldRetryRepair
-                && lastDiskStateMetadata == nil
-                && currentStamp == lastFailedRepairEnvironmentStamp
+            nextStartupRepairRetryAt = ContinuousClock.now.advanced(by: Self.startupRepairRetryInterval)
+            lastFailedRepairEnvironmentStamp = failedStamp
+            let skipUnreadFallbackAfterFailure = lastDiskStateMetadata == nil
             lock.unlock()
-            if shouldRetryRepair {
-                do {
-                    let repairedEvents = try retryPendingStartupRepair()
-                    notifySummaryReady(repairedEvents)
-                    return
-                } catch {
-                    let failedStamp = Self.repairEnvironmentStamp(
-                        historyURL: historyURL,
-                        summaryURL: summaryURL,
-                        mirrorURL: mirrorURL,
-                        fileManager: fileManager
-                    )
-                    lock.lock()
-                    nextStartupRepairRetryAt = ContinuousClock.now.advanced(by: Self.startupRepairRetryInterval)
-                    lastFailedRepairEnvironmentStamp = failedStamp
-                    let skipUnreadFallbackAfterFailure = lastDiskStateMetadata == nil
-                    lock.unlock()
-                    diagnosticSink.record(
-                        AIRecommendationDiagnosticEvent(
-                            stage: .lexicalProfileFallback,
-                            reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
-                        )
-                    )
-                    if skipUnreadFallbackAfterFailure {
-                        return
-                    }
-                }
-            } else if shouldSkipUnreadFallback {
-                return
-            }
+            diagnosticSink.record(
+                AIRecommendationDiagnosticEvent(
+                    stage: .lexicalProfileFallback,
+                    reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
+                )
+            )
+            return .deferred(skipUnreadFallback: skipUnreadFallbackAfterFailure)
         }
+    }
+
+    private func syncRecordsAfterExternalClear() {
+        switch attemptPendingStartupRepairIfNeeded() {
+        case .repaired(let repairedEvents):
+            notifySummaryReady(repairedEvents)
+            return
+        case .deferred(let skipUnreadFallback) where skipUnreadFallback:
+            return
+        case .notNeeded, .deferred:
+            break
+        }
+
+        var detectedOversizedHistory = false
         let events: [AIAcceptedLearningSummaryReadyEvent]
         do {
             events = try withExistingAcceptedLearningFileLock(
@@ -1355,7 +1403,8 @@ public final class AIAcceptedLearningStore:
                     try loadDiskSyncCandidate()
                 },
                 commit: { candidate in
-                    applyDiskSyncCandidate(candidate)
+                    detectedOversizedHistory = candidate?.needsCompaction == true && historyURL != nil
+                    return applyDiskSyncCandidate(candidate)
                 }
             )
         } catch {
@@ -1366,6 +1415,13 @@ public final class AIAcceptedLearningStore:
                 )
             )
             return
+        }
+        if detectedOversizedHistory {
+            if case .repaired(let repairedEvents) = attemptPendingStartupRepairIfNeeded() {
+                notifySummaryReady(events)
+                notifySummaryReady(repairedEvents)
+                return
+            }
         }
         notifySummaryReady(events)
     }

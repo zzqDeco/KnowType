@@ -1192,6 +1192,43 @@ final class AIAcceptedLearningTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: mirrorDir.path)
         XCTAssertEqual(partialCompactionStore.snapshot()?.acceptedCount, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: missingMirrorURL.path))
+
+        let extraRecordLine = try encoder.encode(
+            AIAcceptedLearningRecord(
+                acceptedAt: Date(timeIntervalSince1970: 4),
+                schemaID: "pinyin_simp",
+                rawInput: "four",
+                acceptedText: "ExternalOverflow 第四条",
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test"
+            )
+        )
+        let handle = try FileHandle(forWritingTo: deferredHistoryURL)
+        try handle.seekToEnd()
+        var lineWithNewline = extraRecordLine
+        lineWithNewline.append(0x0A)
+        try handle.write(contentsOf: lineWithNewline)
+        try handle.close()
+        XCTAssertEqual(
+            try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
+            2
+        )
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: unwritableDir.path)
+        XCTAssertEqual(partialCompactionStore.snapshot()?.acceptedCount, 1)
+        XCTAssertEqual(partialCompactionStore.allRecords().map(\.rawInput), ["four"])
+        XCTAssertEqual(
+            try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
+            2
+        )
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unwritableDir.path)
+        XCTAssertEqual(partialCompactionStore.snapshot()?.acceptedCount, 1)
+        XCTAssertEqual(
+            try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
+            1
+        )
     }
 }
 
