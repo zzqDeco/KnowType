@@ -810,6 +810,196 @@ final class AIAcceptedLearningTests: XCTestCase {
         XCTAssertEqual(scrubbedProfile.lexicalContext.recentCommits, ["NormalUserCommit 普通提交"])
     }
 
+    func testFailedClearPinsScrubEntriesAcrossFurtherCompactionAndReload() async throws {
+        let dir = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let historyURL = dir.appendingPathComponent("accepted-ai-learning.jsonl")
+        let summaryURL = dir.appendingPathComponent("accepted-ai-summary.json")
+        let mirrorURL = dir.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let evictedURL = dir.appendingPathComponent("accepted-ai-learning.evicted-commits.json")
+        let lexicalDir = dir.appendingPathComponent("lexical", isDirectory: true)
+        try FileManager.default.createDirectory(at: lexicalDir, withIntermediateDirectories: true)
+        let lexicalJSONURL = lexicalDir.appendingPathComponent("lexical-profile.json")
+        let lexicalMarkdownURL = lexicalDir.appendingPathComponent("LEXICAL_PROFILE.md")
+        let oldCommit = "OldEvictedCommit " + String(repeating: "old accepted text ", count: 5)
+        let activeCommit = "ActiveBeforeClear " + String(repeating: "active accepted text ", count: 5)
+        let oldVariants = [oldCommit, String(oldCommit.prefix(48)) + "..."]
+        let activeVariants = [activeCommit, String(activeCommit.prefix(48)) + "..."]
+        let prefilledLedger = oldVariants.map(acceptedLearningCommitTextDigest) + (2..<4_096).map {
+            String(format: "%064x", $0)
+        }
+        try JSONEncoder().encode(prefilledLedger).write(to: evictedURL, options: .atomic)
+        let store = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0
+        )
+        await store.recordAcceptedAI(AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            acceptedText: activeCommit,
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test",
+            extractedTerms: []
+        ))
+        let context = LexicalContextSnapshot(
+            terms: [LexicalContextTerm(text: "NormalTerm", score: 0.9, source: "rime-userdb")],
+            recentCommits: oldVariants + activeVariants + ["Normal user commit"],
+            toneProfile: ToneProfile(),
+            sourceSummary: ["rime-userdb: 1"]
+        )
+        let profile = PersistentLexicalProfile(
+            schemaID: "pinyin_simp",
+            rimeSnapshotPath: nil,
+            rimeSnapshotModifiedAt: nil,
+            lexicalContext: context
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let originalProfile = try encoder.encode(profile)
+        try originalProfile.write(to: lexicalJSONURL, options: .atomic)
+        try Data(context.markdown.utf8).write(to: lexicalMarkdownURL, options: .atomic)
+        let maintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            feedbackHistoryURL: dir.appendingPathComponent("feedback.jsonl"),
+            feedbackSummaryURL: dir.appendingPathComponent("feedback-summary.json"),
+            feedbackMirrorURL: dir.appendingPathComponent("FEEDBACK.md"),
+            lexicalJSONURL: lexicalJSONURL,
+            lexicalMarkdownURL: lexicalMarkdownURL,
+            fileManager: DirectoryWriteFailingFileManager(blockedDirectory: lexicalDir)
+        )
+        XCTAssertThrowsError(try maintenance.clear(confirm: true))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: historyURL.path))
+        XCTAssertEqual(try Data(contentsOf: lexicalJSONURL), originalProfile)
+        let pinnedMarker = try Data(contentsOf: maintenance.clearMarkerURL)
+        let marker = try XCTUnwrap(JSONSerialization.jsonObject(with: pinnedMarker) as? [String: Any])
+        let pinnedEntries = Set(try XCTUnwrap(marker["pendingEvictedCommitEntries"] as? [String]))
+        XCTAssertTrue(Set(prefilledLedger).isSubset(of: pinnedEntries))
+        XCTAssertTrue(Set(activeVariants.map(acceptedLearningCommitTextDigest)).isSubset(of: pinnedEntries))
+        XCTAssertFalse(String(decoding: pinnedMarker, as: UTF8.self).contains("OldEvictedCommit"))
+
+        for index in 1...501 {
+            await store.recordAcceptedAI(AIAcceptedLearningRecord(
+                schemaID: "pinyin_simp",
+                acceptedText: "AfterFailedClear\(index) " + String(repeating: "long accepted text ", count: 4),
+                provider: "ai-test",
+                contextVersion: "test",
+                candidateSource: "ai:ai-test",
+                extractedTerms: []
+            ))
+        }
+        XCTAssertEqual(store.allRecords().count, 500)
+        let rotatedLedger = try JSONDecoder().decode([String].self, from: Data(contentsOf: evictedURL))
+        XCTAssertEqual(rotatedLedger.count, 4_096)
+        XCTAssertFalse(rotatedLedger.contains(acceptedLearningCommitTextDigest(oldCommit)))
+        XCTAssertEqual(try Data(contentsOf: maintenance.clearMarkerURL), pinnedMarker)
+
+        // A fresh maintenance value must recover solely from persisted retry state.
+        let retryMaintenance = AIAcceptedLearningMaintenance(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            feedbackHistoryURL: maintenance.feedbackHistoryURL,
+            feedbackSummaryURL: maintenance.feedbackSummaryURL,
+            feedbackMirrorURL: maintenance.feedbackMirrorURL,
+            lexicalJSONURL: lexicalJSONURL,
+            lexicalMarkdownURL: lexicalMarkdownURL
+        )
+        _ = try retryMaintenance.clear(confirm: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: evictedURL.path))
+        let completedMarker = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: maintenance.clearMarkerURL)) as? [String: Any]
+        )
+        XCTAssertNil(completedMarker["pendingEvictedCommitEntries"])
+        let reloadedProfile = LexicalProfileStore(jsonURL: lexicalJSONURL, markdownURL: lexicalMarkdownURL)
+        XCTAssertEqual(reloadedProfile.currentSnapshot()?.recentCommits, ["Normal user commit"])
+        XCTAssertTrue(reloadedProfile.currentSnapshot()?.terms.contains { $0.text == "NormalTerm" } == true)
+        let markdown = try String(contentsOf: lexicalMarkdownURL, encoding: .utf8)
+        XCTAssertFalse(markdown.contains("OldEvictedCommit"))
+        XCTAssertFalse(markdown.contains("ActiveBeforeClear"))
+        let reloadedLearning = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0
+        )
+        XCTAssertNil(reloadedLearning.snapshot())
+    }
+
+    func testFailedAppendDeliversPeerInvalidationsOnceOutsideLocks() async throws {
+        for capacity in [2, 3] {
+            let dir = temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let historyURL = dir.appendingPathComponent("accepted-ai-learning.jsonl")
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            func record(_ text: String, schemaID: String) -> AIAcceptedLearningRecord {
+                AIAcceptedLearningRecord(
+                    schemaID: schemaID,
+                    acceptedText: text,
+                    provider: "ai-test",
+                    contextVersion: "test",
+                    candidateSource: "ai:ai-test"
+                )
+            }
+            let removed = record("Removed peer commit", schemaID: "removed")
+            let retained = record("Retained peer commit", schemaID: "surviving")
+            let added = record("Added peer commit", schemaID: "surviving")
+            let initial = try [removed, retained].reduce(into: Data()) { data, record in
+                data.append(try encoder.encode(record))
+                data.append(0x0A)
+            }
+            try initial.write(to: historyURL, options: .atomic)
+            let diagnostics = DiagnosticEventCollector()
+            let store = AIAcceptedLearningStore(
+                historyURL: historyURL,
+                summaryURL: nil,
+                mirrorURL: nil,
+                diagnosticSink: diagnostics,
+                summaryDelayNanoseconds: 0,
+                maxRecordCount: capacity
+            )
+            let events = SummaryReadyEventCollector()
+            let observerID = store.addSummaryReadyObserver { event in
+                events.record(event)
+                // Reentrant reads exercise both the store lock and the file lock.
+                let snapshot = store.snapshot(schemaID: event.schemaID)
+                XCTAssertEqual(snapshot?.acceptedCount ?? 0, event.acceptedCount)
+                XCTAssertEqual(snapshot?.historyHash ?? "", event.historyHash)
+                _ = store.allRecords()
+            }
+            defer { store.removeSummaryReadyObserver(observerID) }
+
+            // Model another process's already-compacted, within-capacity history.
+            let peerHistory = try [retained, added].reduce(into: Data()) { data, record in
+                data.append(try encoder.encode(record))
+                data.append(0x0A)
+            }
+            try peerHistory.write(to: historyURL, options: .atomic)
+            var failedRecord = record("Unencodable local append", schemaID: "local")
+            failedRecord.extractedTerms = [LexicalContextTerm(text: "InvalidScore", score: .nan, source: "accepted-ai")]
+            await store.recordAcceptedAI(failedRecord)
+
+            XCTAssertTrue(diagnostics.reasons().contains { $0.hasPrefix("accepted_learning_write_failed:") })
+            XCTAssertEqual(try Data(contentsOf: historyURL), peerHistory)
+            let invalidations = events.snapshot()
+            XCTAssertEqual(invalidations.map(\.schemaID), ["removed", "surviving"])
+            XCTAssertEqual(invalidations.map(\.acceptedCount), [0, 2])
+            XCTAssertEqual(invalidations.last?.historyHash, AIAcceptedLearningStore.historyHash([retained, added]))
+            for _ in 0..<3 {
+                XCTAssertNil(store.snapshot(schemaID: "removed"))
+                XCTAssertEqual(store.snapshot(schemaID: "surviving")?.acceptedCount, 2)
+            }
+            XCTAssertEqual(events.snapshot(), invalidations)
+            await store.recordAcceptedAI(record("Recovered local append", schemaID: "local"))
+            XCTAssertEqual(store.allRecords().count, capacity)
+            XCTAssertEqual(events.snapshot().filter { $0.schemaID == "removed" }.count, 1)
+        }
+    }
+
     func testCompactionInPeerStoreInvalidatesLiveStoreSchemaSnapshotAndNotifiesObserver() async throws {
         let dir = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -1246,6 +1436,26 @@ private final class DiagnosticEventCollector: AIRecommendationDiagnosticSink, @u
         lock.withLock {
             events.compactMap(\.reason)
         }
+    }
+}
+
+private final class DirectoryWriteFailingFileManager: FileManager, @unchecked Sendable {
+    private let blockedDirectory: URL
+
+    init(blockedDirectory: URL) {
+        self.blockedDirectory = blockedDirectory
+        super.init()
+    }
+
+    override func createDirectory(
+        at url: URL,
+        withIntermediateDirectories createIntermediates: Bool,
+        attributes: [FileAttributeKey: Any]? = nil
+    ) throws {
+        if url.standardizedFileURL.path == blockedDirectory.standardizedFileURL.path {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try super.createDirectory(at: url, withIntermediateDirectories: createIntermediates, attributes: attributes)
     }
 }
 
