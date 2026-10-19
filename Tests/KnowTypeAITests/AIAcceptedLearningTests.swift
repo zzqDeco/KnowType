@@ -1061,6 +1061,55 @@ final class AIAcceptedLearningTests: XCTestCase {
         XCTAssertEqual(bodyCalls, 2)
         XCTAssertEqual(commitCalls, 1)
         XCTAssertEqual(committedValue, 20)
+
+        let unwritableDir = dir.appendingPathComponent("unwritable-startup", isDirectory: true)
+        try FileManager.default.createDirectory(at: unwritableDir, withIntermediateDirectories: true)
+        let deferredHistoryURL = unwritableDir.appendingPathComponent("accepted-ai-learning.jsonl")
+        let deferredSummaryURL = unwritableDir.appendingPathComponent("accepted-ai-summary.json")
+        let deferredMirrorURL = unwritableDir.appendingPathComponent("ACCEPTED_AI_LEARNING.md")
+        let deferredEvictedURL = unwritableDir.appendingPathComponent("accepted-ai-learning.evicted-commits.json")
+        let line1 = try XCTUnwrap(
+            String(
+                data: encoder.encode(
+                    AIAcceptedLearningRecord(
+                        acceptedAt: Date(timeIntervalSince1970: 1),
+                        schemaID: "pinyin_simp",
+                        rawInput: "one",
+                        acceptedText: "DeferredEvictedOne 待淘汰一",
+                        provider: "ai-test",
+                        contextVersion: "test",
+                        candidateSource: "ai:ai-test"
+                    )
+                ),
+                encoding: .utf8
+            )
+        )
+        try (line1 + "\n" + line2).write(to: deferredHistoryURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: unwritableDir.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unwritableDir.path)
+        }
+
+        let deferredStore = AIAcceptedLearningStore(
+            historyURL: deferredHistoryURL,
+            summaryURL: deferredSummaryURL,
+            mirrorURL: deferredMirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 1
+        )
+        XCTAssertEqual(deferredStore.allRecords().count, 1)
+        XCTAssertEqual(
+            try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
+            2
+        )
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unwritableDir.path)
+        XCTAssertEqual(deferredStore.snapshot()?.acceptedCount, 1)
+        XCTAssertEqual(
+            try String(contentsOf: deferredHistoryURL, encoding: .utf8).split(whereSeparator: \.isNewline).count,
+            1
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: deferredEvictedURL.path))
     }
 }
 

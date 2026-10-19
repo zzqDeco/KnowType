@@ -919,7 +919,9 @@ log stream --predicate 'subsystem == "com.knowtype.inputmethod.KnowType" && cate
   bounded sliding window (`defaultMaxRecordCount = 500`, clamped to at least 1)
   and records SHA-256 digests of evicted commit text variants in
   `~/Library/Application Support/KnowType/AI/accepted-ai-learning.evicted-commits.json`
-  (bounded to the latest 4,096 digest entries, never raw text)
+  (bounded to the latest 4,096 digest entries during normal compaction, or
+  temporarily retaining those 4,096 entries plus active-record digests if a
+  clear retry is pending; never raw text)
 - writes bounded language-habit summary JSON to
   `~/Library/Application Support/KnowType/AI/accepted-ai-summary.json`
 - mirrors summary diagnostics to `~/.knowtype/ACCEPTED_AI_LEARNING.md`

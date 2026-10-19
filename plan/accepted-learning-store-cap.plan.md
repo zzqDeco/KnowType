@@ -7,17 +7,21 @@
   and `inMemory`, clamped to at least `1`) so in-memory records and
   `rebuildSummary()` remain bounded instead of growing `O(N)` over full history.
 - Updated `AIAcceptedLearningStore.init` (and external-clear reload) to retain
-  only the most recent `maxRecordCount` records and compact
+  only the most recent `maxRecordCount` records, compact
   `accepted-ai-learning.jsonl` on disk under the interprocess file lock when
-  historical records exceed capacity, while keeping within-capacity and
-  missing-history cold starts read-only.
+  historical records exceed capacity, refresh an existing markdown mirror when
+  `maxRecordCount` changes, retry deferred startup compaction/mirror repair on
+  subsequent reads if startup persistence fails transiently, and keep
+  missing-history or already-consistent within-capacity cold starts read-only.
 - Updated `AIAcceptedLearningStore.append(_:)` and `rebuildSummary()` to reload
   locked on-disk history before compacting or rebuilding summaries, fast-path
   append when within `maxRecordCount`, synchronize live peer stores and detect
   on-disk history signature changes so `snapshot(schemaID:)` and observers are
   invalidated immediately when a schema is evicted by another store's
   compaction, and persist SHA-256 digests of evicted commit text variants
-  (`accepted-ai-learning.evicted-commits.json`, bounded to 4,096 digests) so
+  (`accepted-ai-learning.evicted-commits.json`, bounded to 4,096 digests during
+  normal compaction and temporarily retaining active-record digests alongside
+  them if a clear retry is pending) so
   `AIAcceptedLearningMaintenance.clear(confirm:)` can still scrub evicted
   accepted commits from `LEXICAL_PROFILE.md` without retaining raw evicted
   commit text on disk.

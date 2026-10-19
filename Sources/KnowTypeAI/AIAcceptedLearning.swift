@@ -577,6 +577,7 @@ public final class AIAcceptedLearningStore:
     private var summaryObservers: [UUID: @Sendable (AIAcceptedLearningSummaryReadyEvent) -> Void] = [:]
     private var lastClearMarkerModifiedAt: Date?
     private var lastDiskStateMetadata: DiskStateMetadata?
+    private var pendingStartupRepair: Bool
 
     private struct StartupState {
         var records: [AIAcceptedLearningRecord]
@@ -639,7 +640,7 @@ public final class AIAcceptedLearningStore:
                         repairPersistentSummary: true
                     )
                 }
-                didCompactOnStartup = initialState.needsCompaction
+                didCompactOnStartup = startupState.needsCompaction && historyURL != nil
             } else {
                 startupState = initialState
             }
@@ -673,6 +674,10 @@ public final class AIAcceptedLearningStore:
             startupRepairErrorReason = String(describing: type(of: error))
         }
 
+        let requiresDeferredStartupRepair = startupRepairErrorReason != nil
+            && ((startupState.needsCompaction && historyURL != nil)
+                || startupState.needsMirrorRefresh
+                || startupState.lastDiskStateMetadata == nil)
         self.maxRecordCount = clampedMaxRecordCount
         self.historyURL = historyURL
         self.summaryURL = summaryURL
@@ -684,7 +689,8 @@ public final class AIAcceptedLearningStore:
         self.decoder = configuredDecoder
         self.records = startupState.records
         self.lastClearMarkerModifiedAt = startupState.lastClearMarkerModifiedAt
-        self.lastDiskStateMetadata = startupState.lastDiskStateMetadata
+        self.lastDiskStateMetadata = requiresDeferredStartupRepair ? nil : startupState.lastDiskStateMetadata
+        self.pendingStartupRepair = requiresDeferredStartupRepair
         self.summary = startupState.summary
         self.schemaSummaries = startupState.schemaSummaries
         self.pendingSummarySchemaIDs = []
@@ -1005,6 +1011,9 @@ public final class AIAcceptedLearningStore:
                 lock.unlock()
 
                 try persistSummary(nextSummary)
+                lock.lock()
+                pendingStartupRepair = false
+                lock.unlock()
                 return Self.summaryReadyEvents(
                     from: nextSchemaSummaries,
                     changedSchemaIDs: changedSchemaIDs
@@ -1065,7 +1074,8 @@ public final class AIAcceptedLearningStore:
     }
 
     private func applyDiskSyncCandidate(
-        _ candidate: DiskSyncCandidate?
+        _ candidate: DiskSyncCandidate?,
+        markStartupRepairComplete: Bool = false
     ) -> [AIAcceptedLearningSummaryReadyEvent] {
         guard let candidate else {
             return []
@@ -1100,7 +1110,10 @@ public final class AIAcceptedLearningStore:
         if let updatedMarkerDate = finalMetadata?.clearMarker.modificationDate ?? markerModifiedAt {
             lastClearMarkerModifiedAt = updatedMarkerDate
         }
-        lastDiskStateMetadata = finalMetadata
+        if markStartupRepairComplete {
+            pendingStartupRepair = false
+        }
+        lastDiskStateMetadata = pendingStartupRepair ? nil : finalMetadata
         lock.unlock()
         return Self.summaryReadyEvents(
             from: reloadedSchemaSummaries,
@@ -1108,8 +1121,94 @@ public final class AIAcceptedLearningStore:
         )
     }
 
+    private func retryPendingStartupRepairLocked() throws -> [AIAcceptedLearningSummaryReadyEvent]? {
+        lock.lock()
+        let needsRepair = pendingStartupRepair
+        lock.unlock()
+        guard needsRepair else {
+            return nil
+        }
+        let repairedState = try Self.loadStartupState(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            fileManager: fileManager,
+            encoder: encoder,
+            decoder: decoder,
+            maxRecordCount: maxRecordCount,
+            compactPersistentHistory: true,
+            repairPersistentSummary: true
+        )
+        return applyDiskSyncCandidate(
+            DiskSyncCandidate(
+                reloadedRecords: repairedState.records,
+                finalMetadata: repairedState.lastDiskStateMetadata,
+                markerModifiedAt: repairedState.lastClearMarkerModifiedAt
+            ),
+            markStartupRepairComplete: true
+        )
+    }
+
+    private func retryPendingStartupRepair() throws -> [AIAcceptedLearningSummaryReadyEvent] {
+        let initialState = try withExistingAcceptedLearningFileLock(
+            lockURL: acceptedLearningLockURL(historyURL: historyURL),
+            fileManager: fileManager
+        ) {
+            try Self.loadStartupState(
+                historyURL: historyURL,
+                summaryURL: summaryURL,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager,
+                encoder: encoder,
+                decoder: decoder,
+                maxRecordCount: maxRecordCount,
+                compactPersistentHistory: false,
+                repairPersistentSummary: false
+            )
+        }
+        let repairedState: StartupState
+        let didCompact: Bool
+        if (initialState.needsCompaction && historyURL != nil) || initialState.needsMirrorRefresh {
+            repairedState = try withAcceptedLearningFileLock(
+                lockURL: acceptedLearningLockURL(historyURL: historyURL),
+                fileManager: fileManager
+            ) {
+                try Self.loadStartupState(
+                    historyURL: historyURL,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    encoder: encoder,
+                    decoder: decoder,
+                    maxRecordCount: maxRecordCount,
+                    compactPersistentHistory: true,
+                    repairPersistentSummary: true
+                )
+            }
+            didCompact = repairedState.needsCompaction && historyURL != nil
+        } else {
+            repairedState = initialState
+            didCompact = false
+        }
+        let events = applyDiskSyncCandidate(
+            DiskSyncCandidate(
+                reloadedRecords: repairedState.records,
+                finalMetadata: repairedState.lastDiskStateMetadata,
+                markerModifiedAt: repairedState.lastClearMarkerModifiedAt
+            ),
+            markStartupRepairComplete: true
+        )
+        if didCompact {
+            synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
+        }
+        return events
+    }
+
     @discardableResult
     private func syncRecordsAfterExternalClearLocked() throws -> [AIAcceptedLearningSummaryReadyEvent] {
+        if let repairedEvents = try retryPendingStartupRepairLocked() {
+            return repairedEvents
+        }
         let candidate = try loadDiskSyncCandidate()
         return applyDiskSyncCandidate(candidate)
     }
@@ -1119,6 +1218,23 @@ public final class AIAcceptedLearningStore:
     }
 
     private func syncRecordsAfterExternalClear() {
+        lock.lock()
+        let needsStartupRepair = pendingStartupRepair
+        lock.unlock()
+        if needsStartupRepair {
+            do {
+                let repairedEvents = try retryPendingStartupRepair()
+                notifySummaryReady(repairedEvents)
+                return
+            } catch {
+                diagnosticSink.record(
+                    AIRecommendationDiagnosticEvent(
+                        stage: .lexicalProfileFallback,
+                        reason: "accepted_learning_summary_repair_failed:\(String(describing: type(of: error)))"
+                    )
+                )
+            }
+        }
         let events: [AIAcceptedLearningSummaryReadyEvent]
         do {
             events = try withExistingAcceptedLearningFileLock(
@@ -1307,7 +1423,7 @@ public final class AIAcceptedLearningStore:
         var lines: [String] = [
             "# KnowType Accepted AI Learning",
             "",
-            "This is a local summary of AI recommendations the user explicitly accepted. Retained history (a sliding window of the latest \(recordCountDescription), plus a bounded ledger of up to 4,096 SHA-256 digests for evicted commits in accepted-ai-learning.evicted-commits.json) stays local and is not injected into provider requests.",
+            "This is a local summary of AI recommendations the user explicitly accepted. Retained history (a sliding window of the latest \(recordCountDescription), plus a bounded ledger of up to 4,096 SHA-256 digests for evicted commits in accepted-ai-learning.evicted-commits.json that may temporarily include active-record digests if a clear retry is pending) stays local and is not injected into provider requests.",
             "",
             "## Stats",
             "- Accepted count: \(summary.acceptedCount)",
@@ -1480,7 +1596,7 @@ public final class AIAcceptedLearningStore:
         }
         let summaryIsCurrent = summaryMatchesRecords && mirrorIsCurrent
         if repairPersistentSummary, !summaryIsCurrent {
-            if !summaryMatchesRecords {
+            if needsCompaction {
                 try persistSummary(
                     nextSummary,
                     summaryURL: summaryURL,

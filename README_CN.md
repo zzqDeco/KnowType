@@ -273,7 +273,8 @@ AI 推荐摘要合成的本地 top-K 词汇画像镜像。用户接受 AI 推荐
 且光标范围可验证的编辑会单独汇总为本地 AI feedback；普通 Backspace 不会
 自动当成负反馈。Accepted-AI 历史（滑窗保留最近 500 条记录，并在
 `accepted-ai-learning.evicted-commits.json` 中记录最多 4096 条被淘汰提交的
-SHA-256 摘要以便 `clear` 清理）和 feedback 历史只保存在本机
+SHA-256 摘要；若 `clear` 在清理词库画像前中断待重试，还会临时一并保留当前
+活跃记录的摘要以便 `clear` 清理）和 feedback 历史只保存在本机
 Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
 `~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
 这些文件。可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或
