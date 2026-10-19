@@ -89,6 +89,7 @@ func recordAcceptedLearningEvictedCommits(
     _ evictedRecords: [AIAcceptedLearningRecord],
     historyURL: URL?,
     evictedCommitsURL: URL? = nil,
+    maxEntries: Int = 4_096,
     fileManager: FileManager = .default
 ) throws {
     guard let evictedURL = evictedCommitsURL ?? acceptedLearningEvictedCommitsURL(historyURL: historyURL) else {
@@ -100,7 +101,8 @@ func recordAcceptedLearningEvictedCommits(
     }
     let newDigestSet = Set(newDigests)
     let existing = loadAcceptedLearningEvictedCommitList(from: evictedURL, fileManager: fileManager)
-    let merged = (existing.filter { !newDigestSet.contains($0) } + newDigests).suffix(4_096)
+    let effectiveMaxEntries = max(4_096, maxEntries)
+    let merged = (existing.filter { !newDigestSet.contains($0) } + newDigests).suffix(effectiveMaxEntries)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let data = try encoder.encode(Array(merged))

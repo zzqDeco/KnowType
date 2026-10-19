@@ -602,7 +602,9 @@ final class AIAcceptedLearningTests: XCTestCase {
         let lexicalJSONURL = dir.appendingPathComponent("lexical-profile.json")
         let lexicalMarkdownURL = dir.appendingPathComponent("lexical-profile.md")
 
-        let prefilledLedger = (0..<4_096).map { index in
+        let oldestSurvivingPreClearCommitText = "OldestPreClearEvictedCommit 最早存活淘汰提交"
+        let oldestSurvivingPreClearDigest = acceptedLearningCommitTextDigest(oldestSurvivingPreClearCommitText)
+        let prefilledLedger = [String(format: "ffff%060x", 0), oldestSurvivingPreClearDigest] + (2..<4_096).map { index in
             String(format: "ffff%060x", index)
         }
         try JSONEncoder().encode(prefilledLedger).write(to: evictedCommitsURL, options: .atomic)
@@ -650,6 +652,7 @@ final class AIAcceptedLearningTests: XCTestCase {
                 LexicalContextTerm(text: "普通词条", score: 0.9, source: "rime-userdb")
             ],
             recentCommits: [
+                oldestSurvivingPreClearCommitText,
                 evictedCommitText,
                 retainedCommitText,
                 "NormalUserCommit 普通提交"
@@ -691,6 +694,7 @@ final class AIAcceptedLearningTests: XCTestCase {
         )
         XCTAssertEqual(scrubbedProfile.lexicalContext.recentCommits, ["NormalUserCommit 普通提交"])
         let scrubbedMarkdown = try String(contentsOf: lexicalMarkdownURL, encoding: .utf8)
+        XCTAssertFalse(scrubbedMarkdown.contains(oldestSurvivingPreClearCommitText))
         XCTAssertFalse(scrubbedMarkdown.contains(evictedCommitText))
         XCTAssertFalse(scrubbedMarkdown.contains(retainedCommitText))
         XCTAssertTrue(scrubbedMarkdown.contains("NormalUserCommit 普通提交"))

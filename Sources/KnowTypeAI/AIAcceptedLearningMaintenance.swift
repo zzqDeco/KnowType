@@ -301,15 +301,18 @@ public struct AIAcceptedLearningMaintenance {
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
             let currentRecords = loadRecords().records
             let acceptedCommitTexts = acceptedCommitTextVariants(from: currentRecords)
+            let preClearEvictedEntries = loadAcceptedLearningEvictedCommits(from: evictedCommitsURL, fileManager: fileManager)
+            let currentRecordDigests = acceptedLearningCommitDigestVariants(from: currentRecords)
             if !currentRecords.isEmpty {
                 try recordAcceptedLearningEvictedCommits(
                     currentRecords,
                     historyURL: historyURL,
                     evictedCommitsURL: evictedCommitsURL,
+                    maxEntries: preClearEvictedEntries.count + currentRecordDigests.count,
                     fileManager: fileManager
                 )
             }
-            let evictedCommitEntries = loadAcceptedLearningEvictedCommits(from: evictedCommitsURL, fileManager: fileManager)
+            let evictedCommitEntries = preClearEvictedEntries.union(currentRecordDigests)
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
