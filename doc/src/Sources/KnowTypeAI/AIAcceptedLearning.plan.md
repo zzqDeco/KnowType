@@ -39,22 +39,24 @@ does not emit raw input or accepted text. It emits ready events only for schemas
 whose accepted history changed since the previous rebuild, so schema-specific
 lexical profile refreshes are not retriggered by unchanged cached summaries.
 
-Runtime store construction is read-only when history is missing or when history
-is within `maxRecordCount` and no existing markdown mirror requires a refresh.
-Missing history, summary, mirror, and clear-marker files do not create the AI
-directory, lock file, or markdown mirror. If a persisted summary is stale and no
-existing mirror requires repair, startup rebuilds the in-memory snapshot and
-leaves persistent summary repair to explicit record/rebuild paths or startup
+Runtime store construction is read-only when history is missing or within
+`maxRecordCount`, provided no existing markdown mirror requires refresh or
+removal. Missing history, summary, mirror, and clear-marker files do not create
+the AI directory, lock file, or markdown mirror. If a persisted summary is stale
+and no existing mirror requires repair, startup rebuilds the in-memory snapshot
+and leaves persistent summary repair to explicit record/rebuild paths or startup
 compaction; when an existing JSONL file exceeds `maxRecordCount` or an existing
 markdown mirror does not match the active summary and configured
-`maxRecordCount`, startup acquires the interprocess file lock (creating the lock
-file if necessary) to compact the history/summary/mirror or refresh the existing
-mirror on disk, and retries that repair on subsequent reads if startup
-persistence failed transiently. Startup reads always participate in the
-in-process accepted-learning lock and also join an existing accepted-learning
-maintenance file lock when another process has already created one, so
-concurrent append/rebuild/clear operations are observed consistently without
-making missing-history cold start create a lock file of its own.
+`maxRecordCount` (including an orphaned mirror left behind when history is
+missing or empty), startup acquires the interprocess file lock (creating the
+lock file if necessary) to compact the history/summary/mirror or refresh/remove
+the existing mirror on disk, and retries that repair on subsequent reads (with
+bounded monotonic backoff) if startup persistence failed transiently. Startup
+reads always participate in the in-process accepted-learning lock and also join
+an existing accepted-learning maintenance file lock when another process has
+already created one, so concurrent append/rebuild/clear operations are observed
+consistently without making missing-history cold start create a lock file of its
+own when no existing mirror cleanup is needed.
 
 `AIAcceptedLearningMaintenance` is the non-runtime control surface for this
 data. It powers `knowtype-accepted-learning-tool` and the
