@@ -84,7 +84,7 @@ public enum TextProtection {
         "my", "current", "next", "prev", "previous", "first", "last"
     ]
     private static let likelyCodeIdentifierSuffixes: Set<String> = [
-        "bar", "baz", "qux", "coordinator", "delegate", "manager", "controller",
+        "baz", "qux", "coordinator", "delegate", "manager", "controller",
         "handler", "listener", "observer", "provider", "runtime", "engine", "store",
         "builder", "factory", "helper", "service", "client", "server", "out", "err",
         "println", "print", "printf", "read", "write", "append", "remove", "delete",
@@ -499,7 +499,10 @@ public enum TextProtection {
         return trimmed.range(of: #"^(?:(?:~|\.|\.\.)/)?\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$"#, options: .regularExpression) != nil
     }
 
-    private static func isLikelyDottedIdentifierOrProseToken(_ token: String) -> Bool {
+    private static func isLikelyDottedIdentifierOrProseToken(
+        _ token: String,
+        followingText: Substring = ""
+    ) -> Bool {
         let lowercased = token.lowercased()
         if lowercased == "localhost"
             || !token.contains(".")
@@ -525,6 +528,11 @@ public enum TextProtection {
             return true
         }
 
+        // .bar is a delegated TLD; only code prefixes or an argument list disambiguate it here.
+        if lastLabel == "bar" {
+            return followingText.drop(while: { $0.isWhitespace }).first == "("
+        }
+
         if likelyCodeIdentifierSuffixes.contains(lastLabel) {
             return true
         }
@@ -538,7 +546,11 @@ public enum TextProtection {
             guard let range = Range(match.range, in: text) else {
                 return nil
             }
-            if pattern.reason == "url" && isLikelyDottedIdentifierOrProseToken(String(text[range])) {
+            if pattern.reason == "url",
+               isLikelyDottedIdentifierOrProseToken(
+                String(text[range]),
+                followingText: text[range.upperBound...]
+               ) {
                 return nil
             }
             let start = text.distance(from: text.startIndex, to: range.lowerBound)
