@@ -642,10 +642,15 @@ final class AIAcceptedLearningTests: XCTestCase {
         let mirrorMarkdown = try String(contentsOf: mirrorURL, encoding: .utf8)
         XCTAssertTrue(mirrorMarkdown.contains("Retained history (a sliding window of the latest 1 record"))
         XCTAssertFalse(mirrorMarkdown.contains("Full history stays local"))
-        if let summary = store.snapshot() {
-            let defaultMarkdown = AIAcceptedLearningStore.renderMarkdown(summary)
-            XCTAssertTrue(defaultMarkdown.contains("Retained history (a sliding window of the latest 500 records"))
-        }
+        _ = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: summaryURL,
+            mirrorURL: mirrorURL,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 500
+        )
+        let refreshedMirrorMarkdown = try String(contentsOf: mirrorURL, encoding: .utf8)
+        XCTAssertTrue(refreshedMirrorMarkdown.contains("Retained history (a sliding window of the latest 500 records"))
 
         let context = LexicalContextSnapshot(
             terms: [

@@ -585,6 +585,7 @@ public final class AIAcceptedLearningStore:
         var lastClearMarkerModifiedAt: Date?
         var lastDiskStateMetadata: DiskStateMetadata?
         var needsCompaction: Bool = false
+        var needsMirrorRefresh: Bool = false
     }
 
     public init(
@@ -621,7 +622,7 @@ public final class AIAcceptedLearningStore:
                     repairPersistentSummary: false
                 )
             }
-            if initialState.needsCompaction, historyURL != nil {
+            if (initialState.needsCompaction && historyURL != nil) || initialState.needsMirrorRefresh {
                 startupState = try withAcceptedLearningFileLock(
                     lockURL: acceptedLearningLockURL(historyURL: historyURL),
                     fileManager: fileManager
@@ -638,7 +639,7 @@ public final class AIAcceptedLearningStore:
                         repairPersistentSummary: true
                     )
                 }
-                didCompactOnStartup = true
+                didCompactOnStartup = initialState.needsCompaction
             } else {
                 startupState = initialState
             }
@@ -1463,19 +1464,39 @@ public final class AIAcceptedLearningStore:
         let loadedSummary = Self.loadSummary(from: summaryURL, decoder: decoder)
         let rebuiltSummary = Self.buildSummary(records: records, generatedAt: Date())
         let summaryFileExists = summaryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
-        let summaryIsCurrent = !needsCompaction
+        let summaryMatchesRecords = !needsCompaction
             && Self.summary(loadedSummary, matches: records)
             && (!summaryFileExists || loadedSummary != nil)
-        let nextSummary = summaryIsCurrent ? loadedSummary : rebuiltSummary
+        let nextSummary = summaryMatchesRecords ? loadedSummary : rebuiltSummary
+        let mirrorFileExists = mirrorURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        let mirrorIsCurrent: Bool
+        if !mirrorFileExists {
+            mirrorIsCurrent = true
+        } else if let nextSummary,
+                  let loadedMirror = mirrorURL.flatMap({ try? String(contentsOf: $0, encoding: .utf8) }) {
+            mirrorIsCurrent = loadedMirror == Self.renderMarkdown(nextSummary, maxRecordCount: maxRecordCount)
+        } else {
+            mirrorIsCurrent = false
+        }
+        let summaryIsCurrent = summaryMatchesRecords && mirrorIsCurrent
         if repairPersistentSummary, !summaryIsCurrent {
-            try persistSummary(
-                nextSummary,
-                summaryURL: summaryURL,
-                mirrorURL: mirrorURL,
-                encoder: encoder,
-                fileManager: fileManager,
-                maxRecordCount: maxRecordCount
-            )
+            if !summaryMatchesRecords {
+                try persistSummary(
+                    nextSummary,
+                    summaryURL: summaryURL,
+                    mirrorURL: mirrorURL,
+                    encoder: encoder,
+                    fileManager: fileManager,
+                    maxRecordCount: maxRecordCount
+                )
+            } else {
+                try persistMirror(
+                    nextSummary,
+                    mirrorURL: mirrorURL,
+                    fileManager: fileManager,
+                    maxRecordCount: maxRecordCount
+                )
+            }
         }
         if compactPersistentHistory, needsCompaction {
             diskMetadata = Self.diskStateMetadata(
@@ -1489,7 +1510,8 @@ public final class AIAcceptedLearningStore:
             schemaSummaries: Self.buildSchemaSummaries(records: records, generatedAt: Date()),
             lastClearMarkerModifiedAt: diskMetadata?.clearMarker.modificationDate,
             lastDiskStateMetadata: diskMetadata,
-            needsCompaction: needsCompaction
+            needsCompaction: needsCompaction,
+            needsMirrorRefresh: !mirrorIsCurrent
         )
     }
 
@@ -1590,21 +1612,44 @@ public final class AIAcceptedLearningStore:
             if let summaryURL {
                 try atomicWrite(try encoder.encode(summary), to: summaryURL, fileManager: fileManager)
             }
-            if let mirrorURL {
-                try atomicWrite(
-                    Data(Self.renderMarkdown(summary, maxRecordCount: maxRecordCount).utf8),
-                    to: mirrorURL,
-                    fileManager: fileManager
-                )
-            }
+            try persistMirror(
+                summary,
+                mirrorURL: mirrorURL,
+                fileManager: fileManager,
+                maxRecordCount: maxRecordCount
+            )
             return
         }
         if let summaryURL,
            fileManager.fileExists(atPath: summaryURL.path) {
             try fileManager.removeItem(at: summaryURL)
         }
-        if let mirrorURL,
-           fileManager.fileExists(atPath: mirrorURL.path) {
+        try persistMirror(
+            nil,
+            mirrorURL: mirrorURL,
+            fileManager: fileManager,
+            maxRecordCount: maxRecordCount
+        )
+    }
+
+    private static func persistMirror(
+        _ summary: AIAcceptedLanguageSummary?,
+        mirrorURL: URL?,
+        fileManager: FileManager,
+        maxRecordCount: Int
+    ) throws {
+        guard let mirrorURL else {
+            return
+        }
+        if let summary {
+            try atomicWrite(
+                Data(Self.renderMarkdown(summary, maxRecordCount: maxRecordCount).utf8),
+                to: mirrorURL,
+                fileManager: fileManager
+            )
+            return
+        }
+        if fileManager.fileExists(atPath: mirrorURL.path) {
             try fileManager.removeItem(at: mirrorURL)
         }
     }
