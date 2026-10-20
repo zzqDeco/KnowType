@@ -22,7 +22,15 @@ final class KnowTypeCoreTests: XCTestCase {
             "this.dev",
             "super.ai",
             "example.aero",
-            "example.xn--p1ai"
+            "example.xn--p1ai",
+            "nic.bar",
+            "cocktail.bar",
+            "NIC.BAR",
+            "events.cocktail.bar",
+            "drinks-menu.bar",
+            "nic.bar:443",
+            "nic.bar/registry?lang=en",
+            "cocktail.bar/menu?lang=en"
         ]
 
         for bareURL in bareURLs {
@@ -64,11 +72,58 @@ final class KnowTypeCoreTests: XCTestCase {
         }
     }
 
+    func testBarDomainsAndExplicitDottedURLsKeepLocalProtection() throws {
+        let engine = CorrectionEngine()
+        let urls = [
+            "nic.bar",
+            "cocktail.bar",
+            "nic.bar/registry?lang=en",
+            "cocktail.bar/menu?lang=en",
+            "https://foo.bar",
+            "https://self.bar",
+            "https://self.coordinator",
+            "https://user.name",
+            "https://System.out",
+            "https://config.json",
+            "https://cocktail.bar()",
+            "www.foo.bar",
+            "foo.bar/menu?lang=en",
+            "foo.bar:443"
+        ]
+
+        for url in urls {
+            for prefix in ["", "visit "] {
+                let input = prefix + url
+                let candidates = engine.localCorrect(InputContext(rawInput: input, locale: .enUS))
+                let candidate = try XCTUnwrap(candidates.first, input)
+
+                XCTAssertTrue(TextProtection.requiresNoCorrection(input), input)
+                XCTAssertEqual(candidates.count, 1, input)
+                XCTAssertEqual(candidate.text, input, input)
+                XCTAssertEqual(candidate.source, "local-protection", input)
+                XCTAssertEqual(candidate.correctionLevel, CorrectionLevel.none, input)
+                XCTAssertTrue(
+                    candidate.protectedRanges.contains(
+                        ProtectedRange(start: prefix.count, length: url.count, reason: "url")
+                    ),
+                    "\(input) should retain the complete URL range on the local candidate"
+                )
+            }
+        }
+    }
+
     func testDottedCodeIdentifiersAndProseMistakesDoNotMatchURLOrTriggerLevelZeroProtection() {
         let nonURLDottedTokens = [
             "foo.bar",
+            "self.bar",
+            "user.bar",
+            "bar.bar",
             "user.name",
             "self.coordinator",
+            "config.json",
+            "cocktail.json",
+            "cocktail.coordinator",
+            "cocktail.baz",
             "System.out",
             "System.out.println",
             "hello.world",
@@ -132,16 +187,25 @@ final class KnowTypeCoreTests: XCTestCase {
             #"console.log("x")"#,
             #"console.log ("x")"#,
             "System.out.println()",
-            "System.out.println ()"
+            "System.out.println ()",
+            "foo.bar()",
+            "foo.bar ()",
+            "nic.bar()",
+            "nic.bar ()",
+            "cocktail.bar()",
+            "cocktail.bar ()",
+            "cocktail.bar\t()"
         ] {
-            XCTAssertFalse(
-                TextProtection.detectProtectedRanges(in: dottedCall).contains { $0.reason == "url" },
-                "\(dottedCall) should not match reason: \"url\""
-            )
-            XCTAssertTrue(
-                TextProtection.requiresNoCorrection(dottedCall),
-                "\(dottedCall) should stay protected as code-like"
-            )
+            for input in [dottedCall, "check \(dottedCall) now"] {
+                XCTAssertFalse(
+                    TextProtection.detectProtectedRanges(in: input).contains { $0.reason == "url" },
+                    "\(input) should not match reason: \"url\""
+                )
+                XCTAssertTrue(
+                    TextProtection.requiresNoCorrection(input),
+                    "\(input) should stay protected as code-like"
+                )
+            }
         }
     }
 }

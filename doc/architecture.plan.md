@@ -53,9 +53,16 @@ degraded conversion state instead of synthesizing hidden local candidates.
 
 `KnowTypeCore` owns model-neutral behavior:
 
-- `TextProtection` detects Level 0 correction-protection input such as URLs (including bare domains while excluding pathless, portless dotted identifiers and prose tokens such as `foo.bar` or `self.coordinator` from URL classification),
-  emails, paths, commands, code-like snippets (including callable expressions such as `console.log("x")`), and protected app contexts, and
-  separately detects secret-like credentials for cloud AI hard blocks.
+- `TextProtection` detects Level 0 correction-protection input such as URLs,
+  emails, paths, commands, code-like snippets, and protected app contexts, and
+  separately detects secret-like credentials for cloud AI hard blocks. Bare
+  `.bar` hosts such as `nic.bar` and `cocktail.bar` retain URL protection alone
+  and in prose. Unschemed, pathless, portless lexical code tokens such as
+  `foo.bar`, `user.bar`, and `self.coordinator` remain excluded from URL
+  classification. Dotted calls, including bare `.bar` followed by `(` after
+  optional whitespace, remain code-protected; explicit schemes, `www.`, paths,
+  and ports keep URL precedence. This is lexical disambiguation, not DNS or
+  intent validation, and it does not change the secret-only cloud AI gate.
 - `TraditionalInputEngine` provides clean-room MVP pinyin decoding with compact segmentation, indexed lexicon lookup, typo normalization, same-pinyin candidates, partial-syllable handling, and initial abbreviations.
 - `TraditionalInputEngine` is retained for core/offline tests, package-level demos, and lexicon tooling, but it is retired from the production IMK key path.
 - `TraditionalInputEngine` raw-range segment metadata is legacy/offline behavior; the production IMK frontend no longer generates or applies those segment candidates.
@@ -245,6 +252,30 @@ The seeded default provider is local OpenAI-compatible at `http://127.0.0.1:8317
   headings overlapping or preceding the managed pair are ambiguous, and an
   existing deterministic backup must be a matching regular non-symlink file.
 - `LexicalProfileStore` persists top-K lexical context from Rime userdb sync exports, recent commits, and selection history. The readable mirror is `~/.knowtype/LEXICAL_PROFILE.md`; the canonical JSON lives under Application Support.
+- `AIAcceptedLearningStore` keeps accepted-AI history in a sliding window of
+  500 records by default and a separate eviction ledger capped at 4,096 digests
+  during ordinary compaction. Every nonblank JSONL row must decode before
+  append, startup compaction, or delayed rebuild can proceed; undecodable rows
+  keep their original bytes rather than being silently dropped. Existing cached
+  state survives failed reads, and fully decodable repaired history resumes
+  normal bounded retention. A complete EOF row without LF is safely separated
+  on append; a truncated tail remains untouched. Applied peer changes emit schema
+  invalidations, including nonempty surviving schemas, even if the subsequent local append
+  fails. Callbacks run outside both the store and file locks, without replaying
+  unchanged metadata-current events, so lexical-profile observers can refresh.
+- `AIAcceptedLearningMaintenance` shares the history lock and refuses rebuild
+  on undecodable rows; read-only status reports invalid-row warnings. Confirmed
+  clear remains destructive, including undecodable rows. Before changing the
+  ledger or deleting history, clear pins prior retry entries, the ledger, and
+  active-record digests in optional `pendingEvictedCommitEntries` within the
+  existing schema-version-1 `accepted-ai-learning.clear.json` marker. No new sidecar is
+  added. Ordinary appends may rotate the ledger but do not change these pins.
+  Pin-write failure leaves ledger/history unchanged; after a successful pin,
+  later failures still synchronize peers against actual retained disk history.
+  Clear removes the ledger only after lexical JSON/markdown scrub succeeds,
+  then rewrites the marker without the pending field. Old markers without that
+  field remain readable; old maintenance writers do not retain it, so mixed
+  old/new clear writers have no seamless recovery guarantee.
 - `CorrectionInstructionStore` creates `~/.knowtype/CORRECTION.md`; it and
   pending/processed typing-event files enforce mode 0600 on creation, rewrite,
   and existing-file access. AI correction/recommendation prompts read

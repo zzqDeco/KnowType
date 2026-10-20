@@ -319,19 +319,24 @@ and selections plus bounded summaries of AI recommendations the user explicitly
 accepted. Verified edits made immediately after accepting AI recommendations
 are summarized separately as local AI feedback; ordinary Backspace is ignored
 unless the cursor range proves the edit is inside the just-accepted AI span.
-The accepted-AI history (a sliding window of the latest 500 records, plus a
-bounded ledger of up to 4,096 SHA-256 digests for evicted commits in
-`accepted-ai-learning.evicted-commits.json`—which may temporarily also retain
-active-record digests if a clear retry is pending—so `clear` can still scrub
-them) and feedback history are stored locally under Application Support and are
-not injected directly into provider requests. The canonical lexical profile JSON
-lives under `~/Library/Application Support/KnowType/AI/`. Traditional input does
-not depend on these files. Use `./scripts/accepted-learning.sh status`,
-`rebuild`, or `clear --yes` to inspect, rebuild, or delete accepted-AI learning
-and feedback data. Clear removes accepted-learning/feedback history, evicted
-commit digests, summary, and mirror files and scrubs accepted-AI context from
-the lexical profile without deleting Rime, provider, Keychain, ENV, or
-CORRECTION data.
+Accepted-AI history retains the latest 500 records; its eviction ledger,
+`accepted-ai-learning.evicted-commits.json`, retains at most 4,096 SHA-256
+digests during ordinary compaction. Failed clears pin scrub inputs in optional
+`pendingEvictedCommitEntries` within the existing
+`accepted-ai-learning.clear.json` marker until lexical-profile cleanup succeeds,
+even if further compaction rotates the ledger. Old markers remain readable,
+but old maintenance writers do not retain this field; mixed-version clear
+writers are not guaranteed safe. Peer changes still invalidate cached learning
+if a local append fails. Nonblank undecodable history rows retain their original
+bytes and block append, compaction, and rebuild until repaired.
+Learning and feedback history stay local under Application Support and are not
+injected directly into provider requests. Canonical lexical profile JSON lives
+under `~/Library/Application Support/KnowType/AI/`; traditional input does not
+depend on these files. Use `./scripts/accepted-learning.sh status`, `rebuild`, or
+`clear --yes` to inspect, rebuild, or delete accepted-AI learning and feedback
+data. Confirmed clear remains destructive, including undecodable history rows;
+it scrubs accepted-AI lexical context without deleting Rime, provider, Keychain,
+ENV, or CORRECTION data.
 Committed Context Digest events are queued locally as JSONL under
 `~/.knowtype/events/`. Event text fields are limited to 2,048 Unicode scalars;
 raw input and locked prefixes over 4 KiB UTF-8 skip an AI request without
@@ -516,7 +521,12 @@ commands, code-like text, and protected app contexts.
 
 Correction-protected examples include:
 
-- URLs and `www.` addresses (unschemed bare domains retain Level 0 URL protection while pathless, portless dotted identifiers and prose tokens such as `foo.bar` or `self.coordinator` are excluded from URL classification so normal correction and inner `camelCase`/`snake_case` token protection still apply)
+- URLs and `www.` addresses, including bare `.bar` domains such as `nic.bar`
+  and `cocktail.bar`. Unschemed, pathless, portless lexical code tokens such as
+  `foo.bar`, `user.bar`, and `self.coordinator` remain excluded from URL
+  classification; dotted calls remain code-protected. Explicit schemes,
+  `www.`, paths, and ports take URL precedence. This is a lexical rule, not DNS
+  validation; inner `camelCase`/`snake_case` protection is unchanged.
 - email-like input
 - absolute, home-relative, and relative file paths
 - command-like input such as `swift test` or `git status`

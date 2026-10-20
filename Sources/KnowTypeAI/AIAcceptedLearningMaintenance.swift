@@ -75,13 +75,22 @@ public struct AIAcceptedFeedbackSummaryStatus: Codable, Equatable, Sendable {
 public struct AIAcceptedLearningMaintenance {
     public enum Error: LocalizedError, Equatable {
         case clearRequiresConfirmation
+        case undecodableHistoryRows
 
         public var errorDescription: String? {
             switch self {
             case .clearRequiresConfirmation:
                 return "clear requires --yes to delete accepted AI learning history"
+            case .undecodableHistoryRows:
+                return "rebuild refused: accepted AI learning history contains undecodable rows"
             }
         }
+    }
+
+    private struct ClearMarker: Codable {
+        var schemaVersion: Int = 1
+        var clearedAt: String
+        var pendingEvictedCommitEntries: [String]?
     }
 
     public var historyURL: URL
@@ -248,7 +257,11 @@ public struct AIAcceptedLearningMaintenance {
     public func rebuild() throws -> AIAcceptedLearningMaintenanceStatus {
         let effectiveMaxRecordCount = max(1, maxRecordCount)
         try withAcceptedLearningFileLock(lockURL: lockURL, fileManager: fileManager) {
-            let loadedRecords = try loadRecordsOrThrow().records
+            let loaded = try loadRecordsOrThrow()
+            guard loaded.warnings.isEmpty else {
+                throw Error.undecodableHistoryRows
+            }
+            let loadedRecords = loaded.records
             let records: [AIAcceptedLearningRecord]
             if loadedRecords.count > effectiveMaxRecordCount {
                 let overflowCount = loadedRecords.count - effectiveMaxRecordCount
@@ -313,7 +326,14 @@ public struct AIAcceptedLearningMaintenance {
                     fileManager: fileManager
                 )
             )
+            let pendingClearEntries = try pendingClearEvictedCommitEntries()
             let currentRecordDigests = acceptedLearningCommitDigestVariants(from: currentRecords)
+            let evictedCommitEntries = pendingClearEntries
+                .union(preClearEvictedEntries)
+                .union(currentRecordDigests)
+            // Persist scrub inputs before any ledger or history mutation.
+            try atomicWrite(clearMarkerPayload(pendingEvictedCommitEntries: evictedCommitEntries), to: clearMarkerURL)
+            didWriteClearMarkers = true
             if !currentRecords.isEmpty {
                 try recordAcceptedLearningEvictedCommits(
                     currentRecords,
@@ -323,7 +343,6 @@ public struct AIAcceptedLearningMaintenance {
                     fileManager: fileManager
                 )
             }
-            let evictedCommitEntries = preClearEvictedEntries.union(currentRecordDigests)
             try removeIfExists(historyURL)
             try removeIfExists(summaryURL)
             try removeIfExists(mirrorURL)
@@ -336,13 +355,12 @@ public struct AIAcceptedLearningMaintenance {
                 try removeIfExists(feedbackMirrorURL)
                 try atomicWrite(clearMarkerPayload(), to: feedbackClearMarkerURL)
             }
-            try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
-            didWriteClearMarkers = true
             try scrubAcceptedAIFromLexicalProfile(
                 acceptedCommitTexts: acceptedCommitTexts,
                 evictedCommitEntries: evictedCommitEntries
             )
             try removeIfExists(evictedCommitsURL)
+            try atomicWrite(clearMarkerPayload(), to: clearMarkerURL)
         }
         return status(action: "cleared")
     }
@@ -363,6 +381,9 @@ public struct AIAcceptedLearningMaintenance {
         var records: [AIAcceptedLearningRecord] = []
         var invalidLineCount = 0
         for line in content.split(whereSeparator: \.isNewline) {
+            guard !line.trimmingCharacters(in: .whitespaces).isEmpty else {
+                continue
+            }
             guard let data = String(line).data(using: .utf8),
                   let record = try? decoder.decode(AIAcceptedLearningRecord.self, from: data) else {
                 invalidLineCount += 1
@@ -462,13 +483,27 @@ public struct AIAcceptedLearningMaintenance {
         try fileManager.removeItem(at: url)
     }
 
-    private func clearMarkerPayload() -> Data {
-        let payload: [String: Any] = [
-            "schemaVersion": 1,
-            "clearedAt": dateString(Date())
-        ]
-        let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
-        return data ?? Data()
+    private func pendingClearEvictedCommitEntries() throws -> Set<String> {
+        let data: Data
+        do {
+            data = try Data(contentsOf: clearMarkerURL)
+        } catch {
+            if isAcceptedLearningNoSuchFileError(error) || !fileManager.fileExists(atPath: clearMarkerURL.path) {
+                return []
+            }
+            throw error
+        }
+        let marker = try JSONDecoder().decode(ClearMarker.self, from: data)
+        return Set(marker.pendingEvictedCommitEntries ?? [])
+    }
+
+    private func clearMarkerPayload(pendingEvictedCommitEntries: Set<String> = []) throws -> Data {
+        try encode(ClearMarker(
+            clearedAt: dateString(Date()),
+            pendingEvictedCommitEntries: pendingEvictedCommitEntries.isEmpty
+                ? nil
+                : pendingEvictedCommitEntries.sorted()
+        ))
     }
 
     private func scrubAcceptedAIFromLexicalProfile(

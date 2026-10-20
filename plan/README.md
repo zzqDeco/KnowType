@@ -115,6 +115,7 @@ when converting a shipped plan into a short record.
 | [ai-remove-candidate-hints-bias.plan.md](ai-remove-candidate-hints-bias.plan.md) | Remove current-page Rime candidate hints from real-time AI continuation context | Active |
 | [ai-trigger-stability-no-hints.plan.md](ai-trigger-stability-no-hints.plan.md) | Stabilize three-character raw-input AI triggers without reintroducing candidate hints | Active |
 | [ai-accepted-learning.plan.md](ai-accepted-learning.plan.md) | Locally record accepted AI recommendations and summarize them into the bounded lexical profile | Active |
+| [learning-integrity-and-url-protection.plan.md](learning-integrity-and-url-protection.plan.md) | Review failed-clear recovery, failure-path invalidations, undecodable-history preservation, and bare `.bar` URL protection; CI pending | Active |
 | [accepted-learning-lexical-profile-refresh.plan.md](accepted-learning-lexical-profile-refresh.plan.md) | Refresh persistent lexical profile after accepted-AI summary rebuilds become ready | Active |
 | [accepted-learning-controls.plan.md](accepted-learning-controls.plan.md) | Local status, rebuild, and clear controls for accepted AI learning | Active |
 | [ai-accepted-feedback-learning.plan.md](ai-accepted-feedback-learning.plan.md) | Learn only from verified edits inside recently accepted AI text spans | Active |

@@ -47,6 +47,51 @@
     emits invalidation events for fully evicted schemas, and maintenance
     `rebuild` / `clear` honor the window and scrub evicted commits.
 
+## Integrity Follow-Up
+
+Status: Active. Candidate implementation and regression tests are prepared;
+functional verification is CI-only and has not been run locally for this
+follow-up. Shared README, interface, architecture, and index updates belong to
+the coordinator's later serial integration step.
+
+- Failed clear pins its complete scrub input in the existing clear marker's
+  optional `pendingEvictedCommitEntries` array before deleting history. A later
+  clear reloads these entries even after more accepts rotate the ordinary
+  eviction ledger back to 4,096 entries. Successful lexical JSON/markdown scrub
+  and ledger cleanup precede removal of the pending marker field. Existing
+  schema-version-1 markers without the field remain readable.
+- Append's failure exit delivers already-applied peer invalidations once,
+  outside both locks, including nonempty surviving schemas. Metadata-current
+  snapshots do not need to repeat those events. No provider or runtime
+  production behavior is changed.
+- Runtime refuses a partial JSONL decode, preventing append, delayed rebuild,
+  and startup cap from silently dropping nonblank undecodable rows.
+  Maintenance rebuild reports `undecodableHistoryRows` before rewriting data;
+  status remains diagnostic and explicitly confirmed clear remains destructive.
+  Restoring fully decodable history permits normal bounded compaction again.
+
+Added CI regression coverage:
+
+- Failed lexical-profile write, 501 further long accepts and ledger rotation,
+  clear retry, and lexical-profile/learning-store reload without old commits.
+- Peer-compacted within-capacity history followed by both noncompacting and
+  compacting local encode failures, with reentrant observer reads, no duplicate
+  invalidations, and surviving-schema lexical-profile refresh.
+- Append, startup cap, and maintenance rebuild preserve original history bytes
+  for malformed rows and a complete future-shaped row whose `acceptedText`
+  type cannot decode (not merely an unknown extra key). Explicit repair recovers
+  ordinary cap behavior; confirmed clear's destructive exception is covered.
+
+Recommended CI selectors (do not substitute for the workflow's full suite):
+
+- `swift test --filter AIAcceptedLearningTests`
+- `swift test --filter AIAcceptedLearningStoreTests`
+- `swift test --filter LexicalProfileRuntimeTests`
+
+The existing `.github/workflows/ci.yml` runs unfiltered `swift test`, both
+install/profile smoke variants, and the input hot-path performance smoke. No
+workflow changes or local functional runs are part of this candidate.
+
 ## Docs Absorbed By
 
 - `README.md`

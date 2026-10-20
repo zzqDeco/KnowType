@@ -12,8 +12,7 @@ than `maxRecordCount` records, the store reloads the authoritative locked
 on-disk history before trimming `records` to the latest `maxRecordCount`
 entries, records SHA-256 digests of evicted commit text variants in
 `accepted-ai-learning.evicted-commits.json` (bounded to 4,096 entries during
-normal compaction, and temporarily retaining those 4,096 entries plus
-active-record digests if an incomplete clear is awaiting retry; never raw text)
+normal compaction; clear can temporarily fold in active-record digests)
 so maintenance `clear` can still scrub older accepted commits from
 `LEXICAL_PROFILE.md`, atomically rewrites the compacted
 `accepted-ai-learning.jsonl` file, and marks any evicted schemas alongside the
@@ -38,6 +37,11 @@ invalidation event when a schema's last record is evicted by compaction). It
 does not emit raw input or accepted text. It emits ready events only for schemas
 whose accepted history changed since the previous rebuild, so schema-specific
 lexical profile refreshes are not retriggered by unchanged cached summaries.
+If append first applies an external history change and then fails to encode,
+append, or compact its local record, those external events are still delivered
+once on the failure exit, after both locks are released. This includes changed
+schemas with surviving records, not only zero-count invalidations; subsequent
+reads with already-current disk metadata do not need to rediscover the change.
 
 Runtime store construction is read-only when history is missing or within
 `maxRecordCount`, provided no existing markdown mirror requires refresh or
@@ -58,24 +62,58 @@ already created one, so concurrent append/rebuild/clear operations are observed
 consistently without making missing-history cold start create a lock file of its
 own when no existing mirror cleanup is needed.
 
+Runtime history reads require every nonblank JSONL row to decode as an
+`AIAcceptedLearningRecord`. A malformed or forward-incompatible complete row
+blocks append, delayed rebuild, and startup compaction rather than letting a
+partial decode silently replace the original history. Read/write diagnostics
+contain only the error type, not row contents. Existing cached state is retained
+on a failed read; a cold start without cached records defers repair instead of
+learning from a partial history. After an external repair restores decodable
+rows, normal sliding-window compaction resumes (startup repair also retries
+when the file metadata changes). Blank and whitespace-only lines are ignored.
+A complete final JSON row may lack LF. After the whole history decodes, fast
+append checks the final byte under the file lock and prefixes the new row with
+LF when needed, without rewriting existing bytes. A genuinely truncated EOF row
+still blocks append unchanged, with or without a trailing LF.
+
 `AIAcceptedLearningMaintenance` is the non-runtime control surface for this
 data. It powers `knowtype-accepted-learning-tool` and the
 `scripts/accepted-learning.sh` wrapper with read-only status, explicit rebuild,
 and guarded clear operations. Rebuild applies the same `maxRecordCount` sliding
 window and summary builder used by runtime learning. Maintenance writes share an
-interprocess lock file. Clear folds active accepted-learning records into the
-evicted-commits digest ledger (temporarily allowing the ledger to hold the
-pre-clear 4,096 evicted digests plus the active-window digests until the scrub
-completes) before removing accepted-learning history, summary, and mirror files,
-writes a clear marker so a running store drops stale in-memory records before
-the next snapshot, append, or rebuild, scrubs accepted-AI terms/source lines
-plus matching accepted recent commits (including both active and previously
+interprocess lock file. Before changing the ledger or deleting history, clear
+atomically snapshots all required scrub entries into the optional
+`pendingEvictedCommitEntries` array in `accepted-ai-learning.clear.json`.
+Failure to persist that pin leaves ledger, history, and other learning files
+unchanged; it creates no new durable recovery snapshot, and subsequent ordinary
+ledger rotation still follows the normal bounded policy. Once the pin is durable,
+clear folds active records into the eviction ledger (temporarily allowing the
+pre-clear 4,096 digests plus active-window digests until scrub completes). A
+later failure still synchronizes peer stores outside the file lock; the marker
+requests a reload of actual disk history, not an assumption that clear completed.
+This extends the existing schema-version-1
+marker (`schemaVersion`, `clearedAt`); older markers without the array remain
+readable. New entries are commit digests, while inherited legacy ledger entries
+retain their matching semantics. Ordinary appends never mutate the marker, so
+the pinned snapshot survives subsequent ledger rotation back to 4,096 entries.
+A retried clear unions prior pins, the current ledger, and active-record
+digests. The clear marker also makes a running store drop stale records before
+the next snapshot, append, or rebuild. Clear scrubs accepted-AI terms/source
+lines plus matching accepted recent commits (including both active and previously
 evicted commits recorded in the ledger) from the persistent lexical profile
 while preserving non-AI recent commits and tone data, and removes
 `accepted-ai-learning.evicted-commits.json` only after the lexical profile scrub
-succeeds so a retry after a transient lexical write failure still scrubs those
-commits. If only the markdown mirror can be scrubbed and accepted
-history is unavailable, clear removes accepted-AI marker/source lines but leaves
+succeeds. Only then is the marker rewritten without its pending array. A
+failure, including one while finalizing that marker, leaves the pins available
+for another clear; they are retry state, not an ever-growing ordinary eviction
+ledger. Rebuild refuses undecodable nonblank history rows with
+`AIAcceptedLearningMaintenance.Error.undecodableHistoryRows` before changing
+history, ledger, or summaries; read-only status still reports
+`invalid_history_lines:<count>`. Explicit confirmed clear remains destructive
+and may delete undecodable history rows; it does not claim to decode or scrub
+unknown row contents. An unreadable retry marker aborts clear rather than
+discarding pending entries. If only the markdown mirror can be scrubbed and
+accepted history is unavailable, clear removes accepted-AI marker/source lines but leaves
 unknown recent commits alone because their source cannot be proven. Active
 `LexicalProfileRuntime` instances reload the scrubbed persistent profile, and
 still filter accepted-AI terms/source lines as a fallback, before producing

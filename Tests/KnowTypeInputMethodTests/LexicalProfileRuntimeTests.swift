@@ -175,6 +175,92 @@ final class LexicalProfileRuntimeTests: XCTestCase {
         XCTAssertFalse(markdown.contains("旧选择不应出现"))
     }
 
+    func testPeerInvalidationRefreshesSurvivingSchemaAfterLocalAppendFailure() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let historyURL = directory.appendingPathComponent("accepted-ai-learning.jsonl")
+        let jsonURL = directory.appendingPathComponent("lexical-profile.json")
+        let markdownURL = directory.appendingPathComponent("LEXICAL_PROFILE.md")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let oldRecord = AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            acceptedText: "ObsoletePeerToken old accepted commit",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let retainedRecord = AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            acceptedText: "SurvivingPeerToken retained accepted commit",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test"
+        )
+        let initialHistory = try [oldRecord, retainedRecord].reduce(into: Data()) { data, record in
+            data.append(try encoder.encode(record))
+            data.append(0x0A)
+        }
+        try initialHistory.write(to: historyURL, options: .atomic)
+        let acceptedLearning = AIAcceptedLearningStore(
+            historyURL: historyURL,
+            summaryURL: nil,
+            mirrorURL: nil,
+            summaryDelayNanoseconds: 0,
+            maxRecordCount: 3
+        )
+        let rimeProvider = StaticRimeUserDBTextSnapshotProvider()
+        let runtime = LexicalProfileRuntime(
+            store: LexicalProfileStore(jsonURL: jsonURL, markdownURL: markdownURL),
+            rimeMaintenanceService: rimeProvider,
+            acceptedLearningProvider: acceptedLearning,
+            diagnosticSink: NoopAIRecommendationDiagnosticSink(),
+            refreshGate: LexicalProfileRefreshGate()
+        )
+        defer { runtime.cancelRefresh() }
+        runtime.scheduleRefresh(
+            reason: "commit",
+            schemaID: "pinyin_simp",
+            recentCommits: [],
+            selectionHistory: []
+        )
+        let initialRefresh = await waitUntil {
+            runtime.currentProfile()?.lexicalContext.recentCommits.contains(oldRecord.acceptedText) == true
+        }
+        XCTAssertTrue(initialRefresh)
+
+        // Replace directly to model a peer process without in-process notifications.
+        var compactedHistory = try encoder.encode(retainedRecord)
+        compactedHistory.append(0x0A)
+        try compactedHistory.write(to: historyURL, options: .atomic)
+        let failedRecord = AIAcceptedLearningRecord(
+            schemaID: "pinyin_simp",
+            acceptedText: "Unencodable local append",
+            provider: "ai-test",
+            contextVersion: "test",
+            candidateSource: "ai:ai-test",
+            extractedTerms: [LexicalContextTerm(text: "InvalidScore", score: .nan, source: "accepted-ai")]
+        )
+        await acceptedLearning.recordAcceptedAI(failedRecord)
+        XCTAssertEqual(try Data(contentsOf: historyURL), compactedHistory)
+        XCTAssertEqual(acceptedLearning.snapshot(schemaID: "pinyin_simp")?.acceptedCount, 1)
+
+        // No explicit refresh is scheduled here: the failure-path observer must do it.
+        let invalidatedRefresh = await waitUntil {
+            guard let context = runtime.currentProfile()?.lexicalContext else {
+                return false
+            }
+            return context.recentCommits == [retainedRecord.acceptedText]
+                && !context.terms.contains { $0.text == "ObsoletePeerToken" }
+        }
+        XCTAssertTrue(invalidatedRefresh)
+        let markdown = try String(contentsOf: markdownURL, encoding: .utf8)
+        XCTAssertFalse(markdown.contains("ObsoletePeerToken"))
+        XCTAssertTrue(markdown.contains("SurvivingPeerToken"))
+        let requestCount = await rimeProvider.requestCount
+        XCTAssertEqual(requestCount, 2)
+    }
+
     func testLexicalContextReloadsScrubbedProfileAfterAcceptedLearningClear() throws {
         let directory = temporaryDirectory()
         let jsonURL = directory.appendingPathComponent("lexical-profile.json")

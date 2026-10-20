@@ -849,6 +849,12 @@ public final class AIAcceptedLearningStore:
 
     private func append(_ record: AIAcceptedLearningRecord) throws {
         var externalEvents: [AIAcceptedLearningSummaryReadyEvent] = []
+        var didCompleteAppend = false
+        defer {
+            if !didCompleteAppend {
+                notifySummaryReady(externalEvents)
+            }
+        }
         var didCompact = false
         try withAcceptedLearningFileLock(lockURL: acceptedLearningLockURL(historyURL: historyURL), fileManager: fileManager) {
             externalEvents = try syncRecordsAfterExternalClearLocked()
@@ -902,9 +908,19 @@ public final class AIAcceptedLearningStore:
                     var line = data
                     line.append(0x0A)
                     if fileManager.fileExists(atPath: historyURL.path) {
-                        let handle = try FileHandle(forWritingTo: historyURL)
+                        let handle = try FileHandle(forUpdating: historyURL)
                         defer { try? handle.close() }
-                        try handle.seekToEnd()
+                        let endOffset = try handle.seekToEnd()
+                        if endOffset > 0 {
+                            try handle.seek(toOffset: endOffset - 1)
+                            guard let finalByte = try handle.read(upToCount: 1)?.first else {
+                                throw CocoaError(.fileReadCorruptFile)
+                            }
+                            // A valid last JSON row need not already have a delimiter.
+                            if finalByte != 0x0A {
+                                line.insert(0x0A, at: line.startIndex)
+                            }
+                        }
                         try handle.write(contentsOf: line)
                     } else {
                         try line.write(to: historyURL, options: .atomic)
@@ -936,6 +952,7 @@ public final class AIAcceptedLearningStore:
             pendingSummarySchemaIDs.formUnion(evictedSchemaIDs)
             lock.unlock()
         }
+        didCompleteAppend = true
         notifySummaryReady(externalEvents)
         if didCompact {
             synchronizePeerAcceptedLearningStores(for: historyURL, excluding: self)
@@ -1590,7 +1607,7 @@ public final class AIAcceptedLearningStore:
         var lines: [String] = [
             "# KnowType Accepted AI Learning",
             "",
-            "This is a local summary of AI recommendations the user explicitly accepted. Retained history (a sliding window of the latest \(recordCountDescription), plus a bounded ledger of up to 4,096 SHA-256 digests for evicted commits in accepted-ai-learning.evicted-commits.json that may temporarily include active-record digests if a clear retry is pending) stays local and is not injected into provider requests.",
+            "This is a local summary of AI recommendations the user explicitly accepted. Retained history (a sliding window of the latest \(recordCountDescription), plus an eviction ledger capped at 4,096 SHA-256 digests during normal compaction in accepted-ai-learning.evicted-commits.json) stays local and is not injected into provider requests. Clear may temporarily fold in active digests and pins scrub entries in accepted-ai-learning.clear.json until lexical-profile cleanup succeeds.",
             "",
             "## Stats",
             "- Accepted count: \(summary.acceptedCount)",
@@ -1648,14 +1665,16 @@ public final class AIAcceptedLearningStore:
             }
             throw error
         }
-        return content
-            .split(whereSeparator: \.isNewline)
-            .compactMap { line in
-                guard let data = String(line).data(using: .utf8) else {
-                    return nil
-                }
-                return try? decoder.decode(AIAcceptedLearningRecord.self, from: data)
+        var records: [AIAcceptedLearningRecord] = []
+        for line in content.split(whereSeparator: \.isNewline) {
+            let row = String(line)
+            guard !row.trimmingCharacters(in: .whitespaces).isEmpty else {
+                continue
             }
+            // A partial decode must never become a destructive compaction.
+            records.append(try decoder.decode(AIAcceptedLearningRecord.self, from: Data(row.utf8)))
+        }
+        return records
     }
 
     private static func loadRecords(

@@ -271,17 +271,21 @@ AI 上下文文件位于 `~/.knowtype/`。`ENV.md` 保存 AI 推荐槽使用的�
 是由 Rime userdb 词频、KnowType 近期提交、选择历史，以及用户明确接受过的
 AI 推荐摘要合成的本地 top-K 词汇画像镜像。用户接受 AI 推荐后立即发生、
 且光标范围可验证的编辑会单独汇总为本地 AI feedback；普通 Backspace 不会
-自动当成负反馈。Accepted-AI 历史（滑窗保留最近 500 条记录，并在
-`accepted-ai-learning.evicted-commits.json` 中记录最多 4096 条被淘汰提交的
-SHA-256 摘要；若 `clear` 在清理词库画像前中断待重试，还会临时一并保留当前
-活跃记录的摘要以便 `clear` 清理）和 feedback 历史只保存在本机
-Application Support 中，不会直接注入 provider 请求。Canonical JSON 存在
-`~/Library/Application Support/KnowType/AI/`。传统输入引擎不依赖
-这些文件。可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或
-`clear --yes` 查看、重建或删除 accepted-AI learning/feedback 数据；clear 会
-删除 accepted-learning/feedback history/evicted-commits/summary/mirror，并从
-lexical profile 中清理 accepted-AI 上下文，但不会删除 Rime、provider、Keychain、
-ENV 或 CORRECTION 数据。
+自动当成负反馈。Accepted-AI 历史滑窗保留最近 500 条记录；普通压缩时，
+`accepted-ai-learning.evicted-commits.json` 最多保留 4096 条淘汰提交的
+SHA-256 摘要。失败 clear 的 scrub 输入会固定保存在既有
+`accepted-ai-learning.clear.json` marker 的可选 `pendingEvictedCommitEntries`
+字段中，直到词汇画像清理成功，不受后续 ledger 轮转影响。旧 marker 仍可读取，
+但旧 maintenance writer 不会保留此字段，不能保证混用新旧版本 clear 的安全性。
+即使本地 append 失败，其他进程的变更仍会使学习缓存失效。非空且无法解码的
+history 行保留原始字节，并阻止 append、压缩和 rebuild，直到数据修复。
+Learning 和 feedback 历史只保存在本机 Application Support，不会直接注入
+provider 请求；canonical lexical profile JSON 位于
+`~/Library/Application Support/KnowType/AI/`，传统输入引擎不依赖这些文件。
+可以用 `./scripts/accepted-learning.sh status`、`rebuild` 或 `clear --yes`
+查看、重建或删除 accepted-AI learning/feedback 数据。显式确认的 clear 仍会破坏性
+删除历史，包括无法解码的行；它会清理 accepted-AI 词汇画像上下文，但不会删除
+Rime、provider、Keychain、ENV 或 CORRECTION 数据。
 已提交的 Context Digest 事件会先以 JSONL 保存在本机
 `~/.knowtype/events/`。事件文本字段最多保留 2048 个 Unicode scalar；raw input
 或 locked prefix 超过 4 KiB UTF-8 时跳过 AI 且不做语义截断。pending 最多保留
@@ -427,7 +431,11 @@ Level 0 纠错保护用于避免把本应原样提交的文本改写，例如 UR
 
 纠错保护输入包括：
 
-- URL 和 `www.` 地址（无协议裸域名保留 Level 0 URL 保护；无路径、无端口的点分代码标识符或语句粘连如 `foo.bar`、`self.coordinator` 不误判为 URL，仍可走普通纠错并保留内部 `camelCase`/`snake_case` token 保护）
+- URL 和 `www.` 地址，包括 `nic.bar`、`cocktail.bar` 等 `.bar` 裸域名。
+  无协议、无路径、无端口的词法代码 token，如 `foo.bar`、`user.bar`、
+  `self.coordinator`，仍排除 URL 分类；点分调用仍按代码保护。显式 scheme、
+  `www.`、路径和端口优先按 URL 处理。这是词法规则，不做 DNS 验证；内部
+  `camelCase`/`snake_case` token 保护不变。
 - 邮箱格式输入
 - 绝对路径、`~/` 路径和相对路径
 - `swift test`、`git status` 等命令类输入
