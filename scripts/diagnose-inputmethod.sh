@@ -245,7 +245,11 @@ def backup_summary(root):
                 continue
             if manifest.get("backupID") != directory.name:
                 continue
-            if not (directory / "KnowType.app").is_dir():
+            app_archive = directory / "KnowType.app.zip"
+            legacy_app_dir = directory / "KnowType.app"
+            has_app_archive = app_archive.is_file() and not app_archive.is_symlink()
+            has_legacy_app_dir = legacy_app_dir.is_dir() and not legacy_app_dir.is_symlink()
+            if has_app_archive == has_legacy_app_dir or (app_archive.exists() and not has_app_archive) or (legacy_app_dir.exists() and not has_legacy_app_dir):
                 continue
             backups.append({
                 "backupID": directory.name,

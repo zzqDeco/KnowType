@@ -45,18 +45,24 @@ same helper is used by normal install and failed-install recovery.
 Dry-run callers may use the same discovery functions, but final summaries must
 say "would remove" instead of reporting completed removal.
 
-Install backups are artifact backups only. They may contain `KnowType.app` and
-`KnowType.prefPane`, but they must not contain provider profiles, Keychain
+Install backups are artifact backups only. New backups store `KnowType.app.zip`
+and optional `KnowType.prefPane.zip` (created with `ditto -c -k --sequesterRsrc --keepParent`)
+so LaunchServices and Spotlight never index unpacked `.app` bundles under
+`Application Support`, and they must not contain provider profiles, Keychain
 secrets, Rime userdb, ENV.md, CORRECTION.md, LEXICAL_PROFILE.md, or local
-lexicon data. Schema `2` manifests require each included artifact's checksum,
-bundle identifier, short version, build version, designated signing
-requirement, and normalized signing identity. Pane integrity fields are null
-when no pane is included.
+lexicon data. Schema `2` manifests require each included artifact's extracted
+bundle checksum, bundle identifier, short version, build version, designated
+signing requirement, and normalized signing identity. Pane integrity fields are
+null when no pane is included.
 
-Backup discovery only treats directories with managed backup IDs, matching
-manifests, and a restorable `KnowType.app` as rollback candidates. Unrelated
-folders under the backup root are ignored by `--latest`, retention pruning, and
-diagnostic backup summaries.
+Backup discovery and restore materialization accept either archived
+(`KnowType.app.zip` / `KnowType.prefPane.zip`) or legacy unpacked
+(`KnowType.app` / `KnowType.prefPane`) artifacts in managed backup directories,
+while rejecting symlinks or ambiguous dual entries. `knowtype_archive_legacy_unpacked_backups`
+converts existing unpacked managed backups into verified `.zip` archives and
+unregisters their stale `.app` paths from LaunchServices during installs.
+Unrelated folders under the backup root are ignored by `--latest`, retention
+pruning, and diagnostic backup summaries.
 
 Rollback derives the active input mode from the restored bundle's
 `ComponentInputModeDict` before repairing TIS preferences. Backups that only

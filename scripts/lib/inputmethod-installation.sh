@@ -4,6 +4,7 @@ KNOWTYPE_INSTALLATION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$KNOWTYPE_INSTALLATION_LIB_DIR/inputsource-ids.sh"
 
 KNOWTYPE_PREFPANE_BUNDLE_ID="com.knowtype.preferencepane"
+KNOWTYPE_DITTO="${KNOWTYPE_DITTO:-/usr/bin/ditto}"
 KNOWTYPE_LSREGISTER="${KNOWTYPE_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
 KNOWTYPE_PLIST_BUDDY="${KNOWTYPE_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 KNOWTYPE_PYTHON3="${KNOWTYPE_PYTHON3:-/usr/bin/python3}"
@@ -708,6 +709,117 @@ PY
 KNOWTYPE_CREATED_BACKUP_ID=""
 KNOWTYPE_CREATED_BACKUP_DIR=""
 
+knowtype_backup_has_app_artifact() {
+  local backup_dir="$1"
+  local archive_path="$backup_dir/KnowType.app.zip"
+  local legacy_path="$backup_dir/KnowType.app"
+  local has_archive=0
+  local has_legacy=0
+
+  if [[ -f "$archive_path" && ! -L "$archive_path" ]]; then
+    has_archive=1
+  elif [[ -e "$archive_path" || -L "$archive_path" ]]; then
+    return 1
+  fi
+  if [[ -d "$legacy_path" && ! -L "$legacy_path" ]]; then
+    has_legacy=1
+  elif [[ -e "$legacy_path" || -L "$legacy_path" ]]; then
+    return 1
+  fi
+  (( has_archive + has_legacy == 1 ))
+}
+
+knowtype_backup_has_prefpane_artifact() {
+  local backup_dir="$1"
+  local archive_path="$backup_dir/KnowType.prefPane.zip"
+  local legacy_path="$backup_dir/KnowType.prefPane"
+  local has_archive=0
+  local has_legacy=0
+
+  if [[ -f "$archive_path" && ! -L "$archive_path" ]]; then
+    has_archive=1
+  elif [[ -e "$archive_path" || -L "$archive_path" ]]; then
+    return 1
+  fi
+  if [[ -d "$legacy_path" && ! -L "$legacy_path" ]]; then
+    has_legacy=1
+  elif [[ -e "$legacy_path" || -L "$legacy_path" ]]; then
+    return 1
+  fi
+  (( has_archive + has_legacy == 1 ))
+}
+
+knowtype_backup_has_any_prefpane_entry() {
+  local backup_dir="$1"
+  [[ -e "$backup_dir/KnowType.prefPane.zip" || -L "$backup_dir/KnowType.prefPane.zip" ||
+     -e "$backup_dir/KnowType.prefPane" || -L "$backup_dir/KnowType.prefPane" ]]
+}
+
+knowtype_archive_bundle_to_zip() {
+  local bundle_path="$1"
+  local output_zip="$2"
+  if [[ ! -x "$KNOWTYPE_DITTO" ]]; then
+    echo "error: ditto is required to archive backup bundles: $output_zip" >&2
+    return 1
+  fi
+  rm -f -- "$output_zip"
+  "$KNOWTYPE_DITTO" -c -k --sequesterRsrc --keepParent "$bundle_path" "$output_zip"
+}
+
+knowtype_materialize_backup_artifacts() {
+  local backup_dir="$1"
+  local dest_dir="$2"
+  [[ -d "$dest_dir" ]] || return 1
+
+  if ! knowtype_backup_has_app_artifact "$backup_dir"; then
+    echo "error: backup does not contain a valid KnowType.app archive or legacy bundle: $backup_dir" >&2
+    return 1
+  fi
+
+  if [[ -f "$backup_dir/KnowType.app.zip" ]]; then
+    if [[ ! -x "$KNOWTYPE_DITTO" ]] ||
+       ! "$KNOWTYPE_DITTO" -x -k "$backup_dir/KnowType.app.zip" "$dest_dir"; then
+      echo "error: could not extract KnowType.app.zip from backup: $backup_dir" >&2
+      return 1
+    fi
+    rm -rf -- "$dest_dir/__MACOSX"
+  else
+    if ! cp -R "$backup_dir/KnowType.app" "$dest_dir/KnowType.app"; then
+      echo "error: could not stage legacy KnowType.app from backup: $backup_dir" >&2
+      return 1
+    fi
+  fi
+
+  if [[ ! -d "$dest_dir/KnowType.app" || -L "$dest_dir/KnowType.app" ]]; then
+    echo "error: materialized backup KnowType.app is missing or is a symlink: $backup_dir" >&2
+    return 1
+  fi
+
+  if knowtype_backup_has_any_prefpane_entry "$backup_dir"; then
+    if ! knowtype_backup_has_prefpane_artifact "$backup_dir"; then
+      echo "error: backup contains invalid or ambiguous KnowType.prefPane artifacts: $backup_dir" >&2
+      return 1
+    fi
+    if [[ -f "$backup_dir/KnowType.prefPane.zip" ]]; then
+      if [[ ! -x "$KNOWTYPE_DITTO" ]] ||
+         ! "$KNOWTYPE_DITTO" -x -k "$backup_dir/KnowType.prefPane.zip" "$dest_dir"; then
+        echo "error: could not extract KnowType.prefPane.zip from backup: $backup_dir" >&2
+        return 1
+      fi
+      rm -rf -- "$dest_dir/__MACOSX"
+    else
+      if ! cp -R "$backup_dir/KnowType.prefPane" "$dest_dir/KnowType.prefPane"; then
+        echo "error: could not stage legacy KnowType.prefPane from backup: $backup_dir" >&2
+        return 1
+      fi
+    fi
+    if [[ ! -d "$dest_dir/KnowType.prefPane" || -L "$dest_dir/KnowType.prefPane" ]]; then
+      echo "error: materialized backup KnowType.prefPane is missing or is a symlink: $backup_dir" >&2
+      return 1
+    fi
+  fi
+}
+
 knowtype_create_install_backup() {
   local app_path="$1"
   local prefpane_path="$2"
@@ -780,16 +892,28 @@ knowtype_create_install_backup() {
   fi
   KNOWTYPE_CREATED_BACKUP_ID="$backup_id"
   KNOWTYPE_CREATED_BACKUP_DIR="$backup_dir"
-  if ! cp -R "$app_path" "$backup_dir/KnowType.app"; then
+
+  local stage_root
+  if ! stage_root="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-backup-create.XXXXXX")"; then
     rm -rf -- "$backup_dir"
+    KNOWTYPE_CREATED_BACKUP_ID=""
+    KNOWTYPE_CREATED_BACKUP_DIR=""
+    return 1
+  fi
+  mkdir -p "$stage_root/source" "$stage_root/verify"
+
+  if ! cp -R "$app_path" "$stage_root/source/KnowType.app" ||
+     ! knowtype_archive_bundle_to_zip "$stage_root/source/KnowType.app" "$backup_dir/KnowType.app.zip"; then
+    rm -rf -- "$stage_root" "$backup_dir"
     KNOWTYPE_CREATED_BACKUP_ID=""
     KNOWTYPE_CREATED_BACKUP_DIR=""
     return 1
   fi
   local included_prefpane="false"
   if [[ -d "$prefpane_path" ]]; then
-    if ! cp -R "$prefpane_path" "$backup_dir/KnowType.prefPane"; then
-      rm -rf -- "$backup_dir"
+    if ! cp -R "$prefpane_path" "$stage_root/source/KnowType.prefPane" ||
+       ! knowtype_archive_bundle_to_zip "$stage_root/source/KnowType.prefPane" "$backup_dir/KnowType.prefPane.zip"; then
+      rm -rf -- "$stage_root" "$backup_dir"
       KNOWTYPE_CREATED_BACKUP_ID=""
       KNOWTYPE_CREATED_BACKUP_DIR=""
       return 1
@@ -797,21 +921,29 @@ knowtype_create_install_backup() {
     included_prefpane="true"
   fi
 
-  if ! knowtype_verify_bundle_codesign "$backup_dir/KnowType.app"; then
-    rm -rf -- "$backup_dir"
-    KNOWTYPE_CREATED_BACKUP_ID=""
-    KNOWTYPE_CREATED_BACKUP_DIR=""
-    return 1
-  fi
-  if [[ "$included_prefpane" == "true" ]] &&
-     ! knowtype_validate_preferencepane_bundle_for_install "$backup_dir/KnowType.prefPane" 1; then
-    rm -rf -- "$backup_dir"
+  if ! knowtype_materialize_backup_artifacts "$backup_dir" "$stage_root/verify"; then
+    rm -rf -- "$stage_root" "$backup_dir"
     KNOWTYPE_CREATED_BACKUP_ID=""
     KNOWTYPE_CREATED_BACKUP_DIR=""
     return 1
   fi
 
-  local app_backup_path="$backup_dir/KnowType.app"
+  local app_backup_path="$stage_root/verify/KnowType.app"
+  if ! knowtype_verify_bundle_codesign "$app_backup_path"; then
+    rm -rf -- "$stage_root" "$backup_dir"
+    KNOWTYPE_CREATED_BACKUP_ID=""
+    KNOWTYPE_CREATED_BACKUP_DIR=""
+    return 1
+  fi
+  local prefpane_backup_path="$stage_root/verify/KnowType.prefPane"
+  if [[ "$included_prefpane" == "true" ]] &&
+     ! knowtype_validate_preferencepane_bundle_for_install "$prefpane_backup_path" 1; then
+    rm -rf -- "$stage_root" "$backup_dir"
+    KNOWTYPE_CREATED_BACKUP_ID=""
+    KNOWTYPE_CREATED_BACKUP_DIR=""
+    return 1
+  fi
+
   local app_checksum
   local app_short_version
   local app_build_version
@@ -831,7 +963,6 @@ knowtype_create_install_backup() {
   local prefpane_signing_requirement=""
   local prefpane_signing_identity=""
   if [[ "$included_prefpane" == "true" ]]; then
-    local prefpane_backup_path="$backup_dir/KnowType.prefPane"
     prefpane_checksum="$(knowtype_path_checksum "$prefpane_backup_path" || true)"
     prefpane_bundle_id="$(knowtype_bundle_identifier "$prefpane_backup_path")"
     prefpane_short_version="$(knowtype_bundle_short_version "$prefpane_backup_path")"
@@ -839,6 +970,7 @@ knowtype_create_install_backup() {
     prefpane_signing_requirement="$(knowtype_codesign_requirement "$prefpane_backup_path")"
     prefpane_signing_identity="$(knowtype_codesign_identity "$prefpane_backup_path" || true)"
   fi
+  rm -rf -- "$stage_root"
 
   local metadata_complete=1
   if [[ -z "$app_checksum" || -z "$app_bundle_id" || -z "$app_short_version" ||
@@ -1046,16 +1178,10 @@ knowtype_require_backup_metadata_match() {
 
 KNOWTYPE_BACKUP_VALIDATION_STATUS=""
 
-knowtype_validate_install_backup_for_restore() {
+_knowtype_validate_materialized_backup() {
   local backup_dir="$1"
-  local allow_unverified_legacy="${2:-0}"
-  KNOWTYPE_BACKUP_VALIDATION_STATUS=""
-
-  if ! knowtype_is_managed_backup_dir "$backup_dir"; then
-    echo "error: backup directory or manifest identity is invalid: $backup_dir" >&2
-    return 1
-  fi
-
+  local allow_unverified_legacy="$2"
+  local materialized_dir="$3"
   local backup_id
   local manifest_path
   local schema_version
@@ -1064,8 +1190,8 @@ knowtype_validate_install_backup_for_restore() {
   backup_id="$(basename "$backup_dir")"
   manifest_path="$backup_dir/manifest.json"
   schema_version="$(knowtype_backup_manifest_schema_version "$manifest_path")"
-  app_path="$backup_dir/KnowType.app"
-  prefpane_path="$backup_dir/KnowType.prefPane"
+  app_path="$materialized_dir/KnowType.app"
+  prefpane_path="$materialized_dir/KnowType.prefPane"
 
   if [[ "$schema_version" == "1" ]]; then
     if [[ "$allow_unverified_legacy" != "1" ]]; then
@@ -1102,7 +1228,8 @@ knowtype_validate_install_backup_for_restore() {
     echo "error: backup manifest requires KnowType.prefPane but the artifact is missing: $backup_dir" >&2
     return 1
   fi
-  if [[ "$included_prefpane" == "false" && ( -e "$prefpane_path" || -L "$prefpane_path" ) ]]; then
+  if [[ "$included_prefpane" == "false" ]] &&
+     ( [[ -e "$prefpane_path" || -L "$prefpane_path" ]] || knowtype_backup_has_any_prefpane_entry "$backup_dir" ); then
     echo "error: backup contains an unexpected KnowType.prefPane not recorded by its manifest: $backup_dir" >&2
     return 1
   fi
@@ -1206,17 +1333,113 @@ knowtype_validate_install_backup_for_restore() {
   KNOWTYPE_BACKUP_VALIDATION_STATUS="verified-schema-$KNOWTYPE_BACKUP_MANIFEST_SCHEMA_VERSION"
 }
 
+knowtype_validate_install_backup_for_restore() {
+  local backup_dir="$1"
+  local allow_unverified_legacy="${2:-0}"
+  local caller_materialized_dir="${3:-}"
+  KNOWTYPE_BACKUP_VALIDATION_STATUS=""
+
+  if ! knowtype_is_managed_backup_dir "$backup_dir"; then
+    echo "error: backup directory or manifest identity is invalid: $backup_dir" >&2
+    return 1
+  fi
+
+  local materialized_dir="$caller_materialized_dir"
+  local owns_materialized_dir=0
+  if [[ -z "$materialized_dir" ]]; then
+    materialized_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-backup-validate.XXXXXX")" || return 1
+    owns_materialized_dir=1
+  fi
+
+  local rc=0
+  if ! knowtype_materialize_backup_artifacts "$backup_dir" "$materialized_dir"; then
+    rc=1
+  elif ! _knowtype_validate_materialized_backup "$backup_dir" "$allow_unverified_legacy" "$materialized_dir"; then
+    rc=1
+  fi
+
+  if (( owns_materialized_dir == 1 )); then
+    rm -rf -- "$materialized_dir"
+  fi
+  return "$rc"
+}
+
 knowtype_is_managed_backup_dir() {
   local backup_dir="$1"
   local backup_id
   backup_id="$(basename "$backup_dir")"
   knowtype_is_valid_backup_id "$backup_id" || return 1
   [[ "$backup_id" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]{4}- ]] || return 1
-  [[ -d "$backup_dir/KnowType.app" ]] || return 1
+  knowtype_backup_has_app_artifact "$backup_dir" || return 1
   [[ -f "$backup_dir/manifest.json" ]] || return 1
   local manifest_id
   manifest_id="$(knowtype_backup_manifest_field "$backup_dir/manifest.json" "backupID")"
   [[ "$manifest_id" == "$backup_id" ]]
+}
+
+knowtype_archive_legacy_unpacked_backups() {
+  local dry_run="${1:-0}"
+  local backup_dir
+  while IFS= read -r backup_dir; do
+    [[ -n "$backup_dir" ]] || continue
+    local has_unpacked_app=0
+    local has_unpacked_prefpane=0
+    if [[ -d "$backup_dir/KnowType.app" && ! -L "$backup_dir/KnowType.app" && ! -e "$backup_dir/KnowType.app.zip" ]]; then
+      has_unpacked_app=1
+    fi
+    if [[ -d "$backup_dir/KnowType.prefPane" && ! -L "$backup_dir/KnowType.prefPane" && ! -e "$backup_dir/KnowType.prefPane.zip" ]]; then
+      has_unpacked_prefpane=1
+    fi
+    if (( has_unpacked_app == 0 && has_unpacked_prefpane == 0 )); then
+      continue
+    fi
+    if [[ "$dry_run" == "1" ]]; then
+      echo "[dry-run] Would archive legacy unpacked install backup: $backup_dir"
+      continue
+    fi
+
+    local verify_dir
+    verify_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-backup-archive.XXXXXX")" || continue
+    local archive_ok=1
+    if (( has_unpacked_app == 1 )); then
+      local expected_app_checksum
+      expected_app_checksum="$(knowtype_path_checksum "$backup_dir/KnowType.app" || true)"
+      if [[ -z "$expected_app_checksum" ]] ||
+         ! knowtype_archive_bundle_to_zip "$backup_dir/KnowType.app" "$backup_dir/KnowType.app.zip.tmp" ||
+         ! "$KNOWTYPE_DITTO" -x -k "$backup_dir/KnowType.app.zip.tmp" "$verify_dir" ||
+         [[ "$(knowtype_path_checksum "$verify_dir/KnowType.app" || true)" != "$expected_app_checksum" ]]; then
+        rm -f -- "$backup_dir/KnowType.app.zip.tmp"
+        archive_ok=0
+      fi
+    fi
+    if (( archive_ok == 1 && has_unpacked_prefpane == 1 )); then
+      local expected_prefpane_checksum
+      expected_prefpane_checksum="$(knowtype_path_checksum "$backup_dir/KnowType.prefPane" || true)"
+      if [[ -z "$expected_prefpane_checksum" ]] ||
+         ! knowtype_archive_bundle_to_zip "$backup_dir/KnowType.prefPane" "$backup_dir/KnowType.prefPane.zip.tmp" ||
+         ! "$KNOWTYPE_DITTO" -x -k "$backup_dir/KnowType.prefPane.zip.tmp" "$verify_dir" ||
+         [[ "$(knowtype_path_checksum "$verify_dir/KnowType.prefPane" || true)" != "$expected_prefpane_checksum" ]]; then
+        rm -f -- "$backup_dir/KnowType.app.zip.tmp" "$backup_dir/KnowType.prefPane.zip.tmp"
+        archive_ok=0
+      fi
+    fi
+    rm -rf -- "$verify_dir"
+    if (( archive_ok != 1 )); then
+      echo "warning: could not archive legacy unpacked backup without altering checksum; leaving in place: $backup_dir" >&2
+      continue
+    fi
+
+    if (( has_unpacked_app == 1 )); then
+      knowtype_unregister_launchservices_path "$backup_dir/KnowType.app" 0 >/dev/null || true
+      mv "$backup_dir/KnowType.app.zip.tmp" "$backup_dir/KnowType.app.zip"
+      rm -rf -- "$backup_dir/KnowType.app"
+    fi
+    if (( has_unpacked_prefpane == 1 )); then
+      mv "$backup_dir/KnowType.prefPane.zip.tmp" "$backup_dir/KnowType.prefPane.zip"
+      rm -rf -- "$backup_dir/KnowType.prefPane"
+    fi
+    echo "Archived legacy unpacked install backup: $backup_dir"
+  done < <(knowtype_list_managed_backup_dirs)
 }
 
 knowtype_list_managed_backup_dirs() {

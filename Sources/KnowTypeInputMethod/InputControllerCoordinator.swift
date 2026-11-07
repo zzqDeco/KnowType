@@ -382,14 +382,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
     }
 
     func hidePalettes() {
-        let client = host?.currentClient
-        synchronizeInputModeSnapshot(client: client)
-        if let plan = activeSessionRuntime.transition(
-            for: .clickOutside(
-                currentHostSnapshot: client.map { hostCursorSnapshot(client: $0) }
-            )
-        ) {
-            _ = executeActiveSymbolTransitionPlan(plan, client: client, hideReason: .escape)
+        let symbolClient = activeSessionRuntime.currentSymbolComposition == nil
+            ? nil
+            : host?.currentClient
+        synchronizeInputModeSnapshot(client: symbolClient)
+        if activeSessionRuntime.currentSymbolComposition != nil,
+           let plan = activeSessionRuntime.transition(
+               for: .clickOutside(
+                   currentHostSnapshot: symbolClient.map { hostCursorSnapshot(client: $0) }
+               )
+           ) {
+            _ = executeActiveSymbolTransitionPlan(plan, client: symbolClient, hideReason: .escape)
             return
         }
         hideCandidatePanel(reason: .escape)
@@ -399,16 +402,19 @@ final class InputControllerCoordinator: @unchecked Sendable {
         flushUserSelectionHistory()
         aiAcceptanceRuntime.cancelFeedback(reason: "deactivate")
         resetPunctuationSessionContext()
-        let effectiveClient = effectiveClient(client)
-        synchronizeInputModeSnapshot(client: effectiveClient)
-        if let plan = activeSessionRuntime.transition(
-            for: .deactivate(
-                currentHostSnapshot: effectiveClient.map { hostCursorSnapshot(client: $0) }
-            )
-        ) {
+        let symbolClient = activeSessionRuntime.currentSymbolComposition == nil
+            ? nil
+            : effectiveClient(client)
+        synchronizeInputModeSnapshot(client: symbolClient)
+        if activeSessionRuntime.currentSymbolComposition != nil,
+           let plan = activeSessionRuntime.transition(
+               for: .deactivate(
+                   currentHostSnapshot: symbolClient.map { hostCursorSnapshot(client: $0) }
+               )
+           ) {
             _ = executeActiveSymbolTransitionPlan(
                 plan,
-                client: effectiveClient,
+                client: symbolClient,
                 hideReason: .deactivate
             )
             return
@@ -418,7 +424,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
 
     func inputControllerWillClose() {
         flushUserSelectionHistory()
-        let client = host?.currentClient
+        let needsLifecycleClient = activeSessionRuntime.currentSymbolComposition != nil
+            || compositionState.hasActiveTextComposition
+            || conversionEngine.snapshot.hasComposition
+        let client = needsLifecycleClient ? host?.currentClient : nil
         if let plan = activeSessionRuntime.transition(for: .controllerClose) {
             _ = executeActiveSymbolTransitionPlan(
                 plan,
@@ -1852,12 +1861,17 @@ final class InputControllerCoordinator: @unchecked Sendable {
         return .noAction
     }
 
-    private func insert(_ text: String, client: InputControllerClient?) {
+    private func insert(
+        _ text: String,
+        client: InputControllerClient?,
+        recordsPunctuationContext: Bool = true
+    ) {
         insertTextAndRecordPunctuationContext(
             text,
             client: client,
             state: writeState(),
-            reason: "commit"
+            reason: "commit",
+            recordsPunctuationContext: recordsPunctuationContext
         )
     }
 
@@ -1866,9 +1880,10 @@ final class InputControllerCoordinator: @unchecked Sendable {
         client: InputControllerClient?,
         state: InputClientCompositionWriteState,
         reason: String,
-        clearsOwnedMarkedText: Bool = true
+        clearsOwnedMarkedText: Bool = true,
+        recordsPunctuationContext: Bool = true
     ) {
-        let selectedRangeBeforeInsertion = client?.selectedRange
+        let selectedRangeBeforeInsertion = recordsPunctuationContext ? client?.selectedRange : nil
         inputClientCompositionWriter.insertText(
             text,
             client: client,
@@ -1876,11 +1891,15 @@ final class InputControllerCoordinator: @unchecked Sendable {
             reason: reason,
             clearsOwnedMarkedText: clearsOwnedMarkedText
         )
-        punctuationContextResolver.recordInsertion(
-            text,
-            client: client,
-            selectedRangeBeforeInsertion: selectedRangeBeforeInsertion
-        )
+        if recordsPunctuationContext {
+            punctuationContextResolver.recordInsertion(
+                text,
+                client: client,
+                selectedRangeBeforeInsertion: selectedRangeBeforeInsertion
+            )
+        } else {
+            punctuationContextResolver.invalidate()
+        }
     }
 
     private func insertDirectPassthroughText(_ text: String, client: InputControllerClient?) -> Bool {
@@ -2023,7 +2042,11 @@ final class InputControllerCoordinator: @unchecked Sendable {
                     )
                 )
             case .insertCommittedText(let text, let clientScope):
-                insert(text, client: turnClient(for: clientScope, providedClient: client))
+                insert(
+                    text,
+                    client: turnClient(for: clientScope, providedClient: client),
+                    recordsPunctuationContext: sequence.token.kind != .lifecycleFinish
+                )
             case .schedulePostInsertCaretVerification:
                 guard preparedAcceptedFeedbackID != nil else {
                     return

@@ -131,9 +131,8 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
             .appendingPathComponent("Backups", isDirectory: true)
             .appendingPathComponent("20260524T000000Z-0000-0.1.0-1", isDirectory: true)
         try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: backup.appendingPathComponent("KnowType.app", isDirectory: true),
-            withIntermediateDirectories: true
+        try Data("zip-archive".utf8).write(
+            to: backup.appendingPathComponent("KnowType.app.zip", isDirectory: false)
         )
         try writeJSON(
             [
@@ -159,6 +158,51 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
                 "restoreCommand": "./scripts/rollback-inputmethod.sh --to \(backup.lastPathComponent)"
             ],
             to: backup.appendingPathComponent("manifest.json")
+        )
+        let legacyUnpackedBackup = support
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("20260523T000000Z-0000-0.0.9-1", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: legacyUnpackedBackup.appendingPathComponent("KnowType.app", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try writeJSON(
+            [
+                "schemaVersion": 2,
+                "backupID": legacyUnpackedBackup.lastPathComponent,
+                "createdAt": "2026-05-23T00:00:00Z",
+                "sourceVersion": "0.0.9",
+                "sourceBuild": "1",
+                "bundleIdentifier": "com.knowtype.inputmethod.KnowType",
+                "appChecksum": "legacy-checksum",
+                "includedPrefPane": false,
+                "restoreCommand": "./scripts/rollback-inputmethod.sh --to \(legacyUnpackedBackup.lastPathComponent)"
+            ],
+            to: legacyUnpackedBackup.appendingPathComponent("manifest.json")
+        )
+        let ambiguousBackup = support
+            .appendingPathComponent("Backups", isDirectory: true)
+            .appendingPathComponent("20260525T000000Z-0000-0.2.0-1", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: ambiguousBackup.appendingPathComponent("KnowType.app", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data("zip-archive".utf8).write(
+            to: ambiguousBackup.appendingPathComponent("KnowType.app.zip", isDirectory: false)
+        )
+        try writeJSON(
+            [
+                "schemaVersion": 2,
+                "backupID": ambiguousBackup.lastPathComponent,
+                "createdAt": "2026-05-25T00:00:00Z",
+                "sourceVersion": "0.2.0",
+                "sourceBuild": "1",
+                "bundleIdentifier": "com.knowtype.inputmethod.KnowType",
+                "appChecksum": "ambiguous-checksum",
+                "includedPrefPane": false,
+                "restoreCommand": "./scripts/rollback-inputmethod.sh --to \(ambiguousBackup.lastPathComponent)"
+            ],
+            to: ambiguousBackup.appendingPathComponent("manifest.json")
         )
         try FileManager.default.createDirectory(
             at: support
@@ -200,7 +244,7 @@ final class InstallationDiagnosticsStatusTests: XCTestCase {
         XCTAssertEqual(value("降权词条", in: status.acceptedFeedbackRows), "1")
         XCTAssertEqual(value("ACCEPTED_AI_FEEDBACK.md", in: status.acceptedFeedbackRows), "存在")
         XCTAssertTrue(status.acceptedLearningCommands.contains("./scripts/accepted-learning.sh rebuild"))
-        XCTAssertEqual(value("备份数量", in: status.backupRows), "1")
+        XCTAssertEqual(value("备份数量", in: status.backupRows), "2")
         XCTAssertEqual(status.rollbackCommand, "./scripts/rollback-inputmethod.sh --to 20260524T000000Z-0000-0.1.0-1")
     }
 

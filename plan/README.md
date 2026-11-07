@@ -153,6 +153,7 @@ when converting a shipped plan into a short record.
 
 | Document | Purpose | Status |
 |---|---|---|
+| [imk-idle-deactivate-and-archived-backups.plan.md](imk-idle-deactivate-and-archived-backups.plan.md) | Avoid idle IMK lifecycle reverse-XPC deadlocks on focus changes and store install backups as `ditto` zip archives so LaunchServices cannot register backup `.app` bundles | Delivered |
 | [context-digest-backlog-performance.plan.md](context-digest-backlog-performance.plan.md) | Earlier backlog bounds now absorbed by the Issue #212 request-amplification contract | Absorbed |
 | [option-r-polish-removal.plan.md](option-r-polish-removal.plan.md) | Remove the Option+R rewrite workflow and make locked-prefix rewriting unsupported | Delivered |
 | [text-protection-bare-url-regex.plan.md](text-protection-bare-url-regex.plan.md) | Tighten bare-domain URL matching to recognized TLDs so dotted code identifiers do not trigger Level 0 protection | Delivered |

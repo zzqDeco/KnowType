@@ -268,13 +268,14 @@ prepare_provider_storage_for_source_bundle() {
 }
 
 rollback_provider_storage_after_failed_install() {
+  local restored_bundle_path="${2:-$BACKUP_DIR/KnowType.app}"
   local provider_tool=""
   if (( PROVIDER_MIGRATION_ATTEMPTED != 1 )); then
     return 0
   fi
   provider_tool="$(inputsource_tool_path)"
   local restored_generation=""
-  restored_generation="$(provider_storage_generation_for_bundle "$BACKUP_DIR/KnowType.app" || true)"
+  restored_generation="$(provider_storage_generation_for_bundle "$restored_bundle_path" || true)"
   if [[ "$restored_generation" =~ ^[0-9]+$ ]] && (( restored_generation >= 2 )); then
     return 0
   fi
@@ -363,44 +364,52 @@ rollback_failed_install() {
   if (( INSTALL_SUCCEEDED == 1 || DRY_RUN == 1 )); then
     return 0
   fi
-  if [[ -n "$BACKUP_DIR" && ( -d "$BACKUP_DIR/KnowType.app" || -d "$BACKUP_DIR/KnowType.prefPane" ) ]]; then
+  if [[ -n "$BACKUP_DIR" ]] &&
+     ( knowtype_backup_has_app_artifact "$BACKUP_DIR" || knowtype_backup_has_prefpane_artifact "$BACKUP_DIR" ); then
     echo "Install failed; restoring previous KnowType backup: $BACKUP_ID" >&2
-    if ! knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0; then
+    local backup_materialized_dir=""
+    backup_materialized_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-failed-install.backup.XXXXXX")" || return 0
+    if ! knowtype_validate_install_backup_for_restore "$BACKUP_DIR" 0 "$backup_materialized_dir"; then
+      rm -rf "$backup_materialized_dir"
       echo "error: failed-install rollback refused an invalid backup; current artifacts were left in place" >&2
       return 0
     fi
     if ! knowtype_require_safe_local_preferencepane_if_present "$PREFPANE_TARGET_PATH"; then
+      rm -rf "$backup_materialized_dir"
       echo "error: failed-install rollback left current artifacts in place to protect the foreign PreferencePane" >&2
       return 0
     fi
     local app_stage=""
     local current_stage=""
     local restored_app=0
-    if [[ -d "$BACKUP_DIR/KnowType.app" ]]; then
-      app_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.app.XXXXXX")" || return 0
-      if ! cp -R "$BACKUP_DIR/KnowType.app" "$app_stage/KnowType.app"; then
-        rm -rf "$app_stage"
+    if [[ -d "$backup_materialized_dir/KnowType.app" ]]; then
+      app_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.app.XXXXXX")" || {
+        rm -rf "$backup_materialized_dir"
+        return 0
+      }
+      if ! cp -R "$backup_materialized_dir/KnowType.app" "$app_stage/KnowType.app"; then
+        rm -rf "$app_stage" "$backup_materialized_dir"
         return 0
       fi
       if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]] &&
          ! knowtype_is_safe_local_inputmethod_bundle_path "$TARGET_PATH"; then
-        rm -rf "$app_stage"
+        rm -rf "$app_stage" "$backup_materialized_dir"
         return 0
       fi
       local new_executable="$TARGET_PATH/Contents/MacOS/KnowTypeInputMethodApp"
-      if ! rollback_provider_storage_after_failed_install "$new_executable"; then
-        rm -rf "$app_stage"
+      if ! rollback_provider_storage_after_failed_install "$new_executable" "$backup_materialized_dir/KnowType.app"; then
+        rm -rf "$app_stage" "$backup_materialized_dir"
         return 0
       fi
       if [[ -e "$TARGET_PATH" || -L "$TARGET_PATH" ]]; then
         current_stage="$(mktemp -d "$TARGET_DIR/.KnowType.failed-install.current.XXXXXX")" || {
           reapply_provider_migration_best_effort "$TARGET_PATH"
-          rm -rf "$app_stage"
+          rm -rf "$app_stage" "$backup_materialized_dir"
           return 0
         }
         if ! mv "$TARGET_PATH" "$current_stage/KnowType.app"; then
           reapply_provider_migration_best_effort "$TARGET_PATH"
-          rm -rf "$app_stage" "$current_stage"
+          rm -rf "$app_stage" "$current_stage" "$backup_materialized_dir"
           return 0
         fi
       fi
@@ -409,7 +418,7 @@ rollback_failed_install() {
           mv "$current_stage/KnowType.app" "$TARGET_PATH" 2>/dev/null || true
         fi
         reapply_provider_migration_best_effort "$TARGET_PATH"
-        rm -rf "$app_stage" "$current_stage"
+        rm -rf "$app_stage" "$current_stage" "$backup_materialized_dir"
         return 0
       fi
       rm -rf "$app_stage" "$current_stage"
@@ -418,18 +427,23 @@ rollback_failed_install() {
         reapply_provider_migration_best_effort "$TARGET_PATH"
       fi
     fi
-    if [[ -d "$BACKUP_DIR/KnowType.prefPane" ]]; then
+    if [[ -d "$backup_materialized_dir/KnowType.prefPane" ]]; then
       mkdir -p "$PREFPANE_TARGET_DIR"
       if ! knowtype_replace_local_preferencepane_bundle_atomically \
-        "$BACKUP_DIR/KnowType.prefPane" \
+        "$backup_materialized_dir/KnowType.prefPane" \
         "$PREFPANE_TARGET_PATH" \
         1; then
+        rm -rf "$backup_materialized_dir"
         echo "error: failed-install rollback could not restore the validated PreferencePane backup" >&2
         return 0
       fi
     else
-      knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0 || return 0
+      if ! knowtype_remove_local_preferencepane_bundle_if_safe "$PREFPANE_TARGET_PATH" 0; then
+        rm -rf "$backup_materialized_dir"
+        return 0
+      fi
     fi
+    rm -rf "$backup_materialized_dir"
     if (( restored_app == 1 )); then
       knowtype_register_launchservices_path "$TARGET_PATH" 0
       restore_existing_input_source_after_failed_quiesce
@@ -949,6 +963,7 @@ if (( DRY_RUN == 1 )); then
   fi
   echo "Install state: $(knowtype_install_state_path)"
   echo "Backup root: $(knowtype_backup_root_dir)"
+  knowtype_archive_legacy_unpacked_backups 1
   if (( BACKUP_ENABLED == 1 )); then
     knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 1 "$KEEP_BACKUPS"
     knowtype_prune_install_backups "$KEEP_BACKUPS" 1
@@ -1034,6 +1049,7 @@ fi
 stop_input_method_host_after_quiesce
 require_input_method_host_stopped
 
+knowtype_archive_legacy_unpacked_backups 0
 if (( BACKUP_ENABLED == 1 )); then
   knowtype_create_install_backup "$TARGET_PATH" "$PREFPANE_TARGET_PATH" 0 "$KEEP_BACKUPS"
   BACKUP_ID="$KNOWTYPE_CREATED_BACKUP_ID"

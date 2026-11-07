@@ -611,6 +611,14 @@ KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
 backup_id="$KNOWTYPE_CREATED_BACKUP_ID"
 [[ -n "$backup_id" ]] || die "install backup helper did not record a backup id"
 assert_file "$fake_support_dir/Backups/$backup_id/manifest.json"
+assert_file "$fake_support_dir/Backups/$backup_id/KnowType.app.zip"
+[[ ! -e "$fake_support_dir/Backups/$backup_id/KnowType.app" ]] ||
+  die "install backup left unpacked KnowType.app directory inside Backups: $backup_id"
+if (( WITH_PREFPANE == 1 )); then
+  assert_file "$fake_support_dir/Backups/$backup_id/KnowType.prefPane.zip"
+  [[ ! -e "$fake_support_dir/Backups/$backup_id/KnowType.prefPane" ]] ||
+    die "install backup left unpacked KnowType.prefPane directory inside Backups: $backup_id"
+fi
 KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
 KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
 KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
@@ -621,6 +629,7 @@ if [[ "$second_backup_id" == "$backup_id" ]]; then
   die "rapid repeated backups reused ID: $backup_id"
 fi
 assert_file "$fake_support_dir/Backups/$second_backup_id/manifest.json"
+assert_file "$fake_support_dir/Backups/$second_backup_id/KnowType.app.zip"
 mkdir -p "$fake_support_dir/Backups/zzzz-unmanaged"
 latest_backup_dir="$(
   KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
@@ -705,8 +714,13 @@ rollback_latest_dry_run_output="$(
 )"
 assert_contains "$rollback_latest_dry_run_output" "$second_backup_id" "rollback latest dry run output"
 
-tampered_backup_file="$fake_support_dir/Backups/$backup_id/KnowType.app/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
+tampered_extract_dir="$install_state_tmp/tampered-backup-extract"
+mkdir -p "$tampered_extract_dir"
+"$KNOWTYPE_DITTO" -x -k "$fake_support_dir/Backups/$backup_id/KnowType.app.zip" "$tampered_extract_dir"
+tampered_backup_file="$tampered_extract_dir/KnowType.app/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
 printf '\n# tampered backup smoke\n' >>"$tampered_backup_file"
+knowtype_archive_bundle_to_zip "$tampered_extract_dir/KnowType.app" "$fake_support_dir/Backups/$backup_id/KnowType.app.zip"
+rm -rf "$tampered_extract_dir"
 if tampered_rollback_output="$(
   KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
   KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
@@ -729,9 +743,17 @@ assert_contains "$tampered_override_output" "backup integrity mismatch for app c
 signature_tampered_backup_id="20260524T020000Z-0000-signature-tampered-1"
 signature_tampered_backup_dir="$fake_support_dir/Backups/$signature_tampered_backup_id"
 cp -R "$fake_support_dir/Backups/$second_backup_id" "$signature_tampered_backup_dir"
-signature_tampered_file="$signature_tampered_backup_dir/KnowType.app/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
+signature_tampered_extract_dir="$install_state_tmp/signature-tampered-extract"
+mkdir -p "$signature_tampered_extract_dir"
+"$KNOWTYPE_DITTO" -x -k "$signature_tampered_backup_dir/KnowType.app.zip" "$signature_tampered_extract_dir"
+signature_tampered_file="$signature_tampered_extract_dir/KnowType.app/Contents/Resources/rime-data/pinyin_simp.schema.yaml"
 printf '\n# signature tamper with refreshed manifest checksum\n' >>"$signature_tampered_file"
-signature_tampered_checksum="$(knowtype_path_checksum "$signature_tampered_backup_dir/KnowType.app")"
+knowtype_archive_bundle_to_zip "$signature_tampered_extract_dir/KnowType.app" "$signature_tampered_backup_dir/KnowType.app.zip"
+signature_tampered_verify_dir="$install_state_tmp/signature-tampered-verify"
+mkdir -p "$signature_tampered_verify_dir"
+"$KNOWTYPE_DITTO" -x -k "$signature_tampered_backup_dir/KnowType.app.zip" "$signature_tampered_verify_dir"
+signature_tampered_checksum="$(knowtype_path_checksum "$signature_tampered_verify_dir/KnowType.app")"
+rm -rf "$signature_tampered_extract_dir" "$signature_tampered_verify_dir"
 KNOWTYPE_BACKUP_MANIFEST_PATH="$signature_tampered_backup_dir/manifest.json" \
 KNOWTYPE_BACKUP_ID_VALUE="$signature_tampered_backup_id" \
 KNOWTYPE_BACKUP_CHECKSUM_VALUE="$signature_tampered_checksum" \
@@ -759,10 +781,47 @@ if signature_tampered_output="$(
 fi
 assert_contains "$signature_tampered_output" "codesign --verify --deep --strict failed" "signature-tampered backup rollback output"
 
+unpacked_v2_backup_id="20260524T025000Z-0000-unpacked-v2-1"
+unpacked_v2_backup_dir="$fake_support_dir/Backups/$unpacked_v2_backup_id"
+mkdir -p "$unpacked_v2_backup_dir"
+"$KNOWTYPE_DITTO" -x -k "$fake_support_dir/Backups/$second_backup_id/KnowType.app.zip" "$unpacked_v2_backup_dir"
+if [[ -f "$fake_support_dir/Backups/$second_backup_id/KnowType.prefPane.zip" ]]; then
+  "$KNOWTYPE_DITTO" -x -k "$fake_support_dir/Backups/$second_backup_id/KnowType.prefPane.zip" "$unpacked_v2_backup_dir"
+fi
+rm -rf "$unpacked_v2_backup_dir/__MACOSX"
+KNOWTYPE_BACKUP_MANIFEST_SRC="$fake_support_dir/Backups/$second_backup_id/manifest.json" \
+KNOWTYPE_BACKUP_MANIFEST_DST="$unpacked_v2_backup_dir/manifest.json" \
+KNOWTYPE_BACKUP_ID_VALUE="$unpacked_v2_backup_id" \
+  "$KNOWTYPE_PYTHON3" - <<'PY'
+import json
+import os
+
+with open(os.environ["KNOWTYPE_BACKUP_MANIFEST_SRC"], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+manifest["backupID"] = os.environ["KNOWTYPE_BACKUP_ID_VALUE"]
+manifest["restoreCommand"] = f"./scripts/rollback-inputmethod.sh --to {manifest['backupID']}"
+with open(os.environ["KNOWTYPE_BACKUP_MANIFEST_DST"], "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+  knowtype_archive_legacy_unpacked_backups 0 >/dev/null
+assert_file "$unpacked_v2_backup_dir/KnowType.app.zip"
+[[ ! -e "$unpacked_v2_backup_dir/KnowType.app" ]] ||
+  die "legacy unpacked backup migration left KnowType.app directory behind"
+migrated_v2_dry_run_output="$(
+  KNOWTYPE_INPUTMETHOD_TARGET_DIR="$fake_input_dir" \
+  KNOWTYPE_PREFPANE_TARGET_DIR="$fake_prefpane_dir" \
+  KNOWTYPE_APP_SUPPORT_DIR="$fake_support_dir" \
+    bash "$ROOT_DIR/scripts/rollback-inputmethod.sh" --to "$unpacked_v2_backup_id" --dry-run
+)"
+assert_contains "$migrated_v2_dry_run_output" "Backup integrity: verified-schema-2" "migrated unpacked backup dry run output"
+
 legacy_backup_id="20260524T030000Z-0000-legacy-1"
 legacy_backup_dir="$fake_support_dir/Backups/$legacy_backup_id"
 mkdir -p "$legacy_backup_dir"
-cp -R "$fake_support_dir/Backups/$second_backup_id/KnowType.app" "$legacy_backup_dir/KnowType.app"
+"$KNOWTYPE_DITTO" -x -k "$fake_support_dir/Backups/$second_backup_id/KnowType.app.zip" "$legacy_backup_dir"
+rm -rf "$legacy_backup_dir/__MACOSX"
 cat >"$legacy_backup_dir/manifest.json" <<EOF
 {
   "schemaVersion": 1,
@@ -904,10 +963,14 @@ if (( WITH_PREFPANE == 1 )); then
   assert_file "$prefpane_path/Contents/MacOS/KnowTypePreferencePane"
   assert_file "$prefpane_path/Contents/Frameworks/libKnowTypePreferencePane.dylib"
   assert_dir "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle"
-  assert_file "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/en.lproj/Localizable.strings"
+  assert_file_any "en settings localization" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/en.lproj/Localizable.strings" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/Contents/Resources/en.lproj/Localizable.strings"
   assert_file_any "zh-Hans settings localization" \
     "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/zh-Hans.lproj/Localizable.strings" \
-    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/zh-hans.lproj/Localizable.strings"
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/zh-hans.lproj/Localizable.strings" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/Contents/Resources/zh-Hans.lproj/Localizable.strings" \
+    "$prefpane_path/Contents/Resources/KnowType_KnowTypeSettingsUI.bundle/Contents/Resources/zh-hans.lproj/Localizable.strings"
   [[ -x "$prefpane_path/Contents/MacOS/KnowTypePreferencePane" ]] ||
     die "PreferencePane executable is not executable"
   if command -v otool >/dev/null 2>&1; then

@@ -23,7 +23,9 @@ uninstall scripts.
   specific backup.
 - `--dry-run` shows target app/prefPane paths and refresh steps without changing
   files or input-source state.
-- Schema `2` rollback preflight requires complete app and optional pane
+- Schema `2` rollback preflight materializes archived (`KnowType.app.zip` /
+  `KnowType.prefPane.zip`) or legacy unpacked backup bundles into a temporary
+  directory and requires complete app and optional pane
   checksum, bundle ID, short version/build, signing requirement, and signing
   identity metadata. It compares every field to the backup, runs
   `codesign --verify --deep --strict`, tests the recorded requirement, and
