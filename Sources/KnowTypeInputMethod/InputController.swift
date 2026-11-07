@@ -282,7 +282,7 @@ public final class KnowTypeInputController: IMKInputController, CandidatePanelIn
 
     public override func deactivateServer(_ sender: Any!) {
         coordinator.deactivateServer(
-            client: Self.inputControllerClient(from: sender) ?? currentInputControllerClient
+            client: Self.inputControllerClient(from: sender)
         )
         super.deactivateServer(sender)
     }

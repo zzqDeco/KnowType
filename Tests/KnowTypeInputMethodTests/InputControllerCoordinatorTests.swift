@@ -3636,6 +3636,38 @@ final class InputControllerCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.composedString() as? String, "")
     }
 
+    func testIdleDeactivateHidePalettesAndCloseDoNotQueryHostCursorSnapshotOrCurrentClient() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+        client.resetReadCounts()
+        host.resetReadCounts()
+
+        coordinator.hidePalettes()
+        coordinator.deactivateServer(client: client)
+        coordinator.deactivateServer(client: nil)
+        coordinator.inputControllerWillClose()
+
+        XCTAssertEqual(client.selectedRangeReadCount, 0)
+        XCTAssertEqual(client.markedRangeReadCount, 0)
+        XCTAssertEqual(client.bundleIdentifierReadCount, 0)
+        XCTAssertEqual(host.currentClientReadCount, 0)
+    }
+
+    func testTextCompositionDeactivateCommitsRawWithoutQueryingSymbolHostCursorSnapshot() {
+        let client = FakeInputControllerClient()
+        let (coordinator, host, _) = makeCoordinator(client: client)
+
+        XCTAssertTrue(coordinator.handleText("n", client: client))
+        client.resetReadCounts()
+
+        coordinator.deactivateServer(client: client)
+
+        XCTAssertEqual(client.insertTextWrites.last?.text, "n")
+        XCTAssertEqual(client.selectedRangeReadCount, 0)
+        XCTAssertEqual(client.markedRangeReadCount, 0)
+        XCTAssertEqual(host.hideCandidatePanelCount, 1)
+    }
+
     func testKeyIntentForwardingIgnoresNonComposingEventsAndHandlesAppend() {
         let client = FakeInputControllerClient()
         let (coordinator, _, _) = makeCoordinator(client: client)
@@ -7059,6 +7091,7 @@ private struct FixedInputControllerScreenProvider: ScreenGeometryProviding {
 
 private final class FakeInputControllerHost: InputControllerHost {
     var currentClientValue: InputControllerClient?
+    private(set) var currentClientReadCount = 0
     private(set) var updateCompositionCount = 0
     private(set) var panelStates: [CandidatePanelState] = []
     private(set) var candidatePanelFrames: [CandidatePanelFrame] = []
@@ -7067,7 +7100,12 @@ private final class FakeInputControllerHost: InputControllerHost {
     private(set) var postInsertVerificationOperations: [@Sendable () -> Void] = []
 
     var currentClient: InputControllerClient? {
-        currentClientValue
+        currentClientReadCount += 1
+        return currentClientValue
+    }
+
+    func resetReadCounts() {
+        currentClientReadCount = 0
     }
 
     func updateComposition() {
@@ -7119,23 +7157,44 @@ private final class FakeInputControllerClient: InputControllerClient, @unchecked
         var replacementRange: NSRange
     }
 
-    var bundleIdentifier: String? = "com.example.host"
+    var bundleIdentifierValue: String? = "com.example.host"
+    var bundleIdentifier: String? {
+        get {
+            bundleIdentifierReadCount += 1
+            return bundleIdentifierValue
+        }
+        set {
+            bundleIdentifierValue = newValue
+        }
+    }
     var selectedRangeValue = NSRange(location: 10, length: 0)
     var markedRangeValue: NSRange?
     var characterBeforeCaretValue: Character?
     var firstRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
     var lineHeightRectValue = CGRect(x: 40, y: 500, width: 0, height: 18)
+    private(set) var bundleIdentifierReadCount = 0
+    private(set) var selectedRangeReadCount = 0
+    private(set) var markedRangeReadCount = 0
     private(set) var characterBeforeCaretReadCount = 0
     private(set) var markedTextWrites: [MarkedTextWrite] = []
     private(set) var insertTextWrites: [InsertTextWrite] = []
     private(set) var writeEventKinds: [String] = []
 
     var selectedRange: NSRange {
-        selectedRangeValue
+        selectedRangeReadCount += 1
+        return selectedRangeValue
     }
 
     var markedRange: NSRange? {
-        markedRangeValue
+        markedRangeReadCount += 1
+        return markedRangeValue
+    }
+
+    func resetReadCounts() {
+        bundleIdentifierReadCount = 0
+        selectedRangeReadCount = 0
+        markedRangeReadCount = 0
+        characterBeforeCaretReadCount = 0
     }
 
     func characterBeforeCaret() -> Character? {

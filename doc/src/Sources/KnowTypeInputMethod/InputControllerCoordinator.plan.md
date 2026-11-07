@@ -31,11 +31,16 @@ Current behavior:
   and deactivate only when the current host snapshot matches the latest
   successful presentation snapshot; focus lifecycle synchronizes the shared
   mode generation before this decision, while reset, close, missing or changed
-  host context, host shortcut, and mode-generation transitions clear/cancel
-- captures the current host client once during controller close and passes that
-  client through symbol and text lifecycle cleanup, so a matching owned mark is
-  cleared before ownership is released while a missing or changed host remains
-  write-isolated
+  host context, host shortcut, and mode-generation transitions clear/cancel;
+  when no symbol session is active, `hidePalettes` and `deactivateServer` skip
+  `hostCursorSnapshot` (`selectedRange`, `markedRange`, and `bundleIdentifier`)
+  so idle focus switches never make synchronous reverse-XPC queries back into a
+  transitioning host responder
+- queries `host.currentClient` during controller close only when an active
+  symbol, text, or native composition needs cleanup, passing that captured
+  client through symbol and text lifecycle cleanup so a matching owned mark is
+  cleared before ownership is released while an idle, missing, or changed host
+  remains write- and XPC-isolated
 - preserves the active symbol projection across external runtime-preference
   refreshes instead of replacing it with a normal suggestion frame, and keeps
   the panel on the page size captured when the symbol session began
@@ -262,7 +267,8 @@ Current behavior:
 - flushes user selection history through `InputLexicalCommitRuntime` on
   deactivate and close; deactivate falls back
   to the current IMK client before committing active raw composition through the
-  normal clear-owned-marked-text plus insert path
+  normal clear-owned-marked-text plus insert path without reading
+  `selectedRange` for post-insert punctuation context on the deactivating host
 - clears KnowType-owned marked text when native handled/no-commit output ends
   with no active raw/preedit, because composition ended without inserted text
 - asks `InputCandidatePanelPublicationRuntime` to schedule delayed candidate

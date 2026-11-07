@@ -14,7 +14,9 @@ Current behavior:
   pass-through
 - uses current-client fallback for lifecycle-style callbacks such as explicit
   commit, candidate selection, deactivate, and close where finishing or
-  clearing an existing composition is safer than dropping state
+  clearing an existing composition is safer than dropping state; `deactivateServer`
+  forwards only the callback sender adapter and lets the coordinator query
+  `currentClient` lazily only when an active symbol or text composition exists
 - returns exactly the `keyDown` mask from `recognizedEvents(_:)`, allowing
   InputMethodKit to retain its default click-outside composition commit;
   modifier-dependent shortcuts read flags from key-down events and do not
