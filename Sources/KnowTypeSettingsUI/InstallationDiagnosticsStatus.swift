@@ -466,11 +466,7 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
             return false
         }
 
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(
-            atPath: url.appendingPathComponent("KnowType.app", isDirectory: true).path,
-            isDirectory: &isDirectory
-        ), isDirectory.boolValue else {
+        guard Self.hasValidBackupAppArtifact(in: url, fileManager: fileManager) else {
             return false
         }
 
@@ -480,6 +476,42 @@ struct InstallationDiagnosticsStatus: Equatable, Sendable {
             return false
         }
         return manifest.backupID == url.lastPathComponent
+    }
+
+    private static func hasValidBackupAppArtifact(in url: URL, fileManager: FileManager) -> Bool {
+        let archiveURL = url.appendingPathComponent("KnowType.app.zip", isDirectory: false)
+        let legacyBundleURL = url.appendingPathComponent("KnowType.app", isDirectory: true)
+
+        let archiveKind = Self.backupEntryKind(at: archiveURL, fileManager: fileManager)
+        let legacyKind = Self.backupEntryKind(at: legacyBundleURL, fileManager: fileManager)
+        switch (archiveKind, legacyKind) {
+        case (.regularFile, .missing), (.missing, .directory):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private enum BackupEntryKind {
+        case missing
+        case regularFile
+        case directory
+        case invalid
+    }
+
+    private static func backupEntryKind(at url: URL, fileManager: FileManager) -> BackupEntryKind {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let type = attributes[.type] as? FileAttributeType else {
+            return .missing
+        }
+        switch type {
+        case .typeRegular:
+            return .regularFile
+        case .typeDirectory:
+            return .directory
+        default:
+            return .invalid
+        }
     }
 }
 

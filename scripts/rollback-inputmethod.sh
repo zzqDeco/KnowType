@@ -80,6 +80,7 @@ prefpane_dir="$(knowtype_preferencepane_target_dir)"
 restore_app_staging_dir=""
 current_app_staging_dir=""
 restore_prefpane_staging_dir=""
+backup_materialized_dir=""
 provider_storage_downgraded=0
 provider_profile_tool=""
 
@@ -94,6 +95,7 @@ cleanup_restore_staging() {
   [[ -n "$restore_app_staging_dir" && -d "$restore_app_staging_dir" ]] && rm -rf "$restore_app_staging_dir"
   [[ -n "$current_app_staging_dir" && -d "$current_app_staging_dir" ]] && rm -rf "$current_app_staging_dir"
   [[ -n "$restore_prefpane_staging_dir" && -d "$restore_prefpane_staging_dir" ]] && rm -rf "$restore_prefpane_staging_dir"
+  [[ -n "$backup_materialized_dir" && -d "$backup_materialized_dir" ]] && rm -rf "$backup_materialized_dir"
   return 0
 }
 
@@ -162,7 +164,7 @@ stop_provider_profile_writer_hosts() {
 
 prepare_provider_storage_for_restored_app() {
   local restored_generation current_generation provider_tool output status
-  restored_generation="$(provider_storage_generation_for_bundle "$backup_dir/KnowType.app" || true)"
+  restored_generation="$(provider_storage_generation_for_bundle "$backup_materialized_dir/KnowType.app" || true)"
   stop_provider_profile_writer_hosts
   if [[ "$restored_generation" =~ ^[0-9]+$ ]] && (( restored_generation >= 2 )); then
     return 0
@@ -318,15 +320,16 @@ if [[ -z "$backup_dir" || ! -d "$backup_dir" ]]; then
   echo "error: requested KnowType backup was not found" >&2
   exit 1
 fi
-if [[ ! -d "$backup_dir/KnowType.app" ]]; then
+if ! knowtype_backup_has_app_artifact "$backup_dir"; then
   echo "error: backup does not contain KnowType.app: $backup_dir" >&2
   exit 1
 fi
-if ! knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP"; then
+backup_materialized_dir="$(mktemp -d "${TMPDIR:-/tmp}/knowtype-rollback-inspect.XXXXXX")"
+if ! knowtype_validate_install_backup_for_restore "$backup_dir" "$ALLOW_UNVERIFIED_BACKUP" "$backup_materialized_dir"; then
   exit 1
 fi
 backup_validation_status="$KNOWTYPE_BACKUP_VALIDATION_STATUS"
-restored_active_mode_id="$(knowtype_bundle_visible_input_mode_id "$backup_dir/KnowType.app" || true)"
+restored_active_mode_id="$(knowtype_bundle_visible_input_mode_id "$backup_materialized_dir/KnowType.app" || true)"
 if [[ -z "$restored_active_mode_id" || "$restored_active_mode_id" == "$KNOWTYPE_PARENT_INPUT_SOURCE_ID" ]]; then
   echo "error: backup KnowType.app does not declare a menu-visible input mode." >&2
   echo "Rollback refuses to repair preferences for parent-only backups because they cannot satisfy the current menu-switchable IMK model." >&2
@@ -371,13 +374,13 @@ if (( DRY_RUN == 1 )); then
   fi
   echo "Restored active input mode: $restored_active_mode_id"
   echo "Target app: $target_path"
-  restored_provider_generation="$(provider_storage_generation_for_bundle "$backup_dir/KnowType.app" || true)"
+  restored_provider_generation="$(provider_storage_generation_for_bundle "$backup_materialized_dir/KnowType.app" || true)"
   if [[ ! "$restored_provider_generation" =~ ^[0-9]+$ ]] || (( restored_provider_generation < 2 )); then
     echo "[dry-run] Would quiesce Settings writers and convert current provider metadata to the legacy numeric schema before publishing this pre-v2 app."
   else
     echo "[dry-run] Restored app supports provider storage generation $restored_provider_generation; after publishing it, rollback would migrate any legacy metadata before registration."
   fi
-  if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
+  if [[ -d "$backup_materialized_dir/KnowType.prefPane" ]]; then
     echo "Target PreferencePane: $prefpane_path"
   else
     echo "Target PreferencePane: <remove if installed>"
@@ -411,12 +414,12 @@ require_input_method_host_stopped
 
 mkdir -p "$target_dir"
 restore_app_staging_dir="$(mktemp -d "$target_dir/.KnowType.rollback.app.XXXXXX")"
-cp -R "$backup_dir/KnowType.app" "$restore_app_staging_dir/KnowType.app"
+cp -R "$backup_materialized_dir/KnowType.app" "$restore_app_staging_dir/KnowType.app"
 
-if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
+if [[ -d "$backup_materialized_dir/KnowType.prefPane" ]]; then
   mkdir -p "$prefpane_dir"
   restore_prefpane_staging_dir="$(mktemp -d "$prefpane_dir/.KnowType.rollback.prefpane.XXXXXX")"
-  cp -R "$backup_dir/KnowType.prefPane" "$restore_prefpane_staging_dir/KnowType.prefPane"
+  cp -R "$backup_materialized_dir/KnowType.prefPane" "$restore_prefpane_staging_dir/KnowType.prefPane"
 fi
 
 knowtype_validate_inputmethod_bundle_for_install "$restore_app_staging_dir/KnowType.app" 1
@@ -475,7 +478,7 @@ fi
 rm -rf "$current_app_staging_dir"
 current_app_staging_dir=""
 
-if [[ -d "$backup_dir/KnowType.prefPane" ]]; then
+if [[ -d "$backup_materialized_dir/KnowType.prefPane" ]]; then
   knowtype_remove_local_preferencepane_bundle_if_safe "$prefpane_path" 0
   mv "$restore_prefpane_staging_dir/KnowType.prefPane" "$prefpane_path"
   rm -rf "$restore_prefpane_staging_dir"

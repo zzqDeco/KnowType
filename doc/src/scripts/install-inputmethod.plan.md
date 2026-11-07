@@ -26,10 +26,12 @@ Installs the locally built KnowType input method bundle into
 - Release archive provenance is accepted only when the extracted archive has a
   single unambiguous `release-manifest.json`; older archives may still use one
   sibling manifest beside the zip.
-- Before replacing an existing app, it creates an install-artifact backup under
+- Before replacing an existing app, it archives any legacy unpacked managed
+  backups in place and creates an install-artifact backup under
   `~/Library/Application Support/KnowType/Backups/` unless `--no-backup` is
-  passed. Backups contain `KnowType.app`, optional `KnowType.prefPane`, and a
-  manifest; they do not contain user data.
+  passed. New backups store `KnowType.app.zip`, optional `KnowType.prefPane.zip`,
+  and a manifest so LaunchServices never re-indexes unpacked backup `.app`
+  bundles; they do not contain user data.
 - New backups use manifest schema `2` and record complete app and optional pane
   checksum, bundle identity, short version/build, and signing
   requirement/identity metadata. Backup creation fails rather than writing an
